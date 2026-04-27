@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import YahooFinance from 'yahoo-finance2';
-import { format, subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
-
-const yahooFinance = new YahooFinance();
+import { fetchYahooChart } from '@/lib/yahoo';
+import { subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -17,19 +15,19 @@ function setCached(key: string, data: unknown) {
   cache.set(key, { data, ts: Date.now() });
 }
 
-function getStartDate(timeframe: string): string {
+function getStartDate(timeframe: string): Date {
   const now = new Date();
   switch (timeframe) {
-    case '1W':  return format(subWeeks(now, 1), 'yyyy-MM-dd');
-    case '1M':  return format(subMonths(now, 1), 'yyyy-MM-dd');
-    case '3M':  return format(subMonths(now, 3), 'yyyy-MM-dd');
-    case '6M':  return format(subMonths(now, 6), 'yyyy-MM-dd');
-    case 'YTD': return format(startOfYear(now), 'yyyy-MM-dd');
-    case '1Y':  return format(subYears(now, 1), 'yyyy-MM-dd');
-    case '3Y':  return format(subYears(now, 3), 'yyyy-MM-dd');
-    case '5Y':  return format(subYears(now, 5), 'yyyy-MM-dd');
-    case '10Y': return format(subYears(now, 10), 'yyyy-MM-dd');
-    default:    return format(subYears(now, 1), 'yyyy-MM-dd');
+    case '1W':  return subWeeks(now, 1);
+    case '1M':  return subMonths(now, 1);
+    case '3M':  return subMonths(now, 3);
+    case '6M':  return subMonths(now, 6);
+    case 'YTD': return startOfYear(now);
+    case '1Y':  return subYears(now, 1);
+    case '3Y':  return subYears(now, 3);
+    case '5Y':  return subYears(now, 5);
+    case '10Y': return subYears(now, 10);
+    default:    return subYears(now, 1);
   }
 }
 
@@ -49,24 +47,12 @@ export async function GET(req: NextRequest) {
   const cached = getCached(key);
   if (cached) return NextResponse.json(cached);
 
-  const period1 = getStartDate(timeframe);
-  const period2 = format(new Date(), 'yyyy-MM-dd');
+  const period1 = Math.floor(getStartDate(timeframe).getTime() / 1000);
+  const period2 = Math.floor(Date.now() / 1000);
   const interval = getInterval(timeframe);
 
   try {
-    const rows = await yahooFinance.historical(
-      symbol,
-      { period1, period2, interval },
-      { validateResult: false }
-    );
-
-    const data = rows
-      .filter((r): r is typeof r & { close: number } => r.close != null)
-      .map(r => ({
-        date: format(new Date(r.date), 'yyyy-MM-dd'),
-        close: r.close,
-      }));
-
+    const data = await fetchYahooChart(symbol, period1, period2, interval);
     setCached(key, data);
     return NextResponse.json(data);
   } catch (err) {

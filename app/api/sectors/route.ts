@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import YahooFinance from 'yahoo-finance2';
 import { SECTORS } from '@/lib/config';
-import { format, startOfYear, subMonths, subYears, subWeeks } from 'date-fns';
+import { fetchYahooChart } from '@/lib/yahoo';
+import { startOfYear, subMonths, subYears, subWeeks } from 'date-fns';
 
 const yahooFinance = new YahooFinance();
 
@@ -18,16 +19,14 @@ function setCached(key: string, data: unknown) {
   cache.set(key, { data, ts: Date.now() });
 }
 
-async function getReturn(symbol: string, period1: string): Promise<number | null> {
+async function getReturn(symbol: string, period1: Date): Promise<number | null> {
   try {
-    const rows = await yahooFinance.historical(
-      symbol,
-      { period1, period2: format(new Date(), 'yyyy-MM-dd'), interval: '1d' },
-      { validateResult: false }
-    );
-    if (!rows || rows.length < 2) return null;
-    const start = rows[0].close;
-    const end = rows[rows.length - 1].close;
+    const p1 = Math.floor(period1.getTime() / 1000);
+    const p2 = Math.floor(Date.now() / 1000);
+    const data = await fetchYahooChart(symbol, p1, p2, '1d');
+    if (data.length < 2) return null;
+    const start = data[0].close;
+    const end = data[data.length - 1].close;
     return ((end - start) / start) * 100;
   } catch {
     return null;
@@ -36,16 +35,13 @@ async function getReturn(symbol: string, period1: string): Promise<number | null
 
 async function getCAGR(symbol: string, years: number): Promise<number | null> {
   try {
-    const period1 = format(subYears(new Date(), years), 'yyyy-MM-dd');
-    const rows = await yahooFinance.historical(
-      symbol,
-      { period1, period2: format(new Date(), 'yyyy-MM-dd'), interval: '1mo' },
-      { validateResult: false }
-    );
-    if (!rows || rows.length < 2) return null;
-    const start = rows[0].close;
-    const end = rows[rows.length - 1].close;
-    const actualYears = rows.length / 12;
+    const period1 = Math.floor(subYears(new Date(), years).getTime() / 1000);
+    const period2 = Math.floor(Date.now() / 1000);
+    const data = await fetchYahooChart(symbol, period1, period2, '1mo');
+    if (data.length < 2) return null;
+    const start = data[0].close;
+    const end = data[data.length - 1].close;
+    const actualYears = data.length / 12;
     return (Math.pow(end / start, 1 / actualYears) - 1) * 100;
   } catch {
     return null;
@@ -57,10 +53,10 @@ export async function GET() {
   if (cached) return NextResponse.json(cached);
 
   const now = new Date();
-  const ytdStart = format(startOfYear(now), 'yyyy-MM-dd');
-  const oneMonthStart = format(subMonths(now, 1), 'yyyy-MM-dd');
-  const threeMonthStart = format(subMonths(now, 3), 'yyyy-MM-dd');
-  const oneWeekStart = format(subWeeks(now, 1), 'yyyy-MM-dd');
+  const ytdStart = startOfYear(now);
+  const oneMonthStart = subMonths(now, 1);
+  const threeMonthStart = subMonths(now, 3);
+  const oneWeekStart = subWeeks(now, 1);
 
   try {
     const symbols = SECTORS.map(s => s.symbol);

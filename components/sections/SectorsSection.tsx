@@ -80,8 +80,8 @@ export function SectorsSection() {
   }, [selected, timeframe, fetchHistorical]);
 
   const sorted = [...sectors].sort((a, b) => {
-    const av = (a as Record<string, unknown>)[sortBy] as number | null;
-    const bv = (b as Record<string, unknown>)[sortBy] as number | null;
+    const av = (a as unknown as Record<string, number | null>)[sortBy];
+    const bv = (b as unknown as Record<string, number | null>)[sortBy];
     return (bv ?? -Infinity) - (av ?? -Infinity);
   }).map((s, i) => ({ ...s, displayRank: i + 1 }));
 
@@ -124,7 +124,7 @@ export function SectorsSection() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {sorted.map(sector => {
-            const key = (sector as Record<string, unknown>)[sortBy] as number | null;
+            const key = (sector as unknown as Record<string, number | null>)[sortBy];
             const isUp = (key ?? 0) >= 0;
             const isHot = sector.displayRank <= 2 && (key ?? 0) > 0;
             const isSelected = selected === sector.symbol;
