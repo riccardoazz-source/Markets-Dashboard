@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import YahooFinance from 'yahoo-finance2';
-const yahooFinance = new YahooFinance();
+import { fetchYahooQuote, fetchYahooPE } from '@/lib/yahoo';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -17,43 +16,27 @@ function setCached(key: string, data: unknown) {
 
 export async function GET(req: NextRequest) {
   const symbols = req.nextUrl.searchParams.get('symbols')?.split(',') ?? [];
+  const includePE = req.nextUrl.searchParams.get('pe') !== 'false';
   if (!symbols.length) return NextResponse.json({ error: 'No symbols' }, { status: 400 });
 
-  const key = symbols.sort().join(',');
+  const key = symbols.sort().join(',') + (includePE ? ':pe' : '');
   const cached = getCached(key);
   if (cached) return NextResponse.json(cached);
 
   try {
-    const results = await Promise.allSettled(
-      symbols.map(s =>
-        yahooFinance.quote(s, {}, { validateResult: false }).catch(() => null)
-      )
-    );
+    const quotes = await Promise.all(symbols.map(s => fetchYahooQuote(s)));
 
-    const quotes = results
-      .map((r, i) => {
-        if (r.status === 'rejected' || !r.value) return null;
-        const q = r.value as Record<string, unknown>;
-        return {
-          symbol: symbols[i],
-          name: (q.longName as string) || (q.shortName as string) || symbols[i],
-          price: (q.regularMarketPrice as number) ?? null,
-          change: (q.regularMarketChange as number) ?? 0,
-          changePercent: (q.regularMarketChangePercent as number) ?? 0,
-          currency: (q.currency as string) ?? 'USD',
-          trailingPE: (q.trailingPE as number) ?? null,
-          forwardPE: (q.forwardPE as number) ?? null,
-          marketCap: (q.marketCap as number) ?? null,
-          high52w: (q.fiftyTwoWeekHigh as number) ?? null,
-          low52w: (q.fiftyTwoWeekLow as number) ?? null,
-          volume: (q.regularMarketVolume as number) ?? null,
-          avgVolume: (q.averageDailyVolume3Month as number) ?? null,
-        };
-      })
-      .filter(Boolean);
+    let withPE = quotes;
+    if (includePE) {
+      const peResults = await Promise.all(
+        symbols.map(s => fetchYahooPE(s).catch(() => ({ trailingPE: null, forwardPE: null, marketCap: null })))
+      );
+      withPE = quotes.map((q, i) => q && { ...q, ...peResults[i] });
+    }
 
-    setCached(key, quotes);
-    return NextResponse.json(quotes);
+    const result = withPE.filter(q => q !== null);
+    setCached(key, result);
+    return NextResponse.json(result);
   } catch (err) {
     console.error('quotes error', err);
     return NextResponse.json({ error: 'Failed to fetch quotes' }, { status: 500 });

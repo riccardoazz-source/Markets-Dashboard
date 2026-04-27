@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server';
-import YahooFinance from 'yahoo-finance2';
 import { SECTORS } from '@/lib/config';
-import { fetchYahooChart } from '@/lib/yahoo';
-import { startOfYear, subMonths, subYears, subWeeks } from 'date-fns';
-
-const yahooFinance = new YahooFinance();
+import { fetchYahooChartByRange, returnSince, cagrFromPoints } from '@/lib/yahoo';
+import { format, startOfYear, subMonths, subWeeks, subYears } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -19,32 +16,47 @@ function setCached(key: string, data: unknown) {
   cache.set(key, { data, ts: Date.now() });
 }
 
-async function getReturn(symbol: string, period1: Date): Promise<number | null> {
+async function fetchSector(symbol: string, name: string, category: string) {
   try {
-    const p1 = Math.floor(period1.getTime() / 1000);
-    const p2 = Math.floor(Date.now() / 1000);
-    const data = await fetchYahooChart(symbol, p1, p2, '1d');
-    if (data.length < 2) return null;
-    const start = data[0].close;
-    const end = data[data.length - 1].close;
-    return ((end - start) / start) * 100;
-  } catch {
-    return null;
-  }
-}
+    const { meta, points } = await fetchYahooChartByRange(symbol, '5y', '1d');
 
-async function getCAGR(symbol: string, years: number): Promise<number | null> {
-  try {
-    const period1 = Math.floor(subYears(new Date(), years).getTime() / 1000);
-    const period2 = Math.floor(Date.now() / 1000);
-    const data = await fetchYahooChart(symbol, period1, period2, '1mo');
-    if (data.length < 2) return null;
-    const start = data[0].close;
-    const end = data[data.length - 1].close;
-    const actualYears = data.length / 12;
-    return (Math.pow(end / start, 1 / actualYears) - 1) * 100;
-  } catch {
-    return null;
+    const now = new Date();
+    const ytdReturn = returnSince(points, format(startOfYear(now), 'yyyy-MM-dd'));
+    const oneMonthReturn = returnSince(points, format(subMonths(now, 1), 'yyyy-MM-dd'));
+    const threeMonthReturn = returnSince(points, format(subMonths(now, 3), 'yyyy-MM-dd'));
+    const oneWeekReturn = returnSince(points, format(subWeeks(now, 1), 'yyyy-MM-dd'));
+
+    const threeYearPoints = points.filter(p => p.date >= format(subYears(now, 3), 'yyyy-MM-dd'));
+    const cagr3y = cagrFromPoints(threeYearPoints, 3);
+    const cagr5y = cagrFromPoints(points, points.length > 1
+      ? (new Date(points[points.length - 1].date).getTime() - new Date(points[0].date).getTime()) / (365.25 * 24 * 60 * 60 * 1000)
+      : 5);
+
+    const price = meta?.regularMarketPrice ?? null;
+    const prev = meta?.chartPreviousClose ?? meta?.previousClose ?? null;
+    const changePercent = price != null && prev ? ((price - prev) / prev) * 100 : null;
+
+    return {
+      symbol,
+      name,
+      category,
+      price,
+      changePercent,
+      ytdReturn,
+      oneMonthReturn,
+      threeMonthReturn,
+      oneWeekReturn,
+      cagr3y,
+      cagr5y,
+    };
+  } catch (e) {
+    console.error('sector fetch failed', symbol, e);
+    return {
+      symbol, name, category,
+      price: null, changePercent: null,
+      ytdReturn: null, oneMonthReturn: null, threeMonthReturn: null, oneWeekReturn: null,
+      cagr3y: null, cagr5y: null,
+    };
   }
 }
 
@@ -52,59 +64,13 @@ export async function GET() {
   const cached = getCached('sectors');
   if (cached) return NextResponse.json(cached);
 
-  const now = new Date();
-  const ytdStart = startOfYear(now);
-  const oneMonthStart = subMonths(now, 1);
-  const threeMonthStart = subMonths(now, 3);
-  const oneWeekStart = subWeeks(now, 1);
-
   try {
-    const symbols = SECTORS.map(s => s.symbol);
-
-    const quotes = await Promise.allSettled(
-      symbols.map(s =>
-        yahooFinance.quote(s, {}, { validateResult: false }).catch(() => null)
-      )
+    const data = await Promise.all(
+      SECTORS.map(s => fetchSector(s.symbol, s.name, s.category))
     );
 
-    const returns = await Promise.allSettled(
-      symbols.flatMap(s => [
-        getReturn(s, ytdStart),
-        getReturn(s, oneMonthStart),
-        getReturn(s, threeMonthStart),
-        getReturn(s, oneWeekStart),
-        getCAGR(s, 3),
-        getCAGR(s, 5),
-      ])
-    );
-
-    const data = SECTORS.map((sector, i) => {
-      const q = quotes[i].status === 'fulfilled' ? quotes[i].value : null;
-      const qi = i * 6;
-      const ytdReturn = returns[qi]?.status === 'fulfilled' ? (returns[qi] as PromiseFulfilledResult<number|null>).value : null;
-      const oneMonthReturn = returns[qi + 1]?.status === 'fulfilled' ? (returns[qi + 1] as PromiseFulfilledResult<number|null>).value : null;
-      const threeMonthReturn = returns[qi + 2]?.status === 'fulfilled' ? (returns[qi + 2] as PromiseFulfilledResult<number|null>).value : null;
-      const oneWeekReturn = returns[qi + 3]?.status === 'fulfilled' ? (returns[qi + 3] as PromiseFulfilledResult<number|null>).value : null;
-      const cagr3y = returns[qi + 4]?.status === 'fulfilled' ? (returns[qi + 4] as PromiseFulfilledResult<number|null>).value : null;
-      const cagr5y = returns[qi + 5]?.status === 'fulfilled' ? (returns[qi + 5] as PromiseFulfilledResult<number|null>).value : null;
-
-      const qv = q as Record<string, unknown> | null;
-      return {
-        symbol: sector.symbol,
-        name: sector.name,
-        category: sector.category,
-        price: qv?.regularMarketPrice ?? null,
-        changePercent: qv?.regularMarketChangePercent ?? null,
-        ytdReturn,
-        oneMonthReturn,
-        threeMonthReturn,
-        oneWeekReturn,
-        cagr3y,
-        cagr5y,
-      };
-    });
-
-    const sorted = [...data].sort((a, b) => (b.ytdReturn ?? -Infinity) - (a.ytdReturn ?? -Infinity))
+    const sorted = [...data]
+      .sort((a, b) => (b.ytdReturn ?? -Infinity) - (a.ytdReturn ?? -Infinity))
       .map((s, i) => ({ ...s, rank: i + 1 }));
 
     setCached('sectors', sorted);
