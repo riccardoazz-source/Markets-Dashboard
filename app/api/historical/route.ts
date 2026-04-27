@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchYahooChart } from '@/lib/yahoo';
+import { fetchStooqHistorical } from '@/lib/stooq';
 import { subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
@@ -31,10 +31,10 @@ function getStartDate(timeframe: string): Date {
   }
 }
 
-function getInterval(timeframe: string): '1d' | '1wk' | '1mo' {
-  if (['1W', '1M', '3M', '6M', 'YTD', '1Y'].includes(timeframe)) return '1d';
-  if (['3Y', '5Y'].includes(timeframe)) return '1wk';
-  return '1mo';
+function getInterval(timeframe: string): 'd' | 'w' | 'm' {
+  if (['1W', '1M', '3M', '6M', 'YTD', '1Y'].includes(timeframe)) return 'd';
+  if (['3Y', '5Y'].includes(timeframe)) return 'w';
+  return 'm';
 }
 
 export async function GET(req: NextRequest) {
@@ -47,12 +47,8 @@ export async function GET(req: NextRequest) {
   const cached = getCached(key);
   if (cached) return NextResponse.json(cached);
 
-  const period1 = Math.floor(getStartDate(timeframe).getTime() / 1000);
-  const period2 = Math.floor(Date.now() / 1000);
-  const interval = getInterval(timeframe);
-
   try {
-    const data = await fetchYahooChart(symbol, period1, period2, interval);
+    const data = await fetchStooqHistorical(symbol, getStartDate(timeframe), new Date(), getInterval(timeframe));
     setCached(key, data);
     return NextResponse.json(data);
   } catch (err) {

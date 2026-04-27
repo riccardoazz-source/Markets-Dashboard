@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { SECTORS } from '@/lib/config';
-import { fetchYahooChartByRange, returnSince, cagrFromPoints } from '@/lib/yahoo';
+import { fetchStooqHistorical, returnSince, cagrFromPoints } from '@/lib/stooq';
 import { format, startOfYear, subMonths, subWeeks, subYears } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
@@ -18,9 +18,19 @@ function setCached(key: string, data: unknown) {
 
 async function fetchSector(symbol: string, name: string, category: string) {
   try {
-    const { meta, points } = await fetchYahooChartByRange(symbol, '5y', '1d');
-
     const now = new Date();
+    const points = await fetchStooqHistorical(symbol, subYears(now, 5), now, 'd');
+    if (points.length < 2) {
+      return { symbol, name, category, price: null, changePercent: null,
+        ytdReturn: null, oneMonthReturn: null, threeMonthReturn: null,
+        oneWeekReturn: null, cagr3y: null, cagr5y: null };
+    }
+
+    const last = points[points.length - 1];
+    const prev = points[points.length - 2];
+    const price = last.close;
+    const changePercent = prev ? ((last.close - prev.close) / prev.close) * 100 : null;
+
     const ytdReturn = returnSince(points, format(startOfYear(now), 'yyyy-MM-dd'));
     const oneMonthReturn = returnSince(points, format(subMonths(now, 1), 'yyyy-MM-dd'));
     const threeMonthReturn = returnSince(points, format(subMonths(now, 3), 'yyyy-MM-dd'));
@@ -28,34 +38,25 @@ async function fetchSector(symbol: string, name: string, category: string) {
 
     const threeYearPoints = points.filter(p => p.date >= format(subYears(now, 3), 'yyyy-MM-dd'));
     const cagr3y = cagrFromPoints(threeYearPoints, 3);
-    const cagr5y = cagrFromPoints(points, points.length > 1
-      ? (new Date(points[points.length - 1].date).getTime() - new Date(points[0].date).getTime()) / (365.25 * 24 * 60 * 60 * 1000)
-      : 5);
 
-    const price = meta?.regularMarketPrice ?? null;
-    const prev = meta?.chartPreviousClose ?? meta?.previousClose ?? null;
-    const changePercent = price != null && prev ? ((price - prev) / prev) * 100 : null;
+    const fiveYearSpan =
+      (new Date(last.date).getTime() - new Date(points[0].date).getTime()) /
+      (365.25 * 24 * 60 * 60 * 1000);
+    const cagr5y = cagrFromPoints(points, fiveYearSpan);
 
     return {
-      symbol,
-      name,
-      category,
-      price,
-      changePercent,
-      ytdReturn,
-      oneMonthReturn,
-      threeMonthReturn,
-      oneWeekReturn,
-      cagr3y,
-      cagr5y,
+      symbol, name, category,
+      price, changePercent,
+      ytdReturn, oneMonthReturn, threeMonthReturn, oneWeekReturn,
+      cagr3y, cagr5y,
     };
   } catch (e) {
     console.error('sector fetch failed', symbol, e);
     return {
       symbol, name, category,
       price: null, changePercent: null,
-      ytdReturn: null, oneMonthReturn: null, threeMonthReturn: null, oneWeekReturn: null,
-      cagr3y: null, cagr5y: null,
+      ytdReturn: null, oneMonthReturn: null, threeMonthReturn: null,
+      oneWeekReturn: null, cagr3y: null, cagr5y: null,
     };
   }
 }
