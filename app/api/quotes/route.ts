@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchStooqQuote, fetchStooqHistorical, compute52w } from '@/lib/stooq';
+import { fetchStooqDaily, quoteFromPoints } from '@/lib/stooq';
 import { subYears } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
@@ -15,14 +15,9 @@ function setCached(key: string, data: unknown) {
   cache.set(key, { data, ts: Date.now() });
 }
 
-async function quoteWithRange(symbol: string) {
-  const [quote, hist] = await Promise.all([
-    fetchStooqQuote(symbol),
-    fetchStooqHistorical(symbol, subYears(new Date(), 1), new Date(), 'd').catch(() => []),
-  ]);
-  if (!quote) return null;
-  const range = compute52w(hist);
-  return { ...quote, high52w: range.high, low52w: range.low };
+async function quoteFor(symbol: string) {
+  const points = await fetchStooqDaily(symbol, subYears(new Date(), 1), new Date(), 'd');
+  return quoteFromPoints(symbol, points);
 }
 
 export async function GET(req: NextRequest) {
@@ -34,7 +29,7 @@ export async function GET(req: NextRequest) {
   if (cached) return NextResponse.json(cached);
 
   try {
-    const results = await Promise.all(symbols.map(s => quoteWithRange(s)));
+    const results = await Promise.all(symbols.map(s => quoteFor(s)));
     const quotes = results.filter(q => q !== null);
     setCached(key, quotes);
     return NextResponse.json(quotes);

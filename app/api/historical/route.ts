@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchStooqHistorical } from '@/lib/stooq';
+import { fetchStooqDaily } from '@/lib/stooq';
 import { subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
@@ -48,11 +48,11 @@ export async function GET(req: NextRequest) {
   if (cached) return NextResponse.json(cached);
 
   try {
-    const data = await fetchStooqHistorical(symbol, getStartDate(timeframe), new Date(), getInterval(timeframe));
+    const data = await fetchStooqDaily(symbol, getStartDate(timeframe), new Date(), getInterval(timeframe));
     setCached(key, data);
     return NextResponse.json(data);
   } catch (err) {
     console.error('historical error', symbol, err);
-    return NextResponse.json({ error: 'Failed to fetch historical data' }, { status: 500 });
+    return NextResponse.json([], { status: 200 });
   }
 }
