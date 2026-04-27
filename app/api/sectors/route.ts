@@ -3,8 +3,6 @@ import yahooFinance from 'yahoo-finance2';
 import { SECTORS } from '@/lib/config';
 import { format, startOfYear, subMonths, subYears, subWeeks } from 'date-fns';
 
-yahooFinance.setGlobalConfig({ validation: { logErrors: false } });
-
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
 const TTL = 5 * 60_000;

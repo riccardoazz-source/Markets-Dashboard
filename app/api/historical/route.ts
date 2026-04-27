@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import yahooFinance from 'yahoo-finance2';
 import { format, subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
-yahooFinance.setGlobalConfig({ validation: { logErrors: false } });
-
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
 const TTL = 5 * 60_000;
@@ -61,7 +59,7 @@ export async function GET(req: NextRequest) {
     );
 
     const data = rows
-      .filter(r => r.close != null)
+      .filter((r): r is typeof r & { close: number } => r.close != null)
       .map(r => ({
         date: format(new Date(r.date), 'yyyy-MM-dd'),
         close: r.close,

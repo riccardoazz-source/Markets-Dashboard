@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import yahooFinance from 'yahoo-finance2';
 
-yahooFinance.setGlobalConfig({ validation: { logErrors: false } });
-
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
 const TTL = 60_000;
