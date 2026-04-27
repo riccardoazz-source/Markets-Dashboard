@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from 'yahoo-finance2';
 import { SECTORS } from '@/lib/config';
 import { format, startOfYear, subMonths, subYears, subWeeks } from 'date-fns';
+
+const yahooFinance = new YahooFinance();
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
