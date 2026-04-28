@@ -1,5 +1,18 @@
 import { ChartPoint } from './stooq';
 
+export interface YahooMeta {
+  price: number;
+  previousClose: number;
+  currency: string;
+  high52w: number | null;
+  low52w: number | null;
+}
+
+export interface YahooData {
+  meta: YahooMeta | null;
+  points: ChartPoint[];
+}
+
 interface CrumbSession {
   cookie: string;
   crumb: string;
@@ -14,7 +27,6 @@ const UA =
   '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 async function fetchCrumb(): Promise<CrumbSession> {
-  // Step 1: hit fc.yahoo.com to get the B= consent cookie
   const cookieRes = await fetch('https://fc.yahoo.com', {
     headers: { 'User-Agent': UA },
     redirect: 'follow',
@@ -24,15 +36,10 @@ async function fetchCrumb(): Promise<CrumbSession> {
   const bMatch = raw.match(/\bB=([^;,\s]+)/);
   const cookie = bMatch ? `B=${bMatch[1]}` : '';
 
-  // Step 2: exchange the cookie for a crumb
   const crumbRes = await fetch(
-    'https://query2.finance.yahoo.com/v1/test/getcrumb',
+    'https://query1.finance.yahoo.com/v1/test/getcrumb',
     {
-      headers: {
-        'User-Agent': UA,
-        'Cookie': cookie,
-        'Accept': 'text/plain,*/*',
-      },
+      headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'text/plain,*/*' },
       cache: 'no-store',
     },
   );
@@ -51,12 +58,12 @@ async function getSession(): Promise<CrumbSession> {
   return session;
 }
 
-export async function fetchYahooChart(
+export async function fetchYahooData(
   symbol: string,
   from: Date,
   to: Date,
   interval: '1d' | '1wk' | '1mo' = '1d',
-): Promise<ChartPoint[]> {
+): Promise<YahooData> {
   let { cookie, crumb } = await getSession();
 
   const period1 = Math.floor(from.getTime() / 1000);
@@ -76,7 +83,6 @@ export async function fetchYahooChart(
       signal: ctrl.signal,
     });
 
-    // Crumb expired — refresh once and retry
     if (res.status === 401 || res.status === 403) {
       session = null;
       ({ cookie, crumb } = await getSession());
@@ -89,15 +95,30 @@ export async function fetchYahooChart(
 
     if (!res.ok) {
       console.error(`[yahoo] ${symbol} HTTP ${res.status}`);
-      return [];
+      return { meta: null, points: [] };
     }
 
     const json = await res.json();
     const result = json?.chart?.result?.[0];
     if (!result) {
-      console.warn(`[yahoo] ${symbol} no result in response`);
-      return [];
+      console.warn(`[yahoo] ${symbol} no chart result`);
+      return { meta: null, points: [] };
     }
+
+    // Meta: use Yahoo's own previousClose — immune to dividend-adjusted distortions
+    const m = result.meta ?? {};
+    const metaPrice: number = m.regularMarketPrice ?? 0;
+    const metaPrev: number = m.chartPreviousClose ?? m.previousClose ?? 0;
+    const meta: YahooMeta | null =
+      metaPrice > 0 && metaPrev > 0
+        ? {
+            price: metaPrice,
+            previousClose: metaPrev,
+            currency: m.currency ?? 'USD',
+            high52w: m.fiftyTwoWeekHigh ?? null,
+            low52w: m.fiftyTwoWeekLow ?? null,
+          }
+        : null;
 
     const timestamps: number[] = result.timestamp ?? [];
     const closes: number[] = result.indicators?.quote?.[0]?.close ?? [];
@@ -109,12 +130,24 @@ export async function fetchYahooChart(
       const date = new Date(timestamps[i] * 1000).toISOString().slice(0, 10);
       points.push({ date, close });
     }
+    points.sort((a, b) => a.date.localeCompare(b.date));
 
-    return points.sort((a, b) => a.date.localeCompare(b.date));
+    return { meta, points };
   } catch (e) {
     console.error(`[yahoo] ${symbol} fetch failed:`, (e as Error).message);
-    return [];
+    return { meta: null, points: [] };
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Convenience wrapper — callers that only need points
+export async function fetchYahooChart(
+  symbol: string,
+  from: Date,
+  to: Date,
+  interval: '1d' | '1wk' | '1mo' = '1d',
+): Promise<ChartPoint[]> {
+  const { points } = await fetchYahooData(symbol, from, to, interval);
+  return points;
 }

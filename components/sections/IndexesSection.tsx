@@ -8,7 +8,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, RefreshCw, ChevronRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
 const REGIONS = ['All', 'America', 'EU', 'Asia', 'Global', 'EM'];
 
@@ -71,18 +71,19 @@ export function IndexesSection() {
   const selectedQuote = selected ? quotes[selected] : null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex gap-1">
+    <div className="space-y-3">
+      {/* Region filter — horizontally scrollable on mobile */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
           {REGIONS.map(r => (
             <button
               key={r}
               onClick={() => setSelectedRegion(r)}
               className={clsx(
-                'px-3 py-1 text-xs font-medium rounded-full transition-all',
+                'px-3 py-1 text-xs font-semibold rounded-full transition-all whitespace-nowrap shrink-0',
                 selectedRegion === r
                   ? 'bg-accent text-white'
-                  : 'text-gray-400 hover:text-gray-200 border border-border hover:border-border-light'
+                  : 'text-gray-400 border border-border hover:border-border-light hover:text-gray-200'
               )}
             >
               {r}
@@ -90,9 +91,9 @@ export function IndexesSection() {
           ))}
         </div>
         {lastUpdate && (
-          <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <RefreshCw size={11} />
-            {lastUpdate.toLocaleTimeString()}
+          <div className="flex items-center gap-1 text-[10px] text-gray-600 shrink-0">
+            <RefreshCw size={10} />
+            {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
         )}
       </div>
@@ -100,55 +101,43 @@ export function IndexesSection() {
       {loading ? (
         <LoadingGrid count={INDEXES.length} />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
           {filtered.map(idx => {
             const q = quotes[idx.symbol];
-            const isUp = (q?.changePercent ?? 0) >= 0;
+            const pct = q?.changePercent ?? 0;
+            const isUp = pct >= 0;
             const isSelected = selected === idx.symbol;
             return (
               <button
                 key={idx.symbol}
                 onClick={() => setSelected(isSelected ? null : idx.symbol)}
                 className={clsx(
-                  'rounded-xl border p-4 text-left transition-all duration-150 hover:border-accent/50 hover:shadow-lg hover:shadow-accent/5',
+                  'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                   isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
                 )}
               >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-0.5">
-                      {idx.category}
-                    </p>
-                    <p className="text-sm font-semibold text-gray-100 leading-tight">{idx.name}</p>
-                  </div>
-                  {isSelected && <ChevronRight size={14} className="text-accent mt-0.5" />}
-                </div>
+                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mb-1">
+                  {idx.category}
+                </p>
+                <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">
+                  {idx.name}
+                </p>
                 {q ? (
                   <>
-                    <p className="text-xl font-bold text-white mt-2">
+                    {/* Daily change is the hero number */}
+                    <div className={clsx(
+                      'flex items-center gap-1 text-base font-bold mb-1',
+                      colorForPercent(pct)
+                    )}>
+                      {isUp ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                      {formatPercent(pct)}
+                    </div>
+                    <p className="text-xs text-gray-400 font-medium tabular-nums">
                       {q.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
-                    <div className={clsx('flex items-center gap-1 mt-1 text-sm font-semibold', colorForPercent(q.changePercent))}>
-                      {isUp ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                      {formatPercent(q.changePercent)}
-                    </div>
-                    <div className="mt-2 pt-2 border-t border-border flex gap-3 text-[10px]">
-                      {q.trailingPE != null && (
-                        <div>
-                          <span className="text-gray-500">P/E </span>
-                          <span className="text-gray-300 font-medium">{q.trailingPE.toFixed(1)}</span>
-                        </div>
-                      )}
-                      {q.forwardPE != null && (
-                        <div>
-                          <span className="text-gray-500">Fwd </span>
-                          <span className="text-gray-300 font-medium">{q.forwardPE.toFixed(1)}</span>
-                        </div>
-                      )}
-                    </div>
                   </>
                 ) : (
-                  <div className="mt-2 text-gray-500 text-sm">Loading…</div>
+                  <p className="text-xs text-gray-600 mt-2">Loading…</p>
                 )}
               </button>
             );
@@ -156,20 +145,29 @@ export function IndexesSection() {
         </div>
       )}
 
+      {/* Detail panel */}
       {selected && selectedQuote && (
-        <div className="rounded-xl border border-border bg-bg-card p-5 space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
             <div>
-              <h3 className="text-lg font-bold text-white">{selectedConfig?.name}</h3>
+              <h3 className="text-base font-bold text-white leading-tight">{selectedConfig?.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">{selected} · {selectedConfig?.region}</p>
             </div>
-            <TimeframeSelector value={timeframe} onChange={setTimeframe} />
+            <div className="flex items-center gap-2 shrink-0">
+              <TimeframeSelector value={timeframe} onChange={setTimeframe} />
+              <button
+                onClick={() => setSelected(null)}
+                className="p-1 text-gray-500 hover:text-gray-300"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <Stat label="Price" value={selectedQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2 })} />
             <Stat
-              label="Change"
+              label="Day Change"
               value={formatPercent(selectedQuote.changePercent)}
               color={colorForPercent(selectedQuote.changePercent)}
             />
@@ -187,12 +185,6 @@ export function IndexesSection() {
                 />
               </>
             )}
-            {selectedQuote.trailingPE != null && (
-              <Stat label="P/E (TTM)" value={selectedQuote.trailingPE.toFixed(2)} />
-            )}
-            {selectedQuote.forwardPE != null && (
-              <Stat label="Forward P/E" value={selectedQuote.forwardPE.toFixed(2)} />
-            )}
             {selectedQuote.high52w != null && (
               <Stat label="52W High" value={selectedQuote.high52w.toLocaleString('en-US', { minimumFractionDigits: 2 })} />
             )}
@@ -202,18 +194,17 @@ export function IndexesSection() {
           </div>
 
           {histLoading ? (
-            <div className="flex items-center justify-center h-48">
-              <LoadingSpinner size={32} />
+            <div className="flex items-center justify-center h-40">
+              <LoadingSpinner size={28} />
             </div>
           ) : (
-            <PriceChart data={historical} color="auto" height={240} />
+            <PriceChart data={historical} color="auto" height={200} />
           )}
 
           {cagrData && (
-            <div className="text-xs text-gray-500">
-              {cagrData.startDate} → {cagrData.endDate} ·
-              {' '}{formatPrice(cagrData.startPrice)} → {formatPrice(cagrData.endPrice)}
-            </div>
+            <p className="text-[10px] text-gray-600">
+              {cagrData.startDate} → {cagrData.endDate} · {formatPrice(cagrData.startPrice)} → {formatPrice(cagrData.endPrice)}
+            </p>
           )}
         </div>
       )}
@@ -223,7 +214,7 @@ export function IndexesSection() {
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="bg-bg-input rounded-lg px-3 py-2.5">
+    <div className="bg-bg-input rounded-lg px-3 py-2">
       <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
       <p className={clsx('text-sm font-bold', color ?? 'text-gray-100')}>{value}</p>
     </div>

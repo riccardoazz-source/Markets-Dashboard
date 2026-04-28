@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { SECTORS } from '@/lib/config';
-import { fetchYahooChart } from '@/lib/yahoo';
+import { fetchYahooData } from '@/lib/yahoo';
 import { returnSince, cagrFromPoints } from '@/lib/stooq';
 import { format, startOfYear, subMonths, subWeeks, subYears } from 'date-fns';
 
@@ -17,6 +17,10 @@ function setCached(key: string, data: unknown) {
   cache.set(key, { data, ts: Date.now() });
 }
 
+async function delay(ms: number) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
 async function fetchSector(symbol: string, name: string, category: string) {
   const empty = {
     symbol, name, category,
@@ -26,13 +30,13 @@ async function fetchSector(symbol: string, name: string, category: string) {
   };
 
   const now = new Date();
-  const points = await fetchYahooChart(symbol, subYears(now, 5), now, '1d');
-  if (points.length < 2) return empty;
+  // Weekly interval for 5Y: ~260 points vs 1,250 daily — much lighter per request
+  const { meta, points } = await fetchYahooData(symbol, subYears(now, 5), now, '1wk');
+  if (points.length < 4) return empty;
 
-  const last = points[points.length - 1];
-  const prev = points[points.length - 2];
-  const price = last.close;
-  const changePercent = prev ? ((last.close - prev.close) / prev.close) * 100 : null;
+  const price = meta?.price ?? points[points.length - 1].close;
+  const prev = meta?.previousClose ?? points[points.length - 2]?.close;
+  const changePercent = prev && prev > 0 ? ((price - prev) / prev) * 100 : null;
 
   const ytdReturn = returnSince(points, format(startOfYear(now), 'yyyy-MM-dd'));
   const oneMonthReturn = returnSince(points, format(subMonths(now, 1), 'yyyy-MM-dd'));
@@ -43,7 +47,7 @@ async function fetchSector(symbol: string, name: string, category: string) {
   const cagr3y = cagrFromPoints(threeYearPoints, 3);
 
   const fiveYearSpan =
-    (new Date(last.date).getTime() - new Date(points[0].date).getTime()) /
+    (new Date(points[points.length - 1].date).getTime() - new Date(points[0].date).getTime()) /
     (365.25 * 24 * 60 * 60 * 1000);
   const cagr5y = cagrFromPoints(points, fiveYearSpan);
 
@@ -60,11 +64,20 @@ export async function GET() {
   if (cached) return NextResponse.json(cached);
 
   try {
-    const data = await Promise.all(
-      SECTORS.map(s => fetchSector(s.symbol, s.name, s.category))
-    );
+    const results: ReturnType<typeof fetchSector> extends Promise<infer T> ? T[] : never[] = [];
+    const BATCH = 4;
 
-    const sorted = [...data]
+    // Process in batches to avoid Yahoo rate limits
+    for (let i = 0; i < SECTORS.length; i += BATCH) {
+      const batch = SECTORS.slice(i, i + BATCH);
+      const batchResults = await Promise.all(
+        batch.map(s => fetchSector(s.symbol, s.name, s.category))
+      );
+      results.push(...batchResults);
+      if (i + BATCH < SECTORS.length) await delay(400);
+    }
+
+    const sorted = [...results]
       .sort((a, b) => (b.ytdReturn ?? -Infinity) - (a.ytdReturn ?? -Infinity))
       .map((s, i) => ({ ...s, rank: i + 1 }));
 

@@ -34,3 +34,12 @@ body {
 .recharts-tooltip-wrapper {
   outline: none !important;
 }
+
+/* Hide scrollbar on filter rows that scroll horizontally */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Improve touch target on mobile */
+@media (max-width: 640px) {
+  button { touch-action: manipulation; }
+}
