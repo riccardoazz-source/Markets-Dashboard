@@ -2,16 +2,17 @@ export interface QuoteData {
   symbol: string;
   name: string;
   price: number;
+  previousClose?: number;
   change: number;
   changePercent: number;
   currency: string;
-  trailingPE?: number;
-  forwardPE?: number;
-  marketCap?: number;
-  high52w?: number;
-  low52w?: number;
-  volume?: number;
-  avgVolume?: number;
+  trailingPE?: number | null;
+  forwardPE?: number | null;
+  marketCap?: number | null;
+  high52w?: number | null;
+  low52w?: number | null;
+  fiftyTwoWeekChangePercent?: number | null;
+  volume?: number | null;
 }
 
 export interface HistoricalPoint {

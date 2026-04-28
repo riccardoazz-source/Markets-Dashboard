@@ -72,7 +72,6 @@ export function IndexesSection() {
 
   return (
     <div className="space-y-3">
-      {/* Region filter — horizontally scrollable on mobile */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
           {REGIONS.map(r => (
@@ -104,8 +103,9 @@ export function IndexesSection() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
           {filtered.map(idx => {
             const q = quotes[idx.symbol];
-            const pct = q?.changePercent ?? 0;
-            const isUp = pct >= 0;
+            const day = q?.changePercent ?? 0;
+            const oneY = q?.fiftyTwoWeekChangePercent;
+            const isUp = day >= 0;
             const isSelected = selected === idx.symbol;
             return (
               <button
@@ -122,22 +122,23 @@ export function IndexesSection() {
                 <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">
                   {idx.name}
                 </p>
-                {q ? (
+                {q && q.price > 0 ? (
                   <>
-                    {/* Daily change is the hero number */}
-                    <div className={clsx(
-                      'flex items-center gap-1 text-base font-bold mb-1',
-                      colorForPercent(pct)
-                    )}>
-                      {isUp ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                      {formatPercent(pct)}
-                    </div>
-                    <p className="text-xs text-gray-400 font-medium tabular-nums">
+                    <p className="text-lg font-bold text-white tabular-nums">
                       {q.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
+                    <div className={clsx('flex items-center gap-1 mt-0.5 text-sm font-bold', colorForPercent(day))}>
+                      {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                      {formatPercent(day)} <span className="text-[10px] font-medium opacity-70">day</span>
+                    </div>
+                    {oneY != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(oneY))}>
+                        1Y: {formatPercent(oneY, 1)}
+                      </p>
+                    )}
                   </>
                 ) : (
-                  <p className="text-xs text-gray-600 mt-2">Loading…</p>
+                  <p className="text-xs text-gray-600">Loading…</p>
                 )}
               </button>
             );
@@ -145,7 +146,6 @@ export function IndexesSection() {
         </div>
       )}
 
-      {/* Detail panel */}
       {selected && selectedQuote && (
         <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
           <div className="flex items-start justify-between gap-2">
@@ -155,10 +155,7 @@ export function IndexesSection() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <TimeframeSelector value={timeframe} onChange={setTimeframe} />
-              <button
-                onClick={() => setSelected(null)}
-                className="p-1 text-gray-500 hover:text-gray-300"
-              >
+              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
                 <X size={16} />
               </button>
             </div>
@@ -171,19 +168,25 @@ export function IndexesSection() {
               value={formatPercent(selectedQuote.changePercent)}
               color={colorForPercent(selectedQuote.changePercent)}
             />
+            {selectedQuote.fiftyTwoWeekChangePercent != null && (
+              <Stat
+                label="1Y Change"
+                value={formatPercent(selectedQuote.fiftyTwoWeekChangePercent)}
+                color={colorForPercent(selectedQuote.fiftyTwoWeekChangePercent)}
+              />
+            )}
             {cagrData && (
-              <>
-                <Stat
-                  label={`Return (${timeframe})`}
-                  value={formatPercent(cagrData.return)}
-                  color={colorForPercent(cagrData.return)}
-                />
-                <Stat
-                  label={`CAGR (${timeframe})`}
-                  value={formatPercent(cagrData.cagr)}
-                  color={colorForPercent(cagrData.cagr)}
-                />
-              </>
+              <Stat
+                label={`CAGR ${timeframe}`}
+                value={formatPercent(cagrData.cagr)}
+                color={colorForPercent(cagrData.cagr)}
+              />
+            )}
+            {selectedQuote.trailingPE != null && (
+              <Stat label="P/E" value={selectedQuote.trailingPE.toFixed(1)} />
+            )}
+            {selectedQuote.forwardPE != null && (
+              <Stat label="Fwd P/E" value={selectedQuote.forwardPE.toFixed(1)} />
             )}
             {selectedQuote.high52w != null && (
               <Stat label="52W High" value={selectedQuote.high52w.toLocaleString('en-US', { minimumFractionDigits: 2 })} />

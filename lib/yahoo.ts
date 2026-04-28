@@ -151,3 +151,93 @@ export async function fetchYahooChart(
   const { points } = await fetchYahooData(symbol, from, to, interval);
   return points;
 }
+
+// ---------------------------------------------------------------------------
+// Batch quote endpoint — like CoinGecko's /markets, returns N symbols in ONE
+// request with price, day change, 52w change, P/E, etc.
+// ---------------------------------------------------------------------------
+
+export interface YahooQuote {
+  symbol: string;
+  name: string;
+  price: number;
+  previousClose: number;
+  change: number;
+  changePercent: number;
+  currency: string;
+  high52w: number | null;
+  low52w: number | null;
+  fiftyTwoWeekChangePercent: number | null;
+  trailingPE: number | null;
+  forwardPE: number | null;
+  marketCap: number | null;
+  volume: number | null;
+}
+
+export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]> {
+  if (symbols.length === 0) return [];
+
+  let { cookie, crumb } = await getSession();
+
+  const buildUrl = (c: string) =>
+    `https://query1.finance.yahoo.com/v7/finance/quote` +
+    `?symbols=${encodeURIComponent(symbols.join(','))}` +
+    `&crumb=${encodeURIComponent(c)}`;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+
+  try {
+    let res = await fetch(buildUrl(crumb), {
+      headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'application/json' },
+      cache: 'no-store',
+      signal: ctrl.signal,
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      session = null;
+      ({ cookie, crumb } = await getSession());
+      res = await fetch(buildUrl(crumb), {
+        headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'application/json' },
+        cache: 'no-store',
+      });
+    }
+
+    if (!res.ok) {
+      console.error(`[yahoo-batch] HTTP ${res.status}`);
+      return [];
+    }
+
+    const json = await res.json();
+    const items: Record<string, unknown>[] = json?.quoteResponse?.result ?? [];
+
+    return items.map((it) => ({
+      symbol: (it.symbol as string) ?? '',
+      name:
+        (it.shortName as string) ??
+        (it.longName as string) ??
+        (it.symbol as string) ??
+        '',
+      price: (it.regularMarketPrice as number) ?? 0,
+      previousClose: (it.regularMarketPreviousClose as number) ?? 0,
+      change: (it.regularMarketChange as number) ?? 0,
+      changePercent: (it.regularMarketChangePercent as number) ?? 0,
+      currency: (it.currency as string) ?? 'USD',
+      high52w: (it.fiftyTwoWeekHigh as number) ?? null,
+      low52w: (it.fiftyTwoWeekLow as number) ?? null,
+      fiftyTwoWeekChangePercent:
+        (it.fiftyTwoWeekChangePercent as number) != null
+          ? (it.fiftyTwoWeekChangePercent as number) * 100
+          : null,
+      trailingPE: (it.trailingPE as number) ?? null,
+      forwardPE: (it.forwardPE as number) ?? null,
+      marketCap: (it.marketCap as number) ?? null,
+      volume: (it.regularMarketVolume as number) ?? null,
+    }));
+  } catch (e) {
+    console.error('[yahoo-batch] fetch failed:', (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}

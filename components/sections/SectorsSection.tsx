@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPercent, colorForPercent, calculateCAGR } from '@/lib/utils';
+import { formatPercent, formatPrice, colorForPercent, calculateCAGR } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -15,28 +15,21 @@ interface SectorAPIData {
   category: string;
   price: number | null;
   changePercent: number | null;
-  ytdReturn: number | null;
-  oneMonthReturn: number | null;
-  threeMonthReturn: number | null;
-  oneWeekReturn: number | null;
-  cagr3y: number | null;
-  cagr5y: number | null;
+  oneYearReturn: number | null;
+  high52w: number | null;
+  low52w: number | null;
   rank: number;
 }
 
 const SORT_OPTIONS = [
-  { value: 'ytdReturn',        label: 'YTD'     },
-  { value: 'oneMonthReturn',   label: '1M'      },
-  { value: 'threeMonthReturn', label: '3M'      },
-  { value: 'oneWeekReturn',    label: '1W'      },
-  { value: 'cagr3y',           label: '3Y CAGR' },
-  { value: 'cagr5y',           label: '5Y CAGR' },
+  { value: 'changePercent',  label: 'Day'  },
+  { value: 'oneYearReturn',  label: '1Y'   },
 ];
 
 export function SectorsSection() {
   const [sectors, setSectors] = useState<SectorAPIData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sortBy, setSortBy] = useState<string>('ytdReturn');
+  const [sortBy, setSortBy] = useState<string>('changePercent');
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
@@ -71,8 +64,15 @@ export function SectorsSection() {
     }
   }, []);
 
-  useEffect(() => { fetchSectors(); }, [fetchSectors]);
-  useEffect(() => { if (selected) fetchHistorical(selected, timeframe); }, [selected, timeframe, fetchHistorical]);
+  useEffect(() => {
+    fetchSectors();
+    const id = setInterval(fetchSectors, 60_000);
+    return () => clearInterval(id);
+  }, [fetchSectors]);
+
+  useEffect(() => {
+    if (selected) fetchHistorical(selected, timeframe);
+  }, [selected, timeframe, fetchHistorical]);
 
   const getValue = (s: SectorAPIData) =>
     (s as unknown as Record<string, number | null>)[sortBy] ?? null;
@@ -86,17 +86,17 @@ export function SectorsSection() {
 
   return (
     <div className="space-y-3">
-      {/* Sort bar — scrollable on mobile */}
+      {/* Sort bar */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-0.5">
-          <p className="text-xs text-gray-500 font-medium shrink-0">Sort:</p>
-          <div className="flex gap-1 bg-bg-input rounded-lg p-1 shrink-0">
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-gray-500 font-medium">Sort:</p>
+          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
             {SORT_OPTIONS.map(opt => (
               <button
                 key={opt.value}
                 onClick={() => setSortBy(opt.value)}
                 className={clsx(
-                  'px-2.5 py-1 text-xs font-semibold rounded-md transition-all whitespace-nowrap',
+                  'px-3 py-1 text-xs font-semibold rounded-md transition-all',
                   sortBy === opt.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100'
                 )}
               >
@@ -105,7 +105,7 @@ export function SectorsSection() {
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-2 text-[10px] text-gray-600 shrink-0">
+        <div className="flex items-center gap-2 text-[10px] text-gray-600">
           <span>20 sectors · {sortLabel}</span>
           {lastUpdate && (
             <span className="flex items-center gap-1">
@@ -121,9 +121,11 @@ export function SectorsSection() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
           {sorted.map(sector => {
-            const key = getValue(sector);
+            const day = sector.changePercent ?? 0;
+            const oneY = sector.oneYearReturn;
+            const isUp = day >= 0;
+            const isHot = sector.displayRank <= 2 && day > 0;
             const isSelected = selected === sector.symbol;
-            const isHot = sector.displayRank <= 2 && (key ?? 0) > 0;
 
             return (
               <button
@@ -139,45 +141,30 @@ export function SectorsSection() {
                     <Flame size={8} />HOT
                   </span>
                 )}
-                <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="flex items-center gap-1.5 mb-1">
                   <span className="text-[10px] font-bold text-gray-600">#{sector.displayRank}</span>
                   <span className="text-[10px] text-gray-500 uppercase tracking-wider">{sector.category}</span>
                 </div>
                 <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">{sector.name}</p>
 
-                {/* Primary metric — big and bold */}
-                <div className={clsx('flex items-center gap-1 text-base font-bold', colorForPercent(key ?? 0))}>
-                  {(key ?? 0) >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                  {key != null ? formatPercent(key) : 'N/A'}
-                </div>
-
-                {/* Secondary metrics */}
-                <div className="mt-2 pt-2 border-t border-border grid grid-cols-2 gap-x-2 text-[10px]">
-                  {sector.ytdReturn != null && sortBy !== 'ytdReturn' && (
-                    <div>
-                      <span className="text-gray-600">YTD </span>
-                      <span className={colorForPercent(sector.ytdReturn)}>{formatPercent(sector.ytdReturn, 1)}</span>
+                {sector.price != null ? (
+                  <>
+                    <p className="text-lg font-bold text-white tabular-nums">
+                      ${sector.price.toFixed(2)}
+                    </p>
+                    <div className={clsx('flex items-center gap-1 mt-0.5 text-sm font-bold', colorForPercent(day))}>
+                      {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                      {formatPercent(day)} <span className="text-[10px] font-medium opacity-70">day</span>
                     </div>
-                  )}
-                  {sector.oneMonthReturn != null && sortBy !== 'oneMonthReturn' && (
-                    <div>
-                      <span className="text-gray-600">1M </span>
-                      <span className={colorForPercent(sector.oneMonthReturn)}>{formatPercent(sector.oneMonthReturn, 1)}</span>
-                    </div>
-                  )}
-                  {sector.cagr3y != null && sortBy !== 'cagr3y' && (
-                    <div>
-                      <span className="text-gray-600">3Y </span>
-                      <span className={colorForPercent(sector.cagr3y)}>{formatPercent(sector.cagr3y, 1)}</span>
-                    </div>
-                  )}
-                  {sector.cagr5y != null && sortBy !== 'cagr5y' && (
-                    <div>
-                      <span className="text-gray-600">5Y </span>
-                      <span className={colorForPercent(sector.cagr5y)}>{formatPercent(sector.cagr5y, 1)}</span>
-                    </div>
-                  )}
-                </div>
+                    {oneY != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(oneY))}>
+                        1Y: {formatPercent(oneY, 1)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs text-gray-600">Loading…</p>
+                )}
               </button>
             );
           })}
@@ -203,26 +190,23 @@ export function SectorsSection() {
             {selectedSector.price != null && (
               <Stat label="Price" value={`$${selectedSector.price.toFixed(2)}`} />
             )}
-            {selectedSector.ytdReturn != null && (
-              <Stat label="YTD" value={formatPercent(selectedSector.ytdReturn)} color={colorForPercent(selectedSector.ytdReturn)} />
+            {selectedSector.changePercent != null && (
+              <Stat label="Day" value={formatPercent(selectedSector.changePercent)} color={colorForPercent(selectedSector.changePercent)} />
             )}
-            {selectedSector.oneWeekReturn != null && (
-              <Stat label="1W" value={formatPercent(selectedSector.oneWeekReturn)} color={colorForPercent(selectedSector.oneWeekReturn)} />
-            )}
-            {selectedSector.oneMonthReturn != null && (
-              <Stat label="1M" value={formatPercent(selectedSector.oneMonthReturn)} color={colorForPercent(selectedSector.oneMonthReturn)} />
-            )}
-            {selectedSector.threeMonthReturn != null && (
-              <Stat label="3M" value={formatPercent(selectedSector.threeMonthReturn)} color={colorForPercent(selectedSector.threeMonthReturn)} />
-            )}
-            {selectedSector.cagr3y != null && (
-              <Stat label="3Y CAGR" value={formatPercent(selectedSector.cagr3y)} color={colorForPercent(selectedSector.cagr3y)} />
-            )}
-            {selectedSector.cagr5y != null && (
-              <Stat label="5Y CAGR" value={formatPercent(selectedSector.cagr5y)} color={colorForPercent(selectedSector.cagr5y)} />
+            {selectedSector.oneYearReturn != null && (
+              <Stat label="1Y" value={formatPercent(selectedSector.oneYearReturn)} color={colorForPercent(selectedSector.oneYearReturn)} />
             )}
             {cagrData && (
-              <Stat label={`CAGR ${timeframe}`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
+              <>
+                <Stat label={`Return ${timeframe}`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
+                <Stat label={`CAGR ${timeframe}`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
+              </>
+            )}
+            {selectedSector.high52w != null && (
+              <Stat label="52W High" value={formatPrice(selectedSector.high52w)} />
+            )}
+            {selectedSector.low52w != null && (
+              <Stat label="52W Low" value={formatPrice(selectedSector.low52w)} />
             )}
           </div>
 
