@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchYahooQuotes } from '@/lib/yahoo';
 
-interface CacheEntry { data: unknown; ts: number }
+interface CacheEntry { data: unknown[]; ts: number }
 const cache = new Map<string, CacheEntry>();
-const TTL = 60_000;
-
-function getCached(key: string) {
-  const e = cache.get(key);
-  if (e && Date.now() - e.ts < TTL) return e.data;
-  return null;
-}
-function setCached(key: string, data: unknown) {
-  cache.set(key, { data, ts: Date.now() });
-}
+const FRESH_TTL = 60_000;        // 1 min — fully fresh
+const STALE_TTL = 30 * 60_000;   // 30 min — serve stale if fetch fails
 
 export async function GET(req: NextRequest) {
   const symbols =
@@ -22,16 +14,29 @@ export async function GET(req: NextRequest) {
   }
 
   const key = [...symbols].sort().join(',');
-  const cached = getCached(key);
-  if (cached) return NextResponse.json(cached);
+  const entry = cache.get(key);
+
+  // Fully fresh — serve cached
+  if (entry && Date.now() - entry.ts < FRESH_TTL) {
+    return NextResponse.json(entry.data);
+  }
 
   try {
-    // ONE call returns all symbols — same pattern as CoinGecko /markets
     const quotes = await fetchYahooQuotes(symbols);
-    setCached(key, quotes);
-    return NextResponse.json(quotes);
+    if (quotes.length > 0) {
+      cache.set(key, { data: quotes, ts: Date.now() });
+      return NextResponse.json(quotes);
+    }
+    // Yahoo returned empty — serve stale if we have any
+    if (entry && Date.now() - entry.ts < STALE_TTL) {
+      return NextResponse.json(entry.data);
+    }
+    return NextResponse.json([]);
   } catch (err) {
     console.error('quotes error', err);
-    return NextResponse.json({ error: 'Failed to fetch quotes' }, { status: 500 });
+    if (entry && Date.now() - entry.ts < STALE_TTL) {
+      return NextResponse.json(entry.data);
+    }
+    return NextResponse.json([], { status: 200 });
   }
 }
