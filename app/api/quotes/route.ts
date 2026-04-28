@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchStooqDaily, quoteFromPoints } from '@/lib/stooq';
+import { fetchYahooChart } from '@/lib/yahoo';
+import { quoteFromPoints } from '@/lib/stooq';
 import { subYears } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
@@ -16,7 +17,7 @@ function setCached(key: string, data: unknown) {
 }
 
 async function quoteFor(symbol: string) {
-  const points = await fetchStooqDaily(symbol, subYears(new Date(), 1), new Date(), 'd');
+  const points = await fetchYahooChart(symbol, subYears(new Date(), 1), new Date(), '1d');
   return quoteFromPoints(symbol, points);
 }
 

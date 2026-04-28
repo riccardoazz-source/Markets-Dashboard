@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { SECTORS } from '@/lib/config';
-import { fetchStooqDaily, returnSince, cagrFromPoints } from '@/lib/stooq';
+import { fetchYahooChart } from '@/lib/yahoo';
+import { returnSince, cagrFromPoints } from '@/lib/stooq';
 import { format, startOfYear, subMonths, subWeeks, subYears } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
@@ -25,7 +26,7 @@ async function fetchSector(symbol: string, name: string, category: string) {
   };
 
   const now = new Date();
-  const points = await fetchStooqDaily(symbol, subYears(now, 5), now, 'd');
+  const points = await fetchYahooChart(symbol, subYears(now, 5), now, '1d');
   if (points.length < 2) return empty;
 
   const last = points[points.length - 1];
