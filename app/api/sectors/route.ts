@@ -1,28 +1,30 @@
 import { NextResponse } from 'next/server';
 import { SECTORS } from '@/lib/config';
-import { fetchYahooQuotes } from '@/lib/yahoo';
+import { fetchTDQuotes } from '@/lib/twelvedata';
 
 interface CacheEntry { data: unknown[]; ts: number }
 const cache = new Map<string, CacheEntry>();
-const FRESH_TTL = 60_000;
-const STALE_TTL = 30 * 60_000;
+const FRESH = 60_000;
+const STALE = 30 * 60_000;
 
 export async function GET() {
   const entry = cache.get('sectors');
-  if (entry && Date.now() - entry.ts < FRESH_TTL) {
-    return NextResponse.json(entry.data);
-  }
+  if (entry && Date.now() - entry.ts < FRESH) return NextResponse.json(entry.data);
 
   try {
     const symbols = SECTORS.map(s => s.symbol);
-    const quotes = await fetchYahooQuotes(symbols);
+    const quotes = await fetchTDQuotes(symbols);
 
     if (quotes.length === 0) {
-      // Serve stale if Yahoo blocked/empty
-      if (entry && Date.now() - entry.ts < STALE_TTL) {
-        return NextResponse.json(entry.data);
-      }
-      return NextResponse.json([]);
+      if (entry && Date.now() - entry.ts < STALE) return NextResponse.json(entry.data);
+      // Return skeleton list so the UI always renders 20 sectors
+      return NextResponse.json(
+        SECTORS.map((s, i) => ({
+          symbol: s.symbol, name: s.name, category: s.category,
+          price: null, changePercent: null, oneYearReturn: null,
+          high52w: null, low52w: null, rank: i + 1,
+        }))
+      );
     }
 
     const data = SECTORS.map(s => {
@@ -47,9 +49,13 @@ export async function GET() {
     return NextResponse.json(sorted);
   } catch (err) {
     console.error('sectors error', err);
-    if (entry && Date.now() - entry.ts < STALE_TTL) {
-      return NextResponse.json(entry.data);
-    }
-    return NextResponse.json([], { status: 200 });
+    if (entry && Date.now() - entry.ts < STALE) return NextResponse.json(entry.data);
+    return NextResponse.json(
+      SECTORS.map((s, i) => ({
+        symbol: s.symbol, name: s.name, category: s.category,
+        price: null, changePercent: null, oneYearReturn: null,
+        high52w: null, low52w: null, rank: i + 1,
+      }))
+    );
   }
 }

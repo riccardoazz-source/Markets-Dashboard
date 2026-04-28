@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchYahooChart } from '@/lib/yahoo';
+import { fetchTDTimeSeries } from '@/lib/twelvedata';
 import { subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
@@ -10,9 +10,6 @@ function getCached(key: string) {
   const e = cache.get(key);
   if (e && Date.now() - e.ts < TTL) return e.data;
   return null;
-}
-function setCached(key: string, data: unknown) {
-  cache.set(key, { data, ts: Date.now() });
 }
 
 function getStartDate(timeframe: string): Date {
@@ -40,7 +37,6 @@ function getInterval(timeframe: string): '1d' | '1wk' | '1mo' {
 export async function GET(req: NextRequest) {
   const symbol = req.nextUrl.searchParams.get('symbol');
   const timeframe = req.nextUrl.searchParams.get('timeframe') ?? '1Y';
-
   if (!symbol) return NextResponse.json({ error: 'No symbol' }, { status: 400 });
 
   const key = `${symbol}:${timeframe}`;
@@ -48,13 +44,8 @@ export async function GET(req: NextRequest) {
   if (cached) return NextResponse.json(cached);
 
   try {
-    const data = await fetchYahooChart(
-      symbol,
-      getStartDate(timeframe),
-      new Date(),
-      getInterval(timeframe),
-    );
-    setCached(key, data);
+    const data = await fetchTDTimeSeries(symbol, getStartDate(timeframe), new Date(), getInterval(timeframe));
+    cache.set(key, { data, ts: Date.now() });
     return NextResponse.json(data);
   } catch (err) {
     console.error('historical error', symbol, err);
