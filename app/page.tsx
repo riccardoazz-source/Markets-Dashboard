@@ -5,23 +5,26 @@ import { Navbar, Section } from '@/components/Navbar';
 import { IndexesSection } from '@/components/sections/IndexesSection';
 import { CurrenciesSection } from '@/components/sections/CurrenciesSection';
 import { CryptoCommoditiesSection } from '@/components/sections/CryptoCommoditiesSection';
+import { CommoditiesSection } from '@/components/sections/CommoditiesSection';
 import { SectorsSection } from '@/components/sections/SectorsSection';
 import { CompareSection } from '@/components/sections/CompareSection';
 
 const SECTION_LABELS: Record<Section, string> = {
-  indexes:    'Global Market Indexes',
-  currencies: 'Currency Exchange Rates',
-  crypto:     'Crypto & Commodities',
-  sectors:    'Sector Heat Rankings',
-  compare:    'Asset Comparison',
+  indexes:     'Global Market Indexes',
+  currencies:  'Currency Exchange Rates',
+  crypto:      'Cryptocurrency',
+  commodities: 'Commodities',
+  sectors:     'Sector Heat Rankings',
+  compare:     'Asset Comparison',
 };
 
 const SECTION_DESCRIPTIONS: Record<Section, string> = {
-  indexes:    'Live prices, PE ratios and performance for major global indexes and ETFs',
-  currencies: 'Real-time currency conversion rates with historical charts and period averages',
-  crypto:     'Live cryptocurrency and commodity prices with CAGR and return analysis',
-  sectors:    'US sector ETF performance ranked by return — click any sector for details',
-  compare:    'Normalized performance comparison across any combination of assets',
+  indexes:     'Live prices and performance for major global indexes and ETFs',
+  currencies:  'Real-time currency conversion rates with historical charts',
+  crypto:      'Live cryptocurrency prices with CAGR and return analysis',
+  commodities: 'Live prices for metals, energy and agricultural commodities',
+  sectors:     'US sector ETF performance ranked by return — click any sector for details',
+  compare:     'Normalized performance comparison across any combination of assets',
 };
 
 export default function Home() {
@@ -36,11 +39,12 @@ export default function Home() {
           <p className="text-xs sm:text-sm text-gray-500 mt-0.5 hidden sm:block">{SECTION_DESCRIPTIONS[section]}</p>
         </div>
 
-        {section === 'indexes'    && <IndexesSection />}
-        {section === 'currencies' && <CurrenciesSection />}
-        {section === 'crypto'     && <CryptoCommoditiesSection />}
-        {section === 'sectors'    && <SectorsSection />}
-        {section === 'compare'    && <CompareSection />}
+        {section === 'indexes'     && <IndexesSection />}
+        {section === 'currencies'  && <CurrenciesSection />}
+        {section === 'crypto'      && <CryptoCommoditiesSection />}
+        {section === 'commodities' && <CommoditiesSection />}
+        {section === 'sectors'     && <SectorsSection />}
+        {section === 'compare'     && <CompareSection />}
       </main>
 
       <footer className="max-w-screen-2xl mx-auto px-4 py-6 mt-8 border-t border-border">

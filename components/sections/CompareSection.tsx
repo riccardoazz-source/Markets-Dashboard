@@ -33,7 +33,7 @@ export function CompareSection() {
     try {
       let data: HistoricalPoint[];
       if (config?.type === 'crypto') {
-        const daysMap: Record<string, number> = { '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825 };
+        const daysMap: Record<string, number> = { '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650 };
         const days = daysMap[tf] ?? 365;
         const coinId = symbol.replace('-USD', '').toLowerCase();
         const coinMap: Record<string, string> = {
@@ -42,10 +42,16 @@ export function CompareSection() {
         };
         const id = coinMap[coinId] ?? coinId;
         const res = await fetch(`/api/crypto?mode=historical&id=${id}&days=${days}`);
-        data = await res.json() as HistoricalPoint[];
+        if (!res.ok) return null;
+        const json = await res.json();
+        if (!Array.isArray(json) || json.length === 0) return null;
+        data = json as HistoricalPoint[];
       } else {
         const res = await fetch(`/api/historical?symbol=${symbol}&timeframe=${tf}`);
-        data = await res.json() as HistoricalPoint[];
+        if (!res.ok) return null;
+        const json = await res.json();
+        if (!Array.isArray(json) || json.length === 0) return null;
+        data = json as HistoricalPoint[];
       }
 
       const cagr = calculateCAGR(data, tf);

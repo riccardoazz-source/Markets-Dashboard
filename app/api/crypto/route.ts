@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
     const cached = getCached(key);
     if (cached) return NextResponse.json(cached);
 
-    const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}&interval=${Number(days) > 90 ? 'daily' : 'daily'}`;
+    const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`;
 
     try {
       const res = await fetch(url, {
