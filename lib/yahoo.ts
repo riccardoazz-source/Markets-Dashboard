@@ -97,11 +97,40 @@ async function getSession(): Promise<CrumbSession> {
 // Single chart fetch (used for historical + meta)
 // ---------------------------------------------------------------------------
 
+// No-auth version — try this first before the crumb dance
+async function fetchChartRawNoAuth(
+  symbol: string,
+  query: string,
+  timeoutMs: number,
+): Promise<Record<string, unknown> | null> {
+  const url =
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${query}`;
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: {
+        'User-Agent': UA,
+        'Accept': 'application/json',
+        'Referer': 'https://finance.yahoo.com/',
+      },
+    }, timeoutMs);
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json?.chart?.result?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchChartRaw(
   symbol: string,
   query: string,
   timeoutMs: number,
 ): Promise<Record<string, unknown> | null> {
+  // Try no-auth first
+  const noAuth = await fetchChartRawNoAuth(symbol, query, timeoutMs);
+  if (noAuth) return noAuth;
+
+  // Fall back to crumb auth
   let s: CrumbSession;
   try { s = await getSession(); } catch { return null; }
 
@@ -290,10 +319,77 @@ async function fetchQuotesV8Fallback(symbols: string[]): Promise<YahooQuote[]> {
   return results;
 }
 
+// No-auth path: v8/chart with browser-like headers but no cookie/crumb.
+// Works from Cloudflare Edge IPs even when cookie-based auth is blocked.
+async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
+  const url =
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
+    `?range=1d&interval=1d&includePrePost=false`;
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: {
+        'User-Agent': UA,
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://finance.yahoo.com/',
+      },
+    }, 6_000);
+    if (!res.ok) return null;
+    const json = await res.json() as { chart?: { result?: unknown[] } };
+    const result = json?.chart?.result?.[0] as Record<string, unknown> | undefined;
+    if (!result) return null;
+    const m = (result.meta as Record<string, unknown>) ?? {};
+    const price = Number(m.regularMarketPrice) || 0;
+    const prev = Number(m.chartPreviousClose) || Number(m.previousClose) || 0;
+    if (price <= 0) return null;
+    return {
+      symbol,
+      name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
+      price,
+      previousClose: prev || price,
+      change: price - prev,
+      changePercent: prev > 0 ? ((price - prev) / prev) * 100 : 0,
+      currency: (m.currency as string) ?? 'USD',
+      high52w: (m.fiftyTwoWeekHigh as number) ?? null,
+      low52w: (m.fiftyTwoWeekLow as number) ?? null,
+      fiftyTwoWeekChangePercent: null,
+      trailingPE: null,
+      forwardPE: null,
+      marketCap: null,
+      volume: (m.regularMarketVolume as number) ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchQuotesNoAuth(symbols: string[]): Promise<YahooQuote[]> {
+  const results: YahooQuote[] = [];
+  const BATCH = 10;
+  for (let i = 0; i < symbols.length; i += BATCH) {
+    const batch = symbols.slice(i, i + BATCH);
+    const r = await Promise.all(batch.map(s => fetchQuoteNoAuth(s)));
+    for (const q of r) if (q) results.push(q);
+  }
+  return results;
+}
+
 export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]> {
   if (symbols.length === 0) return [];
+
+  // 1. Try v7 batch with crumb (fastest — one request for all symbols)
   const v7 = await fetchQuotesV7(symbols);
   if (v7.length > 0) return v7;
-  console.warn('[yahoo] v7 batch empty — falling back to v8 chart per-symbol');
+
+  // 2. Try v8/chart without any auth (works from Cloudflare Edge IPs)
+  console.warn('[yahoo] v7 empty — trying no-auth v8/chart');
+  const noAuth = await fetchQuotesNoAuth(symbols);
+  if (noAuth.length > 0) {
+    console.log(`[yahoo] no-auth OK: ${noAuth.length}/${symbols.length}`);
+    return noAuth;
+  }
+
+  // 3. Try v8/chart per-symbol with crumb auth
+  console.warn('[yahoo] no-auth empty — falling back to v8 with crumb');
   return fetchQuotesV8Fallback(symbols);
 }
