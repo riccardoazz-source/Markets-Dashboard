@@ -97,28 +97,31 @@ async function getSession(): Promise<CrumbSession> {
 // Single chart fetch (used for historical + meta)
 // ---------------------------------------------------------------------------
 
-// No-auth version — try this first before the crumb dance
+// No-auth version — try query2 first (less blocked on Vercel Edge), then query1
 async function fetchChartRawNoAuth(
   symbol: string,
   query: string,
   timeoutMs: number,
 ): Promise<Record<string, unknown> | null> {
-  const url =
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${query}`;
-  try {
-    const res = await fetchWithTimeout(url, {
-      headers: {
-        'User-Agent': UA,
-        'Accept': 'application/json',
-        'Referer': 'https://finance.yahoo.com/',
-      },
-    }, timeoutMs);
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json?.chart?.result?.[0] ?? null;
-  } catch {
-    return null;
+  for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
+    const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?${query}`;
+    try {
+      const res = await fetchWithTimeout(url, {
+        headers: {
+          'User-Agent': UA,
+          'Accept': 'application/json',
+          'Referer': 'https://finance.yahoo.com/',
+        },
+      }, timeoutMs);
+      if (!res.ok) continue;
+      const json = await res.json();
+      const result = json?.chart?.result?.[0] ?? null;
+      if (result) return result;
+    } catch {
+      // try next host
+    }
   }
+  return null;
 }
 
 async function fetchChartRaw(
@@ -165,6 +168,17 @@ async function fetchChartRaw(
   }
 }
 
+function daysToRangeParam(daysAgo: number): string | null {
+  if (daysAgo > 2900) return '10y';
+  if (daysAgo > 1500) return '5y';
+  if (daysAgo > 800)  return '3y';
+  if (daysAgo > 300)  return '1y';
+  if (daysAgo > 140)  return '6mo';
+  if (daysAgo > 60)   return '3mo';
+  if (daysAgo > 20)   return '1mo';
+  return null;
+}
+
 export async function fetchYahooData(
   symbol: string,
   from: Date,
@@ -173,11 +187,21 @@ export async function fetchYahooData(
 ): Promise<YahooData> {
   const period1 = Math.floor(from.getTime() / 1000);
   const period2 = Math.floor(to.getTime() / 1000);
-  const result = await fetchChartRaw(
+  let result = await fetchChartRaw(
     symbol,
     `period1=${period1}&period2=${period2}&interval=${interval}`,
     8_000,
   );
+
+  // If period-based query failed (common for futures on Vercel Edge), try range-based
+  if (!result) {
+    const daysAgo = (Date.now() - from.getTime()) / (1000 * 60 * 60 * 24);
+    const rangeStr = daysToRangeParam(daysAgo);
+    if (rangeStr) {
+      result = await fetchChartRaw(symbol, `range=${rangeStr}&interval=${interval}`, 8_000);
+    }
+  }
+
   if (!result) return { meta: null, points: [] };
 
   const m = (result.meta as Record<string, number | string> | undefined) ?? {};
@@ -339,7 +363,7 @@ async function fetchQuotesV8Fallback(symbols: string[]): Promise<YahooQuote[]> {
 // AND can compute 1Y change% from the first chart close.
 async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
   const url =
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
     `?range=1y&interval=1mo&includePrePost=false`;
   try {
     const res = await fetchWithTimeout(url, {
