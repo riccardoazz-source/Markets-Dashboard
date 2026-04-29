@@ -153,12 +153,12 @@ export function IndexesSection() {
               <h3 className="text-base font-bold text-white leading-tight">{selectedConfig?.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">{selected} · {selectedConfig?.region}</p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <TimeframeSelector value={timeframe} onChange={setTimeframe} />
-              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
-                <X size={16} />
-              </button>
-            </div>
+            <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300 shrink-0">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+            <TimeframeSelector value={timeframe} onChange={setTimeframe} />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">

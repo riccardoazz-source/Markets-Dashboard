@@ -30,7 +30,7 @@ export default function Home() {
   return (
     <>
       <Navbar active={section} onSelect={setSection} />
-      <main className="max-w-screen-2xl mx-auto px-3 sm:px-4 py-3 sm:py-5">
+      <main className="max-w-screen-2xl mx-auto px-3 sm:px-4 py-3 sm:py-5 pb-20 sm:pb-5">
         <div className="mb-3 sm:mb-5">
           <h1 className="text-lg sm:text-xl font-bold text-white">{SECTION_LABELS[section]}</h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-0.5 hidden sm:block">{SECTION_DESCRIPTIONS[section]}</p>

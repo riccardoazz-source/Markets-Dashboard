@@ -320,7 +320,7 @@ async function fetchQuotesV8Fallback(symbols: string[]): Promise<YahooQuote[]> {
 }
 
 // No-auth path: v8/chart with browser-like headers but no cookie/crumb.
-// Works from Cloudflare Edge IPs even when cookie-based auth is blocked.
+// Uses regularMarketChangePercent from meta directly (no manual calculation).
 async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
@@ -340,15 +340,22 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
     if (!result) return null;
     const m = (result.meta as Record<string, unknown>) ?? {};
     const price = Number(m.regularMarketPrice) || 0;
-    const prev = Number(m.chartPreviousClose) || Number(m.previousClose) || 0;
     if (price <= 0) return null;
+    const prev = Number(m.chartPreviousClose) || Number(m.previousClose) || price;
+    // Use directly-provided change% — never recalculate from historical prices
+    const changePercent = m.regularMarketChangePercent != null
+      ? Number(m.regularMarketChangePercent)
+      : (prev > 0 ? ((price - prev) / prev) * 100 : 0);
+    const change = m.regularMarketChange != null
+      ? Number(m.regularMarketChange)
+      : (price - prev);
     return {
       symbol,
       name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
       price,
-      previousClose: prev || price,
-      change: price - prev,
-      changePercent: prev > 0 ? ((price - prev) / prev) * 100 : 0,
+      previousClose: prev,
+      change,
+      changePercent,
       currency: (m.currency as string) ?? 'USD',
       high52w: (m.fiftyTwoWeekHigh as number) ?? null,
       low52w: (m.fiftyTwoWeekLow as number) ?? null,
@@ -374,22 +381,72 @@ async function fetchQuotesNoAuth(symbols: string[]): Promise<YahooQuote[]> {
   return results;
 }
 
+// v7 batch WITHOUT crumb — single request, correct % from Yahoo directly.
+// query2 subdomain often passes Vercel Edge without auth.
+async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
+  const url =
+    `https://query2.finance.yahoo.com/v7/finance/quote` +
+    `?symbols=${encodeURIComponent(symbols.join(','))}&formatted=false&lang=en-US&region=US`;
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: {
+        'User-Agent': UA,
+        'Accept': 'application/json',
+        'Referer': 'https://finance.yahoo.com/',
+      },
+    }, 8_000);
+    if (!res.ok) return [];
+    const json = await res.json() as { quoteResponse?: { result?: Record<string, unknown>[] } };
+    const items = json?.quoteResponse?.result ?? [];
+    if (!items.length) return [];
+    return items.map(it => ({
+      symbol:    (it.symbol as string) ?? '',
+      name:      (it.shortName as string) ?? (it.longName as string) ?? (it.symbol as string) ?? '',
+      price:     Number(it.regularMarketPrice) || 0,
+      previousClose: Number(it.regularMarketPreviousClose) || 0,
+      change:    Number(it.regularMarketChange) || 0,
+      changePercent: Number(it.regularMarketChangePercent) || 0,
+      currency:  (it.currency as string) ?? 'USD',
+      high52w:   it.fiftyTwoWeekHigh != null ? Number(it.fiftyTwoWeekHigh) : null,
+      low52w:    it.fiftyTwoWeekLow  != null ? Number(it.fiftyTwoWeekLow)  : null,
+      fiftyTwoWeekChangePercent:
+        it.fiftyTwoWeekChangePercent != null
+          ? Number(it.fiftyTwoWeekChangePercent) * 100
+          : null,
+      trailingPE: it.trailingPE != null ? Number(it.trailingPE) : null,
+      forwardPE:  it.forwardPE  != null ? Number(it.forwardPE)  : null,
+      marketCap:  it.marketCap  != null ? Number(it.marketCap)  : null,
+      volume:     it.regularMarketVolume != null ? Number(it.regularMarketVolume) : null,
+    })).filter(q => q.price > 0);
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]> {
   if (symbols.length === 0) return [];
 
-  // 1. Try v7 batch with crumb (fastest — one request for all symbols)
+  // 1. v7 batch without auth (query2) — one request, all fields including correct %
+  const v7NoAuth = await fetchQuotesV7NoAuth(symbols);
+  if (v7NoAuth.length > 0) {
+    console.log(`[yahoo] v7-noauth OK: ${v7NoAuth.length}/${symbols.length}`);
+    return v7NoAuth;
+  }
+
+  // 2. v7 batch with crumb auth
+  console.warn('[yahoo] v7-noauth empty — trying v7 with crumb');
   const v7 = await fetchQuotesV7(symbols);
   if (v7.length > 0) return v7;
 
-  // 2. Try v8/chart without any auth (works from Cloudflare Edge IPs)
+  // 3. v8/chart per-symbol without auth
   console.warn('[yahoo] v7 empty — trying no-auth v8/chart');
   const noAuth = await fetchQuotesNoAuth(symbols);
   if (noAuth.length > 0) {
-    console.log(`[yahoo] no-auth OK: ${noAuth.length}/${symbols.length}`);
+    console.log(`[yahoo] v8-noauth OK: ${noAuth.length}/${symbols.length}`);
     return noAuth;
   }
 
-  // 3. Try v8/chart per-symbol with crumb auth
+  // 4. v8/chart per-symbol with crumb auth
   console.warn('[yahoo] no-auth empty — falling back to v8 with crumb');
   return fetchQuotesV8Fallback(symbols);
 }
