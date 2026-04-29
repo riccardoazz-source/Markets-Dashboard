@@ -3,33 +3,58 @@ import { CRYPTO_IDS } from '@/lib/config';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
-const TTL = 60_000;
+const MARKETS_TTL = 60_000;          // 1 min for live prices
+const HIST_TTL    = 30 * 60_000;     // 30 min for historical (rarely changes)
 
-function getCached(key: string) {
+function getCached(key: string, ttl: number) {
   const e = cache.get(key);
-  if (e && Date.now() - e.ts < TTL) return e.data;
+  if (e && Date.now() - e.ts < ttl) return e.data;
   return null;
 }
 function setCached(key: string, data: unknown) {
   cache.set(key, { data, ts: Date.now() });
 }
 
+const UA = 'Mozilla/5.0 (compatible; MarketsDashboard/1.0)';
+
+async function fetchCG(url: string, timeoutMs = 12_000): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      headers: { 'Accept': 'application/json', 'User-Agent': UA },
+      signal: ctrl.signal,
+      cache: 'no-store',
+    });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// CoinGecko free tier rate-limits at 30/min — retry with backoff on 429/5xx
+async function fetchCGWithRetry(url: string): Promise<Response> {
+  let res = await fetchCG(url);
+  if (res.ok) return res;
+  if (res.status !== 429 && res.status < 500) return res;
+  await new Promise(r => setTimeout(r, 1500));
+  res = await fetchCG(url);
+  if (res.ok) return res;
+  await new Promise(r => setTimeout(r, 3000));
+  return fetchCG(url);
+}
+
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') ?? 'markets';
 
   if (mode === 'markets') {
-    const cached = getCached('markets');
+    const cached = getCached('markets', MARKETS_TTL);
     if (cached) return NextResponse.json(cached);
 
     const ids = CRYPTO_IDS.map(c => c.id).join(',');
     const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h,7d,1y`;
 
     try {
-      const res = await fetch(url, {
-        headers: { 'Accept': 'application/json' },
-        next: { revalidate: 60 },
-      });
-
+      const res = await fetchCGWithRetry(url);
       if (!res.ok) throw new Error(`CoinGecko: ${res.status}`);
       const raw = await res.json() as Array<Record<string, unknown>>;
 
@@ -61,18 +86,18 @@ export async function GET(req: NextRequest) {
     if (!id) return NextResponse.json({ error: 'No id' }, { status: 400 });
 
     const key = `crypto-hist:${id}:${days}`;
-    const cached = getCached(key);
+    const cached = getCached(key, HIST_TTL);
     if (cached) return NextResponse.json(cached);
 
     const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`;
 
     try {
-      const res = await fetch(url, {
-        headers: { 'Accept': 'application/json' },
-        next: { revalidate: 300 },
-      });
+      const res = await fetchCGWithRetry(url);
       if (!res.ok) throw new Error(`CoinGecko: ${res.status}`);
-      const raw = await res.json() as { prices: [number, number][] };
+      const raw = await res.json() as { prices?: [number, number][] };
+      if (!raw.prices || raw.prices.length === 0) {
+        throw new Error('CoinGecko returned no prices');
+      }
 
       const data = raw.prices.map(([ts, price]) => ({
         date: new Date(ts).toISOString().split('T')[0],
@@ -86,7 +111,7 @@ export async function GET(req: NextRequest) {
       setCached(key, unique);
       return NextResponse.json(unique);
     } catch (err) {
-      console.error('crypto historical error', id, err);
+      console.error('crypto historical error', id, days, err);
       return NextResponse.json({ error: 'Failed to fetch crypto history' }, { status: 500 });
     }
   }

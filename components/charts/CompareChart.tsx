@@ -12,10 +12,16 @@ interface Props {
   height?: number;
 }
 
-function formatDate(dateStr: string, dataLen: number) {
+function formatDate(dateStr: string, allDates: string[]) {
   try {
     const d = parseISO(dateStr);
-    return dataLen > 300 ? format(d, 'MMM yy') : format(d, 'MMM d');
+    if (allDates.length < 2) return format(d, 'MMM d');
+    const first = parseISO(allDates[0]);
+    const last = parseISO(allDates[allDates.length - 1]);
+    const yearSpan = (last.getTime() - first.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+    if (yearSpan < 0.3) return format(d, 'MMM d');
+    if (yearSpan < 4)   return format(d, "MMM ''yy");
+    return format(d, 'yyyy');
   } catch {
     return dateStr;
   }
@@ -43,7 +49,7 @@ export function CompareChart({ assets, height = 340 }: Props) {
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
         <XAxis
           dataKey="date"
-          tickFormatter={d => formatDate(d as string, allDates.length)}
+          tickFormatter={d => formatDate(d as string, allDates)}
           tick={{ fill: '#6b7280', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
@@ -69,7 +75,10 @@ export function CompareChart({ assets, height = 340 }: Props) {
             const asset = assets.find(a => a.symbol === name);
             return [`${value?.toFixed(2)}`, asset?.name ?? name];
           }}
-          labelFormatter={label => formatDate(label as string, allDates.length)}
+          labelFormatter={label => {
+            try { return format(parseISO(label as string), 'MMM d, yyyy'); }
+            catch { return label as string; }
+          }}
         />
         <Legend
           formatter={(value: string) => {

@@ -17,10 +17,17 @@ interface Props {
   isCurrency?: boolean;
 }
 
-function formatDate(dateStr: string, dataLen: number) {
+function formatDate(dateStr: string, data: HistoricalPoint[]) {
   try {
     const d = parseISO(dateStr);
-    return dataLen > 300 ? format(d, 'MMM yy') : dataLen > 60 ? format(d, 'MMM d') : format(d, 'MMM d');
+    if (data.length < 2) return format(d, 'MMM d');
+    const first = parseISO(data[0].date);
+    const last = parseISO(data[data.length - 1].date);
+    const yearSpan = (last.getTime() - first.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+    if (yearSpan < 0.3)  return format(d, 'MMM d');        // < ~3 months
+    if (yearSpan < 1.5)  return format(d, "MMM ''yy");      // < ~1.5 years
+    if (yearSpan < 4)    return format(d, "MMM ''yy");      // 1.5 – 4 years
+    return format(d, 'yyyy');                                // 5Y, 10Y → just year
   } catch {
     return dateStr;
   }
@@ -60,7 +67,7 @@ export function PriceChart({
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
         <XAxis
           dataKey="date"
-          tickFormatter={d => formatDate(d as string, data.length)}
+          tickFormatter={d => formatDate(d as string, data)}
           tick={{ fill: '#6b7280', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
@@ -87,7 +94,10 @@ export function PriceChart({
             fontSize: 12,
           }}
           formatter={(value: number) => [value.toFixed(decimals), 'Price']}
-          labelFormatter={label => formatDate(label as string, data.length)}
+          labelFormatter={label => {
+            try { return format(parseISO(label as string), 'MMM d, yyyy'); }
+            catch { return label as string; }
+          }}
         />
         {showAverage && averageValue && (
           <ReferenceLine

@@ -281,26 +281,42 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
 }
 
 async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
-  // Tiny payload: just last day, gives us meta which has everything we need
-  const result = await fetchChartRaw(symbol, 'range=1d&interval=1d', 4_000);
+  // 1y monthly: small payload, gives meta + first close for 1Y change calc
+  const result = await fetchChartRaw(symbol, 'range=1y&interval=1mo', 5_000);
   if (!result) return null;
 
-  const m = (result.meta as Record<string, number | string> | undefined) ?? {};
-  const price = (m.regularMarketPrice as number) ?? 0;
-  const prev = (m.chartPreviousClose as number) ?? (m.previousClose as number) ?? 0;
+  const m = (result.meta as Record<string, unknown> | undefined) ?? {};
+  const price = Number(m.regularMarketPrice) || 0;
+  const prev = Number(m.chartPreviousClose) || Number(m.previousClose) || 0;
   if (price <= 0 || prev <= 0) return null;
+
+  const changePercent = m.regularMarketChangePercent != null
+    ? Number(m.regularMarketChangePercent)
+    : ((price - prev) / prev) * 100;
+  const change = m.regularMarketChange != null
+    ? Number(m.regularMarketChange)
+    : (price - prev);
+
+  let fiftyTwoWeekChangePercent: number | null = null;
+  const indicators = result.indicators as Record<string, unknown> | undefined;
+  const quotes = indicators?.quote as Array<Record<string, unknown>> | undefined;
+  const closes = (quotes?.[0]?.close as (number | null)[] | undefined) ?? [];
+  const firstValid = closes.find(c => c != null && c > 0);
+  if (firstValid && firstValid > 0) {
+    fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
+  }
 
   return {
     symbol,
     name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
     price,
     previousClose: prev,
-    change: price - prev,
-    changePercent: ((price - prev) / prev) * 100,
+    change,
+    changePercent,
     currency: (m.currency as string) ?? 'USD',
     high52w: (m.fiftyTwoWeekHigh as number) ?? null,
     low52w: (m.fiftyTwoWeekLow as number) ?? null,
-    fiftyTwoWeekChangePercent: null,
+    fiftyTwoWeekChangePercent,
     trailingPE: null,
     forwardPE: null,
     marketCap: null,
@@ -319,12 +335,12 @@ async function fetchQuotesV8Fallback(symbols: string[]): Promise<YahooQuote[]> {
   return results;
 }
 
-// No-auth path: v8/chart with browser-like headers but no cookie/crumb.
-// Uses regularMarketChangePercent from meta directly (no manual calculation).
+// No-auth path: v8/chart with range=1y so we get 52W high/low in meta
+// AND can compute 1Y change% from the first chart close.
 async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-    `?range=1d&interval=1d&includePrePost=false`;
+    `?range=1y&interval=1mo&includePrePost=false`;
   try {
     const res = await fetchWithTimeout(url, {
       headers: {
@@ -342,13 +358,23 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
     const price = Number(m.regularMarketPrice) || 0;
     if (price <= 0) return null;
     const prev = Number(m.chartPreviousClose) || Number(m.previousClose) || price;
-    // Use directly-provided change% — never recalculate from historical prices
     const changePercent = m.regularMarketChangePercent != null
       ? Number(m.regularMarketChangePercent)
       : (prev > 0 ? ((price - prev) / prev) * 100 : 0);
     const change = m.regularMarketChange != null
       ? Number(m.regularMarketChange)
       : (price - prev);
+
+    // Compute 1Y change from first valid close in the monthly chart series
+    let fiftyTwoWeekChangePercent: number | null = null;
+    const indicators = result.indicators as Record<string, unknown> | undefined;
+    const quotes = indicators?.quote as Array<Record<string, unknown>> | undefined;
+    const closes = (quotes?.[0]?.close as (number | null)[] | undefined) ?? [];
+    const firstValid = closes.find(c => c != null && c > 0);
+    if (firstValid && firstValid > 0) {
+      fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
+    }
+
     return {
       symbol,
       name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
@@ -359,7 +385,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       currency: (m.currency as string) ?? 'USD',
       high52w: (m.fiftyTwoWeekHigh as number) ?? null,
       low52w: (m.fiftyTwoWeekLow as number) ?? null,
-      fiftyTwoWeekChangePercent: null,
+      fiftyTwoWeekChangePercent,
       trailingPE: null,
       forwardPE: null,
       marketCap: null,
