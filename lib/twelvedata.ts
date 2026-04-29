@@ -109,29 +109,51 @@ export async function fetchTDQuotes(yahooSymbols: string[]): Promise<TDQuote[]> 
   if (yahooSymbols.length === 0) return [];
 
   const tdSymbols = yahooSymbols.map(toTwelveSymbol);
-  const url = `${BASE}/quote?symbol=${tdSymbols.join(',')}&apikey=${API_KEY}`;
+  // URL-encode each symbol individually (XAU/USD → XAU%2FUSD) but keep comma separators raw
+  const symbolParam = tdSymbols.map(s => encodeURIComponent(s)).join(',');
+  const url = `${BASE}/quote?symbol=${symbolParam}&apikey=${API_KEY}`;
 
   try {
-    const res = await fetchWithTimeout(url, 8_000);
-    if (!res.ok) {
-      console.error(`[12d] quote HTTP ${res.status}`);
+    const res = await fetchWithTimeout(url, 10_000);
+    const text = await res.text();
+    let json: Record<string, unknown>;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      console.error(`[12d] non-JSON response (HTTP ${res.status}):`, text.slice(0, 200));
       return [];
     }
-    const json = await res.json() as Record<string, unknown>;
 
-    // Single symbol: json IS the quote object
+    // Detect global error response: { code, message, status: 'error' }
+    if (json.code != null || json.status === 'error') {
+      console.error(`[12d] API error (HTTP ${res.status}):`, json.code, json.message);
+      return [];
+    }
+
+    if (!res.ok) {
+      console.error(`[12d] quote HTTP ${res.status}:`, JSON.stringify(json).slice(0, 200));
+      return [];
+    }
+
+    // Single symbol: json IS the quote object (has "symbol" field)
     // Multiple symbols: json is { SYMBOL: quoteObj, ... }
-    const entries: [string, Record<string, unknown>][] =
-      tdSymbols.length === 1
-        ? [[tdSymbols[0], json as Record<string, unknown>]]
-        : Object.entries(json) as [string, Record<string, unknown>][];
+    const isSingle = typeof json.symbol === 'string';
+    const entries: [string, Record<string, unknown>][] = isSingle
+      ? [[tdSymbols[0], json]]
+      : (Object.entries(json) as [string, Record<string, unknown>][]);
 
-    return entries
+    const parsed = entries
       .map(([tdSym, q]) => {
-        const original = REVERSE_MAP[tdSym] ?? yahooSymbols.find(y => toTwelveSymbol(y) === tdSym) ?? tdSym;
+        const original =
+          REVERSE_MAP[tdSym] ??
+          yahooSymbols.find(y => toTwelveSymbol(y) === tdSym) ??
+          tdSym;
         return parseQuoteItem(tdSym, q, original);
       })
       .filter((q): q is TDQuote => q !== null);
+
+    console.log(`[12d] quote OK: ${parsed.length}/${yahooSymbols.length} symbols`);
+    return parsed;
   } catch (e) {
     console.error('[12d] quote failed:', (e as Error).message);
     return [];
