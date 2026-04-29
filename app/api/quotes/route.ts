@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchTDQuotes } from '@/lib/twelvedata';
+import { fetchYahooQuotes } from '@/lib/yahoo';
+
+export const runtime = 'edge';
 
 interface CacheEntry { data: unknown[]; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -15,7 +17,7 @@ export async function GET(req: NextRequest) {
   if (entry && Date.now() - entry.ts < FRESH) return NextResponse.json(entry.data);
 
   try {
-    const quotes = await fetchTDQuotes(symbols);
+    const quotes = await fetchYahooQuotes(symbols);
     if (quotes.length > 0) {
       cache.set(key, { data: quotes, ts: Date.now() });
       return NextResponse.json(quotes);

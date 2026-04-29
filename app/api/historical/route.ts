@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchTDTimeSeries } from '@/lib/twelvedata';
+import { fetchYahooChart } from '@/lib/yahoo';
 import { subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
+
+export const runtime = 'edge';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -44,7 +46,7 @@ export async function GET(req: NextRequest) {
   if (cached) return NextResponse.json(cached);
 
   try {
-    const data = await fetchTDTimeSeries(symbol, getStartDate(timeframe), new Date(), getInterval(timeframe));
+    const data = await fetchYahooChart(symbol, getStartDate(timeframe), new Date(), getInterval(timeframe));
     cache.set(key, { data, ts: Date.now() });
     return NextResponse.json(data);
   } catch (err) {

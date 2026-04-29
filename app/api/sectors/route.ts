@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { SECTORS } from '@/lib/config';
-import { fetchTDQuotes } from '@/lib/twelvedata';
+import { fetchYahooQuotes } from '@/lib/yahoo';
+
+export const runtime = 'edge';
 
 interface CacheEntry { data: unknown[]; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -13,7 +15,7 @@ export async function GET() {
 
   try {
     const symbols = SECTORS.map(s => s.symbol);
-    const quotes = await fetchTDQuotes(symbols);
+    const quotes = await fetchYahooQuotes(symbols);
 
     if (quotes.length === 0) {
       if (entry && Date.now() - entry.ts < STALE) return NextResponse.json(entry.data);
