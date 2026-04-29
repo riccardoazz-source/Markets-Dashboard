@@ -10,9 +10,17 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
+type SortKey = 'changePercent' | 'fiftyTwoWeekChangePercent';
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'changePercent',              label: 'Day' },
+  { value: 'fiftyTwoWeekChangePercent',  label: '1Y'  },
+];
+
 export function CommoditiesSection() {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState<SortKey>('changePercent');
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
@@ -54,15 +62,40 @@ export function CommoditiesSection() {
     if (selected) fetchHistorical(selected, timeframe);
   }, [selected, timeframe, fetchHistorical]);
 
+  const sorted = [...COMMODITIES].sort((a, b) => {
+    const qa = quotes[a.symbol];
+    const qb = quotes[b.symbol];
+    const av: number | null | undefined =
+      sortBy === 'changePercent' ? qa?.changePercent : qa?.fiftyTwoWeekChangePercent;
+    const bv: number | null | undefined =
+      sortBy === 'changePercent' ? qb?.changePercent : qb?.fiftyTwoWeekChangePercent;
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return bv - av;
+  });
+
   const selectedConfig = COMMODITIES.find(c => c.symbol === selected);
   const selectedQuote = selected ? quotes[selected] : null;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-gray-500 font-medium">Sort:</p>
+          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+            {SORT_OPTIONS.map(opt => (
+              <button key={opt.value} onClick={() => setSortBy(opt.value)}
+                className={clsx('px-3 py-1 text-xs font-semibold rounded-md transition-all',
+                  sortBy === opt.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
         {lastUpdate && (
-          <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <RefreshCw size={11} />
+          <div className="flex items-center gap-1 text-[10px] text-gray-600 shrink-0">
+            <RefreshCw size={10} />
             {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
         )}
@@ -72,35 +105,33 @@ export function CommoditiesSection() {
         <LoadingGrid count={COMMODITIES.length} />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {COMMODITIES.map(com => {
+          {sorted.map(com => {
             const q = quotes[com.symbol];
             const day = q?.changePercent ?? 0;
+            const oneY = q?.fiftyTwoWeekChangePercent;
             const isUp = day >= 0;
             const isSelected = selected === com.symbol;
             return (
-              <button
-                key={com.symbol}
+              <button key={com.symbol}
                 onClick={() => setSelected(isSelected ? null : com.symbol)}
                 className={clsx(
                   'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                   isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
-                )}
-              >
-                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1">
-                  {com.category}
-                </p>
-                <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">
-                  {com.name}
-                </p>
+                )}>
+                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1">{com.category}</p>
+                <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">{com.name}</p>
                 {q && q.price > 0 ? (
                   <>
-                    <p className="text-lg font-bold text-white tabular-nums">
-                      {formatPrice(q.price)}
-                    </p>
+                    <p className="text-lg font-bold text-white tabular-nums">{formatPrice(q.price)}</p>
                     <div className={clsx('flex items-center gap-1 mt-0.5 text-sm font-bold', colorForPercent(day))}>
                       {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                       {formatPercent(day)} <span className="text-[10px] font-medium opacity-70">day</span>
                     </div>
+                    {oneY != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(oneY))}>
+                        1Y: {formatPercent(oneY, 1)}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <p className="text-xs text-gray-600">Loading…</p>
@@ -126,17 +157,20 @@ export function CommoditiesSection() {
             <TimeframeSelector value={timeframe} onChange={setTimeframe} />
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             <Stat label="Price" value={formatPrice(selectedQuote.price)} />
             <Stat label="Day Change" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
-            {selectedQuote.high52w != null && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
-            {selectedQuote.low52w != null && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
+            {selectedQuote.fiftyTwoWeekChangePercent != null && (
+              <Stat label="1Y Return" value={formatPercent(selectedQuote.fiftyTwoWeekChangePercent)} color={colorForPercent(selectedQuote.fiftyTwoWeekChangePercent)} />
+            )}
             {cagrData && (
               <>
                 <Stat label={`Return (${timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
                 <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
               </>
             )}
+            {selectedQuote.high52w != null && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
+            {selectedQuote.low52w != null && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
           </div>
 
           {histLoading ? (

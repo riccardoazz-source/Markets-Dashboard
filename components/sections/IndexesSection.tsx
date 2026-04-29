@@ -12,10 +12,18 @@ import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
 const REGIONS = ['All', 'America', 'EU', 'Asia', 'Global', 'EM'];
 
+type SortKey = 'changePercent' | 'fiftyTwoWeekChangePercent';
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'changePercent',             label: 'Day' },
+  { value: 'fiftyTwoWeekChangePercent', label: '1Y'  },
+];
+
 export function IndexesSection() {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState('All');
+  const [sortBy, setSortBy] = useState<SortKey>('changePercent');
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
@@ -32,11 +40,8 @@ export function IndexesSection() {
       data.forEach(q => { map[q.symbol] = q; });
       setQuotes(map);
       setLastUpdate(new Date());
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   }, []);
 
   const fetchHistorical = useCallback(async (symbol: string, tf: Timeframe) => {
@@ -46,11 +51,8 @@ export function IndexesSection() {
       const data = await res.json() as HistoricalPoint[];
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setHistLoading(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setHistLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -67,61 +69,79 @@ export function IndexesSection() {
     i => selectedRegion === 'All' || i.region === selectedRegion
   );
 
+  const sortedFiltered = [...filtered].sort((a, b) => {
+    const qa = quotes[a.symbol];
+    const qb = quotes[b.symbol];
+    const av: number | null | undefined =
+      sortBy === 'changePercent' ? qa?.changePercent : qa?.fiftyTwoWeekChangePercent;
+    const bv: number | null | undefined =
+      sortBy === 'changePercent' ? qb?.changePercent : qb?.fiftyTwoWeekChangePercent;
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return bv - av;
+  });
+
   const selectedConfig = INDEXES.find(i => i.symbol === selected);
   const selectedQuote = selected ? quotes[selected] : null;
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
+      {/* Filters row */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
           {REGIONS.map(r => (
-            <button
-              key={r}
-              onClick={() => setSelectedRegion(r)}
+            <button key={r} onClick={() => setSelectedRegion(r)}
               className={clsx(
                 'px-3 py-1 text-xs font-semibold rounded-full transition-all whitespace-nowrap shrink-0',
                 selectedRegion === r
                   ? 'bg-accent text-white'
                   : 'text-gray-400 border border-border hover:border-border-light hover:text-gray-200'
-              )}
-            >
+              )}>
               {r}
             </button>
           ))}
         </div>
-        {lastUpdate && (
-          <div className="flex items-center gap-1 text-[10px] text-gray-600 shrink-0">
-            <RefreshCw size={10} />
-            {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+            {SORT_OPTIONS.map(opt => (
+              <button key={opt.value} onClick={() => setSortBy(opt.value)}
+                className={clsx('px-2.5 py-1 text-xs font-semibold rounded-md transition-all',
+                  sortBy === opt.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}>
+                {opt.label}
+              </button>
+            ))}
           </div>
-        )}
+          {lastUpdate && (
+            <div className="flex items-center gap-1 text-[10px] text-gray-600">
+              <RefreshCw size={10} />
+              {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </div>
+          )}
+        </div>
       </div>
 
       {loading ? (
         <LoadingGrid count={INDEXES.length} />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-          {filtered.map(idx => {
+          {sortedFiltered.map(idx => {
             const q = quotes[idx.symbol];
             const day = q?.changePercent ?? 0;
             const oneY = q?.fiftyTwoWeekChangePercent;
             const isUp = day >= 0;
             const isSelected = selected === idx.symbol;
             return (
-              <button
-                key={idx.symbol}
+              <button key={idx.symbol}
                 onClick={() => setSelected(isSelected ? null : idx.symbol)}
                 className={clsx(
                   'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                   isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
-                )}
-              >
+                )}>
                 <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mb-1">
                   {idx.category}
                 </p>
-                <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">
-                  {idx.name}
-                </p>
+                <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">{idx.name}</p>
                 {q && q.price > 0 ? (
                   <>
                     <p className="text-lg font-bold text-white tabular-nums">
@@ -161,45 +181,26 @@ export function IndexesSection() {
             <TimeframeSelector value={timeframe} onChange={setTimeframe} />
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             <Stat label="Price" value={selectedQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2 })} />
-            <Stat
-              label="Day Change"
-              value={formatPercent(selectedQuote.changePercent)}
-              color={colorForPercent(selectedQuote.changePercent)}
-            />
+            <Stat label="Day Change" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
             {selectedQuote.fiftyTwoWeekChangePercent != null && (
-              <Stat
-                label="1Y Change"
-                value={formatPercent(selectedQuote.fiftyTwoWeekChangePercent)}
-                color={colorForPercent(selectedQuote.fiftyTwoWeekChangePercent)}
-              />
+              <Stat label="1Y Return" value={formatPercent(selectedQuote.fiftyTwoWeekChangePercent)} color={colorForPercent(selectedQuote.fiftyTwoWeekChangePercent)} />
             )}
             {cagrData && (
-              <Stat
-                label={`CAGR ${timeframe}`}
-                value={formatPercent(cagrData.cagr)}
-                color={colorForPercent(cagrData.cagr)}
-              />
+              <>
+                <Stat label={`Return (${timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
+                <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
+              </>
             )}
-            {selectedQuote.trailingPE != null && (
-              <Stat label="P/E" value={selectedQuote.trailingPE.toFixed(1)} />
-            )}
-            {selectedQuote.forwardPE != null && (
-              <Stat label="Fwd P/E" value={selectedQuote.forwardPE.toFixed(1)} />
-            )}
-            {selectedQuote.high52w != null && (
-              <Stat label="52W High" value={selectedQuote.high52w.toLocaleString('en-US', { minimumFractionDigits: 2 })} />
-            )}
-            {selectedQuote.low52w != null && (
-              <Stat label="52W Low" value={selectedQuote.low52w.toLocaleString('en-US', { minimumFractionDigits: 2 })} />
-            )}
+            {selectedQuote.high52w != null && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
+            {selectedQuote.low52w != null && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
+            {selectedQuote.trailingPE != null && <Stat label="P/E" value={selectedQuote.trailingPE.toFixed(1)} />}
+            {selectedQuote.forwardPE != null && <Stat label="Fwd P/E" value={selectedQuote.forwardPE.toFixed(1)} />}
           </div>
 
           {histLoading ? (
-            <div className="flex items-center justify-center h-40">
-              <LoadingSpinner size={28} />
-            </div>
+            <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : (
             <PriceChart data={historical} color="auto" height={200} />
           )}

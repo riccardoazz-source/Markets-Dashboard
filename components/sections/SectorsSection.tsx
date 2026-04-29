@@ -200,12 +200,12 @@ export function SectorsSection() {
               <h3 className="text-base font-bold text-white">{selectedSector.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">{selectedSector.symbol} · {selectedSector.category}</p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <TimeframeSelector value={timeframe} onChange={setTimeframe} />
-              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300"><X size={16} /></button>
-            </div>
+              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300 shrink-0"><X size={16} /></button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+            <TimeframeSelector value={timeframe} onChange={setTimeframe} />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {selectedSector.price != null && <Stat label="Price" value={`$${selectedSector.price.toFixed(2)}`} />}
             {selectedSector.changePercent != null && <Stat label="Day" value={formatPercent(selectedSector.changePercent)} color={colorForPercent(selectedSector.changePercent)} />}
             {selectedSector.oneYearReturn != null && <Stat label="1Y" value={formatPercent(selectedSector.oneYearReturn)} color={colorForPercent(selectedSector.oneYearReturn)} />}

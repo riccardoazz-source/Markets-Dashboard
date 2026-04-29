@@ -74,9 +74,18 @@ export function CompareSection() {
   const fetchAll = useCallback(async () => {
     if (selectedSymbols.length === 0) { setAssets([]); return; }
     setLoading(true);
-    const results = await Promise.all(
-      selectedSymbols.map((s, i) => fetchAsset(s, CHART_COLORS[i % CHART_COLORS.length], timeframe))
-    );
+    // Fetch sequentially in small batches to avoid rate-limiting CoinGecko/Yahoo
+    const results: (CompareAsset | null)[] = [];
+    for (let i = 0; i < selectedSymbols.length; i++) {
+      const color = CHART_COLORS[i % CHART_COLORS.length];
+      let asset = await fetchAsset(selectedSymbols[i], color, timeframe);
+      if (!asset) {
+        // Single retry after 1.5 s
+        await new Promise(r => setTimeout(r, 1500));
+        asset = await fetchAsset(selectedSymbols[i], color, timeframe);
+      }
+      results.push(asset);
+    }
     setAssets(results.filter(Boolean) as CompareAsset[]);
     setLoading(false);
   }, [selectedSymbols, timeframe, fetchAsset]);

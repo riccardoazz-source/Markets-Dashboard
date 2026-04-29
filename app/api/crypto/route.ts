@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     if (cached) return NextResponse.json(cached);
 
     const ids = CRYPTO_IDS.map(c => c.id).join(',');
-    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h,7d`;
+    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h,7d,1y`;
 
     try {
       const res = await fetch(url, {
@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
         change24h: coin.price_change_24h,
         change24hPercent: coin.price_change_percentage_24h,
         change7dPercent: coin.price_change_percentage_7d_in_currency,
+        change1yPercent: coin.price_change_percentage_1y_in_currency ?? null,
         marketCap: coin.market_cap,
         volume24h: coin.total_volume,
         image: coin.image,

@@ -3,18 +3,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CRYPTO_IDS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData, CryptoData } from '@/lib/types';
-import {
-  formatPrice, formatPercent, formatMarketCap, colorForPercent, calculateCAGR,
-} from '@/lib/utils';
+import { formatPrice, formatPercent, formatMarketCap, colorForPercent, calculateCAGR } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
+type SortKey = 'change24hPercent' | 'change1yPercent';
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'change24hPercent', label: 'Day' },
+  { value: 'change1yPercent',  label: '1Y'  },
+];
+
 export function CryptoCommoditiesSection() {
   const [cryptoData, setCryptoData] = useState<CryptoData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState<SortKey>('change24hPercent');
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
@@ -56,51 +62,68 @@ export function CryptoCommoditiesSection() {
     if (selected) fetchHistorical(selected, timeframe);
   }, [selected, timeframe, fetchHistorical]);
 
+  const sorted = [...cryptoData].sort((a, b) => {
+    const av = a[sortBy] ?? -Infinity;
+    const bv = b[sortBy] ?? -Infinity;
+    return (bv as number) - (av as number);
+  });
+
   const selectedCrypto = cryptoData.find(c => c.id === selected);
 
   return (
-    <div className="space-y-4">
-      {lastUpdate && (
-        <div className="flex items-center gap-1.5 text-xs text-gray-500">
-          <RefreshCw size={11} />
-          {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-gray-500 font-medium">Sort:</p>
+          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+            {SORT_OPTIONS.map(opt => (
+              <button key={opt.value} onClick={() => setSortBy(opt.value)}
+                className={clsx('px-3 py-1 text-xs font-semibold rounded-md transition-all',
+                  sortBy === opt.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
+        {lastUpdate && (
+          <div className="flex items-center gap-1 text-[10px] text-gray-600 shrink-0">
+            <RefreshCw size={10} />
+            {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+        )}
+      </div>
 
       {loading ? (
         <LoadingGrid count={8} />
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {cryptoData.map(coin => {
+          {sorted.map(coin => {
             const isUp = coin.change24hPercent >= 0;
             const isSelected = selected === coin.id;
             return (
-              <button
-                key={coin.id}
+              <button key={coin.id}
                 onClick={() => setSelected(isSelected ? null : coin.id)}
                 className={clsx(
-                  'rounded-xl border p-4 text-left transition-all duration-150 hover:border-accent/50',
+                  'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                   isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
-                )}
-              >
-                <div className="flex items-center gap-2 mb-3">
-                  {coin.image && <img src={coin.image} alt={coin.name} className="w-7 h-7 rounded-full" />}
+                )}>
+                <div className="flex items-center gap-2 mb-2">
+                  {coin.image && <img src={coin.image} alt={coin.name} className="w-6 h-6 rounded-full" />}
                   <div>
-                    <p className="text-xs font-bold text-gray-100">{coin.name}</p>
+                    <p className="text-xs font-bold text-gray-100 leading-none">{coin.name}</p>
                     <p className="text-[10px] text-gray-500">{coin.symbol}</p>
                   </div>
                 </div>
-                <p className="text-lg font-bold text-white">{formatPrice(coin.price)}</p>
-                <div className={clsx('flex items-center gap-1 mt-1 text-xs font-bold', colorForPercent(coin.change24hPercent))}>
-                  {isUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-                  {formatPercent(coin.change24hPercent)} <span className="font-medium opacity-70">24h</span>
+                <p className="text-lg font-bold text-white tabular-nums">{formatPrice(coin.price)}</p>
+                <div className={clsx('flex items-center gap-1 mt-0.5 text-sm font-bold', colorForPercent(coin.change24hPercent))}>
+                  {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                  {formatPercent(coin.change24hPercent)} <span className="text-[10px] font-medium opacity-70">day</span>
                 </div>
-                {coin.change7dPercent != null && (
-                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.change7dPercent))}>
-                    7d: {formatPercent(coin.change7dPercent)}
+                {coin.change1yPercent != null && (
+                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.change1yPercent))}>
+                    1Y: {formatPercent(coin.change1yPercent, 1)}
                   </p>
                 )}
-                <p className="text-[10px] text-gray-500 mt-1.5">MCap: {formatMarketCap(coin.marketCap)}</p>
               </button>
             );
           })}
@@ -122,17 +145,20 @@ export function CryptoCommoditiesSection() {
             <TimeframeSelector value={timeframe} onChange={setTimeframe} />
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             <Stat label="Price" value={formatPrice(selectedCrypto.price)} />
-            <Stat label="24h Change" value={formatPercent(selectedCrypto.change24hPercent)} color={colorForPercent(selectedCrypto.change24hPercent)} />
-            <Stat label="Market Cap" value={formatMarketCap(selectedCrypto.marketCap)} />
-            <Stat label="24h Volume" value={formatMarketCap(selectedCrypto.volume24h)} />
+            <Stat label="Day Change" value={formatPercent(selectedCrypto.change24hPercent)} color={colorForPercent(selectedCrypto.change24hPercent)} />
+            {selectedCrypto.change1yPercent != null && (
+              <Stat label="1Y Return" value={formatPercent(selectedCrypto.change1yPercent)} color={colorForPercent(selectedCrypto.change1yPercent)} />
+            )}
             {cagrData && (
               <>
                 <Stat label={`Return (${timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
                 <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
               </>
             )}
+            <Stat label="Market Cap" value={formatMarketCap(selectedCrypto.marketCap)} />
+            <Stat label="24h Volume" value={formatMarketCap(selectedCrypto.volume24h)} />
           </div>
 
           {histLoading ? (

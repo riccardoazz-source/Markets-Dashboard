@@ -42,6 +42,7 @@ export interface CryptoData {
   change24h: number;
   change24hPercent: number;
   change7dPercent?: number;
+  change1yPercent?: number | null;
   marketCap: number;
   volume24h: number;
   image?: string;
