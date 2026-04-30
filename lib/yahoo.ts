@@ -486,27 +486,23 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
 export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]> {
   if (symbols.length === 0) return [];
 
-  // 1. v7 batch without auth (query2) — one request, all fields including correct %
-  const v7NoAuth = await fetchQuotesV7NoAuth(symbols);
-  if (v7NoAuth.length > 0) {
-    console.log(`[yahoo] v7-noauth OK: ${v7NoAuth.length}/${symbols.length}`);
-    return v7NoAuth;
-  }
+  // v7 no-auth (query2) returns corrupted regularMarketPreviousClose (year-ago value)
+  // for indices, making daily % wrong. Use per-symbol v8/chart instead — its
+  // meta.regularMarketChangePercent is always the accurate daily change.
 
-  // 2. v7 batch with crumb auth
-  console.warn('[yahoo] v7-noauth empty — trying v7 with crumb');
-  const v7 = await fetchQuotesV7(symbols);
-  if (v7.length > 0) return v7;
-
-  // 3. v8/chart per-symbol without auth
-  console.warn('[yahoo] v7 empty — trying no-auth v8/chart');
+  // 1. v8/chart per-symbol without auth — accurate daily % from chart meta
   const noAuth = await fetchQuotesNoAuth(symbols);
   if (noAuth.length > 0) {
     console.log(`[yahoo] v8-noauth OK: ${noAuth.length}/${symbols.length}`);
     return noAuth;
   }
 
-  // 4. v8/chart per-symbol with crumb auth
-  console.warn('[yahoo] no-auth empty — falling back to v8 with crumb');
+  // 2. v7 batch with crumb auth
+  console.warn('[yahoo] v8-noauth empty — trying v7 with crumb');
+  const v7 = await fetchQuotesV7(symbols);
+  if (v7.length > 0) return v7;
+
+  // 3. v8/chart per-symbol with crumb auth
+  console.warn('[yahoo] v7 empty — trying v8 with crumb');
   return fetchQuotesV8Fallback(symbols);
 }
