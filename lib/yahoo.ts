@@ -449,25 +449,35 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
     const json = await res.json() as { quoteResponse?: { result?: Record<string, unknown>[] } };
     const items = json?.quoteResponse?.result ?? [];
     if (!items.length) return [];
-    return items.map(it => ({
-      symbol:    (it.symbol as string) ?? '',
-      name:      (it.shortName as string) ?? (it.longName as string) ?? (it.symbol as string) ?? '',
-      price:     Number(it.regularMarketPrice) || 0,
-      previousClose: Number(it.regularMarketPreviousClose) || 0,
-      change:    Number(it.regularMarketChange) || 0,
-      changePercent: Number(it.regularMarketChangePercent) || 0,
-      currency:  (it.currency as string) ?? 'USD',
-      high52w:   it.fiftyTwoWeekHigh != null ? Number(it.fiftyTwoWeekHigh) : null,
-      low52w:    it.fiftyTwoWeekLow  != null ? Number(it.fiftyTwoWeekLow)  : null,
-      fiftyTwoWeekChangePercent:
-        it.fiftyTwoWeekChangePercent != null
-          ? Number(it.fiftyTwoWeekChangePercent) * 100
-          : null,
-      trailingPE: it.trailingPE != null ? Number(it.trailingPE) : null,
-      forwardPE:  it.forwardPE  != null ? Number(it.forwardPE)  : null,
-      marketCap:  it.marketCap  != null ? Number(it.marketCap)  : null,
-      volume:     it.regularMarketVolume != null ? Number(it.regularMarketVolume) : null,
-    })).filter(q => q.price > 0);
+    return items.map(it => {
+      const price    = Number(it.regularMarketPrice) || 0;
+      const prevClose = Number(it.regularMarketPreviousClose) || 0;
+      // Compute daily change from price/previousClose — Yahoo's pre-computed
+      // regularMarketChangePercent from query2 without auth can return YTD or
+      // year-over-year change instead of the actual daily change.
+      const change        = prevClose > 0 ? price - prevClose : Number(it.regularMarketChange) || 0;
+      const changePercent = prevClose > 0 ? ((price - prevClose) / prevClose) * 100
+                                          : Number(it.regularMarketChangePercent) || 0;
+      return {
+        symbol:    (it.symbol as string) ?? '',
+        name:      (it.shortName as string) ?? (it.longName as string) ?? (it.symbol as string) ?? '',
+        price,
+        previousClose: prevClose,
+        change,
+        changePercent,
+        currency:  (it.currency as string) ?? 'USD',
+        high52w:   it.fiftyTwoWeekHigh != null ? Number(it.fiftyTwoWeekHigh) : null,
+        low52w:    it.fiftyTwoWeekLow  != null ? Number(it.fiftyTwoWeekLow)  : null,
+        fiftyTwoWeekChangePercent:
+          it.fiftyTwoWeekChangePercent != null
+            ? Number(it.fiftyTwoWeekChangePercent) * 100
+            : null,
+        trailingPE: it.trailingPE != null ? Number(it.trailingPE) : null,
+        forwardPE:  it.forwardPE  != null ? Number(it.forwardPE)  : null,
+        marketCap:  it.marketCap  != null ? Number(it.marketCap)  : null,
+        volume:     it.regularMarketVolume != null ? Number(it.regularMarketVolume) : null,
+      };
+    }).filter(q => q.price > 0);
   } catch {
     return [];
   }

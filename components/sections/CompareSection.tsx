@@ -31,7 +31,7 @@ export function CompareSection() {
     const config = ALL_COMPARABLE_ASSETS.find(a => a.symbol === symbol);
 
     try {
-      let data: HistoricalPoint[];
+      let data: HistoricalPoint[] = [];
       if (config?.type === 'crypto') {
         const daysMap: Record<string, number> = { '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650 };
         const days = daysMap[tf] ?? 365;
@@ -41,11 +41,21 @@ export function CompareSection() {
           xrp: 'ripple', ada: 'cardano', avax: 'avalanche-2', link: 'chainlink',
         };
         const id = coinMap[coinId] ?? coinId;
-        const res = await fetch(`/api/crypto?mode=historical&id=${id}&days=${days}`);
-        if (!res.ok) return null;
-        const json = await res.json();
-        if (!Array.isArray(json) || json.length === 0) return null;
-        data = json as HistoricalPoint[];
+        // Try CoinGecko first
+        const cgRes = await fetch(`/api/crypto?mode=historical&id=${id}&days=${days}`);
+        if (cgRes.ok) {
+          const json = await cgRes.json();
+          if (Array.isArray(json) && json.length > 0) data = json as HistoricalPoint[];
+        }
+        // Fallback: Yahoo Finance supports BTC-USD, ETH-USD, etc.
+        if (!data || data.length === 0) {
+          const yhRes = await fetch(`/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`);
+          if (yhRes.ok) {
+            const json = await yhRes.json();
+            if (Array.isArray(json) && json.length > 0) data = json as HistoricalPoint[];
+          }
+        }
+        if (!data || data.length === 0) return null;
       } else {
         const res = await fetch(`/api/historical?symbol=${symbol}&timeframe=${tf}`);
         if (!res.ok) return null;
