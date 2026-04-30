@@ -305,27 +305,33 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
 }
 
 async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
-  // 1y monthly: small payload, gives meta + first close for 1Y change calc
-  const result = await fetchChartRaw(symbol, 'range=1y&interval=1mo', 5_000);
+  // range=1y&interval=1d: daily closes — second-to-last is yesterday's close
+  // (chartPreviousClose is the start-of-range value, NOT the previous trading day).
+  const result = await fetchChartRaw(symbol, 'range=1y&interval=1d', 5_000);
   if (!result) return null;
 
   const m = (result.meta as Record<string, unknown> | undefined) ?? {};
   const price = Number(m.regularMarketPrice) || 0;
-  const prev = Number(m.chartPreviousClose) || Number(m.previousClose) || 0;
-  if (price <= 0 || prev <= 0) return null;
+  if (price <= 0) return null;
 
-  const changePercent = m.regularMarketChangePercent != null
-    ? Number(m.regularMarketChangePercent)
-    : ((price - prev) / prev) * 100;
-  const change = m.regularMarketChange != null
-    ? Number(m.regularMarketChange)
-    : (price - prev);
-
-  let fiftyTwoWeekChangePercent: number | null = null;
   const indicators = result.indicators as Record<string, unknown> | undefined;
   const quotes = indicators?.quote as Array<Record<string, unknown>> | undefined;
   const closes = (quotes?.[0]?.close as (number | null)[] | undefined) ?? [];
-  const firstValid = closes.find(c => c != null && c > 0);
+  const validCloses = closes.filter((c): c is number => c != null && c > 0);
+
+  let prev = 0;
+  if (validCloses.length >= 2) {
+    prev = validCloses[validCloses.length - 2];
+  } else {
+    prev = Number(m.previousClose) || Number(m.chartPreviousClose) || 0;
+  }
+  if (prev <= 0) return null;
+
+  const changePercent = ((price - prev) / prev) * 100;
+  const change = price - prev;
+
+  let fiftyTwoWeekChangePercent: number | null = null;
+  const firstValid = validCloses[0];
   if (firstValid && firstValid > 0) {
     fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
   }
@@ -359,12 +365,14 @@ async function fetchQuotesV8Fallback(symbols: string[]): Promise<YahooQuote[]> {
   return results;
 }
 
-// No-auth path: v8/chart with range=1y so we get 52W high/low in meta
-// AND can compute 1Y change% from the first chart close.
+// No-auth path: v8/chart with range=1y&interval=1d gives daily closes — the
+// previous trading day's close is closes[length-2], from which we can compute
+// the actual daily % change correctly. The first valid close in the array
+// gives the 1Y reference price.
 async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
   const url =
     `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-    `?range=1y&interval=1mo&includePrePost=false`;
+    `?range=1y&interval=1d&includePrePost=false`;
   try {
     const res = await fetchWithTimeout(url, {
       headers: {
@@ -381,20 +389,26 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
     const m = (result.meta as Record<string, unknown>) ?? {};
     const price = Number(m.regularMarketPrice) || 0;
     if (price <= 0) return null;
-    const prev = Number(m.chartPreviousClose) || Number(m.previousClose) || price;
-    const changePercent = m.regularMarketChangePercent != null
-      ? Number(m.regularMarketChangePercent)
-      : (prev > 0 ? ((price - prev) / prev) * 100 : 0);
-    const change = m.regularMarketChange != null
-      ? Number(m.regularMarketChange)
-      : (price - prev);
 
-    // Compute 1Y change from first valid close in the monthly chart series
-    let fiftyTwoWeekChangePercent: number | null = null;
     const indicators = result.indicators as Record<string, unknown> | undefined;
     const quotes = indicators?.quote as Array<Record<string, unknown>> | undefined;
     const closes = (quotes?.[0]?.close as (number | null)[] | undefined) ?? [];
-    const firstValid = closes.find(c => c != null && c > 0);
+    const validCloses = closes.filter((c): c is number => c != null && c > 0);
+
+    // Daily %: previous trading day's close = second-to-last valid close
+    // (last close == today, which equals regularMarketPrice during/after trading)
+    let prev = 0;
+    if (validCloses.length >= 2) {
+      prev = validCloses[validCloses.length - 2];
+    } else {
+      prev = Number(m.previousClose) || Number(m.chartPreviousClose) || 0;
+    }
+    const changePercent = prev > 0 ? ((price - prev) / prev) * 100 : 0;
+    const change = prev > 0 ? price - prev : 0;
+
+    // 1Y change: from first valid daily close (about 252 trading days ago)
+    let fiftyTwoWeekChangePercent: number | null = null;
+    const firstValid = validCloses[0];
     if (firstValid && firstValid > 0) {
       fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
     }
