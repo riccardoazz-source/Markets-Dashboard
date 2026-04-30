@@ -86,7 +86,17 @@ export interface CompareAsset {
   name: string;
   type: string;
   color: string;
+  /** Series displayed on the chart (may be normalized) */
   data: HistoricalPoint[];
+  /** Raw price series (always absolute, in original units), used for stats */
+  rawData?: HistoricalPoint[];
+  /** Total-return series (price + reinvested dividends, absolute units) */
+  totalReturnData?: HistoricalPoint[];
   cagr?: number;
   totalReturn?: number;
+  /** CAGR including reinvested dividends */
+  cagrWithDiv?: number;
+  /** IRR (annualized) treating dividends as cash distributions */
+  irr?: number;
+  dividends?: { date: string; amount: number }[];
 }

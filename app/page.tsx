@@ -9,6 +9,8 @@ import { CommoditiesSection } from '@/components/sections/CommoditiesSection';
 import { SectorsSection } from '@/components/sections/SectorsSection';
 import { CompareSection } from '@/components/sections/CompareSection';
 import { MacroSection } from '@/components/sections/MacroSection';
+import { StockSection } from '@/components/sections/StockSection';
+import { SourcesSection } from '@/components/sections/SourcesSection';
 
 const SECTION_LABELS: Record<Section, string> = {
   indexes:     'Global Market Indexes',
@@ -17,7 +19,9 @@ const SECTION_LABELS: Record<Section, string> = {
   commodities: 'Commodities',
   sectors:     'Sector Heat Rankings',
   macro:       'Macro Indicators',
+  stock:       'Stock Lookup',
   compare:     'Asset Comparison',
+  sources:     'Data Sources',
 };
 
 const SECTION_DESCRIPTIONS: Record<Section, string> = {
@@ -27,7 +31,9 @@ const SECTION_DESCRIPTIONS: Record<Section, string> = {
   commodities: 'Live prices for metals, energy and agricultural commodities',
   sectors:     'US sector ETF performance ranked by return — click any sector for details',
   macro:       'Key macroeconomic indicators from the Federal Reserve (FRED)',
-  compare:     'Normalized performance comparison across any combination of assets',
+  stock:       'Search any stock by ticker or ISIN — price, total return with dividends, CAGR & IRR',
+  compare:     'Normalized performance, dividend-adjusted CAGR, IRR and correlation between any combination of assets',
+  sources:     'Reference table of every data source feeding this dashboard',
 };
 
 export default function Home() {
@@ -48,7 +54,9 @@ export default function Home() {
         {section === 'commodities' && <CommoditiesSection />}
         {section === 'sectors'     && <SectorsSection />}
         {section === 'macro'       && <MacroSection />}
+        {section === 'stock'       && <StockSection />}
         {section === 'compare'     && <CompareSection />}
+        {section === 'sources'     && <SourcesSection />}
       </main>
 
       <footer className="max-w-screen-2xl mx-auto px-4 py-6 mt-8 border-t border-border">

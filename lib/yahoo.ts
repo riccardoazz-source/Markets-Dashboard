@@ -11,6 +11,7 @@ export interface YahooMeta {
 export interface YahooData {
   meta: YahooMeta | null;
   points: ChartPoint[];
+  dividends?: { date: string; amount: number }[];
 }
 
 export interface YahooQuote {
@@ -184,12 +185,14 @@ export async function fetchYahooData(
   from: Date,
   to: Date,
   interval: '1d' | '1wk' | '1mo' = '1d',
+  includeEvents = false,
 ): Promise<YahooData> {
   const period1 = Math.floor(from.getTime() / 1000);
   const period2 = Math.floor(to.getTime() / 1000);
+  const eventsQ = includeEvents ? '&events=div%2Csplit' : '';
   let result = await fetchChartRaw(
     symbol,
-    `period1=${period1}&period2=${period2}&interval=${interval}`,
+    `period1=${period1}&period2=${period2}&interval=${interval}${eventsQ}`,
     8_000,
   );
 
@@ -198,11 +201,11 @@ export async function fetchYahooData(
     const daysAgo = (Date.now() - from.getTime()) / (1000 * 60 * 60 * 24);
     const rangeStr = daysToRangeParam(daysAgo);
     if (rangeStr) {
-      result = await fetchChartRaw(symbol, `range=${rangeStr}&interval=${interval}`, 8_000);
+      result = await fetchChartRaw(symbol, `range=${rangeStr}&interval=${interval}${eventsQ}`, 8_000);
     }
   }
 
-  if (!result) return { meta: null, points: [] };
+  if (!result) return { meta: null, points: [], dividends: [] };
 
   const m = (result.meta as Record<string, number | string> | undefined) ?? {};
   const metaPrice = (m.regularMarketPrice as number) ?? 0;
@@ -231,7 +234,28 @@ export async function fetchYahooData(
     points.push({ date, close });
   }
   points.sort((a, b) => a.date.localeCompare(b.date));
-  return { meta, points };
+
+  // Extract dividend events when requested
+  let dividends: { date: string; amount: number }[] | undefined;
+  if (includeEvents) {
+    dividends = [];
+    const events = result.events as Record<string, unknown> | undefined;
+    const divs = events?.dividends as Record<string, { amount?: number; date?: number }> | undefined;
+    if (divs) {
+      for (const k of Object.keys(divs)) {
+        const ev = divs[k];
+        const amt = Number(ev?.amount);
+        const ts = Number(ev?.date);
+        if (isFinite(amt) && amt > 0 && isFinite(ts) && ts > 0) {
+          const date = new Date(ts * 1000).toISOString().slice(0, 10);
+          dividends.push({ date, amount: amt });
+        }
+      }
+      dividends.sort((a, b) => a.date.localeCompare(b.date));
+    }
+  }
+
+  return { meta, points, dividends };
 }
 
 export async function fetchYahooChart(

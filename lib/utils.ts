@@ -127,6 +127,197 @@ export const CHART_COLORS = [
   '#14b8a6', '#84cc16',
 ];
 
+// ---------- Dividend & total-return helpers ----------
+export interface DividendEvent { date: string; amount: number }
+
+/**
+ * Build a "total return" price series by reinvesting dividends. The result is
+ * priced in the same units as the underlying close, and the first point keeps
+ * its original close. Each dividend on date D scales the post-D series by
+ * (1 + amount / close_on_D).
+ */
+export function buildTotalReturnSeries(
+  prices: HistoricalPoint[],
+  dividends: DividendEvent[],
+): HistoricalPoint[] {
+  if (!prices.length) return [];
+  if (!dividends.length) return prices.slice();
+
+  const sortedDivs = [...dividends].sort((a, b) => a.date.localeCompare(b.date));
+  const divByDate = new Map<string, number>();
+  for (const d of sortedDivs) divByDate.set(d.date, (divByDate.get(d.date) ?? 0) + d.amount);
+
+  let factor = 1;
+  // For each dividend ex-date, find the close immediately before/at that date
+  // and bump the multiplicative factor for all subsequent points.
+  const out: HistoricalPoint[] = [];
+  for (let i = 0; i < prices.length; i++) {
+    const p = prices[i];
+    out.push({ date: p.date, close: p.close * factor });
+    const div = divByDate.get(p.date);
+    if (div && p.close > 0) {
+      // Apply adjustment AFTER this point so the dividend doesn't appear as a
+      // jump on the same day; the next bar reflects reinvestment.
+      factor *= 1 + div / p.close;
+    }
+  }
+  return out;
+}
+
+/**
+ * Internal Rate of Return given dated cashflows. Cashflows are signed: an
+ * initial investment is negative, dividends and a terminal sale are positive.
+ * Returns the annualized rate (decimal, e.g. 0.085 = 8.5%) or null if no root
+ * is found within plausible bounds.
+ */
+export function computeIRR(
+  cashflows: { date: string; amount: number }[],
+  guess = 0.08,
+): number | null {
+  if (cashflows.length < 2) return null;
+  const t0 = new Date(cashflows[0].date).getTime();
+  const years = cashflows.map(cf => (new Date(cf.date).getTime() - t0) / (365.25 * 86400 * 1000));
+
+  const npv = (rate: number) => {
+    let s = 0;
+    for (let i = 0; i < cashflows.length; i++) {
+      s += cashflows[i].amount / Math.pow(1 + rate, years[i]);
+    }
+    return s;
+  };
+  const dnpv = (rate: number) => {
+    let s = 0;
+    for (let i = 0; i < cashflows.length; i++) {
+      s -= years[i] * cashflows[i].amount / Math.pow(1 + rate, years[i] + 1);
+    }
+    return s;
+  };
+
+  // Newton-Raphson with bounded fallback
+  let rate = guess;
+  for (let i = 0; i < 60; i++) {
+    const f = npv(rate);
+    const fp = dnpv(rate);
+    if (!isFinite(f) || !isFinite(fp) || Math.abs(fp) < 1e-12) break;
+    const next = rate - f / fp;
+    if (!isFinite(next)) break;
+    if (Math.abs(next - rate) < 1e-7) return next;
+    rate = next;
+    if (rate < -0.999) rate = -0.999;
+    if (rate > 100) rate = 100;
+  }
+
+  // Bisection fallback over [-0.99, 10]
+  let lo = -0.99, hi = 10;
+  let flo = npv(lo), fhi = npv(hi);
+  if (flo * fhi > 0) return null;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const fmid = npv(mid);
+    if (Math.abs(fmid) < 1e-7 || (hi - lo) < 1e-7) return mid;
+    if (flo * fmid < 0) { hi = mid; fhi = fmid; }
+    else { lo = mid; flo = fmid; }
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * IRR for a buy-and-hold investment in a single asset, accounting for
+ * dividends as cash received (not reinvested).
+ *   t0:  -close[0]
+ *   ti:   +dividend_i (any dividend with date > t0 and <= tN)
+ *   tN:   +close[N-1]
+ */
+export function computeAssetIRR(
+  prices: HistoricalPoint[],
+  dividends: DividendEvent[],
+): number | null {
+  if (!prices || prices.length < 2) return null;
+  const start = prices[0];
+  const end = prices[prices.length - 1];
+  if (!start.close || !end.close) return null;
+  const flows: { date: string; amount: number }[] = [{ date: start.date, amount: -start.close }];
+  for (const d of dividends) {
+    if (d.date > start.date && d.date <= end.date && d.amount > 0) {
+      flows.push({ date: d.date, amount: d.amount });
+    }
+  }
+  flows.push({ date: end.date, amount: end.close });
+  return computeIRR(flows);
+}
+
+/**
+ * Pearson correlation of two aligned arrays of numbers.
+ */
+export function pearson(a: number[], b: number[]): number | null {
+  const n = Math.min(a.length, b.length);
+  if (n < 2) return null;
+  let sa = 0, sb = 0;
+  for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
+  const ma = sa / n, mb = sb / n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    const xa = a[i] - ma, xb = b[i] - mb;
+    num += xa * xb;
+    da += xa * xa;
+    db += xb * xb;
+  }
+  if (da === 0 || db === 0) return null;
+  return num / Math.sqrt(da * db);
+}
+
+/**
+ * Compute a correlation matrix of daily log-returns across multiple price
+ * series. Series are aligned on a forward-filled common calendar so that
+ * mismatched dates (e.g. crypto trades weekends, equities don't) still align.
+ */
+export function correlationMatrix(
+  series: { symbol: string; data: HistoricalPoint[] }[],
+): { labels: string[]; matrix: (number | null)[][] } {
+  const labels = series.map(s => s.symbol);
+  if (series.length === 0) return { labels, matrix: [] };
+
+  // Build union of dates and forward-fill
+  const allDates = Array.from(new Set(series.flatMap(s => s.data.map(d => d.date)))).sort();
+  const aligned: number[][] = series.map(s => {
+    const map = new Map(s.data.map(d => [d.date, d.close] as const));
+    const out: number[] = [];
+    let last: number | null = null;
+    for (const d of allDates) {
+      const v = map.get(d);
+      if (v != null) last = v;
+      out.push(last ?? NaN);
+    }
+    return out;
+  });
+
+  // Convert to log returns; only keep indices where ALL series have a finite value
+  const returns: number[][] = aligned.map(arr => {
+    const r: number[] = [];
+    for (let i = 1; i < arr.length; i++) {
+      const a = arr[i - 1], b = arr[i];
+      r.push(a > 0 && b > 0 ? Math.log(b / a) : NaN);
+    }
+    return r;
+  });
+  const len = returns[0]?.length ?? 0;
+  const validIdx: number[] = [];
+  for (let i = 0; i < len; i++) {
+    if (returns.every(r => isFinite(r[i]))) validIdx.push(i);
+  }
+  const cleaned = returns.map(r => validIdx.map(i => r[i]));
+
+  const matrix: (number | null)[][] = labels.map(() => labels.map(() => null));
+  for (let i = 0; i < labels.length; i++) {
+    for (let j = i; j < labels.length; j++) {
+      const c = i === j ? 1 : pearson(cleaned[i], cleaned[j]);
+      matrix[i][j] = c;
+      matrix[j][i] = c;
+    }
+  }
+  return { labels, matrix };
+}
+
 export function timeframeLabel(tf: Timeframe): string {
   const labels: Record<Timeframe, string> = {
     '1W': '1 Week', '1M': '1 Month', '3M': '3 Months',
