@@ -1,10 +1,10 @@
 'use client';
 
-import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem } from 'lucide-react';
+import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity } from 'lucide-react';
 import { ForwardRefExoticComponent, RefAttributes } from 'react';
 import clsx from 'clsx';
 
-export type Section = 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'compare';
+export type Section = 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'compare';
 
 type LucideIcon = ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>>;
 
@@ -14,6 +14,7 @@ const SECTIONS: { id: Section; label: string; short: string; Icon: LucideIcon }[
   { id: 'crypto',      label: 'Crypto',      short: 'Crypto',Icon: Bitcoin    },
   { id: 'commodities', label: 'Commodities', short: 'Cmdty', Icon: Gem        },
   { id: 'sectors',     label: 'Sectors',     short: 'Sec',   Icon: Grid2X2    },
+  { id: 'macro',       label: 'Macro',       short: 'Macro', Icon: Activity   },
   { id: 'compare',     label: 'Compare',     short: 'vs.',   Icon: GitCompare },
 ];
 

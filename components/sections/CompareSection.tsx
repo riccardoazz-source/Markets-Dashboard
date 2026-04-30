@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ALL_COMPARABLE_ASSETS } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
-import { normalizeData, calculateCAGR, formatPercent, colorForPercent, CHART_COLORS } from '@/lib/utils';
+import { normalizeData, calculateCAGR, formatPercent, colorForPercent, CHART_COLORS, getTimeframeStart } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { CompareChart } from '@/components/charts/CompareChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -56,6 +56,13 @@ export function CompareSection() {
           }
         }
         if (!data || data.length === 0) return null;
+      } else if (config?.type === 'macro') {
+        const from = getTimeframeStart(tf);
+        const res = await fetch(`/api/macro?mode=history&id=${encodeURIComponent(symbol)}&from=${from}`);
+        if (!res.ok) return null;
+        const json = await res.json();
+        if (!Array.isArray(json) || json.length === 0) return null;
+        data = json as HistoricalPoint[];
       } else {
         const res = await fetch(`/api/historical?symbol=${symbol}&timeframe=${tf}`);
         if (!res.ok) return null;

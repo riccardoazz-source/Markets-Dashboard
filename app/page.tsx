@@ -8,6 +8,7 @@ import { CryptoCommoditiesSection } from '@/components/sections/CryptoCommoditie
 import { CommoditiesSection } from '@/components/sections/CommoditiesSection';
 import { SectorsSection } from '@/components/sections/SectorsSection';
 import { CompareSection } from '@/components/sections/CompareSection';
+import { MacroSection } from '@/components/sections/MacroSection';
 
 const SECTION_LABELS: Record<Section, string> = {
   indexes:     'Global Market Indexes',
@@ -15,6 +16,7 @@ const SECTION_LABELS: Record<Section, string> = {
   crypto:      'Cryptocurrency',
   commodities: 'Commodities',
   sectors:     'Sector Heat Rankings',
+  macro:       'Macro Indicators',
   compare:     'Asset Comparison',
 };
 
@@ -24,6 +26,7 @@ const SECTION_DESCRIPTIONS: Record<Section, string> = {
   crypto:      'Live cryptocurrency prices with CAGR and return analysis',
   commodities: 'Live prices for metals, energy and agricultural commodities',
   sectors:     'US sector ETF performance ranked by return — click any sector for details',
+  macro:       'Key macroeconomic indicators from the Federal Reserve (FRED)',
   compare:     'Normalized performance comparison across any combination of assets',
 };
 
@@ -44,6 +47,7 @@ export default function Home() {
         {section === 'crypto'      && <CryptoCommoditiesSection />}
         {section === 'commodities' && <CommoditiesSection />}
         {section === 'sectors'     && <SectorsSection />}
+        {section === 'macro'       && <MacroSection />}
         {section === 'compare'     && <CompareSection />}
       </main>
 

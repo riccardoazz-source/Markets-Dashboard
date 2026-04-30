@@ -66,7 +66,7 @@ export interface AssetConfig {
   name: string;
   category: string;
   region?: string;
-  type: 'index' | 'etf' | 'crypto' | 'commodity' | 'currency' | 'sector';
+  type: 'index' | 'etf' | 'crypto' | 'commodity' | 'currency' | 'sector' | 'macro';
 }
 
 export type Timeframe = '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | '3Y' | '5Y' | '10Y';
