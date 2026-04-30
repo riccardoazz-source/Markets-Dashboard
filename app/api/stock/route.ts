@@ -31,6 +31,7 @@ function getStartDate(timeframe: string): Date {
     case '3Y':  return subYears(now, 3);
     case '5Y':  return subYears(now, 5);
     case '10Y': return subYears(now, 10);
+    case 'MAX': return new Date('1900-01-01');
     default:    return subYears(now, 1);
   }
 }
@@ -38,7 +39,7 @@ function getStartDate(timeframe: string): Date {
 function getInterval(timeframe: string): '1d' | '1wk' | '1mo' {
   if (['1W', '1M', '3M', '6M', 'YTD', '1Y'].includes(timeframe)) return '1d';
   if (['3Y', '5Y'].includes(timeframe)) return '1wk';
-  return '1mo';
+  return '1mo'; // 10Y and MAX
 }
 
 interface SearchHit {

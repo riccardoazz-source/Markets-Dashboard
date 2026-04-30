@@ -119,4 +119,11 @@ export const ALL_COMPARABLE_ASSETS = [
   ...CRYPTO_IDS.map(a => ({ symbol: `${a.symbol}-USD`, name: a.name, category: 'Crypto', type: 'crypto' as const, group: 'Crypto' })),
   ...SECTORS.map(a => ({ ...a, group: 'Sectors' })),
   ...MACRO_INDICATORS.map(m => ({ symbol: m.id, name: m.name, category: m.category, type: 'macro' as const, group: 'Macro' })),
+  ...CURRENCY_PAIRS.map(c => ({
+    symbol: c.symbol,
+    name: `${c.from}/${c.to}`,
+    category: 'FX',
+    type: 'currency' as const,
+    group: 'FX',
+  })),
 ];

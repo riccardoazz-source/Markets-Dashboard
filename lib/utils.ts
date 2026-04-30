@@ -49,6 +49,7 @@ export function getTimeframeStart(timeframe: Timeframe): string {
     case '3Y': date = subYears(now, 3); break;
     case '5Y': date = subYears(now, 5); break;
     case '10Y': date = subYears(now, 10); break;
+    case 'MAX': return '1900-01-01';
     default: date = subYears(now, 1);
   }
   return format(date, 'yyyy-MM-dd');
@@ -64,7 +65,8 @@ export function getIntervalForTimeframe(timeframe: Timeframe): string {
     case '1Y': return '1d';
     case '3Y':
     case '5Y': return '1wk';
-    case '10Y': return '1mo';
+    case '10Y':
+    case 'MAX': return '1mo';
     default: return '1d';
   }
 }
@@ -322,7 +324,7 @@ export function timeframeLabel(tf: Timeframe): string {
   const labels: Record<Timeframe, string> = {
     '1W': '1 Week', '1M': '1 Month', '3M': '3 Months',
     '6M': '6 Months', 'YTD': 'Year to Date', '1Y': '1 Year',
-    '3Y': '3 Years', '5Y': '5 Years', '10Y': '10 Years',
+    '3Y': '3 Years', '5Y': '5 Years', '10Y': '10 Years', 'MAX': 'Max',
   };
   return labels[tf] ?? tf;
 }
