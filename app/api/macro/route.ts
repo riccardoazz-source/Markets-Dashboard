@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const runtime = 'edge';
+// Node.js runtime: FRED blocks Cloudflare/Edge IPs, AWS Lambda (Node) IPs work fine.
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
