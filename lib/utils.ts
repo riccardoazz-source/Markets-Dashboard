@@ -135,8 +135,10 @@ export interface DividendEvent { date: string; amount: number }
 /**
  * Build a "total return" price series by reinvesting dividends. The result is
  * priced in the same units as the underlying close, and the first point keeps
- * its original close. Each dividend on date D scales the post-D series by
- * (1 + amount / close_on_D).
+ * its original close. Each dividend on ex-date D is mapped to the last price
+ * bar whose date is <= D (handles monthly bars where the ex-date falls between
+ * bars). The factor is applied after that bar so the next bar reflects
+ * reinvestment without a same-day jump.
  */
 export function buildTotalReturnSeries(
   prices: HistoricalPoint[],
@@ -145,21 +147,25 @@ export function buildTotalReturnSeries(
   if (!prices.length) return [];
   if (!dividends.length) return prices.slice();
 
-  const sortedDivs = [...dividends].sort((a, b) => a.date.localeCompare(b.date));
-  const divByDate = new Map<string, number>();
-  for (const d of sortedDivs) divByDate.set(d.date, (divByDate.get(d.date) ?? 0) + d.amount);
+  // Map each dividend to the index of the last price bar on or before its date.
+  // This works for both daily and monthly price series.
+  const divAtIndex = new Map<number, number>();
+  for (const d of [...dividends].sort((a, b) => a.date.localeCompare(b.date))) {
+    let idx = -1;
+    for (let i = prices.length - 1; i >= 0; i--) {
+      if (prices[i].date <= d.date) { idx = i; break; }
+    }
+    if (idx === -1) continue;
+    divAtIndex.set(idx, (divAtIndex.get(idx) ?? 0) + d.amount);
+  }
 
   let factor = 1;
-  // For each dividend ex-date, find the close immediately before/at that date
-  // and bump the multiplicative factor for all subsequent points.
   const out: HistoricalPoint[] = [];
   for (let i = 0; i < prices.length; i++) {
     const p = prices[i];
     out.push({ date: p.date, close: p.close * factor });
-    const div = divByDate.get(p.date);
+    const div = divAtIndex.get(i);
     if (div && p.close > 0) {
-      // Apply adjustment AFTER this point so the dividend doesn't appear as a
-      // jump on the same day; the next bar reflects reinvestment.
       factor *= 1 + div / p.close;
     }
   }

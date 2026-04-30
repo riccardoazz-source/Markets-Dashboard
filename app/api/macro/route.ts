@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Node.js runtime: FRED blocks Cloudflare/Edge IPs, AWS Lambda (Node) IPs work fine.
+// Explicitly use Node.js runtime (not Edge) so FRED requests come from AWS Lambda IPs.
+export const runtime = 'nodejs';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -117,19 +118,62 @@ async function fetchFREDCsv(
   }
 }
 
-// ---------- Combined fetch with fallback ----------
+// ---------- FRED legacy .txt endpoint (tab-separated, no key required) ----------
+async function fetchFREDTxt(
+  seriesId: string,
+  fromDate?: string,
+  timeoutMs = 6_000,
+): Promise<{ date: string; value: number }[]> {
+  const url = `https://fred.stlouisfed.org/data/${encodeURIComponent(seriesId)}.txt`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      cache: 'no-store',
+      headers: { 'User-Agent': UA, 'Accept': 'text/plain,*/*' },
+    });
+    if (!res.ok) {
+      console.error(`[fred-txt] ${seriesId} HTTP ${res.status}`);
+      return [];
+    }
+    const txt = await res.text();
+    const lines = txt.split('\n');
+    const points: { date: string; value: number }[] = [];
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 2) continue;
+      const date = parts[0].trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      if (fromDate && date < fromDate) continue;
+      const num = parseFloat(parts[1].trim());
+      if (!isNaN(num)) points.push({ date, value: num });
+    }
+    return points;
+  } catch (e) {
+    console.error(`[fred-txt] ${seriesId} fetch failed:`, (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- Combined fetch with fallback chain ----------
 async function fetchFRED(
   seriesId: string,
   fromDate?: string,
   timeoutMs = 6_000,
 ): Promise<{ date: string; value: number }[]> {
-  // Prefer the JSON API when a key is configured (more reliable on Edge)
+  // 1. JSON API (requires FRED_API_KEY env var — most reliable)
   if (process.env.FRED_API_KEY) {
     const api = await fetchFREDApi(seriesId, fromDate, timeoutMs);
     if (api.length > 0) return api;
   }
-  // Fallback / default: public CSV endpoint
-  return fetchFREDCsv(seriesId, fromDate, timeoutMs);
+  // 2. Public CSV endpoint
+  const csv = await fetchFREDCsv(seriesId, fromDate, timeoutMs);
+  if (csv.length > 0) return csv;
+  // 3. Legacy .txt endpoint (tab-separated, different URL path)
+  return fetchFREDTxt(seriesId, fromDate, timeoutMs);
 }
 
 export async function GET(req: NextRequest) {

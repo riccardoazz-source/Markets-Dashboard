@@ -40,7 +40,7 @@ function formatXDate(dateStr: string, data: HistoricalPoint[]) {
 function DualChart({ prices, totalReturn, currency }: { prices: HistoricalPoint[]; totalReturn: HistoricalPoint[]; currency: string }) {
   if (!prices.length) return null;
   const hasDivs = totalReturn !== prices && totalReturn.length > 0 &&
-    totalReturn[totalReturn.length - 1]?.close !== prices[prices.length - 1]?.close;
+    Math.abs((totalReturn[totalReturn.length - 1]?.close ?? 0) - (prices[prices.length - 1]?.close ?? 0)) > 0.0001;
 
   // Align on same date union
   const allDates = Array.from(new Set([...prices, ...totalReturn].map(d => d.date))).sort();

@@ -250,11 +250,11 @@ export function CompareSection() {
             <button onClick={() => setNormalized(n => !n)}
               className={clsx('px-3 py-1 text-xs font-medium rounded-full transition-all border',
                 normalized ? 'border-accent text-accent bg-accent/10' : 'border-border text-gray-400 hover:text-gray-200')}>
-              {normalized ? 'Normalized (Base 100)' : 'Prezzo assoluto'}
+              {normalized ? 'Normalized (Base 100)' : 'Absolute price'}
             </button>
             {normalized && (
               <button onClick={() => setLogScale(s => !s)}
-                title="Scala logaritmica: utile quando gli asset hanno ordini di grandezza molto diversi (es. BTC vs oro)"
+                title="Logarithmic scale: useful when assets have very different magnitudes (e.g. BTC vs gold)"
                 className={clsx('px-3 py-1 text-xs font-medium rounded-full transition-all border',
                   logScale ? 'border-amber-400 text-amber-400 bg-amber-400/10' : 'border-border text-gray-400 hover:text-gray-200')}>
                 Log
@@ -326,7 +326,7 @@ export function CompareSection() {
 
       {logScale && normalized && (
         <p className="text-[10px] text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-3 py-1.5">
-          Scala logaritmica attiva — variazioni percentuali uguali occupano lo stesso spazio verticale. Ideale quando un asset ha rendimenti multipli degli altri (es. BTC vs oro).
+          Logarithmic scale active — equal percentage moves take equal vertical space. Ideal when one asset has returns many times larger than others (e.g. BTC vs gold).
         </p>
       )}
 
@@ -396,22 +396,22 @@ function corrStrength(v: number): { label: string; bg: string; text: string } {
   const a = Math.abs(v);
   const pos = v >= 0;
   if (a >= 0.90) return {
-    label: 'Molto forte',
+    label: 'Very strong',
     bg: pos ? 'rgba(5,150,105,0.85)' : 'rgba(185,28,28,0.85)',
     text: 'white',
   };
   if (a >= 0.60) return {
-    label: 'Forte',
+    label: 'Strong',
     bg: pos ? 'rgba(16,185,129,0.65)' : 'rgba(239,68,68,0.65)',
     text: 'white',
   };
   if (a >= 0.30) return {
-    label: 'Moderata',
+    label: 'Moderate',
     bg: pos ? 'rgba(52,211,153,0.40)' : 'rgba(248,113,113,0.40)',
     text: pos ? '#6ee7b7' : '#fca5a5',
   };
   return {
-    label: 'Debole',
+    label: 'Weak',
     bg: 'rgba(40,44,65,0.7)',
     text: '#6b7280',
   };
@@ -428,22 +428,22 @@ function CorrelationMatrix({
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-gray-100">Matrice di correlazione</h3>
+          <h3 className="text-sm font-semibold text-gray-100">Correlation matrix</h3>
           <p className="text-[10px] text-gray-500 mt-0.5">
-            Pearson sui log-return giornalieri nella finestra temporale selezionata
+            Pearson on daily log-returns in the selected time window · green = positive · red = negative
           </p>
         </div>
         {/* Legend */}
         <div className="flex items-center gap-3 flex-wrap text-[10px]">
           {[
-            { label: 'Trascurabile (|r|<0.30)', bg: 'rgba(40,44,65,0.9)', text: '#6b7280' },
-            { label: 'Moderata (0.30–0.60)', bg: 'rgba(16,185,129,0.40)', text: '#6ee7b7' },
-            { label: 'Forte (0.60–0.90)', bg: 'rgba(16,185,129,0.65)', text: 'white' },
-            { label: 'Molto forte (>0.90)', bg: 'rgba(5,150,105,0.85)', text: 'white' },
+            { label: 'Weak (|r|<0.30)', bg: 'rgba(40,44,65,0.9)', text: '#6b7280' },
+            { label: 'Moderate (0.30–0.60)', bg: 'rgba(16,185,129,0.40)', text: '#6ee7b7' },
+            { label: 'Strong (0.60–0.90)', bg: 'rgba(16,185,129,0.65)', text: 'white' },
+            { label: 'Very strong (>0.90)', bg: 'rgba(5,150,105,0.85)', text: 'white' },
           ].map(l => (
             <span key={l.label} className="flex items-center gap-1">
               <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: l.bg, border: '1px solid rgba(255,255,255,0.08)' }} />
-              <span style={{ color: l.text }}>{l.label} (verde=pos / rosso=neg)</span>
+              <span style={{ color: l.text }}>{l.label}</span>
             </span>
           ))}
         </div>

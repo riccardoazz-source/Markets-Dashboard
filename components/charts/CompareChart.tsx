@@ -55,8 +55,24 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
     return point;
   });
 
+  // For log scale: pre-compute nice tick values from the data range so recharts
+  // doesn't generate dense or fractional ticks.
+  const logTicks = (() => {
+    if (!logScale) return undefined;
+    let lo = Infinity, hi = -Infinity;
+    assets.forEach(a => {
+      [...a.data, ...(a.trData ?? [])].forEach(d => {
+        if (d.close > 0) { lo = Math.min(lo, d.close); hi = Math.max(hi, d.close); }
+      });
+    });
+    if (!isFinite(lo) || !isFinite(hi)) return undefined;
+    const candidates = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+    const filtered = candidates.filter(c => c >= lo * 0.8 && c <= hi * 1.2);
+    return filtered.length >= 2 ? filtered : undefined;
+  })();
+
   const yAxisProps = logScale
-    ? { scale: 'log' as const, domain: ['auto', 'auto'] as [string | number, string | number], allowDataOverflow: false }
+    ? { scale: 'log' as const, domain: ['auto', 'auto'] as [string | number, string | number], allowDataOverflow: false, ticks: logTicks }
     : { domain: ['auto', 'auto'] as [string | number, string | number] };
 
   // Legend entries: one per series (including TR lines)
