@@ -170,6 +170,7 @@ async function fetchChartRaw(
 }
 
 function daysToRangeParam(daysAgo: number): string | null {
+  if (daysAgo > 5000) return 'max'; // MAX timeframe fallback
   if (daysAgo > 2900) return '10y';
   if (daysAgo > 1500) return '5y';
   if (daysAgo > 800)  return '3y';
@@ -190,18 +191,25 @@ export async function fetchYahooData(
   const period1 = Math.floor(from.getTime() / 1000);
   const period2 = Math.floor(to.getTime() / 1000);
   const eventsQ = includeEvents ? '&events=div%2Csplit' : '';
-  let result = await fetchChartRaw(
-    symbol,
-    `period1=${period1}&period2=${period2}&interval=${interval}${eventsQ}`,
-    8_000,
-  );
 
-  // If period-based query failed (common for futures on Vercel Edge), try range-based
-  if (!result) {
-    const daysAgo = (Date.now() - from.getTime()) / (1000 * 60 * 60 * 24);
-    const rangeStr = daysToRangeParam(daysAgo);
-    if (rangeStr) {
-      result = await fetchChartRaw(symbol, `range=${rangeStr}&interval=${interval}${eventsQ}`, 8_000);
+  // Yahoo Finance does not handle negative period1 (dates before 1970-01-01) correctly
+  // and silently returns a short window instead of all history. Use range=max directly.
+  let result: Record<string, unknown> | null = null;
+  if (period1 < 0) {
+    result = await fetchChartRaw(symbol, `range=max&interval=${interval}${eventsQ}`, 10_000);
+  } else {
+    result = await fetchChartRaw(
+      symbol,
+      `period1=${period1}&period2=${period2}&interval=${interval}${eventsQ}`,
+      8_000,
+    );
+    // If period-based query failed (common for futures on Vercel Edge), try range-based
+    if (!result) {
+      const daysAgo = (Date.now() - from.getTime()) / (1000 * 60 * 60 * 24);
+      const rangeStr = daysToRangeParam(daysAgo);
+      if (rangeStr) {
+        result = await fetchChartRaw(symbol, `range=${rangeStr}&interval=${interval}${eventsQ}`, 8_000);
+      }
     }
   }
 

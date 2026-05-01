@@ -158,7 +158,7 @@ async function fetchFREDTxt(
   }
 }
 
-// ---------- Combined fetch with fallback chain ----------
+// ---------- Combined FRED fetch with fallback chain ----------
 async function fetchFRED(
   seriesId: string,
   fromDate?: string,
@@ -176,6 +176,145 @@ async function fetchFRED(
   return fetchFREDTxt(seriesId, fromDate, timeoutMs);
 }
 
+// ---------- Stooq (free, works from Vercel, no key) ----------
+// Maps selected FRED rate series to Stooq symbols.
+const STOOQ_MAP: Record<string, string> = {
+  'DGS10':       '10usy.b',    // US 10-Year Treasury
+  'DGS2':        '2usy.b',     // US 2-Year Treasury
+  'DFF':         'fffunds.b',  // Effective Fed Funds Rate
+  'MORTGAGE30US':'30usmr.b',   // 30-Year Mortgage Rate
+};
+
+async function fetchStooq(
+  symbol: string,
+  fromDate?: string,
+  timeoutMs = 7_000,
+): Promise<{ date: string; value: number }[]> {
+  const d1 = fromDate ? fromDate.replace(/-/g, '') : '19900101';
+  const d2 = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&d1=${d1}&d2=${d2}&i=d`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      cache: 'no-store',
+      headers: { 'User-Agent': UA, 'Accept': 'text/csv,text/plain,*/*' },
+    });
+    if (!res.ok) { console.error(`[stooq] ${symbol} HTTP ${res.status}`); return []; }
+    const csv = await res.text();
+    if (!csv || csv.length < 20 || csv.includes('No data')) return [];
+    const lines = csv.trim().split('\n');
+    const pts: { date: string; value: number }[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',');
+      if (cols.length < 5) continue;
+      const date = cols[0].trim();
+      const close = parseFloat(cols[4].trim()); // Close column
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date) && isFinite(close) && close > 0) {
+        pts.push({ date, value: close });
+      }
+    }
+    return pts;
+  } catch (e) {
+    console.error(`[stooq] ${symbol} failed:`, (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- BLS public API (free, no key, works from Vercel) ----------
+// Covers employment and inflation series.
+const BLS_MAP: Record<string, string> = {
+  'UNRATE':   'LNS14000000',   // Unemployment Rate (seasonally adj.)
+  'PAYEMS':   'CES0000000001', // Total Nonfarm Payrolls (thousands)
+  'CPIAUCSL': 'CUUR0000SA0',   // CPI All Urban, All Items (not SA)
+  'CPILFESL': 'CUUR0000SA0L1E',// CPI Less Food & Energy
+};
+
+async function fetchBLS(
+  blsSeriesId: string,
+  fromDate?: string,
+  timeoutMs = 9_000,
+): Promise<{ date: string; value: number }[]> {
+  const fromYear = fromDate ? fromDate.slice(0, 4) : '2010';
+  const toYear   = String(new Date().getFullYear());
+  const url = 'https://api.bls.gov/publicAPI/v2/timeseries/data/';
+  const body = JSON.stringify({ seriesid: [blsSeriesId], startyear: fromYear, endyear: toYear });
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: ctrl.signal,
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    if (!res.ok) { console.error(`[bls] ${blsSeriesId} HTTP ${res.status}`); return []; }
+    const json = await res.json() as {
+      Results?: { series?: Array<{ data: Array<{ year: string; period: string; value: string }> }> };
+    };
+    const rows = json?.Results?.series?.[0]?.data ?? [];
+    if (!rows.length) return [];
+    const pts: { date: string; value: number }[] = [];
+    for (const r of rows) {
+      if (!r.period.startsWith('M')) continue; // skip annual rows
+      const month = r.period.slice(1).padStart(2, '0');
+      const date  = `${r.year}-${month}-01`;
+      const val   = parseFloat(r.value);
+      if (isFinite(val)) pts.push({ date, value: val });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    return pts;
+  } catch (e) {
+    console.error(`[bls] ${blsSeriesId} failed:`, (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- Master fetch: FRED → Stooq / BLS fallback ----------
+async function fetchMacroSeries(
+  fredId: string,
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  // T10Y2Y is a computed spread — handle separately
+  if (fredId === 'T10Y2Y') {
+    const stooqId10 = STOOQ_MAP['DGS10'];
+    const stooqId2  = STOOQ_MAP['DGS2'];
+    const [d10, d2] = await Promise.all([
+      fetchFRED('DGS10', fromDate).then(d => d.length > 0 ? d : fetchStooq(stooqId10, fromDate)),
+      fetchFRED('DGS2',  fromDate).then(d => d.length > 0 ? d : fetchStooq(stooqId2,  fromDate)),
+    ]);
+    if (!d10.length || !d2.length) return [];
+    const map2 = new Map(d2.map(p => [p.date, p.value]));
+    return d10.filter(p => map2.has(p.date)).map(p => ({ date: p.date, value: p.value - map2.get(p.date)! }));
+  }
+
+  // Try FRED first (works when FRED_API_KEY is set, or if not blocked)
+  const fred = await fetchFRED(fredId, fromDate);
+  if (fred.length > 0) return fred;
+
+  // Stooq fallback for rate series
+  const stooqSym = STOOQ_MAP[fredId];
+  if (stooqSym) {
+    const sq = await fetchStooq(stooqSym, fromDate);
+    if (sq.length > 0) { console.log(`[macro] ${fredId} loaded from Stooq`); return sq; }
+  }
+
+  // BLS fallback for employment / inflation
+  const blsSym = BLS_MAP[fredId];
+  if (blsSym) {
+    const bls = await fetchBLS(blsSym, fromDate);
+    if (bls.length > 0) { console.log(`[macro] ${fredId} loaded from BLS`); return bls; }
+  }
+
+  return [];
+}
+
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') ?? 'list';
 
@@ -188,7 +327,7 @@ export async function GET(req: NextRequest) {
     const cached = getCached(key, TTL);
     if (cached) return NextResponse.json(cached);
     try {
-      const pts = await fetchFRED(id, from, 10_000);
+      const pts = await fetchMacroSeries(id, from);
       const data = pts.map(p => ({ date: p.date, close: p.value }));
       if (data.length > 0) {
         cache.set(key, { data, ts: Date.now() });
@@ -221,7 +360,7 @@ export async function GET(req: NextRequest) {
 
   // Parallelize ALL requests (each is to a different series URL — no batching needed)
   const results = await Promise.all(ids.map(async (id) => {
-    const pts = await fetchFRED(id, fromStr, 8_000);
+    const pts = await fetchMacroSeries(id, fromStr);
     if (pts.length === 0) return { id, latest: null, prev: null };
     return {
       id,

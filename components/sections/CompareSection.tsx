@@ -284,9 +284,9 @@ export function CompareSection() {
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-dashed border-border text-xs text-gray-500">
               <Search size={11} />
               <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Aggiungi asset…"
+                placeholder="Add asset…"
                 className="bg-transparent outline-none text-gray-200 w-28" />
-              {searching && <span className="text-[10px] animate-pulse">…</span>}
+              {searching && <span className="text-[10px] text-gray-500 animate-pulse">…</span>}
             </div>
 
             {search.length > 0 && (localHits.length > 0 || extraRemoteHits.length > 0) && (
@@ -333,7 +333,7 @@ export function CompareSection() {
       {loading ? (
         <div className="flex items-center justify-center h-64">
           <div className="text-center space-y-3"><LoadingSpinner size={36} />
-            <p className="text-xs text-gray-500">Caricamento dati…</p>
+            <p className="text-xs text-gray-500">Loading data…</p>
           </div>
         </div>
       ) : displayAssets.length > 0 ? (
@@ -365,7 +365,7 @@ export function CompareSection() {
                 )}
                 {a.irr != null && (
                   <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">IRR (con div.)</p>
+                    <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
                     <p className={clsx('text-sm font-semibold', colorForPercent(a.irr))}>{formatPercent(a.irr)}</p>
                   </div>
                 )}
@@ -384,7 +384,7 @@ export function CompareSection() {
         </>
       ) : (
         <div className="flex items-center justify-center h-48 text-gray-500 text-sm">
-          Seleziona asset da confrontare
+          Select assets to compare
         </div>
       )}
     </div>

@@ -100,9 +100,9 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
           axisLine={false} tickLine={false} width={60}
           tickFormatter={v => {
             const n = v as number;
-            if (n >= 10000) return `${(n / 1000).toFixed(0)}k`;
-            if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-            return n.toFixed(1);
+            if (n >= 10000) return `${Math.round(n / 1000)}k`;
+            if (n >= 1000) return n % 1000 === 0 ? `${n / 1000}k` : `${(n / 1000).toFixed(1)}k`;
+            return Number.isInteger(n) ? `${n}` : n.toFixed(1);
           }}
         />
         <Tooltip

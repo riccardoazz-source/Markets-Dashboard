@@ -164,7 +164,7 @@ export function StockSection() {
           <input type="text" value={query}
             onChange={e => { setQuery(e.target.value); setSelected(null); setShowDropdown(true); }}
             onFocus={() => setShowDropdown(true)}
-            placeholder="Cerca per ticker (AAPL, KO, ENI.MI), ISIN (US0378331005) o nome…"
+            placeholder="Search by ticker (AAPL, KO, ENI.MI), ISIN (US0378331005) or name…"
             className="bg-transparent outline-none text-gray-100 placeholder-gray-600 text-sm flex-1" />
           {selected && <button onClick={clearSelection} className="p-0.5 text-gray-500 hover:text-gray-300 shrink-0"><X size={14} /></button>}
           {searching && <span className="text-[10px] text-gray-500 animate-pulse shrink-0">…</span>}
@@ -187,10 +187,10 @@ export function StockSection() {
 
       {!selected && (
         <div className="rounded-xl border border-border bg-bg-card p-6 text-center text-sm text-gray-500">
-          Cerca un titolo per ticker (es. <span className="text-gray-300 font-mono">AAPL</span>,{' '}
+          Search a stock by ticker (e.g. <span className="text-gray-300 font-mono">AAPL</span>,{' '}
           <span className="text-gray-300 font-mono">KO</span>,{' '}
-          <span className="text-gray-300 font-mono">ENI.MI</span>) oppure per ISIN
-          (es. <span className="text-gray-300 font-mono">US0378331005</span>).
+          <span className="text-gray-300 font-mono">ENI.MI</span>) or by ISIN
+          (e.g. <span className="text-gray-300 font-mono">US0378331005</span>).
         </div>
       )}
 
@@ -213,11 +213,11 @@ export function StockSection() {
             <div className="flex items-center gap-4 text-[11px]">
               <div className="flex items-center gap-1.5">
                 <span className="w-6 h-0.5 bg-emerald-400 inline-block" />
-                <span className="text-gray-400">Prezzo</span>
+                <span className="text-gray-400">Price</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-6 border-t-2 border-dashed border-emerald-300 inline-block" />
-                <span className="text-gray-400">Total Return (div. reinvestiti)</span>
+                <span className="text-gray-400">Total Return (reinvested div.)</span>
               </div>
             </div>
           )}
@@ -225,7 +225,7 @@ export function StockSection() {
           {/* Stats */}
           {data?.meta && (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-              <Stat label="Prezzo" value={formatPrice(data.meta.price, currency)} />
+              <Stat label="Price" value={formatPrice(data.meta.price, currency)} />
               {cagrPrice && (
                 <Stat label={`Return (${timeframe})`} value={formatPercent(cagrPrice.return)} color={colorForPercent(cagrPrice.return)} />
               )}
@@ -241,7 +241,7 @@ export function StockSection() {
               {data.meta.high52w != null && <Stat label="52W High" value={formatPrice(data.meta.high52w, currency)} />}
               {data.meta.low52w != null && <Stat label="52W Low" value={formatPrice(data.meta.low52w, currency)} />}
               {dividends.length > 0 && (
-                <Stat label="Dividendi nel periodo" value={`${dividends.length} (${formatPrice(totalDivs, currency)})`} />
+                <Stat label="Dividends (period)" value={`${dividends.length} (${formatPrice(totalDivs, currency)})`} />
               )}
             </div>
           )}
@@ -252,14 +252,14 @@ export function StockSection() {
             <DualChart prices={prices} totalReturn={totalReturn} currency={currency} />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-500 text-sm">
-              Nessun dato trovato. Prova un altro ticker.
+              No data found. Try a different ticker.
             </div>
           )}
 
           {dividends.length > 0 && (
             <details className="bg-bg-input rounded-lg px-3 py-2">
               <summary className="text-xs text-gray-300 cursor-pointer">
-                {dividends.length} dividendi nel periodo — totale {formatPrice(totalDivs, currency)}
+                {dividends.length} dividends in period — total {formatPrice(totalDivs, currency)}
               </summary>
               <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-[11px] font-mono text-gray-400 max-h-32 overflow-y-auto">
                 {dividends.slice().reverse().map(d => (
@@ -273,9 +273,9 @@ export function StockSection() {
           )}
 
           <p className="text-[10px] text-gray-700">
-            Linea continua = prezzo · Linea tratteggiata = total return (dividendi reinvestiti sul ex-date).
-            IRR ({timeframe}) = CAGR della serie total return · IRR (cash flow) = tasso che azzera il NPV dei flussi discreti.
-            Fonte: Yahoo Finance · Non è consulenza finanziaria.
+            Solid line = price · Dashed line = total return (dividends reinvested at ex-date).
+            IRR ({timeframe}) = CAGR of the total-return series · IRR (cash flow) = rate that zeros the NPV of discrete cashflows.
+            Source: Yahoo Finance · Not financial advice.
           </p>
         </div>
       )}
