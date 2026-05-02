@@ -527,28 +527,45 @@ export async function GET(req: NextRequest) {
     ? await fetchBLSBatch(blsNeeded.map(id => BLS_MAP[id]), fromStr)
     : new Map<string, { date: string; value: number }[]>();
 
-  // Step 3: Yahoo/NYFed in parallel for rate series that need it
-  const rateNeeded = needFallback.filter(id => YAHOO_YIELD_MAP[id] || id === 'DFF' || id === 'T10Y2Y');
+  // Step 3: Treasury CSV / Yahoo / NY Fed / ECB fallbacks for rate series
+  const rateNeeded = needFallback.filter(id =>
+    TREASURY_COL[id] || YAHOO_YIELD_MAP[id] || id === 'DFF' || id === 'T10Y2Y' || id === 'ECBDFR'
+  );
   const rateFallback = new Map<string, { date: string; value: number }[]>();
-  await Promise.all(rateNeeded.map(async id => {
-    let pts: { date: string; value: number }[] = [];
-    if (id === 'T10Y2Y') {
-      // Try computing spread from available data
-      const d10 = fredAll.find(r => r.id === 'DGS10')?.pts.length
-        ? fredAll.find(r => r.id === 'DGS10')!.pts
-        : await fetchYahooYield(YAHOO_YIELD_MAP['DGS10'], fromStr);
-      const d2 = fredAll.find(r => r.id === 'DGS2')?.pts ?? [];
-      if (d10.length > 0 && d2.length > 0) {
-        const map2 = new Map(d2.map(p => [p.date, p.value]));
-        pts = d10.filter(p => map2.has(p.date)).map(p => ({ date: p.date, value: p.value - map2.get(p.date)! }));
+  if (rateNeeded.length > 0) {
+    // Pre-fetch US Treasury CSV once (one request covers both DGS2 and DGS10 columns)
+    const needsT2  = rateNeeded.some(id => id === 'DGS2'  || id === 'T10Y2Y');
+    const needsT10 = rateNeeded.some(id => id === 'DGS10' || id === 'T10Y2Y');
+    const [tDgs2, tDgs10] = await Promise.all([
+      needsT2  ? fetchUSTreasury('DGS2',  fromStr) : Promise.resolve<{ date: string; value: number }[]>([]),
+      needsT10 ? fetchUSTreasury('DGS10', fromStr) : Promise.resolve<{ date: string; value: number }[]>([]),
+    ]);
+
+    await Promise.all(rateNeeded.map(async id => {
+      let pts: { date: string; value: number }[] = [];
+      if (id === 'DFF') {
+        pts = await fetchNYFedEffr(fromStr);
+      } else if (id === 'ECBDFR') {
+        pts = await fetchECBRate(fromStr);
+      } else if (id === 'DGS2') {
+        pts = tDgs2.length ? tDgs2 : await fetchYahooYield(YAHOO_YIELD_MAP['DGS2'] ?? '^IRX', fromStr);
+      } else if (id === 'DGS10') {
+        pts = tDgs10.length ? tDgs10 : await fetchYahooYield(YAHOO_YIELD_MAP['DGS10'] ?? '^TNX', fromStr);
+      } else if (id === 'T10Y2Y') {
+        const fredD10 = fredAll.find(r => r.id === 'DGS10')?.pts ?? [];
+        const fredD2  = fredAll.find(r => r.id === 'DGS2')?.pts  ?? [];
+        const d10 = fredD10.length ? fredD10 : tDgs10.length ? tDgs10 : await fetchYahooYield('^TNX', fromStr);
+        const d2  = fredD2.length  ? fredD2  : tDgs2;
+        if (d10.length && d2.length) {
+          const m2 = new Map(d2.map(p => [p.date, p.value]));
+          pts = d10.filter(p => m2.has(p.date)).map(p => ({ date: p.date, value: p.value - m2.get(p.date)! }));
+        }
+      } else if (YAHOO_YIELD_MAP[id]) {
+        pts = await fetchYahooYield(YAHOO_YIELD_MAP[id], fromStr);
       }
-    } else if (id === 'DFF') {
-      pts = await fetchNYFedEffr(fromStr);
-    } else if (YAHOO_YIELD_MAP[id]) {
-      pts = await fetchYahooYield(YAHOO_YIELD_MAP[id], fromStr);
-    }
-    if (pts.length > 0) rateFallback.set(id, pts);
-  }));
+      if (pts.length > 0) rateFallback.set(id, pts);
+    }));
+  }
 
   // Step 4: assemble final results
   const results = ids.map(id => {

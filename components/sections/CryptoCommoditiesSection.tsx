@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { CRYPTO_IDS } from '@/lib/config';
+import { CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData, CryptoData } from '@/lib/types';
 import { formatPrice, formatPercent, formatMarketCap, colorForPercent, calculateCAGR } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
@@ -46,7 +46,20 @@ export function CryptoCommoditiesSection() {
       const days = daysMap[tf] ?? 365;
       const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
       const raw = await res.json() as HistoricalPoint[];
-      const data = Array.isArray(raw) ? raw : [];
+      let data = Array.isArray(raw) ? raw : [];
+
+      // Yahoo Finance fallback when CoinGecko is rate-limited (common for >1Y ranges)
+      if (!data.length) {
+        const yahooSym = CRYPTO_YAHOO_SYMBOLS[id];
+        if (yahooSym) {
+          const fbRes = await fetch(`/api/historical?symbol=${encodeURIComponent(yahooSym)}&timeframe=${tf}`);
+          if (fbRes.ok) {
+            const fbRaw = await fbRes.json() as HistoricalPoint[];
+            if (Array.isArray(fbRaw) && fbRaw.length) data = fbRaw;
+          }
+        }
+      }
+
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
     } catch (e) { console.error(e); }
