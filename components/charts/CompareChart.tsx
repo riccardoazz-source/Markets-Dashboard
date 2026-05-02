@@ -29,26 +29,40 @@ function formatDate(dateStr: string, allDates: string[]) {
 export function CompareChart({ assets, height = 340, logScale = false }: Props) {
   if (!assets.length) return null;
 
-  // Build union of all dates across price and TR series
-  const allDates = Array.from(new Set(
+  // Build union of all dates across price and TR series, then cap at ~500 points.
+  // CoinGecko returns daily crypto data even for 3Y/5Y/10Y (1095–3650 pts).
+  // Recharts with O(n²) find() on 3000+ rows can choke; 500 pts still gives
+  // a smooth visual while keeping renders fast and React from interrupting.
+  const MAX_CHART_POINTS = 500;
+  const rawDates = Array.from(new Set(
     assets.flatMap(a => [
       ...a.data.map(d => d.date),
       ...(a.trData ?? []).map(d => d.date),
     ])
   )).sort();
+  const step = rawDates.length > MAX_CHART_POINTS
+    ? Math.ceil(rawDates.length / MAX_CHART_POINTS)
+    : 1;
+  const allDates = step > 1
+    ? rawDates.filter((_, i) => i % step === 0 || i === rawDates.length - 1)
+    : rawDates;
+
+  // Build a date→index map per asset for O(1) lookup instead of O(n) find
+  const assetMaps = assets.map(a => ({
+    prices: new Map(a.data.map(d => [d.date, d.close])),
+    tr:     a.trData ? new Map(a.trData.map(d => [d.date, d.close])) : null,
+  }));
 
   const chartData = allDates.map(date => {
     const point: Record<string, unknown> = { date };
-    assets.forEach(a => {
-      const match = a.data.find(d => d.date === date);
-      const v = match ? match.close : null;
+    assets.forEach((a, idx) => {
+      const v = assetMaps[idx].prices.get(date) ?? null;
       // Guard against Infinity/NaN that can crash Recharts scale computation
       point[a.symbol] = v != null && v > 0 && isFinite(v) ? v : null;
 
       // TR series (total return with dividends)
-      if (a.trData) {
-        const trMatch = a.trData.find(d => d.date === date);
-        const tv = trMatch ? trMatch.close : null;
+      if (assetMaps[idx].tr) {
+        const tv = assetMaps[idx].tr!.get(date) ?? null;
         point[`${a.symbol}_tr`] = tv != null && tv > 0 && isFinite(tv) ? tv : null;
       }
     });

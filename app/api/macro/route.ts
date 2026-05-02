@@ -180,6 +180,7 @@ async function fetchFRED(
 // ---------- Yahoo Finance yields (^TNX = 10Y, works from Vercel) ----------
 const YAHOO_YIELD_MAP: Record<string, string> = {
   'DGS10': '^TNX',  // US 10-Year Treasury Note Yield (in %)
+  'DGS2':  '^IRX',  // 13-week T-bill as rough 2Y proxy — replaced by Treasury CSV when available
 };
 
 async function fetchYahooYield(
@@ -233,6 +234,118 @@ async function fetchNYFedEffr(
     return pts;
   } catch (e) {
     console.error('[nyfed] effr failed:', (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- US Treasury Daily Yield Curve (free, no key) ----------
+// Provides DGS2 ("2 Yr") and can supplement DGS10 ("10 Yr") when FRED/Yahoo fail.
+// URL: https://home.treasury.gov/resource-center/data-chart-center/interest-rates/
+//      daily-treasury-rates.csv/all/all?type=daily_treasury_yield_curve&...
+const TREASURY_COL: Record<string, string> = {
+  'DGS2':  '2 Yr',
+  'DGS10': '10 Yr',
+};
+
+async function fetchUSTreasury(
+  fredId: string,
+  fromDate?: string,
+  timeoutMs = 10_000,
+): Promise<{ date: string; value: number }[]> {
+  const col = TREASURY_COL[fredId];
+  if (!col) return [];
+  const url =
+    'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' +
+    '/daily-treasury-rates.csv/all/all?type=daily_treasury_yield_curve' +
+    '&field_tdr_date_value=all&download=true';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal, cache: 'no-store',
+      headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*', 'Referer': 'https://home.treasury.gov/' },
+    });
+    if (!res.ok) { console.error(`[treasury] HTTP ${res.status}`); return []; }
+    const csv = await res.text();
+    if (!csv || csv.length < 50) return [];
+    const lines = csv.trim().split('\n');
+    if (lines.length < 2) return [];
+    // Header: Date,1 Mo,2 Mo,3 Mo,4 Mo,6 Mo,1 Yr,2 Yr,3 Yr,5 Yr,7 Yr,10 Yr,20 Yr,30 Yr,...
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const colIdx = headers.indexOf(col);
+    if (colIdx === -1) { console.warn(`[treasury] column '${col}' not found`); return []; }
+    const pts: { date: string; value: number }[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(',');
+      if (parts.length <= colIdx) continue;
+      const raw = parts[0].trim().replace(/"/g, '');   // MM/DD/YYYY
+      const segs = raw.split('/');
+      if (segs.length !== 3) continue;
+      const date = `${segs[2]}-${segs[0].padStart(2, '0')}-${segs[1].padStart(2, '0')}`;
+      if (fromDate && date < fromDate) continue;
+      const val = parseFloat(parts[colIdx].trim().replace(/"/g, ''));
+      if (isFinite(val)) pts.push({ date, value: val });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[treasury] ${fredId} loaded ${pts.length} points`);
+    return pts;
+  } catch (e) {
+    console.error(`[treasury] ${fredId} failed:`, (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- ECB Data Portal (Deposit Facility Rate = ECBDFR, no key) ----------
+async function fetchECBRate(
+  fromDate?: string,
+  timeoutMs = 8_000,
+): Promise<{ date: string; value: number }[]> {
+  // ECB Statistical Data Warehouse — Deposit Facility Rate (DFR)
+  const url =
+    'https://data-api.ecb.europa.eu/service/data/FM/B.U2.EUR.4F.KR.DFR.LEV' +
+    '?format=csvdata&detail=dataonly';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal, cache: 'no-store',
+      headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*' },
+    });
+    if (!res.ok) { console.error(`[ecb] DFR HTTP ${res.status}`); return []; }
+    const csv = await res.text();
+    if (!csv || csv.length < 20) return [];
+    const lines = csv.trim().split('\n');
+    // ECB csvdata format: KEY,FREQ,REF_AREA,...,TIME_PERIOD,OBS_VALUE,...
+    // or compacted: KEY,OBS_DIM0,OBS_VALUE,...
+    // Find header to locate TIME_PERIOD and OBS_VALUE columns
+    const header = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const timeIdx = header.indexOf('TIME_PERIOD');
+    const valIdx  = header.indexOf('OBS_VALUE');
+    if (timeIdx === -1 || valIdx === -1) {
+      console.warn('[ecb] unexpected CSV header:', lines[0].slice(0, 120));
+      return [];
+    }
+    const pts: { date: string; value: number }[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(',');
+      if (parts.length <= Math.max(timeIdx, valIdx)) continue;
+      const date = parts[timeIdx].trim().replace(/"/g, '');
+      if (!/^\d{4}-\d{2}(-\d{2})?$/.test(date)) continue;
+      // ECB dates are YYYY-MM or YYYY-MM-DD; normalise to YYYY-MM-01 when no day
+      const normDate = date.length === 7 ? `${date}-01` : date;
+      if (fromDate && normDate < fromDate) continue;
+      const val = parseFloat(parts[valIdx].trim().replace(/"/g, ''));
+      if (isFinite(val)) pts.push({ date: normDate, value: val });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[ecb] DFR loaded ${pts.length} points`);
+    return pts;
+  } catch (e) {
+    console.error('[ecb] DFR failed:', (e as Error).message);
     return [];
   } finally {
     clearTimeout(t);
@@ -326,7 +439,13 @@ async function fetchMacroSeries(
   const fred = await fetchFRED(fredId, fromDate);
   if (fred.length > 0) return fred;
 
-  // Yahoo Finance fallback for Treasury yields
+  // US Treasury CSV — exact DGS2 and DGS10 (better than Yahoo proxy for yields)
+  if (TREASURY_COL[fredId]) {
+    const pts = await fetchUSTreasury(fredId, fromDate);
+    if (pts.length > 0) { console.log(`[macro] ${fredId} loaded from US Treasury`); return pts; }
+  }
+
+  // Yahoo Finance fallback for Treasury yields (rough proxy when Treasury CSV fails)
   const yahooSym = YAHOO_YIELD_MAP[fredId];
   if (yahooSym) {
     const pts = await fetchYahooYield(yahooSym, fromDate);
@@ -337,6 +456,12 @@ async function fetchMacroSeries(
   if (fredId === 'DFF') {
     const pts = await fetchNYFedEffr(fromDate);
     if (pts.length > 0) { console.log(`[macro] DFF loaded from NY Fed`); return pts; }
+  }
+
+  // ECB fallback for ECB Deposit Facility Rate
+  if (fredId === 'ECBDFR') {
+    const pts = await fetchECBRate(fromDate);
+    if (pts.length > 0) { console.log(`[macro] ECBDFR loaded from ECB API`); return pts; }
   }
 
   // BLS fallback for employment / inflation

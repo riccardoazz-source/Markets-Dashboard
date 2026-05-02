@@ -240,20 +240,30 @@ export function CompareSection() {
   // Rebuild display data filtered to commonStart when MAX
   const displayAssets = useMemo(() => {
     if (timeframe !== 'MAX' || !commonStart) return assets;
-    return assets.map(a => {
-      const rawFiltered = (a.rawData ?? a.data).filter(d => d.date >= commonStart);
-      const trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
-      const displayData = normalized ? normalizeData(rawFiltered) : rawFiltered;
-      const displayTrData = trFiltered ? (normalized ? normalizeData(trFiltered) : trFiltered) : undefined;
-      return { ...a, data: displayData, trData: displayTrData };
-    });
+    try {
+      return assets.map(a => {
+        const rawFiltered = (a.rawData ?? a.data).filter(d => d.date >= commonStart);
+        const trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
+        const displayData = normalized ? normalizeData(rawFiltered) : rawFiltered;
+        const displayTrData = trFiltered ? (normalized ? normalizeData(trFiltered) : trFiltered) : undefined;
+        return { ...a, data: displayData, trData: displayTrData };
+      });
+    } catch (e) {
+      console.error('[CompareSection] displayAssets error:', e);
+      return assets;
+    }
   }, [assets, timeframe, commonStart, normalized]);
 
   const correl = useMemo(() => {
-    const series = displayAssets
-      .filter(a => (a.rawData ?? a.data).length > 1)
-      .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
-    return correlationMatrix(series);
+    try {
+      const series = displayAssets
+        .filter(a => (a.rawData ?? a.data).length > 1)
+        .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
+      return correlationMatrix(series);
+    } catch (e) {
+      console.error('[CompareSection] correlationMatrix error:', e);
+      return { labels: [], matrix: [] as (number | null)[][] };
+    }
   }, [displayAssets]);
 
   return (
