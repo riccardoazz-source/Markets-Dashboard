@@ -200,34 +200,30 @@ async function fetchYahooYield(
   }
 }
 
-// ---------- NY Fed EFFR CSV (Effective Federal Funds Rate, no key) ----------
+// ---------- NY Fed EFFR (Effective Federal Funds Rate, no key) ----------
+// JSON API is simpler and avoids date-format ambiguity in the CSV endpoint.
 async function fetchNYFedEffr(
   fromDate?: string,
-  timeoutMs = 7_000,
+  timeoutMs = 5_000,
 ): Promise<{ date: string; value: number }[]> {
-  const url = 'https://markets.newyorkfed.org/api/rates/effr/all/chart.csv';
+  const url = 'https://markets.newyorkfed.org/api/rates/effr/all/data.json';
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: ctrl.signal, cache: 'no-store',
-      headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*' },
+      headers: { 'User-Agent': UA, 'Accept': 'application/json,*/*' },
     });
     if (!res.ok) { console.error(`[nyfed] effr HTTP ${res.status}`); return []; }
-    const csv = await res.text();
-    const lines = csv.trim().split('\n');
+    const json = await res.json() as { refRates?: { effectiveDate: string; percentRate: number }[] };
+    const rates = json?.refRates ?? [];
     const pts: { date: string; value: number }[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',');
-      if (cols.length < 2) continue;
-      const rawDate = cols[0].trim().replace(/"/g, '');  // MM/DD/YYYY
-      const rate = parseFloat(cols[1].trim().replace(/"/g, ''));
-      if (!isFinite(rate)) continue;
-      const parts = rawDate.split('/');
-      if (parts.length !== 3) continue;
-      const date = `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+    for (const r of rates) {
+      const date = r.effectiveDate;
+      if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      if (!isFinite(r.percentRate)) continue;
       if (fromDate && date < fromDate) continue;
-      pts.push({ date, value: rate });
+      pts.push({ date, value: r.percentRate });
     }
     pts.sort((a, b) => a.date.localeCompare(b.date));
     console.log(`[nyfed] effr loaded ${pts.length} points`);
@@ -517,64 +513,64 @@ export async function GET(req: NextRequest) {
   from.setMonth(from.getMonth() - 6);
   const fromStr = from.toISOString().split('T')[0];
 
-  // Step 1: try FRED for all IDs in parallel (fastest path)
-  const fredAll = await Promise.all(ids.map(id => fetchFRED(id, fromStr).then(pts => ({ id, pts }))));
-  const needFallback = fredAll.filter(r => r.pts.length === 0).map(r => r.id);
+  // ── Parallel fetch: FRED + all fallback sources start simultaneously ──
+  // FRED is blocked on most Vercel IPs; 2s timeout lets it fail fast instead
+  // of burning 12s (two endpoints × 6s each) before fallbacks even start.
+  const allBlsIds = ids.filter(id => BLS_MAP[id]).map(id => BLS_MAP[id]);
+  const needsT2  = ids.some(id => id === 'DGS2'  || id === 'T10Y2Y');
+  const needsT10 = ids.some(id => id === 'DGS10' || id === 'T10Y2Y');
 
-  // Step 2: batch ONE BLS call for all employment/inflation series that need it
-  const blsNeeded = needFallback.filter(id => BLS_MAP[id]);
-  const blsBatch = blsNeeded.length > 0
-    ? await fetchBLSBatch(blsNeeded.map(id => BLS_MAP[id]), fromStr)
-    : new Map<string, { date: string; value: number }[]>();
+  const [fredResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts] = await Promise.all([
+    Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
+    allBlsIds.length
+      ? fetchBLSBatch(allBlsIds, fromStr, 6_000)
+      : Promise.resolve(new Map<string, { date: string; value: number }[]>()),
+    needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000) : Promise.resolve<{ date: string; value: number }[]>([]),
+    needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000) : Promise.resolve<{ date: string; value: number }[]>([]),
+    ids.includes('DFF')    ? fetchNYFedEffr(fromStr, 5_000) : Promise.resolve<{ date: string; value: number }[]>([]),
+    ids.includes('ECBDFR') ? fetchECBRate(fromStr,  4_000) : Promise.resolve<{ date: string; value: number }[]>([]),
+  ]);
 
-  // Step 3: Treasury CSV / Yahoo / NY Fed / ECB fallbacks for rate series
-  const rateNeeded = needFallback.filter(id =>
-    TREASURY_COL[id] || YAHOO_YIELD_MAP[id] || id === 'DFF' || id === 'T10Y2Y' || id === 'ECBDFR'
+  const fredMap = new Map(fredResults.map(r => [r.id, r.pts]));
+  const needFallback = ids.filter(id => (fredMap.get(id) ?? []).length === 0);
+
+  // Yahoo yield fallback for DGS10/DGS2 if Treasury CSV also failed
+  const yahooMap = new Map<string, { date: string; value: number }[]>();
+  const yahooNeeded = needFallback.filter(id =>
+    (id === 'DGS10' && !tDgs10.length) || (id === 'DGS2' && !tDgs2.length)
   );
-  const rateFallback = new Map<string, { date: string; value: number }[]>();
-  if (rateNeeded.length > 0) {
-    // Pre-fetch US Treasury CSV once (one request covers both DGS2 and DGS10 columns)
-    const needsT2  = rateNeeded.some(id => id === 'DGS2'  || id === 'T10Y2Y');
-    const needsT10 = rateNeeded.some(id => id === 'DGS10' || id === 'T10Y2Y');
-    const [tDgs2, tDgs10] = await Promise.all([
-      needsT2  ? fetchUSTreasury('DGS2',  fromStr) : Promise.resolve<{ date: string; value: number }[]>([]),
-      needsT10 ? fetchUSTreasury('DGS10', fromStr) : Promise.resolve<{ date: string; value: number }[]>([]),
-    ]);
-
-    await Promise.all(rateNeeded.map(async id => {
-      let pts: { date: string; value: number }[] = [];
-      if (id === 'DFF') {
-        pts = await fetchNYFedEffr(fromStr);
-      } else if (id === 'ECBDFR') {
-        pts = await fetchECBRate(fromStr);
-      } else if (id === 'DGS2') {
-        pts = tDgs2.length ? tDgs2 : await fetchYahooYield(YAHOO_YIELD_MAP['DGS2'] ?? '^IRX', fromStr);
-      } else if (id === 'DGS10') {
-        pts = tDgs10.length ? tDgs10 : await fetchYahooYield(YAHOO_YIELD_MAP['DGS10'] ?? '^TNX', fromStr);
-      } else if (id === 'T10Y2Y') {
-        const fredD10 = fredAll.find(r => r.id === 'DGS10')?.pts ?? [];
-        const fredD2  = fredAll.find(r => r.id === 'DGS2')?.pts  ?? [];
-        const d10 = fredD10.length ? fredD10 : tDgs10.length ? tDgs10 : await fetchYahooYield('^TNX', fromStr);
-        const d2  = fredD2.length  ? fredD2  : tDgs2;
-        if (d10.length && d2.length) {
-          const m2 = new Map(d2.map(p => [p.date, p.value]));
-          pts = d10.filter(p => m2.has(p.date)).map(p => ({ date: p.date, value: p.value - m2.get(p.date)! }));
-        }
-      } else if (YAHOO_YIELD_MAP[id]) {
-        pts = await fetchYahooYield(YAHOO_YIELD_MAP[id], fromStr);
-      }
-      if (pts.length > 0) rateFallback.set(id, pts);
+  if (yahooNeeded.length > 0) {
+    await Promise.all(yahooNeeded.map(async id => {
+      const sym = YAHOO_YIELD_MAP[id];
+      if (!sym) return;
+      const pts = await fetchYahooYield(sym, fromStr);
+      if (pts.length) yahooMap.set(id, pts);
     }));
   }
 
-  // Step 4: assemble final results
-  const results = ids.map(id => {
-    let pts = fredAll.find(r => r.id === id)?.pts ?? [];
-    if (!pts.length) {
-      const blsSym = BLS_MAP[id];
-      if (blsSym) pts = blsBatch.get(blsSym) ?? [];
+  // T10Y2Y: compute spread from best available DGS10 + DGS2
+  let t10y2yPts: { date: string; value: number }[] = [];
+  if (needFallback.includes('T10Y2Y')) {
+    const d10 = (fredMap.get('DGS10') ?? []).length ? fredMap.get('DGS10')!
+      : tDgs10.length ? tDgs10 : yahooMap.get('DGS10') ?? [];
+    const d2  = (fredMap.get('DGS2')  ?? []).length ? fredMap.get('DGS2')!
+      : tDgs2.length  ? tDgs2  : yahooMap.get('DGS2')  ?? [];
+    if (d10.length && d2.length) {
+      const m2 = new Map(d2.map(p => [p.date, p.value]));
+      t10y2yPts = d10.filter(p => m2.has(p.date))
+        .map(p => ({ date: p.date, value: p.value - m2.get(p.date)! }));
     }
-    if (!pts.length) pts = rateFallback.get(id) ?? [];
+  }
+
+  // Assemble final results
+  const results = ids.map(id => {
+    let pts = fredMap.get(id) ?? [];
+    if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
+    if (!pts.length && id === 'DFF')    pts = nyFedPts;
+    if (!pts.length && id === 'ECBDFR') pts = ecbPts;
+    if (!pts.length && id === 'DGS2')   pts = tDgs2.length  ? tDgs2  : yahooMap.get('DGS2')  ?? [];
+    if (!pts.length && id === 'DGS10')  pts = tDgs10.length ? tDgs10 : yahooMap.get('DGS10') ?? [];
+    if (!pts.length && id === 'T10Y2Y') pts = t10y2yPts;
     if (!pts.length) return { id, latest: null, prev: null };
     return {
       id,
