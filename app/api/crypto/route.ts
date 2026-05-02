@@ -99,10 +99,12 @@ export async function GET(req: NextRequest) {
         throw new Error('CoinGecko returned no prices');
       }
 
-      const data = raw.prices.map(([ts, price]) => ({
-        date: new Date(ts).toISOString().split('T')[0],
-        close: price,
-      }));
+      const data = raw.prices
+        .filter(([, price]) => price != null && price > 0 && isFinite(price))
+        .map(([ts, price]) => ({
+          date: new Date(ts).toISOString().split('T')[0],
+          close: price,
+        }));
 
       const unique = Array.from(
         data.reduce((m, d) => { m.set(d.date, d); return m; }, new Map<string, { date: string; close: number }>()).values()

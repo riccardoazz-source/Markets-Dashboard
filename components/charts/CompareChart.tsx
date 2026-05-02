@@ -41,38 +41,47 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
     const point: Record<string, unknown> = { date };
     assets.forEach(a => {
       const match = a.data.find(d => d.date === date);
-      // Only include positive values when using log scale
       const v = match ? match.close : null;
-      point[a.symbol] = v != null && v > 0 ? v : null;
+      // Guard against Infinity/NaN that can crash Recharts scale computation
+      point[a.symbol] = v != null && v > 0 && isFinite(v) ? v : null;
 
       // TR series (total return with dividends)
       if (a.trData) {
         const trMatch = a.trData.find(d => d.date === date);
         const tv = trMatch ? trMatch.close : null;
-        point[`${a.symbol}_tr`] = tv != null && tv > 0 ? tv : null;
+        point[`${a.symbol}_tr`] = tv != null && tv > 0 && isFinite(tv) ? tv : null;
       }
     });
     return point;
   });
 
-  // For log scale: pre-compute nice tick values from the data range so recharts
-  // doesn't generate dense or fractional ticks.
-  const logTicks = (() => {
-    if (!logScale) return undefined;
+  // For log scale: scan data range for explicit domain + nice tick values.
+  // Using 'auto' domain with log scale can crash Recharts/D3 when no valid
+  // positive values exist (D3 log scale cannot handle 0 or negative domain).
+  const { logTicks, logDomain } = (() => {
+    if (!logScale) return { logTicks: undefined, logDomain: ['auto', 'auto'] as [string | number, string | number] };
     let lo = Infinity, hi = -Infinity;
     assets.forEach(a => {
       [...a.data, ...(a.trData ?? [])].forEach(d => {
-        if (d.close > 0) { lo = Math.min(lo, d.close); hi = Math.max(hi, d.close); }
+        if (d.close > 0 && isFinite(d.close)) {
+          lo = Math.min(lo, d.close);
+          hi = Math.max(hi, d.close);
+        }
       });
     });
-    if (!isFinite(lo) || !isFinite(hi)) return undefined;
+    // Fall back to a safe range so D3 log scale never receives 0 / NaN domain
+    const safeLo = isFinite(lo) && lo > 0 ? Math.max(lo * 0.85, 0.1) : 1;
+    const safeHi = isFinite(hi) && hi > 0 ? hi * 1.15 : 1000;
     const candidates = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
-    const filtered = candidates.filter(c => c >= lo * 0.8 && c <= hi * 1.2);
-    return filtered.length >= 2 ? filtered : undefined;
+    const filtered = candidates.filter(c => c >= safeLo && c <= safeHi);
+    return {
+      logTicks: filtered.length >= 2 ? filtered : undefined,
+      logDomain: [safeLo, safeHi] as [number, number],
+    };
   })();
 
   const yAxisProps = logScale
-    ? { scale: 'log' as const, domain: ['auto', 'auto'] as [string | number, string | number], allowDataOverflow: false, ticks: logTicks }
+    ? { scale: 'log' as const, domain: logDomain, allowDataOverflow: false, ticks: logTicks }
     : { domain: ['auto', 'auto'] as [string | number, string | number] };
 
   // Legend entries: one per series (including TR lines)

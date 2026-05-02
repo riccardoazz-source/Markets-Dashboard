@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from 'react';
 import { ALL_COMPARABLE_ASSETS } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
@@ -13,6 +13,28 @@ import { CompareChart } from '@/components/charts/CompareChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { X, Search } from 'lucide-react';
+
+class ChartErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error) { console.error('[CompareChart] render error:', error); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center h-48 text-gray-500 text-sm">
+          Chart rendering error — try a different timeframe or asset.
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const PRESETS = [
   { label: 'Indexes', symbols: ['^GSPC', '^NDX', '^STOXX50E', 'URTH'] },
@@ -337,7 +359,7 @@ export function CompareSection() {
           </div>
         </div>
       ) : displayAssets.length > 0 ? (
-        <>
+        <ChartErrorBoundary>
           <div className="rounded-xl border border-border bg-bg-card p-4">
             <CompareChart assets={displayAssets} height={360} logScale={logScale} />
           </div>
@@ -381,7 +403,7 @@ export function CompareSection() {
               names={Object.fromEntries(assets.map(a => [a.symbol, a.name]))}
             />
           )}
-        </>
+        </ChartErrorBoundary>
       ) : (
         <div className="flex items-center justify-center h-48 text-gray-500 text-sm">
           Select assets to compare

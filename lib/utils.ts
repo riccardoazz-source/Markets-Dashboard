@@ -106,7 +106,11 @@ export function calculateCAGR(
 
 export function normalizeData(data: HistoricalPoint[]): HistoricalPoint[] {
   if (!data || data.length === 0) return [];
-  const base = data[0].close;
+  // Use the first positive finite value as the base to avoid Infinity/NaN
+  // when the opening price is 0 or invalid (e.g. CoinGecko placeholder rows).
+  const basePoint = data.find(d => d.close > 0 && isFinite(d.close));
+  if (!basePoint) return data.slice();
+  const base = basePoint.close;
   return data.map(d => ({ ...d, close: (d.close / base) * 100 }));
 }
 
