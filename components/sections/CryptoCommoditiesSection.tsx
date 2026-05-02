@@ -45,7 +45,8 @@ export function CryptoCommoditiesSection() {
       const daysMap: Record<string, number> = { '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650 };
       const days = daysMap[tf] ?? 365;
       const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
-      const data = await res.json() as HistoricalPoint[];
+      const raw = await res.json() as HistoricalPoint[];
+      const data = Array.isArray(raw) ? raw : [];
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
     } catch (e) { console.error(e); }

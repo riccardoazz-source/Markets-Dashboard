@@ -68,7 +68,8 @@ export function SectorsSection() {
     setHistLoading(true);
     try {
       const res = await fetch(`/api/historical?symbol=${symbol}&timeframe=${tf}`);
-      const data = await res.json() as HistoricalPoint[];
+      const raw = await res.json() as HistoricalPoint[];
+      const data = Array.isArray(raw) ? raw : [];
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
     } catch (e) {

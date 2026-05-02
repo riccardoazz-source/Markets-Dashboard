@@ -37,7 +37,7 @@ export function PriceChart({
   data, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false,
 }: Props) {
-  if (!data || data.length === 0) {
+  if (!data || data.length === 0 || !data[0]) {
     return (
       <div className="flex items-center justify-center text-gray-500 text-sm" style={{ height }}>
         No data available
