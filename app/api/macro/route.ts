@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchYahooChart } from '@/lib/yahoo';
 
 // Explicitly use Node.js runtime (not Edge) so FRED requests come from AWS Lambda IPs.
 export const runtime = 'nodejs';
@@ -176,140 +177,173 @@ async function fetchFRED(
   return fetchFREDTxt(seriesId, fromDate, timeoutMs);
 }
 
-// ---------- Stooq (free, works from Vercel, no key) ----------
-// Maps selected FRED rate series to Stooq symbols.
-const STOOQ_MAP: Record<string, string> = {
-  'DGS10':       '10usy.b',    // US 10-Year Treasury
-  'DGS2':        '2usy.b',     // US 2-Year Treasury
-  'DFF':         'fffunds.b',  // Effective Fed Funds Rate
-  'MORTGAGE30US':'30usmr.b',   // 30-Year Mortgage Rate
+// ---------- Yahoo Finance yields (^TNX = 10Y, works from Vercel) ----------
+const YAHOO_YIELD_MAP: Record<string, string> = {
+  'DGS10': '^TNX',  // US 10-Year Treasury Note Yield (in %)
 };
 
-async function fetchStooq(
-  symbol: string,
+async function fetchYahooYield(
+  yahooSym: string,
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  const from = fromDate ? new Date(fromDate) : new Date('2000-01-01');
+  const to   = new Date();
+  const daysAgo = (Date.now() - from.getTime()) / 86_400_000;
+  const interval: '1d' | '1wk' | '1mo' = daysAgo > 1500 ? '1mo' : daysAgo > 300 ? '1wk' : '1d';
+  try {
+    const pts = await fetchYahooChart(yahooSym, from, to, interval);
+    return pts.map(p => ({ date: p.date, value: p.close }));
+  } catch (e) {
+    console.error(`[yahoo-yield] ${yahooSym} failed:`, (e as Error).message);
+    return [];
+  }
+}
+
+// ---------- NY Fed EFFR CSV (Effective Federal Funds Rate, no key) ----------
+async function fetchNYFedEffr(
   fromDate?: string,
   timeoutMs = 7_000,
 ): Promise<{ date: string; value: number }[]> {
-  const d1 = fromDate ? fromDate.replace(/-/g, '') : '19900101';
-  const d2 = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol)}&d1=${d1}&d2=${d2}&i=d`;
+  const url = 'https://markets.newyorkfed.org/api/rates/effr/all/chart.csv';
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      signal: ctrl.signal,
-      cache: 'no-store',
-      headers: { 'User-Agent': UA, 'Accept': 'text/csv,text/plain,*/*' },
+      signal: ctrl.signal, cache: 'no-store',
+      headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*' },
     });
-    if (!res.ok) { console.error(`[stooq] ${symbol} HTTP ${res.status}`); return []; }
+    if (!res.ok) { console.error(`[nyfed] effr HTTP ${res.status}`); return []; }
     const csv = await res.text();
-    if (!csv || csv.length < 20 || csv.includes('No data')) return [];
     const lines = csv.trim().split('\n');
     const pts: { date: string; value: number }[] = [];
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].split(',');
-      if (cols.length < 5) continue;
-      const date = cols[0].trim();
-      const close = parseFloat(cols[4].trim()); // Close column
-      if (/^\d{4}-\d{2}-\d{2}$/.test(date) && isFinite(close) && close > 0) {
-        pts.push({ date, value: close });
-      }
+      if (cols.length < 2) continue;
+      const rawDate = cols[0].trim().replace(/"/g, '');  // MM/DD/YYYY
+      const rate = parseFloat(cols[1].trim().replace(/"/g, ''));
+      if (!isFinite(rate)) continue;
+      const parts = rawDate.split('/');
+      if (parts.length !== 3) continue;
+      const date = `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+      if (fromDate && date < fromDate) continue;
+      pts.push({ date, value: rate });
     }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[nyfed] effr loaded ${pts.length} points`);
     return pts;
   } catch (e) {
-    console.error(`[stooq] ${symbol} failed:`, (e as Error).message);
+    console.error('[nyfed] effr failed:', (e as Error).message);
     return [];
   } finally {
     clearTimeout(t);
   }
 }
 
-// ---------- BLS public API (free, no key, works from Vercel) ----------
-// Covers employment and inflation series.
+// ---------- BLS public API ----------
+// Maps FRED series IDs to BLS series IDs.
 const BLS_MAP: Record<string, string> = {
-  'UNRATE':   'LNS14000000',   // Unemployment Rate (seasonally adj.)
-  'PAYEMS':   'CES0000000001', // Total Nonfarm Payrolls (thousands)
-  'CPIAUCSL': 'CUUR0000SA0',   // CPI All Urban, All Items (not SA)
-  'CPILFESL': 'CUUR0000SA0L1E',// CPI Less Food & Energy
+  'UNRATE':   'LNS14000000',    // Unemployment Rate (seasonally adj.)
+  'PAYEMS':   'CES0000000001',  // Total Nonfarm Payrolls (thousands)
+  'CPIAUCSL': 'CUUR0000SA0',    // CPI All Urban, All Items
+  'CPILFESL': 'CUUR0000SA0L1E', // CPI Less Food & Energy
 };
 
-async function fetchBLS(
-  blsSeriesId: string,
+type BlsRow = { year: string; period: string; value: string };
+type BlsSeries = { seriesID: string; data: BlsRow[] };
+
+// Batch-fetch multiple BLS series in ONE API call (25 queries/day limit per IP).
+// Returns a map from BLS series ID → sorted points.
+async function fetchBLSBatch(
+  blsIds: string[],
   fromDate?: string,
-  timeoutMs = 9_000,
-): Promise<{ date: string; value: number }[]> {
-  const fromYear = fromDate ? fromDate.slice(0, 4) : '2010';
+  timeoutMs = 12_000,
+): Promise<Map<string, { date: string; value: number }[]>> {
+  const result = new Map<string, { date: string; value: number }[]>();
+  if (!blsIds.length) return result;
+  const fromYear = fromDate ? fromDate.slice(0, 4) : String(new Date().getFullYear() - 5);
   const toYear   = String(new Date().getFullYear());
-  const url = 'https://api.bls.gov/publicAPI/v2/timeseries/data/';
-  const body = JSON.stringify({ seriesid: [blsSeriesId], startyear: fromYear, endyear: toYear });
+  const body = JSON.stringify({ seriesid: blsIds, startyear: fromYear, endyear: toYear });
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      signal: ctrl.signal,
-      cache: 'no-store',
-      headers: { 'Content-Type': 'application/json' },
-      body,
+    const res = await fetch('https://api.bls.gov/publicAPI/v2/timeseries/data/', {
+      method: 'POST', signal: ctrl.signal, cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }, body,
     });
-    if (!res.ok) { console.error(`[bls] ${blsSeriesId} HTTP ${res.status}`); return []; }
-    const json = await res.json() as {
-      Results?: { series?: Array<{ data: Array<{ year: string; period: string; value: string }> }> };
-    };
-    const rows = json?.Results?.series?.[0]?.data ?? [];
-    if (!rows.length) return [];
-    const pts: { date: string; value: number }[] = [];
-    for (const r of rows) {
-      if (!r.period.startsWith('M')) continue; // skip annual rows
-      const month = r.period.slice(1).padStart(2, '0');
-      const date  = `${r.year}-${month}-01`;
-      const val   = parseFloat(r.value);
-      if (isFinite(val)) pts.push({ date, value: val });
+    if (!res.ok) { console.error(`[bls-batch] HTTP ${res.status}`); return result; }
+    const json = await res.json() as { Results?: { series?: BlsSeries[] } };
+    for (const s of json?.Results?.series ?? []) {
+      const pts: { date: string; value: number }[] = [];
+      for (const r of s.data) {
+        if (!r.period.startsWith('M')) continue;
+        const month = r.period.slice(1).padStart(2, '0');
+        const date  = `${r.year}-${month}-01`;
+        const val   = parseFloat(r.value);
+        if (isFinite(val)) pts.push({ date, value: val });
+      }
+      pts.sort((a, b) => a.date.localeCompare(b.date));
+      result.set(s.seriesID, pts);
     }
-    pts.sort((a, b) => a.date.localeCompare(b.date));
-    return pts;
+    console.log(`[bls-batch] loaded ${result.size}/${blsIds.length} series`);
+    return result;
   } catch (e) {
-    console.error(`[bls] ${blsSeriesId} failed:`, (e as Error).message);
-    return [];
+    console.error('[bls-batch] failed:', (e as Error).message);
+    return result;
   } finally {
     clearTimeout(t);
   }
 }
 
-// ---------- Master fetch: FRED → Stooq / BLS fallback ----------
+// Single-series BLS fetch (used in history mode)
+async function fetchBLS(
+  blsId: string,
+  fromDate?: string,
+  timeoutMs = 10_000,
+): Promise<{ date: string; value: number }[]> {
+  const batch = await fetchBLSBatch([blsId], fromDate, timeoutMs);
+  return batch.get(blsId) ?? [];
+}
+
+// ---------- Master fetch: FRED → Yahoo/NYFed/BLS fallback ----------
 async function fetchMacroSeries(
   fredId: string,
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  // T10Y2Y is a computed spread — handle separately
+  // T10Y2Y: compute as DGS10 - DGS2 when FRED is blocked
   if (fredId === 'T10Y2Y') {
-    const stooqId10 = STOOQ_MAP['DGS10'];
-    const stooqId2  = STOOQ_MAP['DGS2'];
+    const fred = await fetchFRED('T10Y2Y', fromDate);
+    if (fred.length > 0) return fred;
     const [d10, d2] = await Promise.all([
-      fetchFRED('DGS10', fromDate).then(d => d.length > 0 ? d : fetchStooq(stooqId10, fromDate)),
-      fetchFRED('DGS2',  fromDate).then(d => d.length > 0 ? d : fetchStooq(stooqId2,  fromDate)),
+      fetchMacroSeries('DGS10', fromDate),
+      fetchFRED('DGS2', fromDate),
     ]);
     if (!d10.length || !d2.length) return [];
     const map2 = new Map(d2.map(p => [p.date, p.value]));
     return d10.filter(p => map2.has(p.date)).map(p => ({ date: p.date, value: p.value - map2.get(p.date)! }));
   }
 
-  // Try FRED first (works when FRED_API_KEY is set, or if not blocked)
+  // Try FRED first (works when FRED_API_KEY is set or FRED isn't blocked)
   const fred = await fetchFRED(fredId, fromDate);
   if (fred.length > 0) return fred;
 
-  // Stooq fallback for rate series
-  const stooqSym = STOOQ_MAP[fredId];
-  if (stooqSym) {
-    const sq = await fetchStooq(stooqSym, fromDate);
-    if (sq.length > 0) { console.log(`[macro] ${fredId} loaded from Stooq`); return sq; }
+  // Yahoo Finance fallback for Treasury yields
+  const yahooSym = YAHOO_YIELD_MAP[fredId];
+  if (yahooSym) {
+    const pts = await fetchYahooYield(yahooSym, fromDate);
+    if (pts.length > 0) { console.log(`[macro] ${fredId} loaded from Yahoo (${yahooSym})`); return pts; }
+  }
+
+  // NY Fed fallback for Fed Funds Rate
+  if (fredId === 'DFF') {
+    const pts = await fetchNYFedEffr(fromDate);
+    if (pts.length > 0) { console.log(`[macro] DFF loaded from NY Fed`); return pts; }
   }
 
   // BLS fallback for employment / inflation
   const blsSym = BLS_MAP[fredId];
   if (blsSym) {
-    const bls = await fetchBLS(blsSym, fromDate);
-    if (bls.length > 0) { console.log(`[macro] ${fredId} loaded from BLS`); return bls; }
+    const pts = await fetchBLS(blsSym, fromDate);
+    if (pts.length > 0) { console.log(`[macro] ${fredId} loaded from BLS`); return pts; }
   }
 
   return [];
@@ -358,19 +392,57 @@ export async function GET(req: NextRequest) {
   from.setMonth(from.getMonth() - 6);
   const fromStr = from.toISOString().split('T')[0];
 
-  // Parallelize ALL requests (each is to a different series URL — no batching needed)
-  const results = await Promise.all(ids.map(async (id) => {
-    const pts = await fetchMacroSeries(id, fromStr);
-    if (pts.length === 0) return { id, latest: null, prev: null };
+  // Step 1: try FRED for all IDs in parallel (fastest path)
+  const fredAll = await Promise.all(ids.map(id => fetchFRED(id, fromStr).then(pts => ({ id, pts }))));
+  const needFallback = fredAll.filter(r => r.pts.length === 0).map(r => r.id);
+
+  // Step 2: batch ONE BLS call for all employment/inflation series that need it
+  const blsNeeded = needFallback.filter(id => BLS_MAP[id]);
+  const blsBatch = blsNeeded.length > 0
+    ? await fetchBLSBatch(blsNeeded.map(id => BLS_MAP[id]), fromStr)
+    : new Map<string, { date: string; value: number }[]>();
+
+  // Step 3: Yahoo/NYFed in parallel for rate series that need it
+  const rateNeeded = needFallback.filter(id => YAHOO_YIELD_MAP[id] || id === 'DFF' || id === 'T10Y2Y');
+  const rateFallback = new Map<string, { date: string; value: number }[]>();
+  await Promise.all(rateNeeded.map(async id => {
+    let pts: { date: string; value: number }[] = [];
+    if (id === 'T10Y2Y') {
+      // Try computing spread from available data
+      const d10 = fredAll.find(r => r.id === 'DGS10')?.pts.length
+        ? fredAll.find(r => r.id === 'DGS10')!.pts
+        : await fetchYahooYield(YAHOO_YIELD_MAP['DGS10'], fromStr);
+      const d2 = fredAll.find(r => r.id === 'DGS2')?.pts ?? [];
+      if (d10.length > 0 && d2.length > 0) {
+        const map2 = new Map(d2.map(p => [p.date, p.value]));
+        pts = d10.filter(p => map2.has(p.date)).map(p => ({ date: p.date, value: p.value - map2.get(p.date)! }));
+      }
+    } else if (id === 'DFF') {
+      pts = await fetchNYFedEffr(fromStr);
+    } else if (YAHOO_YIELD_MAP[id]) {
+      pts = await fetchYahooYield(YAHOO_YIELD_MAP[id], fromStr);
+    }
+    if (pts.length > 0) rateFallback.set(id, pts);
+  }));
+
+  // Step 4: assemble final results
+  const results = ids.map(id => {
+    let pts = fredAll.find(r => r.id === id)?.pts ?? [];
+    if (!pts.length) {
+      const blsSym = BLS_MAP[id];
+      if (blsSym) pts = blsBatch.get(blsSym) ?? [];
+    }
+    if (!pts.length) pts = rateFallback.get(id) ?? [];
+    if (!pts.length) return { id, latest: null, prev: null };
     return {
       id,
       latest: pts[pts.length - 1],
       prev: pts.length > 1 ? pts[pts.length - 2] : null,
     };
-  }));
+  });
 
   const okCount = results.filter(r => r.latest != null).length;
-  console.log(`[macro] list: ${okCount}/${ids.length} series loaded`);
+  console.log(`[macro] list: ${okCount}/${ids.length} series (FRED ${ids.length - needFallback.length}, fallback ${okCount - (ids.length - needFallback.length)})`);
 
   // Don't cache an all-empty response (probably a transient FRED issue)
   if (okCount > 0) {
