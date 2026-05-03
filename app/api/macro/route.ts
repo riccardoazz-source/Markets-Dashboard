@@ -201,12 +201,16 @@ async function fetchYahooYield(
 }
 
 // ---------- NY Fed EFFR (Effective Federal Funds Rate, no key) ----------
-// JSON API is simpler and avoids date-format ambiguity in the CSV endpoint.
+// recentOnly=true → last/10.json (~500 B); false → all/data.json (full history, ~2 MB).
 async function fetchNYFedEffr(
   fromDate?: string,
   timeoutMs = 5_000,
+  recentOnly = false,
 ): Promise<{ date: string; value: number }[]> {
-  const url = 'https://markets.newyorkfed.org/api/rates/effr/all/data.json';
+  // For list mode we only need 2 points; last/10 is ~500 B vs all/data ~2 MB.
+  const url = recentOnly
+    ? 'https://markets.newyorkfed.org/api/rates/effr/last/10.json'
+    : 'https://markets.newyorkfed.org/api/rates/effr/all/data.json';
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -226,7 +230,7 @@ async function fetchNYFedEffr(
       pts.push({ date, value: r.percentRate });
     }
     pts.sort((a, b) => a.date.localeCompare(b.date));
-    console.log(`[nyfed] effr loaded ${pts.length} points`);
+    console.log(`[nyfed] effr loaded ${pts.length} points (recentOnly=${recentOnly})`);
     return pts;
   } catch (e) {
     console.error('[nyfed] effr failed:', (e as Error).message);
@@ -245,54 +249,81 @@ const TREASURY_COL: Record<string, string> = {
   'DGS10': '10 Yr',
 };
 
+function buildTreasuryUrl(year?: number): string {
+  const base = 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates';
+  const suffix = '?type=daily_treasury_yield_curve&download=true';
+  if (year) return `${base}/daily-treasury-rates.csv/${year}/all${suffix}`;
+  return `${base}/daily-treasury-rates.csv/all/all${suffix}&field_tdr_date_value=all`;
+}
+
+function parseTreasuryCsv(csv: string, col: string, fromDate?: string) {
+  const lines = csv.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  const colIdx = headers.indexOf(col);
+  if (colIdx === -1) return [];
+  const pts: { date: string; value: number }[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(',');
+    if (parts.length <= colIdx) continue;
+    const raw = parts[0].trim().replace(/"/g, ''); // MM/DD/YYYY
+    const segs = raw.split('/');
+    if (segs.length !== 3) continue;
+    const date = `${segs[2]}-${segs[0].padStart(2, '0')}-${segs[1].padStart(2, '0')}`;
+    if (fromDate && date < fromDate) continue;
+    const val = parseFloat(parts[colIdx].trim().replace(/"/g, ''));
+    if (isFinite(val)) pts.push({ date, value: val });
+  }
+  pts.sort((a, b) => a.date.localeCompare(b.date));
+  return pts;
+}
+
 async function fetchUSTreasury(
   fredId: string,
   fromDate?: string,
-  timeoutMs = 10_000,
+  timeoutMs = 5_000,
+  recentOnly = false,
 ): Promise<{ date: string; value: number }[]> {
   const col = TREASURY_COL[fredId];
   if (!col) return [];
-  const url =
-    'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' +
-    '/daily-treasury-rates.csv/all/all?type=daily_treasury_yield_curve' +
-    '&field_tdr_date_value=all&download=true';
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      signal: ctrl.signal, cache: 'no-store',
-      headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*', 'Referer': 'https://home.treasury.gov/' },
-    });
-    if (!res.ok) { console.error(`[treasury] HTTP ${res.status}`); return []; }
-    const csv = await res.text();
-    if (!csv || csv.length < 50) return [];
-    const lines = csv.trim().split('\n');
-    if (lines.length < 2) return [];
-    // Header: Date,1 Mo,2 Mo,3 Mo,4 Mo,6 Mo,1 Yr,2 Yr,3 Yr,5 Yr,7 Yr,10 Yr,20 Yr,30 Yr,...
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-    const colIdx = headers.indexOf(col);
-    if (colIdx === -1) { console.warn(`[treasury] column '${col}' not found`); return []; }
-    const pts: { date: string; value: number }[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split(',');
-      if (parts.length <= colIdx) continue;
-      const raw = parts[0].trim().replace(/"/g, '');   // MM/DD/YYYY
-      const segs = raw.split('/');
-      if (segs.length !== 3) continue;
-      const date = `${segs[2]}-${segs[0].padStart(2, '0')}-${segs[1].padStart(2, '0')}`;
-      if (fromDate && date < fromDate) continue;
-      const val = parseFloat(parts[colIdx].trim().replace(/"/g, ''));
-      if (isFinite(val)) pts.push({ date, value: val });
+
+  const tryUrl = async (url: string): Promise<string | null> => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal, cache: 'no-store',
+        headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*', 'Referer': 'https://home.treasury.gov/' },
+      });
+      if (!res.ok) { console.error(`[treasury] HTTP ${res.status} for ${url}`); return null; }
+      return await res.text();
+    } catch (e) {
+      console.error(`[treasury] ${fredId} failed:`, (e as Error).message);
+      return null;
+    } finally { clearTimeout(t); }
+  };
+
+  if (recentOnly) {
+    // For list mode: only need latest + prev — fetch current year CSV (~80 rows vs 20k)
+    const now = new Date();
+    for (const yr of [now.getFullYear(), now.getFullYear() - 1]) {
+      const csv = await tryUrl(buildTreasuryUrl(yr));
+      if (!csv || csv.length < 50) continue;
+      const pts = parseTreasuryCsv(csv, col, fromDate);
+      if (pts.length > 0) {
+        console.log(`[treasury] ${fredId} loaded ${pts.length} pts from ${yr}`);
+        return pts;
+      }
     }
-    pts.sort((a, b) => a.date.localeCompare(b.date));
-    console.log(`[treasury] ${fredId} loaded ${pts.length} points`);
-    return pts;
-  } catch (e) {
-    console.error(`[treasury] ${fredId} failed:`, (e as Error).message);
     return [];
-  } finally {
-    clearTimeout(t);
   }
+
+  // History mode: fetch full dataset
+  const csv = await tryUrl(buildTreasuryUrl());
+  if (!csv || csv.length < 50) return [];
+  const pts = parseTreasuryCsv(csv, col, fromDate);
+  console.log(`[treasury] ${fredId} loaded ${pts.length} points`);
+  return pts;
 }
 
 // ---------- ECB Data Portal (Deposit Facility Rate = ECBDFR, no key) ----------
@@ -526,16 +557,17 @@ export async function GET(req: NextRequest) {
     Promise.race([p, new Promise<T>(r => setTimeout(() => r(fb), 6_000))]);
 
   const needsYTnx = ids.includes('DGS10') || ids.includes('T10Y2Y');
-  const needsYIrx = ids.includes('DGS2')  || ids.includes('T10Y2Y');
+  // ^IRX is also the DFF fallback (13W T-Bill ≈ Fed Funds Rate within ~10 bps)
+  const needsYIrx = ids.includes('DGS2') || ids.includes('T10Y2Y') || ids.includes('DFF');
 
   const [fredResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts, yahooTnx, yahooIrx] = await Promise.all([
     Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
     allBlsIds.length
       ? fetchBLSBatch(allBlsIds, fromStr, 6_000)
       : Promise.resolve(new Map<string, Pts>()),
-    needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000) : Promise.resolve<Pts>([]),
-    needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000) : Promise.resolve<Pts>([]),
-    ids.includes('DFF')    ? fetchNYFedEffr(fromStr, 5_000) : Promise.resolve<Pts>([]),
+    needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000, true) : Promise.resolve<Pts>([]),
+    needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000, true) : Promise.resolve<Pts>([]),
+    ids.includes('DFF')    ? fetchNYFedEffr(fromStr, 5_000, true) : Promise.resolve<Pts>([]),
     ids.includes('ECBDFR') ? fetchECBRate(fromStr,  4_000)  : Promise.resolve<Pts>([]),
     needsYTnx ? cap6(fetchYahooYield('^TNX', fromStr), [] as Pts) : Promise.resolve<Pts>([]),
     needsYIrx ? cap6(fetchYahooYield('^IRX', fromStr), [] as Pts) : Promise.resolve<Pts>([]),
@@ -562,7 +594,8 @@ export async function GET(req: NextRequest) {
   const results = ids.map(id => {
     let pts = fredMap.get(id) ?? [];
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
-    if (!pts.length && id === 'DFF')    pts = nyFedPts;
+    // DFF: NY Fed JSON → Yahoo ^IRX (13W T-Bill ≈ Fed Funds Rate within ~10 bps)
+    if (!pts.length && id === 'DFF')    pts = nyFedPts.length ? nyFedPts : yahooIrx;
     if (!pts.length && id === 'ECBDFR') pts = ecbPts;
     if (!pts.length && id === 'DGS2')   pts = tDgs2.length  ? tDgs2  : yahooIrx;
     if (!pts.length && id === 'DGS10')  pts = tDgs10.length ? tDgs10 : yahooTnx;
