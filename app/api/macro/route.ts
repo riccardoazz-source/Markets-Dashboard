@@ -520,41 +520,37 @@ export async function GET(req: NextRequest) {
   const needsT2  = ids.some(id => id === 'DGS2'  || id === 'T10Y2Y');
   const needsT10 = ids.some(id => id === 'DGS10' || id === 'T10Y2Y');
 
-  const [fredResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts] = await Promise.all([
+  type Pts = { date: string; value: number }[];
+  // Cap Yahoo at 6s — it's a last resort and we must stay under the 10s Lambda limit
+  const cap6 = <T>(p: Promise<T>, fb: T): Promise<T> =>
+    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fb), 6_000))]);
+
+  const needsYTnx = ids.includes('DGS10') || ids.includes('T10Y2Y');
+  const needsYIrx = ids.includes('DGS2')  || ids.includes('T10Y2Y');
+
+  const [fredResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts, yahooTnx, yahooIrx] = await Promise.all([
     Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
     allBlsIds.length
       ? fetchBLSBatch(allBlsIds, fromStr, 6_000)
-      : Promise.resolve(new Map<string, { date: string; value: number }[]>()),
-    needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000) : Promise.resolve<{ date: string; value: number }[]>([]),
-    needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000) : Promise.resolve<{ date: string; value: number }[]>([]),
-    ids.includes('DFF')    ? fetchNYFedEffr(fromStr, 5_000) : Promise.resolve<{ date: string; value: number }[]>([]),
-    ids.includes('ECBDFR') ? fetchECBRate(fromStr,  4_000) : Promise.resolve<{ date: string; value: number }[]>([]),
+      : Promise.resolve(new Map<string, Pts>()),
+    needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000) : Promise.resolve<Pts>([]),
+    needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000) : Promise.resolve<Pts>([]),
+    ids.includes('DFF')    ? fetchNYFedEffr(fromStr, 5_000) : Promise.resolve<Pts>([]),
+    ids.includes('ECBDFR') ? fetchECBRate(fromStr,  4_000)  : Promise.resolve<Pts>([]),
+    needsYTnx ? cap6(fetchYahooYield('^TNX', fromStr), [] as Pts) : Promise.resolve<Pts>([]),
+    needsYIrx ? cap6(fetchYahooYield('^IRX', fromStr), [] as Pts) : Promise.resolve<Pts>([]),
   ]);
 
   const fredMap = new Map(fredResults.map(r => [r.id, r.pts]));
   const needFallback = ids.filter(id => (fredMap.get(id) ?? []).length === 0);
 
-  // Yahoo yield fallback for DGS10/DGS2 if Treasury CSV also failed
-  const yahooMap = new Map<string, { date: string; value: number }[]>();
-  const yahooNeeded = needFallback.filter(id =>
-    (id === 'DGS10' && !tDgs10.length) || (id === 'DGS2' && !tDgs2.length)
-  );
-  if (yahooNeeded.length > 0) {
-    await Promise.all(yahooNeeded.map(async id => {
-      const sym = YAHOO_YIELD_MAP[id];
-      if (!sym) return;
-      const pts = await fetchYahooYield(sym, fromStr);
-      if (pts.length) yahooMap.set(id, pts);
-    }));
-  }
-
   // T10Y2Y: compute spread from best available DGS10 + DGS2
-  let t10y2yPts: { date: string; value: number }[] = [];
+  let t10y2yPts: Pts = [];
   if (needFallback.includes('T10Y2Y')) {
     const d10 = (fredMap.get('DGS10') ?? []).length ? fredMap.get('DGS10')!
-      : tDgs10.length ? tDgs10 : yahooMap.get('DGS10') ?? [];
+      : tDgs10.length ? tDgs10 : yahooTnx;
     const d2  = (fredMap.get('DGS2')  ?? []).length ? fredMap.get('DGS2')!
-      : tDgs2.length  ? tDgs2  : yahooMap.get('DGS2')  ?? [];
+      : tDgs2.length  ? tDgs2  : yahooIrx;
     if (d10.length && d2.length) {
       const m2 = new Map(d2.map(p => [p.date, p.value]));
       t10y2yPts = d10.filter(p => m2.has(p.date))
@@ -568,8 +564,8 @@ export async function GET(req: NextRequest) {
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
     if (!pts.length && id === 'DFF')    pts = nyFedPts;
     if (!pts.length && id === 'ECBDFR') pts = ecbPts;
-    if (!pts.length && id === 'DGS2')   pts = tDgs2.length  ? tDgs2  : yahooMap.get('DGS2')  ?? [];
-    if (!pts.length && id === 'DGS10')  pts = tDgs10.length ? tDgs10 : yahooMap.get('DGS10') ?? [];
+    if (!pts.length && id === 'DGS2')   pts = tDgs2.length  ? tDgs2  : yahooIrx;
+    if (!pts.length && id === 'DGS10')  pts = tDgs10.length ? tDgs10 : yahooTnx;
     if (!pts.length && id === 'T10Y2Y') pts = t10y2yPts;
     if (!pts.length) return { id, latest: null, prev: null };
     return {
