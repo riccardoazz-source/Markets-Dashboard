@@ -177,27 +177,64 @@ async function fetchFRED(
   return fetchFREDTxt(seriesId, fromDate, timeoutMs);
 }
 
-// ---------- Yahoo Finance yields (^TNX = 10Y, works from Vercel) ----------
+// ---------- Yahoo Finance yields (^TNX = 10Y, ^IRX = 13W T-Bill) ----------
 const YAHOO_YIELD_MAP: Record<string, string> = {
-  'DGS10': '^TNX',  // US 10-Year Treasury Note Yield (in %)
-  'DGS2':  '^IRX',  // 13-week T-bill as rough 2Y proxy — replaced by Treasury CSV when available
+  'DGS10': '^TNX',
+  'DGS2':  '^IRX', // 13W T-Bill proxy — replaced by Treasury CSV when available
 };
 
+// Uses range-based queries directly, bypassing the period-based path in
+// fetchYahooChart which can take >6s (two hosts × 8s) before failing over.
 async function fetchYahooYield(
   yahooSym: string,
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  const from = fromDate ? new Date(fromDate) : new Date('2000-01-01');
-  const to   = new Date();
-  const daysAgo = (Date.now() - from.getTime()) / 86_400_000;
-  const interval: '1d' | '1wk' | '1mo' = daysAgo > 1500 ? '1mo' : daysAgo > 300 ? '1wk' : '1d';
-  try {
-    const pts = await fetchYahooChart(yahooSym, from, to, interval);
-    return pts.map(p => ({ date: p.date, value: p.close }));
-  } catch (e) {
-    console.error(`[yahoo-yield] ${yahooSym} failed:`, (e as Error).message);
-    return [];
+  const daysAgo = fromDate
+    ? (Date.now() - new Date(fromDate).getTime()) / 86_400_000
+    : 180;
+  const rangeParam = daysAgo > 1500 ? '10y' : daysAgo > 800 ? '5y'
+    : daysAgo > 300 ? '1y' : '6mo';
+  const interval: '1d' | '1wk' | '1mo' = daysAgo > 1500 ? '1mo'
+    : daysAgo > 300 ? '1wk' : '1d';
+
+  for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
+    const url =
+      `https://${host}/v8/finance/chart/${encodeURIComponent(yahooSym)}` +
+      `?range=${rangeParam}&interval=${interval}`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4_000);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal, cache: 'no-store',
+        headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' },
+      });
+      if (!res.ok) { console.warn(`[yahoo-yield] ${yahooSym} ${host} HTTP ${res.status}`); continue; }
+      const json = await res.json() as { chart?: { result?: unknown[] } };
+      const result = json?.chart?.result?.[0] as Record<string, unknown> | undefined;
+      if (!result) { console.warn(`[yahoo-yield] ${yahooSym} ${host} no result`); continue; }
+      const timestamps = (result.timestamp as number[]) ?? [];
+      const closes = (
+        (result.indicators as Record<string, unknown>)?.quote as Array<Record<string, unknown>>
+      )?.[0]?.close as number[] ?? [];
+      const pts: { date: string; value: number }[] = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        const c = closes[i];
+        if (c == null || !isFinite(c) || c <= 0) continue;
+        pts.push({ date: new Date(timestamps[i] * 1000).toISOString().slice(0, 10), value: c });
+      }
+      pts.sort((a, b) => a.date.localeCompare(b.date));
+      if (pts.length > 0) {
+        console.log(`[yahoo-yield] ${yahooSym} ${host}: ${pts.length} pts`);
+        return pts;
+      }
+    } catch (e) {
+      console.error(`[yahoo-yield] ${yahooSym} ${host}:`, (e as Error).message);
+    } finally {
+      clearTimeout(t);
+    }
   }
+  console.warn(`[yahoo-yield] ${yahooSym} all hosts failed`);
+  return [];
 }
 
 // ---------- NY Fed EFFR (Effective Federal Funds Rate, no key) ----------
@@ -552,9 +589,6 @@ export async function GET(req: NextRequest) {
   const needsT10 = ids.some(id => id === 'DGS10' || id === 'T10Y2Y');
 
   type Pts = { date: string; value: number }[];
-  // Cap Yahoo at 6s — it's a last resort and we must stay under the 10s Lambda limit
-  const cap6 = <T>(p: Promise<T>, fb: T): Promise<T> =>
-    Promise.race([p, new Promise<T>(r => setTimeout(() => r(fb), 6_000))]);
 
   const needsYTnx = ids.includes('DGS10') || ids.includes('T10Y2Y');
   // ^IRX is also the DFF fallback (13W T-Bill ≈ Fed Funds Rate within ~10 bps)
@@ -569,8 +603,9 @@ export async function GET(req: NextRequest) {
     needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000, true) : Promise.resolve<Pts>([]),
     ids.includes('DFF')    ? fetchNYFedEffr(fromStr, 5_000, true) : Promise.resolve<Pts>([]),
     ids.includes('ECBDFR') ? fetchECBRate(fromStr,  4_000)  : Promise.resolve<Pts>([]),
-    needsYTnx ? cap6(fetchYahooYield('^TNX', fromStr), [] as Pts) : Promise.resolve<Pts>([]),
-    needsYIrx ? cap6(fetchYahooYield('^IRX', fromStr), [] as Pts) : Promise.resolve<Pts>([]),
+    // fetchYahooYield has its own 4s-per-host timeout (max 8s), so no outer cap needed
+    needsYTnx ? fetchYahooYield('^TNX', fromStr) : Promise.resolve<Pts>([]),
+    needsYIrx ? fetchYahooYield('^IRX', fromStr) : Promise.resolve<Pts>([]),
   ]);
 
   const fredMap = new Map(fredResults.map(r => [r.id, r.pts]));
