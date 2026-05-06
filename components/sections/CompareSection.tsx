@@ -257,8 +257,8 @@ export function CompareSection() {
   const correl = useMemo(() => {
     try {
       const series = displayAssets
-        .filter(a => (a.rawData ?? a.data).length > 1)
-        .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
+        .filter(a => (a.totalReturnData ?? a.rawData ?? a.data).length > 1)
+        .map(a => ({ symbol: a.symbol, data: a.totalReturnData ?? a.rawData ?? a.data }));
       return correlationMatrix(series);
     } catch (e) {
       console.error('[CompareSection] correlationMatrix error:', e);
