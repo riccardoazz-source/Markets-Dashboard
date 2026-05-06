@@ -16,6 +16,13 @@ function getCached(key: string, ttl: number) {
   return null;
 }
 
+// Vercel edge cache + browser cache. s-maxage matches our in-memory TTL so
+// most requests are served at the edge in <50ms instead of going through the
+// full fan-out. stale-while-revalidate keeps the UI snappy during refreshes.
+const CACHE_HEADERS = {
+  'Cache-Control': 'public, s-maxage=1800, stale-while-revalidate=21600',
+};
+
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -176,6 +183,53 @@ async function fetchFRED(
   if (csv.length > 0) return csv;
   // 3. Legacy .txt endpoint (tab-separated, different URL path)
   return fetchFREDTxt(seriesId, fromDate, timeoutMs);
+}
+
+// ---------- DBnomics (Banque de France public mirror of FRED) ----------
+// No API key, no IP blocks observed from Vercel — usually our fastest source
+// for FRED-only series like MORTGAGE30US, ICSA, T10YIE, GDPC1, INDPRO.
+async function fetchDBnomicsFRED(
+  seriesId: string,
+  fromDate?: string,
+  timeoutMs = 4_000,
+): Promise<{ date: string; value: number }[]> {
+  const url = `https://api.db.nomics.world/v22/series/FRED/${encodeURIComponent(seriesId)}?observations=1`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal, cache: 'no-store',
+      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    });
+    if (!res.ok) {
+      console.warn(`[dbnomics] ${seriesId} HTTP ${res.status}`);
+      return [];
+    }
+    const json = await res.json() as {
+      series?: { docs?: Array<{ period?: string[]; value?: (number | string | null)[] }> };
+    };
+    const doc = json?.series?.docs?.[0];
+    if (!doc?.period || !doc?.value) return [];
+    const periods = doc.period;
+    const values = doc.value;
+    const out: { date: string; value: number }[] = [];
+    for (let i = 0; i < periods.length; i++) {
+      const p = periods[i];
+      const v = values[i];
+      if (typeof p !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(p)) continue;
+      const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(v);
+      if (!isFinite(num)) continue;
+      if (fromDate && p < fromDate) continue;
+      out.push({ date: p, value: num });
+    }
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    return out;
+  } catch (e) {
+    console.error(`[dbnomics] ${seriesId}:`, (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 // ---------- Yahoo Finance yields (^TNX = 10Y, ^IRX = 13W T-Bill) ----------
@@ -508,8 +562,9 @@ async function fetchMacroSeries(
 
   // Fire all sources in parallel — drastically faster than sequential fallbacks.
   // Wall time = max(each source) instead of sum(each source).
-  const [fred, treasury, yahoo, nyFed, yahooDff, ecb, bls] = await Promise.all([
+  const [fred, dbnomics, treasury, yahoo, nyFed, yahooDff, ecb, bls] = await Promise.all([
     fetchFRED(fredId, fromDate, 2_000),
+    fetchDBnomicsFRED(fredId, fromDate, 4_000),
     TREASURY_COL[fredId] ? fetchUSTreasury(fredId, fromDate, 6_000) : Promise.resolve<Pts>([]),
     yahooSym             ? fetchYahooYield(yahooSym, fromDate)      : Promise.resolve<Pts>([]),
     fredId === 'DFF'     ? fetchNYFedEffr(fromDate, 6_000)          : Promise.resolve<Pts>([]),
@@ -519,8 +574,10 @@ async function fetchMacroSeries(
     blsSym               ? fetchBLS(blsSym, fromDate, 6_000)        : Promise.resolve<Pts>([]),
   ]);
 
-  // Priority: most authoritative source first
+  // Priority: most authoritative source first. DBnomics is also a FRED mirror
+  // so it ranks right after direct FRED.
   if (fred.length)     { console.log(`[macro] ${fredId} from FRED (${fred.length} pts)`);   return fred; }
+  if (dbnomics.length) { console.log(`[macro] ${fredId} from DBnomics (${dbnomics.length} pts)`); return dbnomics; }
   if (treasury.length) { console.log(`[macro] ${fredId} from Treasury (${treasury.length} pts)`); return treasury; }
   if (nyFed.length)    { console.log(`[macro] ${fredId} from NY Fed (${nyFed.length} pts)`); return nyFed; }
   if (ecb.length)      { console.log(`[macro] ${fredId} from ECB (${ecb.length} pts)`);     return ecb; }
@@ -541,7 +598,7 @@ export async function GET(req: NextRequest) {
     const from = req.nextUrl.searchParams.get('from') ?? undefined;
     const key = `hist:${id}:${from ?? ''}`;
     const cached = getCached(key, TTL);
-    if (cached) return NextResponse.json(cached);
+    if (cached) return NextResponse.json(cached, { headers: CACHE_HEADERS });
     try {
       const pts = await fetchMacroSeries(id, from);
       const data = pts.map(p => ({ date: p.date, close: p.value }));
@@ -549,13 +606,13 @@ export async function GET(req: NextRequest) {
         cache.set(key, { data, ts: Date.now() });
       } else {
         const stale = getCached(key, STALE);
-        if (stale) return NextResponse.json(stale);
+        if (stale) return NextResponse.json(stale, { headers: CACHE_HEADERS });
       }
-      return NextResponse.json(data);
+      return NextResponse.json(data, { headers: CACHE_HEADERS });
     } catch (err) {
       console.error('macro history error', id, err);
       const stale = getCached(key, STALE);
-      if (stale) return NextResponse.json(stale);
+      if (stale) return NextResponse.json(stale, { headers: CACHE_HEADERS });
       return NextResponse.json([], { status: 200 });
     }
   }
@@ -567,7 +624,7 @@ export async function GET(req: NextRequest) {
 
   const key = `list:${[...ids].sort().join(',')}`;
   const cached = getCached(key, TTL);
-  if (cached) return NextResponse.json(cached);
+  if (cached) return NextResponse.json(cached, { headers: CACHE_HEADERS });
 
   // Fetch last ~6 months so we always have latest + previous observation
   const from = new Date();
@@ -587,8 +644,11 @@ export async function GET(req: NextRequest) {
   // ^IRX is also the DFF fallback (13W T-Bill ≈ Fed Funds Rate within ~10 bps)
   const needsYIrx = ids.includes('DGS2') || ids.includes('T10Y2Y') || ids.includes('DFF');
 
-  const [fredResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts, yahooTnx, yahooIrx] = await Promise.all([
+  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts, yahooTnx, yahooIrx] = await Promise.all([
     Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
+    // DBnomics mirrors FRED and is reachable from Vercel — runs in parallel
+    // and fills any FRED-only series (MORTGAGE30US, ICSA, T10YIE, GDPC1, INDPRO).
+    Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 4_000).then(pts => ({ id, pts })))),
     allBlsIds.length
       ? fetchBLSBatch(allBlsIds, fromStr, 6_000)
       : Promise.resolve(new Map<string, Pts>()),
@@ -602,14 +662,20 @@ export async function GET(req: NextRequest) {
   ]);
 
   const fredMap = new Map(fredResults.map(r => [r.id, r.pts]));
-  const needFallback = ids.filter(id => (fredMap.get(id) ?? []).length === 0);
+  const dbnMap  = new Map(dbnomicsResults.map(r => [r.id, r.pts]));
+  const needFallback = ids.filter(id =>
+    (fredMap.get(id) ?? []).length === 0 && (dbnMap.get(id) ?? []).length === 0,
+  );
 
   // T10Y2Y: compute spread from best available DGS10 + DGS2
+  // Source priority: FRED → DBnomics → Treasury → Yahoo
   let t10y2yPts: Pts = [];
   if (needFallback.includes('T10Y2Y')) {
     const d10 = (fredMap.get('DGS10') ?? []).length ? fredMap.get('DGS10')!
+      : (dbnMap.get('DGS10') ?? []).length ? dbnMap.get('DGS10')!
       : tDgs10.length ? tDgs10 : yahooTnx;
     const d2  = (fredMap.get('DGS2')  ?? []).length ? fredMap.get('DGS2')!
+      : (dbnMap.get('DGS2') ?? []).length ? dbnMap.get('DGS2')!
       : tDgs2.length  ? tDgs2  : yahooIrx;
     if (d10.length && d2.length) {
       const m2 = new Map(d2.map(p => [p.date, p.value]));
@@ -618,9 +684,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Assemble final results
+  // Assemble final results — DBnomics slots in right after FRED (it mirrors it)
   const results = ids.map(id => {
     let pts = fredMap.get(id) ?? [];
+    if (!pts.length) pts = dbnMap.get(id) ?? [];
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
     // DFF: NY Fed JSON → Yahoo ^IRX (13W T-Bill ≈ Fed Funds Rate within ~10 bps)
     if (!pts.length && id === 'DFF')    pts = nyFedPts.length ? nyFedPts : yahooIrx;
@@ -637,7 +704,9 @@ export async function GET(req: NextRequest) {
   });
 
   const okCount = results.filter(r => r.latest != null).length;
-  console.log(`[macro] list: ${okCount}/${ids.length} series (FRED ${ids.length - needFallback.length}, fallback ${okCount - (ids.length - needFallback.length)})`);
+  const fredOk = ids.filter(id => (fredMap.get(id) ?? []).length > 0).length;
+  const dbnOk  = ids.filter(id => (fredMap.get(id) ?? []).length === 0 && (dbnMap.get(id) ?? []).length > 0).length;
+  console.log(`[macro] list: ${okCount}/${ids.length} (FRED ${fredOk}, DBnomics ${dbnOk}, other ${okCount - fredOk - dbnOk})`);
 
   // Don't cache an all-empty response (probably a transient FRED issue)
   if (okCount > 0) {
@@ -645,7 +714,7 @@ export async function GET(req: NextRequest) {
   } else {
     // Serve stale cache on total failure
     const stale = getCached(key, STALE);
-    if (stale) return NextResponse.json(stale);
+    if (stale) return NextResponse.json(stale, { headers: CACHE_HEADERS });
   }
-  return NextResponse.json(results);
+  return NextResponse.json(results, { headers: CACHE_HEADERS });
 }
