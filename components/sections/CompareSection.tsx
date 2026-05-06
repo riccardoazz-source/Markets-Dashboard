@@ -6,7 +6,7 @@ import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   normalizeData, calculateCAGR, formatPercent, colorForPercent,
   CHART_COLORS, getTimeframeStart, buildTotalReturnSeries, computeAssetIRR,
-  correlationMatrix,
+  correlationMatrix, dedupStepSeries,
 } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { CompareChart } from '@/components/charts/CompareChart';
@@ -243,30 +243,49 @@ export function CompareSection() {
     .filter(h => !selectedSymbols.includes(h.symbol) && !localSymbols.has(h.symbol))
     .slice(0, 8);
 
-  // For MAX: compute common start (latest first date across all assets)
-  const commonStart = useMemo(() => {
-    if (timeframe !== 'MAX' || !assets.length) return null;
-    const firstDates = assets.map(a => a.rawData?.[0]?.date ?? a.data[0]?.date).filter(Boolean) as string[];
-    if (!firstDates.length) return null;
-    return firstDates.reduce((a, b) => (a > b ? a : b));
-  }, [assets, timeframe]);
-
-  // Rebuild display data filtered to commonStart when MAX
+  // For ALL timeframes: trim every asset to the same common start date.
+  // commonStart = latest first-date after clipping each series to the
+  // selected timeframe window. This ensures:
+  //   1. No asset shows data before the selected timeframe start
+  //   2. All assets start at the same date (shortest-available series wins)
+  //   3. rawData + totalReturnData are trimmed so correlation uses the same range
   const displayAssets = useMemo(() => {
-    if (timeframe !== 'MAX' || !commonStart) return assets;
+    if (!assets.length) return assets;
     try {
+      const tfStart = getTimeframeStart(timeframe);
+
+      // First pass: find each asset's first date that falls within the TF window
+      const firstDates = assets.map(a => {
+        const raw = a.rawData ?? a.data;
+        return raw.find(d => d.date >= tfStart)?.date ?? tfStart;
+      });
+      const commonStart = firstDates.reduce((a, b) => (a > b ? a : b));
+
       return assets.map(a => {
-        const rawFiltered = (a.rawData ?? a.data).filter(d => d.date >= commonStart);
+        const raw = a.rawData ?? a.data;
+        const rawFiltered = raw.filter(d => d.date >= commonStart);
         const trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
-        const displayData = normalized ? normalizeData(rawFiltered) : rawFiltered;
-        const displayTrData = trFiltered ? (normalized ? normalizeData(trFiltered) : trFiltered) : undefined;
-        return { ...a, data: displayData, trData: displayTrData };
+        // For macro rate series: deduplicate consecutive identical values so
+        // the chart renders a step function ending at the last CHANGE date,
+        // not at today's "no change" daily observation.
+        const displayRaw = a.type === 'macro' ? dedupStepSeries(rawFiltered) : rawFiltered;
+        const displayData = normalized ? normalizeData(displayRaw) : displayRaw;
+        const displayTrData = trFiltered
+          ? (normalized ? normalizeData(trFiltered) : trFiltered)
+          : undefined;
+        return {
+          ...a,
+          data: displayData,
+          rawData: rawFiltered,       // full data for correlation (NOT deduped)
+          totalReturnData: trFiltered, // full data for correlation
+          trData: displayTrData,
+        };
       });
     } catch (e) {
       console.error('[CompareSection] displayAssets error:', e);
       return assets;
     }
-  }, [assets, timeframe, commonStart, normalized]);
+  }, [assets, timeframe, normalized]);
 
   const correl = useMemo(() => {
     try {

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { MACRO_INDICATORS, MacroUnit } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
-import { getTimeframeStart, calculateCAGR, formatPercent } from '@/lib/utils';
+import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -232,7 +232,13 @@ export function MacroSection() {
               <LoadingSpinner size={28} />
             </div>
           ) : historical.length > 0 ? (
-            <PriceChart data={historical} color="auto" height={220} isCurrency={false} />
+            <PriceChart
+              data={selectedIndicator?.unit === '%' ? dedupStepSeries(historical) : historical}
+              color="auto"
+              height={220}
+              isCurrency={false}
+              interpolationType={selectedIndicator?.unit === '%' ? 'stepAfter' : 'monotone'}
+            />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-600 text-sm">
               No historical data

@@ -151,7 +151,9 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
           }}
         />
         {assets.map(a => (
-          <Line key={a.symbol} type="monotone" dataKey={a.symbol}
+          <Line key={a.symbol}
+            type={a.type === 'macro' ? 'stepAfter' : 'monotone'}
+            dataKey={a.symbol}
             stroke={a.color} strokeWidth={2} dot={false}
             activeDot={{ r: 4 }} connectNulls />
         ))}

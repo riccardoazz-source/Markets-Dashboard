@@ -15,6 +15,7 @@ interface Props {
   height?: number;
   label?: string;
   isCurrency?: boolean;
+  interpolationType?: 'monotone' | 'stepAfter';
 }
 
 function formatDate(dateStr: string, data: HistoricalPoint[]) {
@@ -35,7 +36,7 @@ function formatDate(dateStr: string, data: HistoricalPoint[]) {
 
 export function PriceChart({
   data, color = '#6366f1', showAverage = false, averageValue,
-  height = 220, isCurrency = false,
+  height = 220, isCurrency = false, interpolationType = 'monotone',
 }: Props) {
   if (!data || data.length === 0 || !data[0]) {
     return (
@@ -108,7 +109,7 @@ export function PriceChart({
           />
         )}
         <Area
-          type="monotone"
+          type={interpolationType}
           dataKey="close"
           stroke={resolvedColor}
           strokeWidth={2}

@@ -119,6 +119,28 @@ export function averageRate(data: { date: string; rate: number }[]): number {
   return data.reduce((sum, d) => sum + d.rate, 0) / data.length;
 }
 
+/**
+ * Remove consecutive data points with the same value, keeping only the first
+ * occurrence of each distinct value. Used for step-function series (interest
+ * rates, central bank rates) so the chart shows when the value actually changed
+ * rather than plotting a daily "no change" point for every business day.
+ * Always keeps the first and last points.
+ */
+export function dedupStepSeries(data: HistoricalPoint[]): HistoricalPoint[] {
+  if (data.length <= 1) return data;
+  const out: HistoricalPoint[] = [data[0]];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i].close !== out[out.length - 1].close) {
+      out.push(data[i]);
+    }
+  }
+  // Always include the last point (most recent "current" value)
+  if (out[out.length - 1] !== data[data.length - 1]) {
+    out.push(data[data.length - 1]);
+  }
+  return out;
+}
+
 export function colorForPercent(value: number): string {
   return value >= 0 ? 'text-up-text' : 'text-down-text';
 }
