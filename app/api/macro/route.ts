@@ -508,6 +508,105 @@ async function fetchWorldBankGDP(
   }
 }
 
+// ---------- OECD MEI (Main Economic Indicators) — fallback for INDPRO ----------
+// stats.oecd.org returns SDMX-JSON 1.0; observations keyed as "s0:s1:...:t"
+// where t is the time-period index into structure.dimensions.observation[0].values
+async function fetchOECDIndPro(
+  fromDate?: string,
+  timeoutMs = 6_000,
+): Promise<{ date: string; value: number }[]> {
+  // PRMNTO01 = total industry output, IDX2015 = index base 2015=100, M = monthly
+  const url =
+    'https://stats.oecd.org/SDMX-JSON/data/MEI_BTE6/USA.PRMNTO01.IDX2015.M/all' +
+    '?format=json';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      next: { revalidate: 3600 },
+      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    });
+    if (!res.ok) { console.warn(`[oecd] INDPRO HTTP ${res.status}`); return []; }
+    const json = await res.json() as {
+      dataSets?: Array<{ observations?: Record<string, [number, ...unknown[]]> }>;
+      structure?: { dimensions?: { observation?: Array<{ id: string; values: Array<{ id: string }> }> } };
+    };
+    const obs = json?.dataSets?.[0]?.observations ?? {};
+    const timeDim = (json?.structure?.dimensions?.observation ?? [])
+      .find(d => d.id === 'TIME_PERIOD');
+    if (!timeDim?.values?.length) { console.warn('[oecd] INDPRO no TIME_PERIOD dim'); return []; }
+    const periods = timeDim.values; // [{id: "2000-01"}, ...]
+    const pts: { date: string; value: number }[] = [];
+    for (const [key, vals] of Object.entries(obs)) {
+      const tIdx = parseInt(key.split(':').at(-1) ?? '-1', 10);
+      if (tIdx < 0 || tIdx >= periods.length) continue;
+      const rawPeriod = periods[tIdx].id; // e.g. "2024-01"
+      const dateStr = /^\d{4}-\d{2}$/.test(rawPeriod) ? `${rawPeriod}-01` : rawPeriod;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+      if (fromDate && dateStr < fromDate) continue;
+      const v = vals[0];
+      if (typeof v === 'number' && isFinite(v)) pts.push({ date: dateStr, value: v });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[oecd] INDPRO: ${pts.length} pts`);
+    return pts;
+  } catch (e) {
+    console.error('[oecd] INDPRO failed:', (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- Freddie Mac PMMS (30-Year Mortgage Rate = MORTGAGE30US fallback) ----------
+// Freddie Mac publishes the Primary Mortgage Market Survey as a CSV download.
+async function fetchFreddieMacMortgage(
+  fromDate?: string,
+  timeoutMs = 6_000,
+): Promise<{ date: string; value: number }[]> {
+  const url = 'https://www.freddiemac.com/pmms/docs/historicalweeklydata.csv';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      next: { revalidate: 86400 },
+      headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*', 'Referer': 'https://www.freddiemac.com/pmms/' },
+    });
+    if (!res.ok) { console.warn(`[freddiemac] mortgage HTTP ${res.status}`); return []; }
+    const csv = await res.text();
+    if (!csv || csv.length < 50) return [];
+    const lines = csv.trim().split('\n');
+    const pts: { date: string; value: number }[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(',');
+      if (parts.length < 2) continue;
+      const raw = parts[0].trim().replace(/"/g, '');
+      // Try YYYY-MM-DD first, then MM/DD/YYYY
+      let dateStr = '';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        dateStr = raw;
+      } else {
+        const segs = raw.split('/');
+        if (segs.length === 3) dateStr = `${segs[2]}-${segs[0].padStart(2, '0')}-${segs[1].padStart(2, '0')}`;
+      }
+      if (!dateStr) continue;
+      if (fromDate && dateStr < fromDate) continue;
+      const val = parseFloat(parts[1].trim().replace(/"/g, ''));
+      if (isFinite(val) && val > 0) pts.push({ date: dateStr, value: val });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[freddiemac] mortgage: ${pts.length} pts`);
+    return pts;
+  } catch (e) {
+    console.error('[freddiemac] mortgage failed:', (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // ---------- ECB Data Portal (Deposit Facility Rate = ECBDFR, no key) ----------
 async function fetchECBRate(
   fromDate?: string,
@@ -702,6 +801,32 @@ async function fetchMacroSeries(
     return [];
   }
 
+  // INDPRO: Industrial Production. Primary = FRED/DBnomics. Fallback = OECD MEI.
+  if (fredId === 'INDPRO') {
+    const [fredInd, dbn, oecd] = await Promise.all([
+      fetchFRED('INDPRO', fromDate, 2_000),
+      fetchDBnomicsFRED('INDPRO', fromDate, 5_000),
+      fetchOECDIndPro(fromDate, 6_000),
+    ]);
+    if (fredInd.length > 0) return fredInd;
+    if (dbn.length > 0) return dbn;
+    if (oecd.length > 0) { console.log(`[macro] INDPRO from OECD (${oecd.length} pts)`); return oecd; }
+    return [];
+  }
+
+  // MORTGAGE30US: Primary = FRED/DBnomics. Fallback = Freddie Mac PMMS CSV.
+  if (fredId === 'MORTGAGE30US') {
+    const [fredM, dbn, fm] = await Promise.all([
+      fetchFRED('MORTGAGE30US', fromDate, 2_000),
+      fetchDBnomicsFRED('MORTGAGE30US', fromDate, 5_000),
+      fetchFreddieMacMortgage(fromDate, 6_000),
+    ]);
+    if (fredM.length > 0) return fredM;
+    if (dbn.length > 0) return dbn;
+    if (fm.length > 0) { console.log(`[macro] MORTGAGE30US from Freddie Mac (${fm.length} pts)`); return fm; }
+    return [];
+  }
+
   const yahooSym = YAHOO_YIELD_MAP[fredId];
   const blsSym   = BLS_MAP[fredId];
 
@@ -784,17 +909,19 @@ export async function GET(req: NextRequest) {
   const needsYTnx = ids.includes('DGS10') || ids.includes('T10Y2Y');
   const needsYIrx = ids.includes('DGS2')  || ids.includes('T10Y2Y') || ids.includes('DFF');
 
-  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts, yahooTnx, yahooIrx] = await Promise.all([
+  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage] = await Promise.all([
     Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
     Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 5_000).then(pts => ({ id, pts })))),
     // BLS: parallel GET requests, each cached 4h by Next.js edge data cache
     blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr) : Promise.resolve(new Map<string, Pts>()),
     needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000, true) : Promise.resolve<Pts>([]),
     needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000, true) : Promise.resolve<Pts>([]),
-    ids.includes('DFF')    ? fetchNYFedEffr(fromStr, 5_000, true) : Promise.resolve<Pts>([]),
-    ids.includes('ECBDFR') ? fetchECBRate(fromStr, 5_000)         : Promise.resolve<Pts>([]),
-    needsYTnx ? fetchYahooYield('^TNX', fromStr) : Promise.resolve<Pts>([]),
-    needsYIrx ? fetchYahooYield('^IRX', fromStr) : Promise.resolve<Pts>([]),
+    ids.includes('DFF')          ? fetchNYFedEffr(fromStr, 5_000, true)       : Promise.resolve<Pts>([]),
+    ids.includes('ECBDFR')       ? fetchECBRate(fromStr, 5_000)               : Promise.resolve<Pts>([]),
+    needsYTnx                    ? fetchYahooYield('^TNX', fromStr)            : Promise.resolve<Pts>([]),
+    needsYIrx                    ? fetchYahooYield('^IRX', fromStr)            : Promise.resolve<Pts>([]),
+    ids.includes('INDPRO')       ? fetchOECDIndPro(fromStr, 6_000)            : Promise.resolve<Pts>([]),
+    ids.includes('MORTGAGE30US') ? fetchFreddieMacMortgage(fromStr, 6_000)    : Promise.resolve<Pts>([]),
   ]);
 
   const fredMap = new Map(fredResults.map(r => [r.id, r.pts]));
@@ -826,11 +953,13 @@ export async function GET(req: NextRequest) {
     if (!pts.length) pts = dbnMap.get(id) ?? [];
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
     // DFF: NY Fed JSON → Yahoo ^IRX (13W T-Bill ≈ Fed Funds Rate within ~10 bps)
-    if (!pts.length && id === 'DFF')    pts = nyFedPts.length ? nyFedPts : yahooIrx;
-    if (!pts.length && id === 'ECBDFR') pts = ecbPts;
-    if (!pts.length && id === 'DGS2')   pts = tDgs2.length  ? tDgs2  : yahooIrx;
-    if (!pts.length && id === 'DGS10')  pts = tDgs10.length ? tDgs10 : yahooTnx;
-    if (!pts.length && id === 'T10Y2Y') pts = t10y2yPts;
+    if (!pts.length && id === 'DFF')          pts = nyFedPts.length ? nyFedPts : yahooIrx;
+    if (!pts.length && id === 'ECBDFR')       pts = ecbPts;
+    if (!pts.length && id === 'DGS2')         pts = tDgs2.length  ? tDgs2  : yahooIrx;
+    if (!pts.length && id === 'DGS10')        pts = tDgs10.length ? tDgs10 : yahooTnx;
+    if (!pts.length && id === 'T10Y2Y')       pts = t10y2yPts;
+    if (!pts.length && id === 'INDPRO')       pts = oecdIndPro;
+    if (!pts.length && id === 'MORTGAGE30US') pts = fmMortgage;
     if (!pts.length) return { id, latest: null, prev: null };
     return {
       id,
