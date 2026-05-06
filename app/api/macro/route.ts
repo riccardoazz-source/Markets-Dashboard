@@ -347,17 +347,22 @@ async function fetchNYFedEffr(
 }
 
 // ---------- US Treasury Daily Yield Curve (free, no key) ----------
-// Provides DGS2 ("2 Yr") and can supplement DGS10 ("10 Yr") when FRED/Yahoo fail.
-// URL: https://home.treasury.gov/resource-center/data-chart-center/interest-rates/
-//      daily-treasury-rates.csv/all/all?type=daily_treasury_yield_curve&...
+// Provides DGS2 ("2 Yr") and DGS10 ("10 Yr") from the nominal yield curve.
 const TREASURY_COL: Record<string, string> = {
-  'DGS2':  '2 Yr',
-  'DGS10': '10 Yr',
+  'DGS2':   '2 Yr',
+  'DGS10':  '10 Yr',
 };
 
-function buildTreasuryUrl(year?: number): string {
+// Real yield curve — used to fetch DFII10 (10Y TIPS real yield).
+// T10YIE = DGS10 (nominal) − DFII10 (real) = implied 10Y inflation breakeven.
+const TREASURY_REAL_COL: Record<string, string> = {
+  'DFII10': '10 Yr',
+};
+
+function buildTreasuryUrl(year?: number, real = false): string {
   const base = 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates';
-  const suffix = '?type=daily_treasury_yield_curve&download=true';
+  const type = real ? 'daily_treasury_real_yield_curve' : 'daily_treasury_yield_curve';
+  const suffix = `?type=${type}&download=true`;
   if (year) return `${base}/daily-treasury-rates.csv/${year}/all${suffix}`;
   return `${base}/daily-treasury-rates.csv/all/all${suffix}&field_tdr_date_value=all`;
 }
@@ -433,15 +438,87 @@ async function fetchUSTreasury(
   return pts;
 }
 
+// Fetch one column from the Treasury TIPS / real yield-curve CSV.
+async function fetchUSTreasuryReal(
+  fredId: string,   // e.g. 'DFII10'
+  fromDate?: string,
+  timeoutMs = 5_000,
+): Promise<{ date: string; value: number }[]> {
+  const col = TREASURY_REAL_COL[fredId];
+  if (!col) return [];
+  const tryUrl = async (url: string): Promise<string | null> => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal, next: { revalidate: 1800 },
+        headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*', 'Referer': 'https://home.treasury.gov/' },
+      });
+      if (!res.ok) return null;
+      return await res.text();
+    } catch { return null; } finally { clearTimeout(t); }
+  };
+  // For list mode / recent: try current year, then prior year
+  const now = new Date();
+  for (const yr of [now.getFullYear(), now.getFullYear() - 1]) {
+    const csv = await tryUrl(buildTreasuryUrl(yr, true));
+    if (!csv || csv.length < 50) continue;
+    const pts = parseTreasuryCsv(csv, col, fromDate);
+    if (pts.length) return pts;
+  }
+  // Fall back to full history
+  const csv = await tryUrl(buildTreasuryUrl(undefined, true));
+  if (!csv || csv.length < 50) return [];
+  return parseTreasuryCsv(csv, col, fromDate);
+}
+
+// ---------- World Bank API (Real GDP = GDPC1 fallback, annual) ----------
+async function fetchWorldBankGDP(
+  fromDate?: string,
+  timeoutMs = 5_000,
+): Promise<{ date: string; value: number }[]> {
+  // NY.GDP.MKTP.KD = GDP constant 2015 USD; convert to billions for GDPC1 scale
+  const url = 'https://api.worldbank.org/v2/country/US/indicator/NY.GDP.MKTP.KD' +
+    '?format=json&mrv=60&per_page=60';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal, next: { revalidate: 86400 }, // daily — annual data
+      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    });
+    if (!res.ok) { console.warn(`[worldbank] GDP HTTP ${res.status}`); return []; }
+    const json = await res.json() as [unknown, Array<{ date?: string; value?: number | null }>];
+    const rows = Array.isArray(json) ? json[1] : [];
+    const pts: { date: string; value: number }[] = [];
+    for (const r of rows) {
+      if (!r.date || r.value == null || !isFinite(r.value)) continue;
+      const dateStr = `${r.date}-07-01`; // annual → mid-year proxy
+      if (fromDate && dateStr < fromDate) continue;
+      pts.push({ date: dateStr, value: r.value / 1e9 }); // USD → billions
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[worldbank] GDP: ${pts.length} annual pts`);
+    return pts;
+  } catch (e) {
+    console.error('[worldbank] GDP failed:', (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 // ---------- ECB Data Portal (Deposit Facility Rate = ECBDFR, no key) ----------
 async function fetchECBRate(
   fromDate?: string,
   timeoutMs = 8_000,
 ): Promise<{ date: string; value: number }[]> {
-  // ECB Statistical Data Warehouse — Deposit Facility Rate (DFR)
-  const url =
-    'https://data-api.ecb.europa.eu/service/data/FM/B.U2.EUR.4F.KR.DFR.LEV' +
-    '?format=csvdata&detail=dataonly';
+  // Try the newer API first, fall back to the legacy SDW endpoint.
+  const urls = [
+    'https://data-api.ecb.europa.eu/service/data/FM/B.U2.EUR.4F.KR.DFR.LEV?format=csvdata&detail=dataonly',
+    'https://sdw-wsrest.ecb.europa.eu/service/data/FM/B.U2.EUR.4F.KR.DFR.LEV?format=csvdata&detail=dataonly',
+  ];
+  for (const url of urls) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -450,7 +527,7 @@ async function fetchECBRate(
       next: { revalidate: 1800 },
       headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*' },
     });
-    if (!res.ok) { console.error(`[ecb] DFR HTTP ${res.status}`); return []; }
+    if (!res.ok) { console.error(`[ecb] DFR HTTP ${res.status} (${url})`); continue; }
     const csv = await res.text();
     if (!csv || csv.length < 20) return [];
     const lines = csv.trim().split('\n');
@@ -477,14 +554,18 @@ async function fetchECBRate(
       if (isFinite(val)) pts.push({ date: normDate, value: val });
     }
     pts.sort((a, b) => a.date.localeCompare(b.date));
-    console.log(`[ecb] DFR loaded ${pts.length} points`);
-    return pts;
+    if (pts.length > 0) {
+      console.log(`[ecb] DFR loaded ${pts.length} points from ${url}`);
+      return pts;
+    }
   } catch (e) {
-    console.error('[ecb] DFR failed:', (e as Error).message);
-    return [];
+    console.error(`[ecb] DFR failed (${url}):`, (e as Error).message);
   } finally {
     clearTimeout(t);
   }
+  } // end for url loop
+  console.warn('[ecb] DFR all endpoints failed');
+  return [];
 }
 
 // ---------- BLS public API ----------
@@ -571,7 +652,7 @@ async function fetchMacroSeries(
 ): Promise<{ date: string; value: number }[]> {
   type Pts = { date: string; value: number }[];
 
-  // T10Y2Y is computed as DGS10 - DGS2
+  // T10Y2Y: computed as DGS10 − DGS2
   if (fredId === 'T10Y2Y') {
     const [fredSpread, d10, d2] = await Promise.all([
       fetchFRED('T10Y2Y', fromDate, 2_000),
@@ -585,33 +666,65 @@ async function fetchMacroSeries(
       .map(p => ({ date: p.date, value: p.value - map2.get(p.date)! }));
   }
 
-  const yahooSym = YAHOO_YIELD_MAP[fredId];
-  const blsSym = BLS_MAP[fredId];
+  // T10YIE: computed as DGS10 (nominal) − DFII10 (TIPS real) = breakeven inflation.
+  // Treasury publishes both curves as free CSV; no FRED key needed.
+  if (fredId === 'T10YIE') {
+    const [fredT10yie, dbn, d10, dfii10] = await Promise.all([
+      fetchFRED('T10YIE', fromDate, 2_000),
+      fetchDBnomicsFRED('T10YIE', fromDate, 5_000),
+      fetchUSTreasury('DGS10',  fromDate, 6_000),
+      fetchUSTreasuryReal('DFII10', fromDate, 6_000),
+    ]);
+    if (fredT10yie.length > 0) return fredT10yie;
+    if (dbn.length > 0) return dbn;
+    if (d10.length > 0 && dfii10.length > 0) {
+      const mReal = new Map(dfii10.map(p => [p.date, p.value]));
+      const spread = d10.filter(p => mReal.has(p.date))
+        .map(p => ({ date: p.date, value: p.value - mReal.get(p.date)! }));
+      if (spread.length > 0) {
+        console.log(`[macro] T10YIE computed from Treasury DGS10-DFII10 (${spread.length} pts)`);
+        return spread;
+      }
+    }
+    return [];
+  }
 
-  // Fire all sources in parallel — drastically faster than sequential fallbacks.
-  // Wall time = max(each source) instead of sum(each source).
+  // GDPC1: Real GDP. Primary = FRED/DBnomics (quarterly). Fallback = World Bank (annual).
+  if (fredId === 'GDPC1') {
+    const [fredGdp, dbn, wb] = await Promise.all([
+      fetchFRED('GDPC1', fromDate, 2_000),
+      fetchDBnomicsFRED('GDPC1', fromDate, 5_000),
+      fetchWorldBankGDP(fromDate, 5_000),
+    ]);
+    if (fredGdp.length > 0) return fredGdp;
+    if (dbn.length > 0) return dbn;
+    if (wb.length > 0) { console.log(`[macro] GDPC1 from World Bank (${wb.length} annual pts)`); return wb; }
+    return [];
+  }
+
+  const yahooSym = YAHOO_YIELD_MAP[fredId];
+  const blsSym   = BLS_MAP[fredId];
+
+  // All remaining sources in parallel.
   const [fred, dbnomics, treasury, yahoo, nyFed, yahooDff, ecb, bls] = await Promise.all([
     fetchFRED(fredId, fromDate, 2_000),
-    fetchDBnomicsFRED(fredId, fromDate, 4_000),
+    fetchDBnomicsFRED(fredId, fromDate, 5_000),
     TREASURY_COL[fredId] ? fetchUSTreasury(fredId, fromDate, 6_000) : Promise.resolve<Pts>([]),
     yahooSym             ? fetchYahooYield(yahooSym, fromDate)      : Promise.resolve<Pts>([]),
     fredId === 'DFF'     ? fetchNYFedEffr(fromDate, 6_000)          : Promise.resolve<Pts>([]),
-    // ^IRX (13W T-Bill) ≈ Fed Funds Rate within ~10 bps — used as DFF proxy
     fredId === 'DFF'     ? fetchYahooYield('^IRX', fromDate)        : Promise.resolve<Pts>([]),
     fredId === 'ECBDFR'  ? fetchECBRate(fromDate, 6_000)            : Promise.resolve<Pts>([]),
     blsSym               ? fetchBLS(blsSym, fromDate, 6_000)        : Promise.resolve<Pts>([]),
   ]);
 
-  // Priority: most authoritative source first. DBnomics is also a FRED mirror
-  // so it ranks right after direct FRED.
-  if (fred.length)     { console.log(`[macro] ${fredId} from FRED (${fred.length} pts)`);   return fred; }
-  if (dbnomics.length) { console.log(`[macro] ${fredId} from DBnomics (${dbnomics.length} pts)`); return dbnomics; }
-  if (treasury.length) { console.log(`[macro] ${fredId} from Treasury (${treasury.length} pts)`); return treasury; }
-  if (nyFed.length)    { console.log(`[macro] ${fredId} from NY Fed (${nyFed.length} pts)`); return nyFed; }
-  if (ecb.length)      { console.log(`[macro] ${fredId} from ECB (${ecb.length} pts)`);     return ecb; }
-  if (bls.length)      { console.log(`[macro] ${fredId} from BLS (${bls.length} pts)`);     return bls; }
-  if (yahoo.length)    { console.log(`[macro] ${fredId} from Yahoo (${yahoo.length} pts)`); return yahoo; }
-  if (yahooDff.length) { console.log(`[macro] DFF from Yahoo ^IRX proxy (${yahooDff.length} pts)`); return yahooDff; }
+  if (fred.length)     { console.log(`[macro] ${fredId} FRED (${fred.length})`);       return fred; }
+  if (dbnomics.length) { console.log(`[macro] ${fredId} DBnomics (${dbnomics.length})`); return dbnomics; }
+  if (treasury.length) { console.log(`[macro] ${fredId} Treasury (${treasury.length})`); return treasury; }
+  if (nyFed.length)    { console.log(`[macro] ${fredId} NY Fed (${nyFed.length})`);    return nyFed; }
+  if (ecb.length)      { console.log(`[macro] ${fredId} ECB (${ecb.length})`);         return ecb; }
+  if (bls.length)      { console.log(`[macro] ${fredId} BLS (${bls.length})`);         return bls; }
+  if (yahoo.length)    { console.log(`[macro] ${fredId} Yahoo (${yahoo.length})`);     return yahoo; }
+  if (yahooDff.length) { console.log(`[macro] DFF Yahoo ^IRX (${yahooDff.length})`);  return yahooDff; }
 
   return [];
 }
