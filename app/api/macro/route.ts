@@ -186,50 +186,62 @@ async function fetchFRED(
 }
 
 // ---------- DBnomics (Banque de France public mirror of FRED) ----------
-// No API key, no IP blocks observed from Vercel — usually our fastest source
-// for FRED-only series like MORTGAGE30US, ICSA, T10YIE, GDPC1, INDPRO.
+// No API key, no IP blocks observed from Vercel — covers FRED-only series
+// like MORTGAGE30US, ICSA, T10YIE, GDPC1, INDPRO.
+// Canonical path: /v22/series/{provider}/{dataset}/{series}
+// For FRED, each series is its own dataset so both codes are the series id.
 async function fetchDBnomicsFRED(
   seriesId: string,
   fromDate?: string,
-  timeoutMs = 4_000,
+  timeoutMs = 5_000,
 ): Promise<{ date: string; value: number }[]> {
-  const url = `https://api.db.nomics.world/v22/series/FRED/${encodeURIComponent(seriesId)}?observations=1`;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      signal: ctrl.signal, cache: 'no-store',
-      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-    });
-    if (!res.ok) {
-      console.warn(`[dbnomics] ${seriesId} HTTP ${res.status}`);
-      return [];
+  const enc = encodeURIComponent(seriesId);
+  // Try canonical /{id}/{id} first, then dataset-only /{id} as fallback.
+  const urls = [
+    `https://api.db.nomics.world/v22/series/FRED/${enc}/${enc}?observations=1`,
+    `https://api.db.nomics.world/v22/series/FRED/${enc}?observations=1`,
+  ];
+  for (const url of urls) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal, cache: 'no-store',
+        headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+      });
+      if (!res.ok) { console.warn(`[dbnomics] ${seriesId} HTTP ${res.status} (${url})`); continue; }
+      const json = await res.json() as {
+        series?: { docs?: Array<{ period?: string[]; value?: (number | string | null)[] }> };
+      };
+      const doc = json?.series?.docs?.[0];
+      if (!doc?.period?.length) { console.warn(`[dbnomics] ${seriesId} empty doc`); continue; }
+      const periods = doc.period!;
+      const values  = doc.value ?? [];
+      const out: { date: string; value: number }[] = [];
+      for (let i = 0; i < periods.length; i++) {
+        const p = periods[i];
+        const v = values[i];
+        if (typeof p !== 'string') continue;
+        // dbnomics may return YYYY-MM for monthly series — append day
+        const dateStr = /^\d{4}-\d{2}$/.test(p) ? `${p}-01` : p;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+        const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(String(v));
+        if (!isFinite(num)) continue;
+        if (fromDate && dateStr < fromDate) continue;
+        out.push({ date: dateStr, value: num });
+      }
+      out.sort((a, b) => a.date.localeCompare(b.date));
+      if (out.length > 0) {
+        console.log(`[dbnomics] ${seriesId}: ${out.length} pts`);
+        return out;
+      }
+    } catch (e) {
+      console.error(`[dbnomics] ${seriesId}:`, (e as Error).message);
+    } finally {
+      clearTimeout(t);
     }
-    const json = await res.json() as {
-      series?: { docs?: Array<{ period?: string[]; value?: (number | string | null)[] }> };
-    };
-    const doc = json?.series?.docs?.[0];
-    if (!doc?.period || !doc?.value) return [];
-    const periods = doc.period;
-    const values = doc.value;
-    const out: { date: string; value: number }[] = [];
-    for (let i = 0; i < periods.length; i++) {
-      const p = periods[i];
-      const v = values[i];
-      if (typeof p !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(p)) continue;
-      const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(v);
-      if (!isFinite(num)) continue;
-      if (fromDate && p < fromDate) continue;
-      out.push({ date: p, value: num });
-    }
-    out.sort((a, b) => a.date.localeCompare(b.date));
-    return out;
-  } catch (e) {
-    console.error(`[dbnomics] ${seriesId}:`, (e as Error).message);
-    return [];
-  } finally {
-    clearTimeout(t);
   }
+  return [];
 }
 
 // ---------- Yahoo Finance yields (^TNX = 10Y, ^IRX = 13W T-Bill) ----------

@@ -281,11 +281,20 @@ export function pearson(a: number[], b: number[]): number | null {
 /**
  * Pearson correlation matrix of log-returns across multiple price series.
  *
- * Alignment: we intersect the actual trading dates of all series (no
- * forward-fill). Forward-filling missing dates injects spurious zero-return
- * bars (e.g. equities on weekends while crypto trades), which biases the
- * correlation toward zero. By taking only dates where every series has a
- * real observation, every return reflects a real price move on both sides.
+ * Alignment strategy:
+ * - Detect the dominant cadence of all series (daily / weekly / monthly).
+ * - Convert every date to a canonical bucket key (exact date for daily,
+ *   Monday-of-week for weekly, YYYY-MM for monthly).
+ * - Intersect the bucket keys that are present in ALL series.
+ * - Take the last observation of each series in each bucket.
+ *
+ * Why bucket instead of exact-date intersection:
+ * Yahoo monthly bars for equities use the first trading day of the month
+ * (e.g. 2024-01-02) while crypto bars use the calendar start (2024-01-01).
+ * Weekly bars can similarly be off by 1–2 days across asset classes.
+ * Exact intersection would yield zero or near-zero overlap, making the
+ * correlation "—". Bucketing normalises this while keeping no forward-fill
+ * bias (every bucket price is a real observation on both sides).
  */
 export function correlationMatrix(
   series: { symbol: string; data: HistoricalPoint[] }[],
@@ -293,30 +302,63 @@ export function correlationMatrix(
   const labels = series.map(s => s.symbol);
   if (series.length === 0) return { labels, matrix: [] };
 
-  // Intersect dates: keep only dates present in every series.
-  const dateSets = series.map(s => new Set(s.data.map(d => d.date)));
-  const baseDates = series[0].data.map(d => d.date);
-  const commonDates = baseDates
-    .filter(d => dateSets.every(set => set.has(d)))
-    .sort();
+  // ── Cadence detection ─────────────────────────────────────────────────────
+  function medianSpacingDays(data: HistoricalPoint[]): number {
+    if (data.length < 3) return 1;
+    const diffs: number[] = [];
+    for (let i = 1; i < Math.min(data.length, 40); i++) {
+      const ms = new Date(data[i].date).getTime() - new Date(data[i - 1].date).getTime();
+      diffs.push(ms / 86_400_000);
+    }
+    diffs.sort((a, b) => a - b);
+    return diffs[Math.floor(diffs.length / 2)];
+  }
+  // Use the series with the most data points as the reference for cadence.
+  const ref = series.reduce((a, b) => b.data.length > a.data.length ? b : a);
+  const med = medianSpacingDays(ref.data);
+  const cadence: 'D' | 'W' | 'M' = med <= 3 ? 'D' : med <= 10 ? 'W' : 'M';
 
-  // Sample each series at the intersected dates.
-  const aligned: number[][] = series.map(s => {
-    const map = new Map(s.data.map(d => [d.date, d.close] as const));
-    return commonDates.map(d => map.get(d) ?? NaN);
+  // ── Bucket key ────────────────────────────────────────────────────────────
+  function bucketKey(date: string): string {
+    if (cadence === 'M') return date.slice(0, 7); // "YYYY-MM"
+    if (cadence === 'W') {
+      const d = new Date(date + 'T12:00:00Z');
+      const day = d.getUTCDay(); // 0=Sun … 6=Sat
+      const offset = day === 0 ? 6 : day - 1; // days back to Monday
+      const mon = new Date(d.getTime() - offset * 86_400_000);
+      return mon.toISOString().slice(0, 10);
+    }
+    return date;
+  }
+
+  // ── Per-series bucket maps (last close wins within a bucket) ──────────────
+  const bucketMaps: Map<string, number>[] = series.map(s => {
+    const m = new Map<string, number>();
+    for (const p of s.data) m.set(bucketKey(p.date), p.close); // sorted → last wins
+    return m;
   });
 
-  // Log returns between consecutive intersected observations.
+  // ── Intersect bucket keys present in ALL series ───────────────────────────
+  const allKeys = Array.from(bucketMaps[0].keys());
+  const commonKeys = allKeys
+    .filter(k => bucketMaps.every(m => m.has(k)))
+    .sort();
+
+  if (commonKeys.length < 3) return { labels, matrix: labels.map(() => labels.map(() => null)) };
+
+  // ── Aligned price arrays and log-returns ──────────────────────────────────
+  const aligned: number[][] = bucketMaps.map(m => commonKeys.map(k => m.get(k)!));
+
   const returns: number[][] = aligned.map(arr => {
     const r: number[] = [];
     for (let i = 1; i < arr.length; i++) {
       const a = arr[i - 1], b = arr[i];
-      r.push(a > 0 && b > 0 && isFinite(a) && isFinite(b) ? Math.log(b / a) : NaN);
+      r.push(a > 0 && b > 0 ? Math.log(b / a) : NaN);
     }
     return r;
   });
 
-  // Drop any index where any series produced a non-finite return.
+  // Drop indices where any series is non-finite.
   const len = returns[0]?.length ?? 0;
   const validIdx: number[] = [];
   for (let i = 0; i < len; i++) {
