@@ -63,6 +63,7 @@ export function CompareSection() {
   const [loading, setLoading] = useState(false);
   const [normalized, setNormalized] = useState(true);
   const [logScale, setLogScale] = useState(false);
+  const [corrMode, setCorrMode] = useState<'returns' | 'levels'>('returns');
 
   // Dual search: local config + remote Yahoo search
   const [search, setSearch] = useState('');
@@ -272,12 +273,12 @@ export function CompareSection() {
       const series = displayAssets
         .filter(a => (a.totalReturnData ?? a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.totalReturnData ?? a.rawData ?? a.data }));
-      return correlationMatrix(series);
+      return correlationMatrix(series, corrMode);
     } catch (e) {
       console.error('[CompareSection] correlationMatrix error:', e);
-      return { labels: [], matrix: [] as (number | null)[][] };
+      return { labels: [], matrix: [] as (number | null)[][], sampleCount: 0 };
     }
-  }, [displayAssets]);
+  }, [displayAssets, corrMode]);
 
   return (
     <div className="space-y-4">
@@ -423,7 +424,10 @@ export function CompareSection() {
             <CorrelationMatrix
               labels={correl.labels}
               matrix={correl.matrix}
+              sampleCount={correl.sampleCount}
               names={Object.fromEntries(assets.map(a => [a.symbol, a.name]))}
+              mode={corrMode}
+              onModeChange={setCorrMode}
             />
           )}
         </ChartErrorBoundary>
@@ -463,20 +467,44 @@ function corrStrength(v: number): { label: string; bg: string; text: string } {
 }
 
 function CorrelationMatrix({
-  labels, matrix, names,
+  labels, matrix, sampleCount, names, mode, onModeChange,
 }: {
   labels: string[];
   matrix: (number | null)[][];
+  sampleCount: number;
   names: Record<string, string>;
+  mode: 'returns' | 'levels';
+  onModeChange: (m: 'returns' | 'levels') => void;
 }) {
   return (
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-gray-100">Correlation matrix</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-sm font-semibold text-gray-100">Correlation matrix</h3>
+            <div className="flex rounded-md overflow-hidden border border-border text-[10px]">
+              <button
+                onClick={() => onModeChange('returns')}
+                className={clsx('px-2 py-0.5 transition-colors', mode === 'returns' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
+                title="Pearson on period log-returns — measures return co-movement. Rigorous but one extreme month (e.g. COVID crash) can dominate."
+              >Returns</button>
+              <button
+                onClick={() => onModeChange('levels')}
+                className={clsx('px-2 py-0.5 transition-colors border-l border-border', mode === 'levels' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
+                title="Pearson on normalized price levels — mirrors the visual up/down relationship. Intuitive but spurious correlations possible for trending series."
+              >Levels</button>
+            </div>
+          </div>
           <p className="text-[10px] text-gray-500 mt-0.5">
-            Pearson on log-returns of total-return prices · dates intersected across all assets · green = positive, red = negative
+            {mode === 'returns'
+              ? `Pearson on log-returns · total-return prices · ${sampleCount} periods · green = positive, red = negative`
+              : `Pearson on normalized levels (base 100) · ${sampleCount} periods · green = positive, red = negative`}
           </p>
+          {mode === 'levels' && (
+            <p className="text-[10px] text-amber-400/70 mt-0.5">
+              Levels correlation shows visual trend relationships. Note: two independent trends can appear correlated by coincidence.
+            </p>
+          )}
         </div>
         {/* Legend */}
         <div className="flex flex-col gap-1 text-[10px]">

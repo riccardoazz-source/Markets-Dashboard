@@ -279,28 +279,28 @@ export function pearson(a: number[], b: number[]): number | null {
 }
 
 /**
- * Pearson correlation matrix of log-returns across multiple price series.
+ * Pearson correlation matrix across multiple price series.
  *
- * Alignment strategy:
- * - Detect the dominant cadence of all series (daily / weekly / monthly).
- * - Convert every date to a canonical bucket key (exact date for daily,
- *   Monday-of-week for weekly, YYYY-MM for monthly).
- * - Intersect the bucket keys that are present in ALL series.
- * - Take the last observation of each series in each bucket.
+ * mode='returns' (default): Pearson on log-returns — captures period-to-period
+ *   return co-movement. Statistically rigorous. Not distorted by level trends,
+ *   but a single extreme outlier (e.g. COVID crash) can dominate.
  *
- * Why bucket instead of exact-date intersection:
- * Yahoo monthly bars for equities use the first trading day of the month
- * (e.g. 2024-01-02) while crypto bars use the calendar start (2024-01-01).
- * Weekly bars can similarly be off by 1–2 days across asset classes.
- * Exact intersection would yield zero or near-zero overlap, making the
- * correlation "—". Bucketing normalises this while keeping no forward-fill
- * bias (every bucket price is a real observation on both sides).
+ * mode='levels': Pearson on normalized levels (base 100 at common start) —
+ *   captures the visual up/down relationship the eye sees. Intuitive but
+ *   technically a spurious regression risk for non-stationary series (two
+ *   independent trends can show perfect level correlation).
+ *
+ * Alignment for both modes:
+ * - Detect coarsest cadence across all series (daily / weekly / monthly).
+ * - Convert every date to a canonical bucket key.
+ * - Intersect bucket keys present in ALL series.
  */
 export function correlationMatrix(
   series: { symbol: string; data: HistoricalPoint[] }[],
-): { labels: string[]; matrix: (number | null)[][] } {
+  mode: 'returns' | 'levels' = 'returns',
+): { labels: string[]; matrix: (number | null)[][]; sampleCount: number } {
   const labels = series.map(s => s.symbol);
-  if (series.length === 0) return { labels, matrix: [] };
+  if (series.length === 0) return { labels, matrix: [], sampleCount: 0 };
 
   // ── Cadence detection ─────────────────────────────────────────────────────
   function medianSpacingDays(data: HistoricalPoint[]): number {
@@ -351,27 +351,45 @@ export function correlationMatrix(
     .filter(k => bucketMaps.every(m => m.has(k)))
     .sort();
 
-  if (commonKeys.length < 3) return { labels, matrix: labels.map(() => labels.map(() => null)) };
+  if (commonKeys.length < 3) {
+    return { labels, matrix: labels.map(() => labels.map(() => null)), sampleCount: 0 };
+  }
 
-  // ── Aligned price arrays and log-returns ──────────────────────────────────
+  // ── Aligned price arrays ───────────────────────────────────────────────────
   const aligned: number[][] = bucketMaps.map(m => commonKeys.map(k => m.get(k)!));
 
-  const returns: number[][] = aligned.map(arr => {
-    const r: number[] = [];
-    for (let i = 1; i < arr.length; i++) {
-      const a = arr[i - 1], b = arr[i];
-      r.push(a > 0 && b > 0 ? Math.log(b / a) : NaN);
-    }
-    return r;
-  });
+  let cleaned: number[][];
+  let sampleCount: number;
 
-  // Drop indices where any series is non-finite.
-  const len = returns[0]?.length ?? 0;
-  const validIdx: number[] = [];
-  for (let i = 0; i < len; i++) {
-    if (returns.every(r => isFinite(r[i]))) validIdx.push(i);
+  if (mode === 'levels') {
+    // Normalize each series to 100 at the first common point; use all commonKeys.
+    const normalized = aligned.map(arr => {
+      const base = arr.find(v => v > 0 && isFinite(v)) ?? arr[0];
+      return arr.map(v => base > 0 ? (v / base) * 100 : NaN);
+    });
+    const validIdx: number[] = [];
+    for (let i = 0; i < normalized[0].length; i++) {
+      if (normalized.every(r => isFinite(r[i]))) validIdx.push(i);
+    }
+    cleaned = normalized.map(r => validIdx.map(i => r[i]));
+    sampleCount = validIdx.length;
+  } else {
+    // Log-returns: drop first point, compute differences
+    const returns: number[][] = aligned.map(arr => {
+      const r: number[] = [];
+      for (let i = 1; i < arr.length; i++) {
+        const a = arr[i - 1], b = arr[i];
+        r.push(a > 0 && b > 0 ? Math.log(b / a) : NaN);
+      }
+      return r;
+    });
+    const validIdx: number[] = [];
+    for (let i = 0; i < (returns[0]?.length ?? 0); i++) {
+      if (returns.every(r => isFinite(r[i]))) validIdx.push(i);
+    }
+    cleaned = returns.map(r => validIdx.map(i => r[i]));
+    sampleCount = validIdx.length;
   }
-  const cleaned = returns.map(r => validIdx.map(i => r[i]));
 
   const matrix: (number | null)[][] = labels.map(() => labels.map(() => null));
   for (let i = 0; i < labels.length; i++) {
@@ -381,7 +399,7 @@ export function correlationMatrix(
       matrix[j][i] = c;
     }
   }
-  return { labels, matrix };
+  return { labels, matrix, sampleCount };
 }
 
 export function timeframeLabel(tf: Timeframe): string {
