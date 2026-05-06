@@ -313,10 +313,17 @@ export function correlationMatrix(
     diffs.sort((a, b) => a - b);
     return diffs[Math.floor(diffs.length / 2)];
   }
-  // Use the series with the most data points as the reference for cadence.
-  const ref = series.reduce((a, b) => b.data.length > a.data.length ? b : a);
-  const med = medianSpacingDays(ref.data);
-  const cadence: 'D' | 'W' | 'M' = med <= 3 ? 'D' : med <= 10 ? 'W' : 'M';
+  // Use the COARSEST cadence across all series. If one series has monthly
+  // bars (e.g. AGNC at MAX timeframe) and another has daily bars (DFF),
+  // using daily cadence gives near-zero exact-date intersection; monthly
+  // bucketing collapses both to YYYY-MM and gives ~200 common points.
+  function toCadence(med: number): 'D' | 'W' | 'M' {
+    return med <= 3 ? 'D' : med <= 10 ? 'W' : 'M';
+  }
+  const cadenceOrder = { D: 0, W: 1, M: 2 };
+  const cadence: 'D' | 'W' | 'M' = series
+    .map(s => toCadence(medianSpacingDays(s.data)))
+    .reduce((coarsest, c) => cadenceOrder[c] > cadenceOrder[coarsest] ? c : coarsest, 'D' as 'D' | 'W' | 'M');
 
   // ── Bucket key ────────────────────────────────────────────────────────────
   function bucketKey(date: string): string {

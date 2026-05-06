@@ -206,7 +206,8 @@ async function fetchDBnomicsFRED(
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
-        signal: ctrl.signal, cache: 'no-store',
+        signal: ctrl.signal,
+        next: { revalidate: 1800 },
         headers: { 'User-Agent': UA, 'Accept': 'application/json' },
       });
       if (!res.ok) { console.warn(`[dbnomics] ${seriesId} HTTP ${res.status} (${url})`); continue; }
@@ -319,7 +320,8 @@ async function fetchNYFedEffr(
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      signal: ctrl.signal, cache: 'no-store',
+      signal: ctrl.signal,
+      next: { revalidate: 1800 }, // edge data cache — survives cold starts unlike in-memory Map
       headers: { 'User-Agent': UA, 'Accept': 'application/json,*/*' },
     });
     if (!res.ok) { console.error(`[nyfed] effr HTTP ${res.status}`); return []; }
@@ -396,7 +398,8 @@ async function fetchUSTreasury(
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
-        signal: ctrl.signal, cache: 'no-store',
+        signal: ctrl.signal,
+        next: { revalidate: 1800 },
         headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*', 'Referer': 'https://home.treasury.gov/' },
       });
       if (!res.ok) { console.error(`[treasury] HTTP ${res.status} for ${url}`); return null; }
@@ -443,7 +446,8 @@ async function fetchECBRate(
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      signal: ctrl.signal, cache: 'no-store',
+      signal: ctrl.signal,
+      next: { revalidate: 1800 },
       headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*' },
     });
     if (!res.ok) { console.error(`[ecb] DFR HTTP ${res.status}`); return []; }
@@ -495,57 +499,69 @@ const BLS_MAP: Record<string, string> = {
 type BlsRow = { year: string; period: string; value: string };
 type BlsSeries = { seriesID: string; data: BlsRow[] };
 
-// Batch-fetch multiple BLS series in ONE API call (25 queries/day limit per IP).
-// Returns a map from BLS series ID → sorted points.
-async function fetchBLSBatch(
-  blsIds: string[],
+function parseBLSSeries(series: BlsSeries, fromDate?: string): { date: string; value: number }[] {
+  const pts: { date: string; value: number }[] = [];
+  for (const r of series.data) {
+    if (!r.period.startsWith('M')) continue;
+    const month = r.period.slice(1).padStart(2, '0');
+    const date  = `${r.year}-${month}-01`;
+    const val   = parseFloat(r.value);
+    if (isFinite(val) && (!fromDate || date >= fromDate)) pts.push({ date, value: val });
+  }
+  pts.sort((a, b) => a.date.localeCompare(b.date));
+  return pts;
+}
+
+// Fetch a single BLS series via GET. GET requests are cacheable by Next.js edge
+// data cache (next: { revalidate }) unlike POST, solving the 25-req/day rate limit:
+// with 4h revalidate we make ≤6 requests/series/day per edge region.
+async function fetchBLS(
+  blsId: string,
   fromDate?: string,
-  timeoutMs = 12_000,
-): Promise<Map<string, { date: string; value: number }[]>> {
-  const result = new Map<string, { date: string; value: number }[]>();
-  if (!blsIds.length) return result;
+  timeoutMs = 8_000,
+): Promise<{ date: string; value: number }[]> {
   const fromYear = fromDate ? fromDate.slice(0, 4) : String(new Date().getFullYear() - 5);
   const toYear   = String(new Date().getFullYear());
-  const body = JSON.stringify({ seriesid: blsIds, startyear: fromYear, endyear: toYear });
+  const key = process.env.BLS_API_KEY ? `&registrationkey=${process.env.BLS_API_KEY}` : '';
+  const url = `https://api.bls.gov/publicAPI/v2/timeseries/data/${blsId}?startyear=${fromYear}&endyear=${toYear}${key}`;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch('https://api.bls.gov/publicAPI/v2/timeseries/data/', {
-      method: 'POST', signal: ctrl.signal, cache: 'no-store',
-      headers: { 'Content-Type': 'application/json' }, body,
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      next: { revalidate: 14400 }, // 4h — matches BLS monthly cadence; stays within 25 req/day
+      headers: { 'Accept': 'application/json' },
     });
-    if (!res.ok) { console.error(`[bls-batch] HTTP ${res.status}`); return result; }
+    if (!res.ok) { console.error(`[bls] ${blsId} HTTP ${res.status}`); return []; }
     const json = await res.json() as { Results?: { series?: BlsSeries[] } };
-    for (const s of json?.Results?.series ?? []) {
-      const pts: { date: string; value: number }[] = [];
-      for (const r of s.data) {
-        if (!r.period.startsWith('M')) continue;
-        const month = r.period.slice(1).padStart(2, '0');
-        const date  = `${r.year}-${month}-01`;
-        const val   = parseFloat(r.value);
-        if (isFinite(val)) pts.push({ date, value: val });
-      }
-      pts.sort((a, b) => a.date.localeCompare(b.date));
-      result.set(s.seriesID, pts);
-    }
-    console.log(`[bls-batch] loaded ${result.size}/${blsIds.length} series`);
-    return result;
+    const s = json?.Results?.series?.[0];
+    if (!s) { console.warn(`[bls] ${blsId} empty response`); return []; }
+    const pts = parseBLSSeries(s, fromDate);
+    console.log(`[bls] ${blsId}: ${pts.length} pts`);
+    return pts;
   } catch (e) {
-    console.error('[bls-batch] failed:', (e as Error).message);
-    return result;
+    console.error(`[bls] ${blsId} failed:`, (e as Error).message);
+    return [];
   } finally {
     clearTimeout(t);
   }
 }
 
-// Single-series BLS fetch (used in history mode)
-async function fetchBLS(
-  blsId: string,
+// Fetch multiple BLS series in parallel (one GET per series, all cached).
+async function fetchBLSBatch(
+  fredIds: string[],
   fromDate?: string,
-  timeoutMs = 10_000,
-): Promise<{ date: string; value: number }[]> {
-  const batch = await fetchBLSBatch([blsId], fromDate, timeoutMs);
-  return batch.get(blsId) ?? [];
+): Promise<Map<string, { date: string; value: number }[]>> {
+  const result = new Map<string, { date: string; value: number }[]>();
+  await Promise.all(
+    fredIds.map(async id => {
+      const blsId = BLS_MAP[id];
+      if (!blsId) return;
+      const pts = await fetchBLS(blsId, fromDate);
+      result.set(blsId, pts);
+    })
+  );
+  return result;
 }
 
 // ---------- Master fetch: all sources in parallel, first hit wins ----------
@@ -646,29 +662,24 @@ export async function GET(req: NextRequest) {
   // ── Parallel fetch: FRED + all fallback sources start simultaneously ──
   // FRED is blocked on most Vercel IPs; 2s timeout lets it fail fast instead
   // of burning 12s (two endpoints × 6s each) before fallbacks even start.
-  const allBlsIds = ids.filter(id => BLS_MAP[id]).map(id => BLS_MAP[id]);
-  const needsT2  = ids.some(id => id === 'DGS2'  || id === 'T10Y2Y');
-  const needsT10 = ids.some(id => id === 'DGS10' || id === 'T10Y2Y');
+  const blsFredIds = ids.filter(id => BLS_MAP[id]);
+  const needsT2    = ids.some(id => id === 'DGS2'  || id === 'T10Y2Y');
+  const needsT10   = ids.some(id => id === 'DGS10' || id === 'T10Y2Y');
 
   type Pts = { date: string; value: number }[];
 
   const needsYTnx = ids.includes('DGS10') || ids.includes('T10Y2Y');
-  // ^IRX is also the DFF fallback (13W T-Bill ≈ Fed Funds Rate within ~10 bps)
-  const needsYIrx = ids.includes('DGS2') || ids.includes('T10Y2Y') || ids.includes('DFF');
+  const needsYIrx = ids.includes('DGS2')  || ids.includes('T10Y2Y') || ids.includes('DFF');
 
   const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts, yahooTnx, yahooIrx] = await Promise.all([
     Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
-    // DBnomics mirrors FRED and is reachable from Vercel — runs in parallel
-    // and fills any FRED-only series (MORTGAGE30US, ICSA, T10YIE, GDPC1, INDPRO).
-    Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 4_000).then(pts => ({ id, pts })))),
-    allBlsIds.length
-      ? fetchBLSBatch(allBlsIds, fromStr, 6_000)
-      : Promise.resolve(new Map<string, Pts>()),
+    Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 5_000).then(pts => ({ id, pts })))),
+    // BLS: parallel GET requests, each cached 4h by Next.js edge data cache
+    blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr) : Promise.resolve(new Map<string, Pts>()),
     needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000, true) : Promise.resolve<Pts>([]),
     needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000, true) : Promise.resolve<Pts>([]),
     ids.includes('DFF')    ? fetchNYFedEffr(fromStr, 5_000, true) : Promise.resolve<Pts>([]),
-    ids.includes('ECBDFR') ? fetchECBRate(fromStr,  4_000)  : Promise.resolve<Pts>([]),
-    // fetchYahooYield has its own 4s-per-host timeout (max 8s), so no outer cap needed
+    ids.includes('ECBDFR') ? fetchECBRate(fromStr, 5_000)         : Promise.resolve<Pts>([]),
     needsYTnx ? fetchYahooYield('^TNX', fromStr) : Promise.resolve<Pts>([]),
     needsYIrx ? fetchYahooYield('^IRX', fromStr) : Promise.resolve<Pts>([]),
   ]);
