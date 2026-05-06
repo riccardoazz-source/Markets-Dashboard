@@ -126,6 +126,7 @@ export async function GET(req: NextRequest) {
       symbol,
       meta: data.meta,
       prices: data.points,
+      adjPrices: data.adjPoints ?? [],
       dividends: data.dividends ?? [],
     };
     if (data.points.length > 0) {

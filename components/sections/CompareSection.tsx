@@ -48,6 +48,7 @@ const TF_OPTIONS: Timeframe[] = ['1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y
 interface StockApiResp {
   symbol: string; meta: unknown;
   prices: HistoricalPoint[];
+  adjPrices?: HistoricalPoint[];
   dividends: { date: string; amount: number }[];
 }
 interface SearchHit { symbol: string; name: string; exchange: string; type: string }
@@ -99,6 +100,7 @@ export function CompareSection() {
 
     try {
       let data: HistoricalPoint[] = [];
+      let adjData: HistoricalPoint[] = [];
       let dividends: { date: string; amount: number }[] = [];
 
       if (config?.type === 'crypto') {
@@ -135,12 +137,17 @@ export function CompareSection() {
         if (!Array.isArray(json) || !json.length) return null;
         data = json as HistoricalPoint[];
       } else {
-        // Stocks/indexes/ETFs/sectors → use stock API for dividends
+        // Stocks/indexes/ETFs/sectors → use stock API for adjPrices + dividends
         const res = await fetch(`/api/stock?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`);
         if (res.ok) {
           const json = await res.json() as StockApiResp;
           if (Array.isArray(json.prices) && json.prices.length) {
             data = json.prices;
+            // adjPrices are split + dividend adjusted — use as total-return series.
+            // Fall back to manual reinvestment only when adjPrices are not returned.
+            if (Array.isArray(json.adjPrices) && json.adjPrices.length) {
+              adjData = json.adjPrices;
+            }
             dividends = Array.isArray(json.dividends) ? json.dividends : [];
             // Cache name from meta if available
             if (!nameCacheRef[symbol] && json.meta) {
@@ -157,8 +164,14 @@ export function CompareSection() {
         if (!data.length) return null;
       }
 
+      // Total-return series: prefer adjPrices (Yahoo adjclose — handles splits + dividends).
+      // Fall back to manual dividend reinvestment when adjPrices not available.
+      const totalReturnData: HistoricalPoint[] | undefined =
+        adjData.length > 0 ? adjData
+        : dividends.length > 0 ? buildTotalReturnSeries(data, dividends)
+        : undefined;
+
       const cagr = calculateCAGR(data, tf);
-      const totalReturnData = dividends.length > 0 ? buildTotalReturnSeries(data, dividends) : undefined;
       const cagrTR = totalReturnData ? calculateCAGR(totalReturnData, tf) : undefined;
       const irr = dividends.length > 0 ? computeAssetIRR(data, dividends) : undefined;
 
