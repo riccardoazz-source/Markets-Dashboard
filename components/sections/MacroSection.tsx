@@ -12,7 +12,7 @@ import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
 type Category = 'All' | 'Rates' | 'Employment' | 'Inflation' | 'Growth';
 const CATEGORIES: Category[] = ['All', 'Rates', 'Employment', 'Inflation', 'Growth'];
-const TF_OPTIONS: Timeframe[] = ['1Y', '3Y', '5Y', '10Y'];
+const TF_OPTIONS: Timeframe[] = ['1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface MacroLatest {
   id: string;

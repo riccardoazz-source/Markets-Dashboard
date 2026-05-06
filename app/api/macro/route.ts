@@ -193,8 +193,8 @@ async function fetchYahooYield(
   const daysAgo = fromDate
     ? (Date.now() - new Date(fromDate).getTime()) / 86_400_000
     : 180;
-  const rangeParam = daysAgo > 1500 ? '10y' : daysAgo > 800 ? '5y'
-    : daysAgo > 300 ? '1y' : '6mo';
+  const rangeParam = daysAgo > 3500 ? 'max' : daysAgo > 1500 ? '10y'
+    : daysAgo > 800 ? '5y' : daysAgo > 300 ? '1y' : '6mo';
   const interval: '1d' | '1wk' | '1mo' = daysAgo > 1500 ? '1mo'
     : daysAgo > 300 ? '1wk' : '1d';
 
@@ -482,59 +482,51 @@ async function fetchBLS(
   return batch.get(blsId) ?? [];
 }
 
-// ---------- Master fetch: FRED → Yahoo/NYFed/BLS fallback ----------
+// ---------- Master fetch: all sources in parallel, first hit wins ----------
 async function fetchMacroSeries(
   fredId: string,
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  // T10Y2Y: compute as DGS10 - DGS2 when FRED is blocked
+  type Pts = { date: string; value: number }[];
+
+  // T10Y2Y is computed as DGS10 - DGS2
   if (fredId === 'T10Y2Y') {
-    const fred = await fetchFRED('T10Y2Y', fromDate);
-    if (fred.length > 0) return fred;
-    const [d10, d2] = await Promise.all([
+    const [fredSpread, d10, d2] = await Promise.all([
+      fetchFRED('T10Y2Y', fromDate, 2_000),
       fetchMacroSeries('DGS10', fromDate),
-      fetchFRED('DGS2', fromDate),
+      fetchMacroSeries('DGS2',  fromDate),
     ]);
+    if (fredSpread.length > 0) return fredSpread;
     if (!d10.length || !d2.length) return [];
     const map2 = new Map(d2.map(p => [p.date, p.value]));
-    return d10.filter(p => map2.has(p.date)).map(p => ({ date: p.date, value: p.value - map2.get(p.date)! }));
+    return d10.filter(p => map2.has(p.date))
+      .map(p => ({ date: p.date, value: p.value - map2.get(p.date)! }));
   }
 
-  // Try FRED first (works when FRED_API_KEY is set or FRED isn't blocked)
-  const fred = await fetchFRED(fredId, fromDate);
-  if (fred.length > 0) return fred;
-
-  // US Treasury CSV — exact DGS2 and DGS10 (better than Yahoo proxy for yields)
-  if (TREASURY_COL[fredId]) {
-    const pts = await fetchUSTreasury(fredId, fromDate);
-    if (pts.length > 0) { console.log(`[macro] ${fredId} loaded from US Treasury`); return pts; }
-  }
-
-  // Yahoo Finance fallback for Treasury yields (rough proxy when Treasury CSV fails)
   const yahooSym = YAHOO_YIELD_MAP[fredId];
-  if (yahooSym) {
-    const pts = await fetchYahooYield(yahooSym, fromDate);
-    if (pts.length > 0) { console.log(`[macro] ${fredId} loaded from Yahoo (${yahooSym})`); return pts; }
-  }
-
-  // NY Fed fallback for Fed Funds Rate
-  if (fredId === 'DFF') {
-    const pts = await fetchNYFedEffr(fromDate);
-    if (pts.length > 0) { console.log(`[macro] DFF loaded from NY Fed`); return pts; }
-  }
-
-  // ECB fallback for ECB Deposit Facility Rate
-  if (fredId === 'ECBDFR') {
-    const pts = await fetchECBRate(fromDate);
-    if (pts.length > 0) { console.log(`[macro] ECBDFR loaded from ECB API`); return pts; }
-  }
-
-  // BLS fallback for employment / inflation
   const blsSym = BLS_MAP[fredId];
-  if (blsSym) {
-    const pts = await fetchBLS(blsSym, fromDate);
-    if (pts.length > 0) { console.log(`[macro] ${fredId} loaded from BLS`); return pts; }
-  }
+
+  // Fire all sources in parallel — drastically faster than sequential fallbacks.
+  // Wall time = max(each source) instead of sum(each source).
+  const [fred, treasury, yahoo, nyFed, yahooDff, ecb, bls] = await Promise.all([
+    fetchFRED(fredId, fromDate, 2_000),
+    TREASURY_COL[fredId] ? fetchUSTreasury(fredId, fromDate, 6_000) : Promise.resolve<Pts>([]),
+    yahooSym             ? fetchYahooYield(yahooSym, fromDate)      : Promise.resolve<Pts>([]),
+    fredId === 'DFF'     ? fetchNYFedEffr(fromDate, 6_000)          : Promise.resolve<Pts>([]),
+    // ^IRX (13W T-Bill) ≈ Fed Funds Rate within ~10 bps — used as DFF proxy
+    fredId === 'DFF'     ? fetchYahooYield('^IRX', fromDate)        : Promise.resolve<Pts>([]),
+    fredId === 'ECBDFR'  ? fetchECBRate(fromDate, 6_000)            : Promise.resolve<Pts>([]),
+    blsSym               ? fetchBLS(blsSym, fromDate, 6_000)        : Promise.resolve<Pts>([]),
+  ]);
+
+  // Priority: most authoritative source first
+  if (fred.length)     { console.log(`[macro] ${fredId} from FRED (${fred.length} pts)`);   return fred; }
+  if (treasury.length) { console.log(`[macro] ${fredId} from Treasury (${treasury.length} pts)`); return treasury; }
+  if (nyFed.length)    { console.log(`[macro] ${fredId} from NY Fed (${nyFed.length} pts)`); return nyFed; }
+  if (ecb.length)      { console.log(`[macro] ${fredId} from ECB (${ecb.length} pts)`);     return ecb; }
+  if (bls.length)      { console.log(`[macro] ${fredId} from BLS (${bls.length} pts)`);     return bls; }
+  if (yahoo.length)    { console.log(`[macro] ${fredId} from Yahoo (${yahoo.length} pts)`); return yahoo; }
+  if (yahooDff.length) { console.log(`[macro] DFF from Yahoo ^IRX proxy (${yahooDff.length} pts)`); return yahooDff; }
 
   return [];
 }
