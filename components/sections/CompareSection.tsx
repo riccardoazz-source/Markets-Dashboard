@@ -462,22 +462,44 @@ function CorrelationMatrix({
         <div>
           <h3 className="text-sm font-semibold text-gray-100">Correlation matrix</h3>
           <p className="text-[10px] text-gray-500 mt-0.5">
-            Pearson on daily log-returns in the selected time window · green = positive · red = negative
+            Pearson on log-returns of total-return prices · dates intersected across all assets · green = positive, red = negative
           </p>
         </div>
         {/* Legend */}
-        <div className="flex items-center gap-3 flex-wrap text-[10px]">
-          {[
-            { label: 'Weak (|r|<0.30)', bg: 'rgba(40,44,65,0.9)', text: '#6b7280' },
-            { label: 'Moderate (0.30–0.60)', bg: 'rgba(16,185,129,0.40)', text: '#6ee7b7' },
-            { label: 'Strong (0.60–0.90)', bg: 'rgba(16,185,129,0.65)', text: 'white' },
-            { label: 'Very strong (>0.90)', bg: 'rgba(5,150,105,0.85)', text: 'white' },
-          ].map(l => (
-            <span key={l.label} className="flex items-center gap-1">
-              <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: l.bg, border: '1px solid rgba(255,255,255,0.08)' }} />
-              <span style={{ color: l.text }}>{l.label}</span>
+        <div className="flex flex-col gap-1 text-[10px]">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-gray-500 mr-1">Negative:</span>
+            {[
+              { label: 'Very strong (r ≤ −0.90)', bg: 'rgba(185,28,28,0.85)', text: 'white' },
+              { label: 'Strong (−0.90 to −0.60)', bg: 'rgba(239,68,68,0.65)', text: 'white' },
+              { label: 'Moderate (−0.60 to −0.30)', bg: 'rgba(248,113,113,0.40)', text: '#fca5a5' },
+            ].map(l => (
+              <span key={l.label} className="flex items-center gap-1">
+                <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: l.bg, border: '1px solid rgba(255,255,255,0.08)' }} />
+                <span style={{ color: l.text }}>{l.label}</span>
+              </span>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-gray-500 mr-1">Weak:</span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: 'rgba(40,44,65,0.9)', border: '1px solid rgba(255,255,255,0.08)' }} />
+              <span style={{ color: '#6b7280' }}>|r| &lt; 0.30</span>
             </span>
-          ))}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-gray-500 mr-1">Positive:</span>
+            {[
+              { label: 'Moderate (0.30 to 0.60)', bg: 'rgba(52,211,153,0.40)', text: '#6ee7b7' },
+              { label: 'Strong (0.60 to 0.90)', bg: 'rgba(16,185,129,0.65)', text: 'white' },
+              { label: 'Very strong (r ≥ 0.90)', bg: 'rgba(5,150,105,0.85)', text: 'white' },
+            ].map(l => (
+              <span key={l.label} className="flex items-center gap-1">
+                <span className="inline-block w-3 h-3 rounded-sm" style={{ backgroundColor: l.bg, border: '1px solid rgba(255,255,255,0.08)' }} />
+                <span style={{ color: l.text }}>{l.label}</span>
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 

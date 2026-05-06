@@ -279,9 +279,13 @@ export function pearson(a: number[], b: number[]): number | null {
 }
 
 /**
- * Compute a correlation matrix of daily log-returns across multiple price
- * series. Series are aligned on a forward-filled common calendar so that
- * mismatched dates (e.g. crypto trades weekends, equities don't) still align.
+ * Pearson correlation matrix of log-returns across multiple price series.
+ *
+ * Alignment: we intersect the actual trading dates of all series (no
+ * forward-fill). Forward-filling missing dates injects spurious zero-return
+ * bars (e.g. equities on weekends while crypto trades), which biases the
+ * correlation toward zero. By taking only dates where every series has a
+ * real observation, every return reflects a real price move on both sides.
  */
 export function correlationMatrix(
   series: { symbol: string; data: HistoricalPoint[] }[],
@@ -289,29 +293,30 @@ export function correlationMatrix(
   const labels = series.map(s => s.symbol);
   if (series.length === 0) return { labels, matrix: [] };
 
-  // Build union of dates and forward-fill
-  const allDates = Array.from(new Set(series.flatMap(s => s.data.map(d => d.date)))).sort();
+  // Intersect dates: keep only dates present in every series.
+  const dateSets = series.map(s => new Set(s.data.map(d => d.date)));
+  const baseDates = series[0].data.map(d => d.date);
+  const commonDates = baseDates
+    .filter(d => dateSets.every(set => set.has(d)))
+    .sort();
+
+  // Sample each series at the intersected dates.
   const aligned: number[][] = series.map(s => {
     const map = new Map(s.data.map(d => [d.date, d.close] as const));
-    const out: number[] = [];
-    let last: number | null = null;
-    for (const d of allDates) {
-      const v = map.get(d);
-      if (v != null) last = v;
-      out.push(last ?? NaN);
-    }
-    return out;
+    return commonDates.map(d => map.get(d) ?? NaN);
   });
 
-  // Convert to log returns; only keep indices where ALL series have a finite value
+  // Log returns between consecutive intersected observations.
   const returns: number[][] = aligned.map(arr => {
     const r: number[] = [];
     for (let i = 1; i < arr.length; i++) {
       const a = arr[i - 1], b = arr[i];
-      r.push(a > 0 && b > 0 ? Math.log(b / a) : NaN);
+      r.push(a > 0 && b > 0 && isFinite(a) && isFinite(b) ? Math.log(b / a) : NaN);
     }
     return r;
   });
+
+  // Drop any index where any series produced a non-finite return.
   const len = returns[0]?.length ?? 0;
   const validIdx: number[] = [];
   for (let i = 0; i < len; i++) {
