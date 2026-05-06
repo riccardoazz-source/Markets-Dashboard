@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchYahooChart } from '@/lib/yahoo';
 
-// Explicitly use Node.js runtime (not Edge) so FRED requests come from AWS Lambda IPs.
-export const runtime = 'nodejs';
+// Edge runtime: near-zero cold start + same network that works for Yahoo Finance
+// in /api/historical and /api/crypto. Node.js was tried to get different IPs for
+// FRED, but FRED is blocked regardless — edge is strictly better here.
+export const runtime = 'edge';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
