@@ -6,7 +6,7 @@ import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   normalizeData, calculateCAGR, formatPercent, colorForPercent,
   CHART_COLORS, getTimeframeStart, buildTotalReturnSeries, computeAssetIRR,
-  correlationMatrix, dedupStepSeries,
+  correlationMatrix, dedupStepSeries, extendToToday,
 } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { CompareChart } from '@/components/charts/CompareChart';
@@ -63,7 +63,7 @@ export function CompareSection() {
   const [loading, setLoading] = useState(false);
   const [normalized, setNormalized] = useState(true);
   const [logScale, setLogScale] = useState(false);
-  const [corrMode, setCorrMode] = useState<'returns' | 'levels'>('returns');
+  const [corrMode, setCorrMode] = useState<'returns' | 'levels' | 'spearman'>('spearman');
 
   // Dual search: local config + remote Yahoo search
   const [search, setSearch] = useState('');
@@ -265,10 +265,15 @@ export function CompareSection() {
         const raw = a.rawData ?? a.data;
         const rawFiltered = raw.filter(d => d.date >= commonStart);
         const trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
-        // For macro rate series: deduplicate consecutive identical values so
-        // the chart renders a step function ending at the last CHANGE date,
-        // not at today's "no change" daily observation.
-        const displayRaw = a.type === 'macro' ? dedupStepSeries(rawFiltered) : rawFiltered;
+        // For macro series:
+        //   1. dedup consecutive identical values → chart shows when value
+        //      actually changed, not 100s of "no change" daily duplicates.
+        //   2. extendToToday → line extends horizontally to today, clearly
+        //      showing "value is still current" instead of ending mid-axis
+        //      and looking like the value collapsed.
+        const displayRaw = a.type === 'macro'
+          ? extendToToday(dedupStepSeries(rawFiltered))
+          : rawFiltered;
         const displayData = normalized ? normalizeData(displayRaw) : displayRaw;
         const displayTrData = trFiltered
           ? (normalized ? normalizeData(trFiltered) : trFiltered)
@@ -492,8 +497,8 @@ function CorrelationMatrix({
   matrix: (number | null)[][];
   sampleCount: number;
   names: Record<string, string>;
-  mode: 'returns' | 'levels';
-  onModeChange: (m: 'returns' | 'levels') => void;
+  mode: 'returns' | 'levels' | 'spearman';
+  onModeChange: (m: 'returns' | 'levels' | 'spearman') => void;
 }) {
   return (
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
@@ -503,25 +508,37 @@ function CorrelationMatrix({
             <h3 className="text-sm font-semibold text-gray-100">Correlation matrix</h3>
             <div className="flex rounded-md overflow-hidden border border-border text-[10px]">
               <button
-                onClick={() => onModeChange('returns')}
-                className={clsx('px-2 py-0.5 transition-colors', mode === 'returns' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
-                title="Pearson on period log-returns — measures return co-movement. Rigorous but one extreme month (e.g. COVID crash) can dominate."
-              >Returns</button>
+                onClick={() => onModeChange('spearman')}
+                className={clsx('px-2 py-0.5 transition-colors', mode === 'spearman' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
+                title="Spearman rank correlation — captures monotone relationships, robust to outliers (COVID crashes, rate spikes don't dominate). Best match for the visual relationship the eye sees."
+              >Rank (Spearman)</button>
               <button
                 onClick={() => onModeChange('levels')}
                 className={clsx('px-2 py-0.5 transition-colors border-l border-border', mode === 'levels' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
-                title="Pearson on normalized price levels — mirrors the visual up/down relationship. Intuitive but spurious correlations possible for trending series."
+                title="Pearson on price levels — sensitive to outliers and to the magnitude of swings; can show spurious correlations for trending series."
               >Levels</button>
+              <button
+                onClick={() => onModeChange('returns')}
+                className={clsx('px-2 py-0.5 transition-colors border-l border-border', mode === 'returns' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
+                title="Pearson on period log-returns — period-to-period co-movement. Rigorous but a single extreme period (e.g. COVID) can pull the result toward zero."
+              >Returns</button>
             </div>
           </div>
           <p className="text-[10px] text-gray-500 mt-0.5">
             {mode === 'returns'
-              ? `Pearson on log-returns · total-return prices · ${sampleCount} periods · green = positive, red = negative`
-              : `Pearson on normalized levels (base 100) · ${sampleCount} periods · green = positive, red = negative`}
+              ? `Pearson on log-returns · ${sampleCount} periods · green = positive, red = negative`
+              : mode === 'levels'
+              ? `Pearson on price levels · ${sampleCount} periods · green = positive, red = negative`
+              : `Spearman rank correlation on levels · ${sampleCount} periods · green = positive, red = negative`}
           </p>
+          {mode === 'spearman' && (
+            <p className="text-[10px] text-gray-500 mt-0.5">
+              Recommended: rank-based, robust to outliers. Captures monotone relationships (when X rises, does Y tend to fall?) without being thrown off by single extreme periods.
+            </p>
+          )}
           {mode === 'levels' && (
             <p className="text-[10px] text-amber-400/70 mt-0.5">
-              Levels correlation shows visual trend relationships. Note: two independent trends can appear correlated by coincidence.
+              Levels correlation can show spurious results for non-stationary trends. For most use cases, Rank (Spearman) is more reliable.
             </p>
           )}
         </div>

@@ -141,6 +141,25 @@ export function dedupStepSeries(data: HistoricalPoint[]): HistoricalPoint[] {
   return out;
 }
 
+/**
+ * Append a synthetic data point at today's date with the last known value, IF
+ * the last observation is older than today. Used so the chart line extends all
+ * the way to "now" — visually communicating "this value is still current as of
+ * today" rather than letting the line end abruptly at the last update date
+ * (which a viewer might misread as a sudden drop or "data collapsing").
+ *
+ * Example: Fed Funds Rate last changed 2025-12-18 at 4.25%. Without this, the
+ * chart line ends at 2025-12-18; with it, the line extends horizontally to
+ * today at 4.25%, clearly showing "still 4.25% as of today".
+ */
+export function extendToToday(data: HistoricalPoint[]): HistoricalPoint[] {
+  if (!data.length) return data;
+  const today = new Date().toISOString().slice(0, 10);
+  const last = data[data.length - 1];
+  if (last.date >= today) return data;
+  return [...data, { date: today, close: last.close }];
+}
+
 export function colorForPercent(value: number): string {
   return value >= 0 ? 'text-up-text' : 'text-down-text';
 }
@@ -301,25 +320,58 @@ export function pearson(a: number[], b: number[]): number | null {
 }
 
 /**
- * Pearson correlation matrix across multiple price series.
+ * Convert values to ranks (1..n), with average ranks for ties. Used by Spearman.
+ */
+function ranks(values: number[]): number[] {
+  const n = values.length;
+  const indexed = values.map((v, i) => ({ v, i }));
+  indexed.sort((a, b) => a.v - b.v);
+  const r = new Array<number>(n);
+  let i = 0;
+  while (i < n) {
+    let j = i;
+    while (j + 1 < n && indexed[j + 1].v === indexed[i].v) j++;
+    const avgRank = (i + j) / 2 + 1; // 1-based, average over tie group
+    for (let k = i; k <= j; k++) r[indexed[k].i] = avgRank;
+    i = j + 1;
+  }
+  return r;
+}
+
+/**
+ * Spearman rank correlation: Pearson on ranks. Robust to outliers because a
+ * single extreme value (e.g. COVID rate crash) only contributes its rank,
+ * not its squared deviation. Good for monotone but non-linear relationships.
+ */
+export function spearman(a: number[], b: number[]): number | null {
+  const n = Math.min(a.length, b.length);
+  if (n < 2) return null;
+  return pearson(ranks(a.slice(0, n)), ranks(b.slice(0, n)));
+}
+
+/**
+ * Correlation matrix across multiple price series.
  *
- * mode='returns' (default): Pearson on log-returns — captures period-to-period
- *   return co-movement. Statistically rigorous. Not distorted by level trends,
- *   but a single extreme outlier (e.g. COVID crash) can dominate.
+ * mode='returns': Pearson on log-returns — period-to-period return co-movement.
+ *   Statistically rigorous but a single extreme outlier (e.g. COVID crash)
+ *   can dominate.
  *
  * mode='levels': Pearson on normalized levels (base 100 at common start) —
- *   captures the visual up/down relationship the eye sees. Intuitive but
- *   technically a spurious regression risk for non-stationary series (two
- *   independent trends can show perfect level correlation).
+ *   the visual up/down relationship the eye sees. Intuitive but technically
+ *   a spurious-regression risk for non-stationary series.
  *
- * Alignment for both modes:
+ * mode='spearman' (default): Spearman rank correlation on levels — robust
+ *   to outliers, captures monotone relationships. Closest to "does asset A
+ *   tend to be high when asset B is low?" without being skewed by extremes.
+ *
+ * Alignment for all modes:
  * - Detect coarsest cadence across all series (daily / weekly / monthly).
  * - Convert every date to a canonical bucket key.
  * - Intersect bucket keys present in ALL series.
  */
 export function correlationMatrix(
   series: { symbol: string; data: HistoricalPoint[] }[],
-  mode: 'returns' | 'levels' = 'returns',
+  mode: 'returns' | 'levels' | 'spearman' = 'spearman',
 ): { labels: string[]; matrix: (number | null)[][]; sampleCount: number } {
   const labels = series.map(s => s.symbol);
   if (series.length === 0) return { labels, matrix: [], sampleCount: 0 };
@@ -383,19 +435,7 @@ export function correlationMatrix(
   let cleaned: number[][];
   let sampleCount: number;
 
-  if (mode === 'levels') {
-    // Normalize each series to 100 at the first common point; use all commonKeys.
-    const normalized = aligned.map(arr => {
-      const base = arr.find(v => v > 0 && isFinite(v)) ?? arr[0];
-      return arr.map(v => base > 0 ? (v / base) * 100 : NaN);
-    });
-    const validIdx: number[] = [];
-    for (let i = 0; i < normalized[0].length; i++) {
-      if (normalized.every(r => isFinite(r[i]))) validIdx.push(i);
-    }
-    cleaned = normalized.map(r => validIdx.map(i => r[i]));
-    sampleCount = validIdx.length;
-  } else {
+  if (mode === 'returns') {
     // Log-returns: drop first point, compute differences
     const returns: number[][] = aligned.map(arr => {
       const r: number[] = [];
@@ -411,12 +451,22 @@ export function correlationMatrix(
     }
     cleaned = returns.map(r => validIdx.map(i => r[i]));
     sampleCount = validIdx.length;
+  } else {
+    // 'levels' and 'spearman' both use levels (normalized for display, but
+    // Pearson is scale-invariant so result is identical to raw levels).
+    const validIdx: number[] = [];
+    for (let i = 0; i < aligned[0].length; i++) {
+      if (aligned.every(r => isFinite(r[i]) && r[i] > 0)) validIdx.push(i);
+    }
+    cleaned = aligned.map(r => validIdx.map(i => r[i]));
+    sampleCount = validIdx.length;
   }
 
+  const corrFn = mode === 'spearman' ? spearman : pearson;
   const matrix: (number | null)[][] = labels.map(() => labels.map(() => null));
   for (let i = 0; i < labels.length; i++) {
     for (let j = i; j < labels.length; j++) {
-      const c = i === j ? 1 : pearson(cleaned[i], cleaned[j]);
+      const c = i === j ? 1 : corrFn(cleaned[i], cleaned[j]);
       matrix[i][j] = c;
       matrix[j][i] = c;
     }
