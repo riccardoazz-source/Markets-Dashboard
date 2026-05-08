@@ -6,13 +6,13 @@ import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   normalizeData, calculateCAGR, formatPercent, colorForPercent,
   CHART_COLORS, getTimeframeStart, buildTotalReturnSeries, computeAssetIRR,
-  correlationMatrix, dedupStepSeries, extendToToday,
+  correlationMatrix, dedupStepSeries, extendToToday, CorrAlignedRow,
 } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { CompareChart } from '@/components/charts/CompareChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { X, Search } from 'lucide-react';
+import { X, Search, ChevronDown, ChevronUp } from 'lucide-react';
 
 class ChartErrorBoundary extends Component<
   { children: ReactNode },
@@ -300,7 +300,7 @@ export function CompareSection() {
       return correlationMatrix(series, corrMode);
     } catch (e) {
       console.error('[CompareSection] correlationMatrix error:', e);
-      return { labels: [], matrix: [] as (number | null)[][], sampleCount: 0 };
+      return { labels: [], matrix: [] as (number | null)[][], sampleCount: 0, alignedData: [] as CorrAlignedRow[] };
     }
   }, [displayAssets, corrMode]);
 
@@ -449,6 +449,7 @@ export function CompareSection() {
               labels={correl.labels}
               matrix={correl.matrix}
               sampleCount={correl.sampleCount}
+              alignedData={correl.alignedData}
               names={Object.fromEntries(assets.map(a => [a.symbol, a.name]))}
               mode={corrMode}
               onModeChange={setCorrMode}
@@ -491,15 +492,26 @@ function corrStrength(v: number): { label: string; bg: string; text: string } {
 }
 
 function CorrelationMatrix({
-  labels, matrix, sampleCount, names, mode, onModeChange,
+  labels, matrix, sampleCount, alignedData, names, mode, onModeChange,
 }: {
   labels: string[];
   matrix: (number | null)[][];
   sampleCount: number;
+  alignedData: CorrAlignedRow[];
   names: Record<string, string>;
   mode: 'returns' | 'levels' | 'spearman';
   onModeChange: (m: 'returns' | 'levels' | 'spearman') => void;
 }) {
+  const [showData, setShowData] = useState(false);
+
+  function fmtVal(v: number): string {
+    if (mode === 'returns') return `${(v * 100).toFixed(3)}%`;
+    return v.toFixed(4);
+  }
+
+  // Show most recent first
+  const rows = [...alignedData].reverse();
+
   return (
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
       <div className="flex items-start justify-between flex-wrap gap-3">
@@ -611,6 +623,54 @@ function CorrelationMatrix({
           </tbody>
         </table>
       </div>
+
+      {/* Expandable raw-data panel */}
+      {alignedData.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowData(s => !s)}
+            className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {showData ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {showData ? 'Hide' : 'Inspect'} data used in calculation
+            <span className="text-gray-700">({alignedData.length} periods · {mode === 'returns' ? 'log-return %' : 'price level'})</span>
+          </button>
+
+          {showData && (
+            <div className="mt-2 overflow-auto max-h-72 rounded-lg border border-border">
+              <table className="text-[11px] w-full border-collapse">
+                <thead className="sticky top-0 bg-bg-card z-10">
+                  <tr>
+                    <th className="text-left px-3 py-1.5 text-gray-400 font-semibold border-b border-border whitespace-nowrap">Period</th>
+                    {labels.map(l => (
+                      <th key={l} className="text-right px-3 py-1.5 text-gray-400 font-semibold border-b border-border whitespace-nowrap">
+                        {names[l] ?? l}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, ri) => (
+                    <tr key={ri} className={ri % 2 === 0 ? 'bg-bg-input/40' : ''}>
+                      <td className="px-3 py-1 text-gray-400 font-mono whitespace-nowrap">{row.period}</td>
+                      {row.values.map((v, vi) => (
+                        <td key={vi} className={clsx(
+                          'px-3 py-1 text-right font-mono tabular-nums',
+                          mode === 'returns'
+                            ? (v > 0 ? 'text-up-text' : v < 0 ? 'text-down-text' : 'text-gray-400')
+                            : 'text-gray-200',
+                        )}>
+                          {fmtVal(v)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

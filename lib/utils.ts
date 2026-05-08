@@ -369,12 +369,14 @@ export function spearman(a: number[], b: number[]): number | null {
  * - Convert every date to a canonical bucket key.
  * - Intersect bucket keys present in ALL series.
  */
+export interface CorrAlignedRow { period: string; values: number[] }
+
 export function correlationMatrix(
   series: { symbol: string; data: HistoricalPoint[] }[],
   mode: 'returns' | 'levels' | 'spearman' = 'spearman',
-): { labels: string[]; matrix: (number | null)[][]; sampleCount: number } {
+): { labels: string[]; matrix: (number | null)[][]; sampleCount: number; alignedData: CorrAlignedRow[] } {
   const labels = series.map(s => s.symbol);
-  if (series.length === 0) return { labels, matrix: [], sampleCount: 0 };
+  if (series.length === 0) return { labels, matrix: [], sampleCount: 0, alignedData: [] };
 
   // ── Cadence detection ─────────────────────────────────────────────────────
   function medianSpacingDays(data: HistoricalPoint[]): number {
@@ -426,7 +428,7 @@ export function correlationMatrix(
     .sort();
 
   if (commonKeys.length < 3) {
-    return { labels, matrix: labels.map(() => labels.map(() => null)), sampleCount: 0 };
+    return { labels, matrix: labels.map(() => labels.map(() => null)), sampleCount: 0, alignedData: [] };
   }
 
   // ── Aligned price arrays ───────────────────────────────────────────────────
@@ -434,6 +436,7 @@ export function correlationMatrix(
 
   let cleaned: number[][];
   let sampleCount: number;
+  let validIdx: number[] = [];
 
   if (mode === 'returns') {
     // Log-returns: drop first point, compute differences
@@ -445,7 +448,6 @@ export function correlationMatrix(
       }
       return r;
     });
-    const validIdx: number[] = [];
     for (let i = 0; i < (returns[0]?.length ?? 0); i++) {
       if (returns.every(r => isFinite(r[i]))) validIdx.push(i);
     }
@@ -454,12 +456,23 @@ export function correlationMatrix(
   } else {
     // 'levels' and 'spearman' both use levels (normalized for display, but
     // Pearson is scale-invariant so result is identical to raw levels).
-    const validIdx: number[] = [];
     for (let i = 0; i < aligned[0].length; i++) {
       if (aligned.every(r => isFinite(r[i]) && r[i] > 0)) validIdx.push(i);
     }
     cleaned = aligned.map(r => validIdx.map(i => r[i]));
     sampleCount = validIdx.length;
+  }
+
+  // Build aligned data rows for user inspection: exact values going into the calculation.
+  // For returns: period label = end of each return interval (commonKeys[validIdx[i]+1]).
+  // For levels/spearman: period label = commonKeys[validIdx[i]].
+  const alignedData: CorrAlignedRow[] = [];
+  const n = cleaned[0]?.length ?? 0;
+  for (let i = 0; i < n; i++) {
+    const period = mode === 'returns'
+      ? (commonKeys[validIdx[i] + 1] ?? commonKeys[validIdx[i]])
+      : commonKeys[validIdx[i]];
+    alignedData.push({ period, values: cleaned.map(c => c[i]) });
   }
 
   const corrFn = mode === 'spearman' ? spearman : pearson;
@@ -471,7 +484,7 @@ export function correlationMatrix(
       matrix[j][i] = c;
     }
   }
-  return { labels, matrix, sampleCount };
+  return { labels, matrix, sampleCount, alignedData };
 }
 
 export function timeframeLabel(tf: Timeframe): string {
