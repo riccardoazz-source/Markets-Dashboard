@@ -263,6 +263,7 @@ export function CompareSection() {
         const raw = a.rawData ?? a.data;
         const rawFiltered = raw.filter(d => d.date >= commonStart);
         const trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
+        const divsFiltered = a.dividends?.filter(d => d.date >= commonStart) ?? [];
         // For macro series:
         //   1. dedup consecutive identical values → chart shows when value
         //      actually changed, not 100s of "no change" daily duplicates.
@@ -276,12 +277,34 @@ export function CompareSection() {
         const displayTrData = trFiltered
           ? (normalized ? normalizeData(trFiltered) : trFiltered)
           : undefined;
+
+        // Recompute return/CAGR on the trimmed (commonStart→today) window so
+        // card numbers reflect the same period the chart shows. Without this,
+        // the chart trims to commonStart but cards keep the CAGR computed on
+        // the original (longer) timeframe window, causing an inversion — e.g.
+        // an ETF launched mid-year ranks below an index on the card while
+        // clearly outperforming it on the chart.
+        // Prefer the total-return version (matches the dashed line) so a
+        // distributing ETF doesn't look worse just because its price return
+        // is suppressed by income distributions.
+        const cagrPrice = calculateCAGR(rawFiltered, timeframe);
+        const cagrTR = trFiltered && trFiltered.length > 1
+          ? calculateCAGR(trFiltered, timeframe)
+          : null;
+        const irrTrim = divsFiltered.length > 0
+          ? computeAssetIRR(rawFiltered, divsFiltered)
+          : null;
+
         return {
           ...a,
           data: displayData,
           rawData: rawFiltered,       // full data for correlation (NOT deduped)
           totalReturnData: trFiltered, // full data for correlation
           trData: displayTrData,
+          cagr: cagrTR?.cagr ?? cagrPrice?.cagr,
+          totalReturn: cagrTR?.return ?? cagrPrice?.return,
+          cagrWithDiv: cagrTR?.cagr,
+          irr: irrTrim != null ? irrTrim * 100 : a.irr,
         };
       });
     } catch (e) {
@@ -410,35 +433,42 @@ export function CompareSection() {
             <CompareChart assets={displayAssets} height={360} logScale={logScale} />
           </div>
 
-          {/* Stats cards */}
+          {/* Stats cards — use displayAssets so numbers are computed on the
+              same window the chart displays (commonStart → today), and prefer
+              total-return values to match the dashed line. */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {assets.map((a, i) => (
-              <div key={a.symbol} className="rounded-xl border p-3 bg-bg-card"
-                style={{ borderColor: CHART_COLORS[i % CHART_COLORS.length] + '66' }}>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
-                  <p className="text-sm font-semibold text-gray-100 truncate">{a.name}</p>
+            {displayAssets.map((a, i) => {
+              const hasDiv = a.cagrWithDiv != null;
+              return (
+                <div key={a.symbol} className="rounded-xl border p-3 bg-bg-card"
+                  style={{ borderColor: CHART_COLORS[i % CHART_COLORS.length] + '66' }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
+                    <p className="text-sm font-semibold text-gray-100 truncate">{a.name}</p>
+                  </div>
+                  {a.totalReturn != null && (
+                    <div>
+                      <p className="text-[10px] text-gray-500">
+                        Return {hasDiv ? '(incl. div.)' : ''} ({timeframe})
+                      </p>
+                      <p className={clsx('text-base font-bold', colorForPercent(a.totalReturn))}>{formatPercent(a.totalReturn)}</p>
+                    </div>
+                  )}
+                  {a.cagr != null && (
+                    <div className="mt-1">
+                      <p className="text-[10px] text-gray-500">CAGR{hasDiv ? ' (incl. div.)' : ''}</p>
+                      <p className={clsx('text-sm font-semibold', colorForPercent(a.cagr))}>{formatPercent(a.cagr)}</p>
+                    </div>
+                  )}
+                  {a.irr != null && (
+                    <div className="mt-1">
+                      <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
+                      <p className={clsx('text-sm font-semibold', colorForPercent(a.irr))}>{formatPercent(a.irr)}</p>
+                    </div>
+                  )}
                 </div>
-                {a.totalReturn != null && (
-                  <div>
-                    <p className="text-[10px] text-gray-500">Return ({timeframe === 'MAX' ? 'MAX' : timeframe})</p>
-                    <p className={clsx('text-base font-bold', colorForPercent(a.totalReturn))}>{formatPercent(a.totalReturn)}</p>
-                  </div>
-                )}
-                {a.cagr != null && (
-                  <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">CAGR</p>
-                    <p className={clsx('text-sm font-semibold', colorForPercent(a.cagr))}>{formatPercent(a.cagr)}</p>
-                  </div>
-                )}
-                {a.irr != null && (
-                  <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
-                    <p className={clsx('text-sm font-semibold', colorForPercent(a.irr))}>{formatPercent(a.irr)}</p>
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Correlation matrix */}
