@@ -46,10 +46,13 @@ export function PriceChart({
     );
   }
 
+  const isStep = interpolationType === 'stepAfter';
   const first = data[0].close;
   const last = data[data.length - 1].close;
-  const isUp = last >= first;
-  const chartColor = isUp ? '#10b981' : '#ef4444';
+  // For step-function series (rates) use accent color: red/green based on the
+  // full history is misleading (a 40-year rate starting at 8% and now at 4%
+  // would always be red even during the 2022-24 hike cycle).
+  const chartColor = isStep ? '#6366f1' : (last >= first ? '#10b981' : '#ef4444');
   const resolvedColor = color === 'auto' ? chartColor : color;
 
   const decimals = isCurrency
@@ -112,8 +115,8 @@ export function PriceChart({
           type={interpolationType}
           dataKey="close"
           stroke={resolvedColor}
-          strokeWidth={2}
-          fill={`url(#grad-${resolvedColor.replace('#', '')})`}
+          strokeWidth={isStep ? 1.5 : 2}
+          fill={isStep ? 'none' : `url(#grad-${resolvedColor.replace('#', '')})`}
           dot={false}
           activeDot={{ r: 4, fill: resolvedColor }}
         />
