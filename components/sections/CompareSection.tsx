@@ -63,8 +63,6 @@ export function CompareSection() {
   const [loading, setLoading] = useState(false);
   const [normalized, setNormalized] = useState(true);
   const [logScale, setLogScale] = useState(false);
-  const [corrMode, setCorrMode] = useState<'returns' | 'levels' | 'spearman'>('spearman');
-
   // Dual search: local config + remote Yahoo search
   const [search, setSearch] = useState('');
   const [remoteHits, setRemoteHits] = useState<SearchHit[]>([]);
@@ -295,14 +293,14 @@ export function CompareSection() {
   const correl = useMemo(() => {
     try {
       const series = displayAssets
-        .filter(a => (a.totalReturnData ?? a.rawData ?? a.data).length > 1)
-        .map(a => ({ symbol: a.symbol, data: a.totalReturnData ?? a.rawData ?? a.data }));
-      return correlationMatrix(series, corrMode);
+        .filter(a => (a.rawData ?? a.data).length > 1)
+        .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
+      return correlationMatrix(series);
     } catch (e) {
       console.error('[CompareSection] correlationMatrix error:', e);
       return { labels: [], matrix: [] as (number | null)[][], sampleCount: 0, alignedData: [] as CorrAlignedRow[] };
     }
-  }, [displayAssets, corrMode]);
+  }, [displayAssets]);
 
   return (
     <div className="space-y-4">
@@ -451,8 +449,6 @@ export function CompareSection() {
               sampleCount={correl.sampleCount}
               alignedData={correl.alignedData}
               names={Object.fromEntries(assets.map(a => [a.symbol, a.name]))}
-              mode={corrMode}
-              onModeChange={setCorrMode}
             />
           )}
         </ChartErrorBoundary>
@@ -492,22 +488,15 @@ function corrStrength(v: number): { label: string; bg: string; text: string } {
 }
 
 function CorrelationMatrix({
-  labels, matrix, sampleCount, alignedData, names, mode, onModeChange,
+  labels, matrix, sampleCount, alignedData, names,
 }: {
   labels: string[];
   matrix: (number | null)[][];
   sampleCount: number;
   alignedData: CorrAlignedRow[];
   names: Record<string, string>;
-  mode: 'returns' | 'levels' | 'spearman';
-  onModeChange: (m: 'returns' | 'levels' | 'spearman') => void;
 }) {
   const [showData, setShowData] = useState(false);
-
-  function fmtVal(v: number): string {
-    if (mode === 'returns') return `${(v * 100).toFixed(3)}%`;
-    return v.toFixed(4);
-  }
 
   // Show most recent first
   const rows = [...alignedData].reverse();
@@ -516,43 +505,10 @@ function CorrelationMatrix({
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-sm font-semibold text-gray-100">Correlation matrix</h3>
-            <div className="flex rounded-md overflow-hidden border border-border text-[10px]">
-              <button
-                onClick={() => onModeChange('spearman')}
-                className={clsx('px-2 py-0.5 transition-colors', mode === 'spearman' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
-                title="Spearman rank correlation — captures monotone relationships, robust to outliers (COVID crashes, rate spikes don't dominate). Best match for the visual relationship the eye sees."
-              >Rank (Spearman)</button>
-              <button
-                onClick={() => onModeChange('levels')}
-                className={clsx('px-2 py-0.5 transition-colors border-l border-border', mode === 'levels' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
-                title="Pearson on price levels — sensitive to outliers and to the magnitude of swings; can show spurious correlations for trending series."
-              >Levels</button>
-              <button
-                onClick={() => onModeChange('returns')}
-                className={clsx('px-2 py-0.5 transition-colors border-l border-border', mode === 'returns' ? 'bg-accent/20 text-accent' : 'text-gray-500 hover:text-gray-300')}
-                title="Pearson on period log-returns — period-to-period co-movement. Rigorous but a single extreme period (e.g. COVID) can pull the result toward zero."
-              >Returns</button>
-            </div>
-          </div>
+          <h3 className="text-sm font-semibold text-gray-100">Correlation matrix</h3>
           <p className="text-[10px] text-gray-500 mt-0.5">
-            {mode === 'returns'
-              ? `Pearson on log-returns · ${sampleCount} periods · green = positive, red = negative`
-              : mode === 'levels'
-              ? `Pearson on price levels · ${sampleCount} periods · green = positive, red = negative`
-              : `Spearman rank correlation on levels · ${sampleCount} periods · green = positive, red = negative`}
+            {sampleCount} periods · green = positive, red = negative
           </p>
-          {mode === 'spearman' && (
-            <p className="text-[10px] text-gray-500 mt-0.5">
-              Recommended: rank-based, robust to outliers. Captures monotone relationships (when X rises, does Y tend to fall?) without being thrown off by single extreme periods.
-            </p>
-          )}
-          {mode === 'levels' && (
-            <p className="text-[10px] text-amber-400/70 mt-0.5">
-              Levels correlation can show spurious results for non-stationary trends. For most use cases, Rank (Spearman) is more reliable.
-            </p>
-          )}
         </div>
         {/* Legend */}
         <div className="flex flex-col gap-1 text-[10px]">
@@ -633,7 +589,7 @@ function CorrelationMatrix({
           >
             {showData ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             {showData ? 'Hide' : 'Inspect'} data used in calculation
-            <span className="text-gray-700">({alignedData.length} periods · {mode === 'returns' ? 'log-return %' : 'price level'})</span>
+            <span className="text-gray-700">({alignedData.length} periods)</span>
           </button>
 
           {showData && (
@@ -654,13 +610,8 @@ function CorrelationMatrix({
                     <tr key={ri} className={ri % 2 === 0 ? 'bg-bg-input/40' : ''}>
                       <td className="px-3 py-1 text-gray-400 font-mono whitespace-nowrap">{row.period}</td>
                       {row.values.map((v, vi) => (
-                        <td key={vi} className={clsx(
-                          'px-3 py-1 text-right font-mono tabular-nums',
-                          mode === 'returns'
-                            ? (v > 0 ? 'text-up-text' : v < 0 ? 'text-down-text' : 'text-gray-400')
-                            : 'text-gray-200',
-                        )}>
-                          {fmtVal(v)}
+                        <td key={vi} className="px-3 py-1 text-right font-mono tabular-nums text-gray-200">
+                          {v.toFixed(4)}
                         </td>
                       ))}
                     </tr>

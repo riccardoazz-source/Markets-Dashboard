@@ -350,33 +350,23 @@ export function spearman(a: number[], b: number[]): number | null {
 }
 
 /**
- * Correlation matrix across multiple price series.
+ * Correlation matrix across multiple price series using Spearman rank
+ * correlation on the actual values (levels).
  *
- * mode='returns': Pearson on log-returns — period-to-period return co-movement.
- *   Statistically rigorous but a single extreme outlier (e.g. COVID crash)
- *   can dominate.
- *
- * mode='levels': Pearson on normalized levels (base 100 at common start) —
- *   the visual up/down relationship the eye sees. Intuitive but technically
- *   a spurious-regression risk for non-stationary series.
- *
- * mode='spearman' (default): Spearman rank correlation on levels — robust
- *   to outliers, captures monotone relationships. Closest to "does asset A
- *   tend to be high when asset B is low?" without being skewed by extremes.
- *
- * Alignment for all modes:
- * - Detect coarsest cadence across all series (daily / weekly / monthly).
- * - Convert every date to a canonical bucket key.
- * - Intersect bucket keys present in ALL series.
+ * Alignment: detect the coarsest cadence across all series (daily/weekly/monthly),
+ * bucket every date to that cadence, then build the union of all periods and
+ * carry the last known value forward (LOCF) for series that did not update in
+ * a given period (e.g. a central bank rate that stays unchanged for months).
+ * Only periods after the first observation of EVERY series are included.
  */
 export interface CorrAlignedRow { period: string; values: number[] }
 
 export function correlationMatrix(
   series: { symbol: string; data: HistoricalPoint[] }[],
-  mode: 'returns' | 'levels' | 'spearman' = 'spearman',
 ): { labels: string[]; matrix: (number | null)[][]; sampleCount: number; alignedData: CorrAlignedRow[] } {
   const labels = series.map(s => s.symbol);
-  if (series.length === 0) return { labels, matrix: [], sampleCount: 0, alignedData: [] };
+  const empty = { labels, matrix: [] as (number | null)[][], sampleCount: 0, alignedData: [] as CorrAlignedRow[] };
+  if (series.length === 0) return empty;
 
   // ── Cadence detection ─────────────────────────────────────────────────────
   function medianSpacingDays(data: HistoricalPoint[]): number {
@@ -389,10 +379,6 @@ export function correlationMatrix(
     diffs.sort((a, b) => a - b);
     return diffs[Math.floor(diffs.length / 2)];
   }
-  // Use the COARSEST cadence across all series. If one series has monthly
-  // bars (e.g. AGNC at MAX timeframe) and another has daily bars (DFF),
-  // using daily cadence gives near-zero exact-date intersection; monthly
-  // bucketing collapses both to YYYY-MM and gives ~200 common points.
   function toCadence(med: number): 'D' | 'W' | 'M' {
     return med <= 3 ? 'D' : med <= 10 ? 'W' : 'M';
   }
@@ -403,11 +389,11 @@ export function correlationMatrix(
 
   // ── Bucket key ────────────────────────────────────────────────────────────
   function bucketKey(date: string): string {
-    if (cadence === 'M') return date.slice(0, 7); // "YYYY-MM"
+    if (cadence === 'M') return date.slice(0, 7);
     if (cadence === 'W') {
       const d = new Date(date + 'T12:00:00Z');
-      const day = d.getUTCDay(); // 0=Sun … 6=Sat
-      const offset = day === 0 ? 6 : day - 1; // days back to Monday
+      const day = d.getUTCDay();
+      const offset = day === 0 ? 6 : day - 1;
       const mon = new Date(d.getTime() - offset * 86_400_000);
       return mon.toISOString().slice(0, 10);
     }
@@ -417,69 +403,55 @@ export function correlationMatrix(
   // ── Per-series bucket maps (last close wins within a bucket) ──────────────
   const bucketMaps: Map<string, number>[] = series.map(s => {
     const m = new Map<string, number>();
-    for (const p of s.data) m.set(bucketKey(p.date), p.close); // sorted → last wins
+    for (const p of s.data) m.set(bucketKey(p.date), p.close);
     return m;
   });
 
-  // ── Intersect bucket keys present in ALL series ───────────────────────────
-  const allKeys = Array.from(bucketMaps[0].keys());
-  const commonKeys = allKeys
-    .filter(k => bucketMaps.every(m => m.has(k)))
-    .sort();
+  // ── Union of all bucket keys, sorted ascending ────────────────────────────
+  const allKeys = Array.from(
+    new Set(bucketMaps.flatMap(m => Array.from(m.keys())))
+  ).sort();
 
-  if (commonKeys.length < 3) {
+  // ── LOCF-fill each series across the full union ───────────────────────────
+  // For series like the Fed Funds Rate that only has data on meeting dates,
+  // every subsequent period carries the last known rate until the next change.
+  const filled: Map<string, number>[] = bucketMaps.map(m => {
+    const out = new Map<string, number>();
+    let last: number | undefined;
+    for (const k of allKeys) {
+      if (m.has(k)) last = m.get(k)!;
+      if (last !== undefined) out.set(k, last);
+    }
+    return out;
+  });
+
+  // ── Keep only periods where ALL series have reached their first observation ─
+  const validKeys = allKeys.filter(k => filled.every(m => m.has(k)));
+
+  if (validKeys.length < 3) {
     return { labels, matrix: labels.map(() => labels.map(() => null)), sampleCount: 0, alignedData: [] };
   }
 
-  // ── Aligned price arrays ───────────────────────────────────────────────────
-  const aligned: number[][] = bucketMaps.map(m => commonKeys.map(k => m.get(k)!));
-
-  let cleaned: number[][];
-  let sampleCount: number;
-  let validIdx: number[] = [];
-
-  if (mode === 'returns') {
-    // Log-returns: drop first point, compute differences
-    const returns: number[][] = aligned.map(arr => {
-      const r: number[] = [];
-      for (let i = 1; i < arr.length; i++) {
-        const a = arr[i - 1], b = arr[i];
-        r.push(a > 0 && b > 0 ? Math.log(b / a) : NaN);
-      }
-      return r;
-    });
-    for (let i = 0; i < (returns[0]?.length ?? 0); i++) {
-      if (returns.every(r => isFinite(r[i]))) validIdx.push(i);
-    }
-    cleaned = returns.map(r => validIdx.map(i => r[i]));
-    sampleCount = validIdx.length;
-  } else {
-    // 'levels' and 'spearman' both use levels (normalized for display, but
-    // Pearson is scale-invariant so result is identical to raw levels).
-    for (let i = 0; i < aligned[0].length; i++) {
-      if (aligned.every(r => isFinite(r[i]) && r[i] > 0)) validIdx.push(i);
-    }
-    cleaned = aligned.map(r => validIdx.map(i => r[i]));
-    sampleCount = validIdx.length;
+  // ── Aligned value arrays, then drop any row with invalid/non-positive value ─
+  const aligned: number[][] = filled.map(m => validKeys.map(k => m.get(k)!));
+  const validIdx: number[] = [];
+  for (let i = 0; i < aligned[0].length; i++) {
+    if (aligned.every(r => isFinite(r[i]) && r[i] > 0)) validIdx.push(i);
   }
+  const cleaned: number[][] = aligned.map(r => validIdx.map(i => r[i]));
+  const sampleCount = validIdx.length;
 
-  // Build aligned data rows for user inspection: exact values going into the calculation.
-  // For returns: period label = end of each return interval (commonKeys[validIdx[i]+1]).
-  // For levels/spearman: period label = commonKeys[validIdx[i]].
-  const alignedData: CorrAlignedRow[] = [];
-  const n = cleaned[0]?.length ?? 0;
-  for (let i = 0; i < n; i++) {
-    const period = mode === 'returns'
-      ? (commonKeys[validIdx[i] + 1] ?? commonKeys[validIdx[i]])
-      : commonKeys[validIdx[i]];
-    alignedData.push({ period, values: cleaned.map(c => c[i]) });
-  }
+  // ── Aligned data rows for user inspection ─────────────────────────────────
+  const alignedData: CorrAlignedRow[] = validIdx.map((ki, i) => ({
+    period: validKeys[ki],
+    values: cleaned.map(c => c[i]),
+  }));
 
-  const corrFn = mode === 'spearman' ? spearman : pearson;
+  // ── Spearman rank correlation on values ───────────────────────────────────
   const matrix: (number | null)[][] = labels.map(() => labels.map(() => null));
   for (let i = 0; i < labels.length; i++) {
     for (let j = i; j < labels.length; j++) {
-      const c = i === j ? 1 : corrFn(cleaned[i], cleaned[j]);
+      const c = i === j ? 1 : spearman(cleaned[i], cleaned[j]);
       matrix[i][j] = c;
       matrix[j][i] = c;
     }
