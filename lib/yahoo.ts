@@ -560,3 +560,129 @@ export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]>
   console.warn('[yahoo] v7 empty — trying v8 with crumb');
   return fetchQuotesV8Fallback(symbols);
 }
+
+// ---------------------------------------------------------------------------
+// Earnings (quarterly EPS history) via Yahoo quoteSummary
+// ---------------------------------------------------------------------------
+
+export interface YahooEarningsPoint {
+  date: string;        // YYYY-MM-DD (quarter end)
+  period: string;      // "3Q2024" or "2024-09-30"
+  eps: number;         // actual EPS
+  estimate?: number;   // EPS estimate (if available)
+}
+
+export interface YahooEarnings {
+  quarterly: YahooEarningsPoint[];
+  currency: string;
+}
+
+function quarterToEndDate(periodStr: string): string | null {
+  const m = periodStr.match(/^(\d)Q(\d{4})$/);
+  if (!m) return null;
+  const q = parseInt(m[1]);
+  const y = parseInt(m[2]);
+  if (!(q >= 1 && q <= 4) || !y) return null;
+  const endMonth = q * 3;
+  const endDay = endMonth === 6 || endMonth === 9 ? 30 : 31;
+  return `${y}-${String(endMonth).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
+}
+
+interface QuoteSummaryRoot {
+  quoteSummary?: { result?: Array<Record<string, unknown>> };
+}
+
+async function fetchQuoteSummary(
+  symbol: string,
+  modules: string,
+  timeoutMs = 8_000,
+): Promise<Record<string, unknown> | null> {
+  // Try no-auth first (query2 often passes Vercel Edge)
+  for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
+    const url = `https://${host}/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`;
+    try {
+      const res = await fetchWithTimeout(url, {
+        headers: {
+          'User-Agent': UA,
+          'Accept': 'application/json',
+          'Referer': 'https://finance.yahoo.com/',
+        },
+      }, timeoutMs);
+      if (!res.ok) continue;
+      const json = await res.json() as QuoteSummaryRoot;
+      const result = json?.quoteSummary?.result?.[0];
+      if (result) return result;
+    } catch { /* try next host */ }
+  }
+  // Crumb auth fallback
+  let s: CrumbSession;
+  try { s = await getSession(); } catch { return null; }
+  const url = `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}`
+    + `?modules=${modules}&crumb=${encodeURIComponent(s.crumb)}`;
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' },
+    }, timeoutMs);
+    if (!res.ok) return null;
+    const json = await res.json() as QuoteSummaryRoot;
+    return json?.quoteSummary?.result?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings | null> {
+  const result = await fetchQuoteSummary(symbol, 'earnings,earningsHistory');
+  if (!result) return null;
+
+  const map = new Map<string, YahooEarningsPoint>();
+
+  // earningsHistory.history: timestamped EPS for past quarters
+  type HistEntry = {
+    quarter?: { raw?: number };
+    epsActual?: { raw?: number };
+    epsEstimate?: { raw?: number };
+  };
+  const hist = (result.earningsHistory as { history?: HistEntry[] } | undefined)?.history ?? [];
+  for (const h of hist) {
+    const ts = h?.quarter?.raw;
+    const actual = h?.epsActual?.raw;
+    const estimate = h?.epsEstimate?.raw;
+    if (typeof ts === 'number' && typeof actual === 'number' && isFinite(actual)) {
+      const date = new Date(ts * 1000).toISOString().slice(0, 10);
+      map.set(date, {
+        date,
+        period: date,
+        eps: actual,
+        estimate: typeof estimate === 'number' ? estimate : undefined,
+      });
+    }
+  }
+
+  // earnings.earningsChart.quarterly: additional quarters keyed by "NQYYYY"
+  type EarnQ = { date?: string; actual?: { raw?: number }; estimate?: { raw?: number } };
+  const earnings = result.earnings as
+    | { earningsChart?: { quarterly?: EarnQ[] }; financialCurrency?: string }
+    | undefined;
+  const eqs = earnings?.earningsChart?.quarterly ?? [];
+  for (const q of eqs) {
+    const periodStr = q?.date ?? '';
+    const actual = q?.actual?.raw;
+    const estimate = q?.estimate?.raw;
+    if (typeof actual === 'number' && isFinite(actual)) {
+      const date = quarterToEndDate(periodStr);
+      if (date && !map.has(date)) {
+        map.set(date, {
+          date,
+          period: periodStr,
+          eps: actual,
+          estimate: typeof estimate === 'number' ? estimate : undefined,
+        });
+      }
+    }
+  }
+
+  const quarterly = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+  if (!quarterly.length) return null;
+  return { quarterly, currency: earnings?.financialCurrency ?? 'USD' };
+}

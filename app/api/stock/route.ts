@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchYahooData } from '@/lib/yahoo';
+import { fetchYahooData, fetchYahooEarnings } from '@/lib/yahoo';
 import { subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
 export const runtime = 'edge';
@@ -94,6 +94,19 @@ async function searchYahoo(q: string, timeoutMs = 5000): Promise<SearchHit[]> {
 
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') ?? 'history';
+
+  // ---- Earnings (quarterly EPS history) ----
+  if (mode === 'earnings') {
+    const symbol = req.nextUrl.searchParams.get('symbol');
+    if (!symbol) return NextResponse.json({ error: 'No symbol' }, { status: 400 });
+    const key = `earn:${symbol}`;
+    const cached = getCached(key, 6 * 60 * 60_000); // 6h — earnings update infrequently
+    if (cached) return NextResponse.json(cached);
+    const data = await fetchYahooEarnings(symbol);
+    const payload = data ?? { quarterly: [], currency: 'USD' };
+    if (data && data.quarterly.length > 0) cache.set(key, { data: payload, ts: Date.now() });
+    return NextResponse.json(payload);
+  }
 
   // ---- Search by ticker / ISIN / name ----
   if (mode === 'search') {
