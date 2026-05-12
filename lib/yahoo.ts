@@ -632,8 +632,21 @@ async function fetchQuoteSummary(
 }
 
 export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings | null> {
+  // Try the chart endpoint with events=earnings first — works without auth.
+  // This gives us historical quarterly EPS (actual + estimate) for many years.
+  const chartEarnings = await fetchEarningsFromChart(symbol);
+  if (chartEarnings && chartEarnings.quarterly.length > 0) {
+    console.log(`[yahoo-earnings] ${symbol}: ${chartEarnings.quarterly.length} quarters via chart events`);
+    return chartEarnings;
+  }
+
+  // Fallback to quoteSummary (requires crumb auth — may fail on Vercel Edge)
+  console.log(`[yahoo-earnings] ${symbol}: chart events empty, trying quoteSummary`);
   const result = await fetchQuoteSummary(symbol, 'earnings,earningsHistory');
-  if (!result) return null;
+  if (!result) {
+    console.warn(`[yahoo-earnings] ${symbol}: quoteSummary failed`);
+    return null;
+  }
 
   const map = new Map<string, YahooEarningsPoint>();
 
@@ -683,6 +696,71 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
   }
 
   const quarterly = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
-  if (!quarterly.length) return null;
+  if (!quarterly.length) {
+    console.warn(`[yahoo-earnings] ${symbol}: quoteSummary returned but no usable quarters`);
+    return null;
+  }
+  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} quarters via quoteSummary`);
   return { quarterly, currency: earnings?.financialCurrency ?? 'USD' };
+}
+
+// Alternative path: v8/finance/chart with events=earnings — no auth required.
+// Yahoo embeds quarterly earnings (epsActual + epsEstimate) in the chart events.
+async function fetchEarningsFromChart(symbol: string): Promise<YahooEarnings | null> {
+  // Request 10y of monthly data with earnings events — enough to get ~40 quarters
+  const query = 'range=10y&interval=1mo&events=earnings';
+  const result = await fetchChartRawNoAuth(symbol, query, 8_000);
+  if (!result) return null;
+
+  const meta = (result.meta as Record<string, unknown> | undefined) ?? {};
+  const currency = (meta.currency as string) ?? 'USD';
+
+  const events = result.events as Record<string, unknown> | undefined;
+  const earningsEvents = events?.earnings as
+    | Record<string, {
+        epsActual?: number | { raw?: number };
+        epsEstimate?: number | { raw?: number };
+        date?: number;
+        dateFormatted?: string;
+        quarter?: string;
+      }>
+    | undefined;
+  if (!earningsEvents) return null;
+
+  const toNum = (v: unknown): number | undefined => {
+    if (typeof v === 'number' && isFinite(v)) return v;
+    if (v && typeof v === 'object' && 'raw' in (v as Record<string, unknown>)) {
+      const raw = (v as { raw?: number }).raw;
+      return typeof raw === 'number' && isFinite(raw) ? raw : undefined;
+    }
+    return undefined;
+  };
+
+  const out: YahooEarningsPoint[] = [];
+  for (const k of Object.keys(earningsEvents)) {
+    const ev = earningsEvents[k];
+    const actual = toNum(ev?.epsActual);
+    if (actual == null) continue;
+    const estimate = toNum(ev?.epsEstimate);
+    let date: string | null = null;
+    if (typeof ev?.dateFormatted === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ev.dateFormatted)) {
+      date = ev.dateFormatted;
+    } else if (typeof ev?.date === 'number' && ev.date > 0) {
+      date = new Date(ev.date * 1000).toISOString().slice(0, 10);
+    } else {
+      const ts = Number(k);
+      if (isFinite(ts) && ts > 0) date = new Date(ts * 1000).toISOString().slice(0, 10);
+    }
+    if (!date) continue;
+    out.push({
+      date,
+      period: ev?.quarter ?? date,
+      eps: actual,
+      estimate,
+    });
+  }
+
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  if (!out.length) return null;
+  return { quarterly: out, currency };
 }
