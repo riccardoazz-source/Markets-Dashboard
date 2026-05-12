@@ -192,6 +192,7 @@ export function StockSection() {
   const [selected, setSelected] = useState<SearchHit | null>(null);
   const [data, setData] = useState<StockData | null>(null);
   const [earnings, setEarnings] = useState<EarningsData | null>(null);
+  const [earningsLoading, setEarningsLoading] = useState(false);
   const [overlayEPS, setOverlayEPS] = useState(false);
   const [loading, setLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
@@ -236,15 +237,18 @@ export function StockSection() {
 
   // Earnings — fetched once per symbol (cheap; doesn't depend on timeframe)
   useEffect(() => {
-    if (!selected) { setEarnings(null); setOverlayEPS(false); return; }
+    if (!selected) { setEarnings(null); setOverlayEPS(false); setEarningsLoading(false); return; }
     let cancelled = false;
+    setEarnings(null);
+    setEarningsLoading(true);
     fetch(`/api/stock?mode=earnings&symbol=${encodeURIComponent(selected.symbol)}`)
       .then(r => r.json())
       .then((d: EarningsData) => {
         if (cancelled) return;
         setEarnings(d?.quarterly?.length ? d : null);
+        setEarningsLoading(false);
       })
-      .catch(() => { if (!cancelled) setEarnings(null); });
+      .catch(() => { if (!cancelled) { setEarnings(null); setEarningsLoading(false); } });
     return () => { cancelled = true; };
   }, [selected]);
 
@@ -344,7 +348,11 @@ export function StockSection() {
                   </div>
                 )}
               </div>
-              {earnings && earnings.quarterly.length > 0 && (
+              {earningsLoading ? (
+                <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border rounded-full animate-pulse">
+                  Loading EPS…
+                </span>
+              ) : earnings && earnings.quarterly.length > 0 ? (
                 <button onClick={() => setOverlayEPS(s => !s)}
                   className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
                     overlayEPS
@@ -352,6 +360,10 @@ export function StockSection() {
                       : 'border-border text-gray-400 hover:text-gray-200')}>
                   {overlayEPS ? 'Hide EPS on chart' : 'Show EPS on chart'}
                 </button>
+              ) : (
+                <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">
+                  No EPS data
+                </span>
               )}
             </div>
           )}
