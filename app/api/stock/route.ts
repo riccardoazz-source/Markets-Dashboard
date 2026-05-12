@@ -113,53 +113,56 @@ export async function GET(req: NextRequest) {
     const symbol = req.nextUrl.searchParams.get('symbol') ?? 'AAPL';
     const results: Record<string, unknown> = {};
 
-    // 1. chart with events=earnings — check if epsActual is present
+    // Step 1: try to fetch the B cookie from fc.yahoo.com
+    let cookie = '';
     try {
-      const r1 = await fetch(
-        `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1mo&events=earnings`,
-        { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
-      );
-      const j1 = await r1.json() as { chart?: { result?: Array<{ events?: { earnings?: Record<string, unknown> } }> } };
-      const chartResult = j1?.chart?.result?.[0];
-      const earningsEvents = chartResult?.events?.earnings ?? null;
-      const firstEvent = earningsEvents ? Object.values(earningsEvents)[0] : null;
-      results['chart-events'] = {
-        status: r1.status,
-        hasEvents: !!earningsEvents,
-        eventCount: earningsEvents ? Object.keys(earningsEvents).length : 0,
-        firstEventSample: firstEvent ? JSON.stringify(firstEvent).slice(0, 300) : null,
-      };
-    } catch (e) { results['chart-events'] = { error: (e as Error).message }; }
+      const cookieRes = await fetch('https://fc.yahoo.com', {
+        headers: { 'User-Agent': UA }, redirect: 'follow', cache: 'no-store',
+      });
+      const raw = cookieRes.headers.get('set-cookie') ?? '';
+      const bMatch = raw.match(/\bB=([^;,\s]+)/);
+      cookie = bMatch ? `B=${bMatch[1]}` : '';
+      results['fc-cookie'] = { status: cookieRes.status, cookieFound: !!cookie, rawSnippet: raw.slice(0, 200) };
+    } catch (e) {
+      results['fc-cookie'] = { error: (e as Error).message };
+    }
 
-    // 2. quoteSummary on query1 (not query2) — no auth
-    try {
-      const r2 = await fetch(
-        `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings%2CearningsHistory`,
-        { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
-      );
-      const j2 = await r2.json() as Record<string, unknown>;
-      results['quoteSummary-query1-noauth'] = { status: r2.status, sample: JSON.stringify(j2).slice(0, 600) };
-    } catch (e) { results['quoteSummary-query1-noauth'] = { error: (e as Error).message }; }
+    // Step 2: try to fetch the crumb
+    let crumb = '';
+    if (cookie) {
+      try {
+        const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+          headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'text/plain,*/*' },
+          cache: 'no-store',
+        });
+        const text = await crumbRes.text();
+        crumb = text.trim();
+        const valid = crumb && !crumb.toLowerCase().includes('<!doctype');
+        results['crumb'] = { status: crumbRes.status, valid, crumbSnippet: crumb.slice(0, 30) };
+        if (!valid) crumb = '';
+      } catch (e) {
+        results['crumb'] = { error: (e as Error).message };
+      }
+    } else {
+      results['crumb'] = { skipped: 'no cookie' };
+    }
 
-    // 3. quoteSummary v10 on query2 — older endpoint, sometimes works without crumb
-    try {
-      const r3 = await fetch(
-        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings%2CearningsHistory`,
-        { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
-      );
-      const j3 = await r3.json() as Record<string, unknown>;
-      results['quoteSummary-v10-query2'] = { status: r3.status, sample: JSON.stringify(j3).slice(0, 600) };
-    } catch (e) { results['quoteSummary-v10-query2'] = { error: (e as Error).message }; }
-
-    // 4. fundamentals-timeseries — single type (no comma issue)
-    try {
-      const r4 = await fetch(
-        `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=quarterlyEpsActual&period1=493590046&period2=9999999999`,
-        { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
-      );
-      const j4 = await r4.json() as Record<string, unknown>;
-      results['fundamentals-timeseries'] = { status: r4.status, sample: JSON.stringify(j4).slice(0, 600) };
-    } catch (e) { results['fundamentals-timeseries'] = { error: (e as Error).message }; }
+    // Step 3: try v10 quoteSummary with crumb on query2 + query1
+    if (crumb) {
+      for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
+        const url = `https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings%2CearningsHistory&crumb=${encodeURIComponent(crumb)}`;
+        try {
+          const r = await fetch(url, {
+            headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'application/json' },
+            cache: 'no-store',
+          });
+          const j = await r.json() as Record<string, unknown>;
+          results[`quoteSummary-v10-${host.split('.')[0]}-crumb`] = { status: r.status, sample: JSON.stringify(j).slice(0, 600) };
+        } catch (e) {
+          results[`quoteSummary-v10-${host.split('.')[0]}-crumb`] = { error: (e as Error).message };
+        }
+      }
+    }
 
     return NextResponse.json(results);
   }
