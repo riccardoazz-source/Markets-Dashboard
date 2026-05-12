@@ -108,6 +108,45 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(payload);
   }
 
+  // ---- Earnings debug — raw Yahoo responses (no cache) ----
+  if (mode === 'earnings-debug') {
+    const symbol = req.nextUrl.searchParams.get('symbol') ?? 'AAPL';
+    const results: Record<string, unknown> = {};
+
+    // 1. chart with events=earnings
+    try {
+      const r1 = await fetch(
+        `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1mo&events=earnings`,
+        { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
+      );
+      const j1 = await r1.json() as Record<string, unknown>;
+      const chartResult = (j1?.chart as { result?: unknown[] } | undefined)?.result;
+      results['chart-events'] = { status: r1.status, hasResult: chartResult && chartResult.length > 0, sample: JSON.stringify(j1).slice(0, 800) };
+    } catch (e) { results['chart-events'] = { error: (e as Error).message }; }
+
+    // 2. quoteSummary no-auth
+    try {
+      const r2 = await fetch(
+        `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings,earningsHistory`,
+        { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
+      );
+      const j2 = await r2.json() as Record<string, unknown>;
+      results['quoteSummary-noauth'] = { status: r2.status, sample: JSON.stringify(j2).slice(0, 800) };
+    } catch (e) { results['quoteSummary-noauth'] = { error: (e as Error).message }; }
+
+    // 3. fundamentals-timeseries
+    try {
+      const r3 = await fetch(
+        `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=quarterlyEpsActual,quarterlyEpsEstimate&period1=0&period2=9999999999`,
+        { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
+      );
+      const j3 = await r3.json() as Record<string, unknown>;
+      results['fundamentals-timeseries'] = { status: r3.status, sample: JSON.stringify(j3).slice(0, 800) };
+    } catch (e) { results['fundamentals-timeseries'] = { error: (e as Error).message }; }
+
+    return NextResponse.json(results);
+  }
+
   // ---- Search by ticker / ISIN / name ----
   if (mode === 'search') {
     const q = (req.nextUrl.searchParams.get('q') ?? '').trim();
