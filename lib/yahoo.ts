@@ -797,100 +797,104 @@ function buildFinancialsFromTimeseries(
 }
 
 export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings | null> {
-  // Primary: fundamentals-timeseries with crumb (long history + financials)
-  const ts = await fetchFundamentalsTimeseries(symbol);
-  if (ts) {
-    const { financials, epsPoints } = buildFinancialsFromTimeseries(ts);
-    if (epsPoints.length > 0 || financials.length > 0) {
-      console.log(`[yahoo-earnings] ${symbol}: ${epsPoints.length} EPS / ${financials.length} financial quarters via timeseries`);
-      return { quarterly: epsPoints, financials, currency: ts.currency };
+  // Run both sources in parallel — timeseries for breadth, quoteSummary for actual past data.
+  const [tsData, qsResult] = await Promise.all([
+    fetchFundamentalsTimeseries(symbol).catch(() => null),
+    fetchQuoteSummary(symbol, 'earnings,earningsHistory,incomeStatementHistoryQuarterly').catch(() => null),
+  ]);
+
+  const epsMap = new Map<string, YahooEarningsPoint>();
+  const financialsMap = new Map<string, YahooFinancialQuarter>();
+  let currency = 'USD';
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Seed from timeseries — only past/current quarters (timeseries includes forward estimates)
+  if (tsData) {
+    const { financials: tsFinancials, epsPoints: tsEps } = buildFinancialsFromTimeseries(tsData);
+    currency = tsData.currency;
+    for (const ep of tsEps) {
+      if (ep.date <= today) epsMap.set(ep.date, ep);
+    }
+    for (const f of tsFinancials) {
+      if (f.date <= today) financialsMap.set(f.date, f);
     }
   }
 
-  // Fallback: v10 quoteSummary (only ~4 quarters of EPS, but better than nothing)
-  console.log(`[yahoo-earnings] ${symbol}: timeseries empty, trying quoteSummary fallback`);
-  const result = await fetchQuoteSummary(symbol, 'earnings,earningsHistory,incomeStatementHistoryQuarterly');
-  if (!result) {
-    console.warn(`[yahoo-earnings] ${symbol}: all sources failed`);
-    return null;
-  }
-
-  const map = new Map<string, YahooEarningsPoint>();
-
-  type HistEntry = {
-    quarter?: { raw?: number };
-    epsActual?: { raw?: number };
-    epsEstimate?: { raw?: number };
-  };
-  const hist = (result.earningsHistory as { history?: HistEntry[] } | undefined)?.history ?? [];
-  for (const h of hist) {
-    const ts = h?.quarter?.raw;
-    const actual = h?.epsActual?.raw;
-    const estimate = h?.epsEstimate?.raw;
-    if (typeof ts === 'number' && typeof actual === 'number' && isFinite(actual)) {
-      const date = new Date(ts * 1000).toISOString().slice(0, 10);
-      map.set(date, {
-        date, period: date, eps: actual,
-        estimate: typeof estimate === 'number' ? estimate : undefined,
-      });
-    }
-  }
-
-  type EarnQ = { date?: string; actual?: { raw?: number }; estimate?: { raw?: number } };
-  const earnings = result.earnings as
-    | { earningsChart?: { quarterly?: EarnQ[] }; financialCurrency?: string }
-    | undefined;
-  const eqs = earnings?.earningsChart?.quarterly ?? [];
-  for (const q of eqs) {
-    const periodStr = q?.date ?? '';
-    const actual = q?.actual?.raw;
-    const estimate = q?.estimate?.raw;
-    if (typeof actual === 'number' && isFinite(actual)) {
-      const date = quarterToEndDate(periodStr);
-      if (date && !map.has(date)) {
-        map.set(date, {
-          date, period: periodStr, eps: actual,
+  // Overlay with quoteSummary — actual reported EPS with correct fiscal-period timestamps
+  if (qsResult) {
+    type HistEntry = { quarter?: { raw?: number }; epsActual?: { raw?: number }; epsEstimate?: { raw?: number } };
+    const hist = (qsResult.earningsHistory as { history?: HistEntry[] } | undefined)?.history ?? [];
+    for (const h of hist) {
+      const rawTs = h?.quarter?.raw;
+      const actual = h?.epsActual?.raw;
+      const estimate = h?.epsEstimate?.raw;
+      if (typeof rawTs === 'number' && typeof actual === 'number' && isFinite(actual)) {
+        const date = new Date(rawTs * 1000).toISOString().slice(0, 10);
+        // Always overwrite timeseries entry — quoteSummary has the actual reported value
+        epsMap.set(date, {
+          date, period: date, eps: actual,
           estimate: typeof estimate === 'number' ? estimate : undefined,
         });
       }
     }
+
+    type EarnQ = { date?: string; actual?: { raw?: number }; estimate?: { raw?: number } };
+    const earnings = qsResult.earnings as
+      | { earningsChart?: { quarterly?: EarnQ[] }; financialCurrency?: string }
+      | undefined;
+    if (earnings?.financialCurrency) currency = earnings.financialCurrency;
+    const eqs = earnings?.earningsChart?.quarterly ?? [];
+    for (const q of eqs) {
+      const periodStr = q?.date ?? '';
+      const actual = q?.actual?.raw;
+      const estimate = q?.estimate?.raw;
+      if (typeof actual === 'number' && isFinite(actual)) {
+        const date = quarterToEndDate(periodStr);
+        if (date && !epsMap.has(date)) {
+          epsMap.set(date, {
+            date, period: periodStr, eps: actual,
+            estimate: typeof estimate === 'number' ? estimate : undefined,
+          });
+        }
+      }
+    }
+
+    type IsEntry = {
+      endDate?: { raw?: number; fmt?: string };
+      totalRevenue?: { raw?: number };
+      costOfRevenue?: { raw?: number };
+      grossProfit?: { raw?: number };
+      operatingIncome?: { raw?: number };
+      netIncome?: { raw?: number };
+    };
+    const isHistory = (qsResult.incomeStatementHistoryQuarterly as { incomeStatementHistory?: IsEntry[] } | undefined)
+      ?.incomeStatementHistory ?? [];
+    for (const e of isHistory) {
+      const rawTs = e?.endDate?.raw;
+      const date = rawTs != null
+        ? new Date(rawTs * 1000).toISOString().slice(0, 10)
+        : e?.endDate?.fmt ?? null;
+      if (!date) continue;
+      const existing = financialsMap.get(date) ?? { date };
+      financialsMap.set(date, {
+        ...existing,
+        date,
+        revenue: e?.totalRevenue?.raw ?? existing.revenue,
+        costOfRevenue: e?.costOfRevenue?.raw ?? existing.costOfRevenue,
+        grossProfit: e?.grossProfit?.raw ?? existing.grossProfit,
+        operatingIncome: e?.operatingIncome?.raw ?? existing.operatingIncome,
+        netIncome: e?.netIncome?.raw ?? existing.netIncome,
+      });
+    }
   }
 
-  // Optional: limited income statement history (~4 quarters)
-  const financialsMap = new Map<string, YahooFinancialQuarter>();
-  type IsEntry = {
-    endDate?: { raw?: number; fmt?: string };
-    totalRevenue?: { raw?: number };
-    costOfRevenue?: { raw?: number };
-    grossProfit?: { raw?: number };
-    operatingIncome?: { raw?: number };
-    netIncome?: { raw?: number };
-  };
-  const isHistory = (result.incomeStatementHistoryQuarterly as { incomeStatementHistory?: IsEntry[] } | undefined)
-    ?.incomeStatementHistory ?? [];
-  for (const e of isHistory) {
-    // prefer unix timestamp (raw) over fmt string which may vary by locale
-    const rawTs = e?.endDate?.raw;
-    const date = rawTs != null
-      ? new Date(rawTs * 1000).toISOString().slice(0, 10)
-      : e?.endDate?.fmt ?? null;
-    if (!date) continue;
-    financialsMap.set(date, {
-      date,
-      revenue: e?.totalRevenue?.raw,
-      costOfRevenue: e?.costOfRevenue?.raw,
-      grossProfit: e?.grossProfit?.raw,
-      operatingIncome: e?.operatingIncome?.raw,
-      netIncome: e?.netIncome?.raw,
-    });
-  }
-
-  const quarterly = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const quarterly = Array.from(epsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
   const financials = Array.from(financialsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
   if (!quarterly.length && !financials.length) {
-    console.warn(`[yahoo-earnings] ${symbol}: quoteSummary returned but no usable quarters`);
+    console.warn(`[yahoo-earnings] ${symbol}: all sources returned no usable data`);
     return null;
   }
-  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} EPS / ${financials.length} financial quarters via quoteSummary`);
-  return { quarterly, financials, currency: earnings?.financialCurrency ?? 'USD' };
+  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} EPS / ${financials.length} financial quarters (merged)`);
+  return { quarterly, financials, currency };
 }
