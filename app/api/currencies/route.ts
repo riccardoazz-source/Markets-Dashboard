@@ -26,6 +26,7 @@ function getStartDate(timeframe: string): string {
     case '3Y':  return format(subYears(now, 3), 'yyyy-MM-dd');
     case '5Y':  return format(subYears(now, 5), 'yyyy-MM-dd');
     case '10Y': return format(subYears(now, 10), 'yyyy-MM-dd');
+    case 'MAX': return '1999-01-04'; // Frankfurter starts from the euro's launch
     default:    return format(subYears(now, 1), 'yyyy-MM-dd');
   }
 }

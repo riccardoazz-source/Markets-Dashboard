@@ -800,7 +800,10 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
   // Run both sources in parallel — timeseries for breadth, quoteSummary for actual past data.
   const [tsData, qsResult] = await Promise.all([
     fetchFundamentalsTimeseries(symbol).catch(() => null),
-    fetchQuoteSummary(symbol, 'earnings,earningsHistory,incomeStatementHistoryQuarterly').catch(() => null),
+    fetchQuoteSummary(
+      symbol,
+      'earnings,earningsHistory,incomeStatementHistoryQuarterly,incomeStatementHistory',
+    ).catch(() => null),
   ]);
 
   const epsMap = new Map<string, YahooEarningsPoint>();
@@ -839,8 +842,9 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
     }
 
     type EarnQ = { date?: string; actual?: { raw?: number }; estimate?: { raw?: number } };
+    type EarnY = { date?: number | string; actual?: { raw?: number }; estimate?: { raw?: number } };
     const earnings = qsResult.earnings as
-      | { earningsChart?: { quarterly?: EarnQ[] }; financialCurrency?: string }
+      | { earningsChart?: { quarterly?: EarnQ[]; yearly?: EarnY[] }; financialCurrency?: string }
       | undefined;
     if (earnings?.financialCurrency) currency = earnings.financialCurrency;
     const eqs = earnings?.earningsChart?.quarterly ?? [];
@@ -855,6 +859,19 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
             date, period: periodStr, eps: actual,
             estimate: typeof estimate === 'number' ? estimate : undefined,
           });
+        }
+      }
+    }
+    // Yearly EPS — extends history 4 fiscal years beyond the ~4 most recent quarters
+    const eys = earnings?.earningsChart?.yearly ?? [];
+    for (const y of eys) {
+      const yr = typeof y?.date === 'number' ? y.date : Number(y?.date);
+      const actual = y?.actual?.raw;
+      if (Number.isInteger(yr) && yr > 1900 && typeof actual === 'number' && isFinite(actual)) {
+        // Place annual point at Dec 31 of that calendar year as a reasonable anchor
+        const date = `${yr}-12-31`;
+        if (!epsMap.has(date)) {
+          epsMap.set(date, { date, period: `FY${yr}`, eps: actual });
         }
       }
     }
@@ -884,6 +901,26 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
         grossProfit: e?.grossProfit?.raw ?? existing.grossProfit,
         operatingIncome: e?.operatingIncome?.raw ?? existing.operatingIncome,
         netIncome: e?.netIncome?.raw ?? existing.netIncome,
+      });
+    }
+    // Annual income statement — extends financials 4 fiscal years beyond the quarters
+    const annualIs = (qsResult.incomeStatementHistory as { incomeStatementHistory?: IsEntry[] } | undefined)
+      ?.incomeStatementHistory ?? [];
+    for (const e of annualIs) {
+      const rawTs = e?.endDate?.raw;
+      const date = rawTs != null
+        ? new Date(rawTs * 1000).toISOString().slice(0, 10)
+        : e?.endDate?.fmt ?? null;
+      if (!date) continue;
+      // Don't clobber quarterly data with annual; only add when no entry exists for that date
+      if (financialsMap.has(date)) continue;
+      financialsMap.set(date, {
+        date,
+        revenue: e?.totalRevenue?.raw,
+        costOfRevenue: e?.costOfRevenue?.raw,
+        grossProfit: e?.grossProfit?.raw,
+        operatingIncome: e?.operatingIncome?.raw,
+        netIncome: e?.netIncome?.raw,
       });
     }
   }
