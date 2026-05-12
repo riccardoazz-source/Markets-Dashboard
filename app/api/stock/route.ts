@@ -113,35 +113,52 @@ export async function GET(req: NextRequest) {
     const symbol = req.nextUrl.searchParams.get('symbol') ?? 'AAPL';
     const results: Record<string, unknown> = {};
 
-    // 1. chart with events=earnings
+    // 1. chart with events=earnings — check if epsActual is present
     try {
       const r1 = await fetch(
         `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2y&interval=1mo&events=earnings`,
         { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
       );
-      const j1 = await r1.json() as Record<string, unknown>;
-      const chartResult = (j1?.chart as { result?: unknown[] } | undefined)?.result;
-      results['chart-events'] = { status: r1.status, hasResult: chartResult && chartResult.length > 0, sample: JSON.stringify(j1).slice(0, 800) };
+      const j1 = await r1.json() as { chart?: { result?: Array<{ events?: { earnings?: Record<string, unknown> } }> } };
+      const chartResult = j1?.chart?.result?.[0];
+      const earningsEvents = chartResult?.events?.earnings ?? null;
+      const firstEvent = earningsEvents ? Object.values(earningsEvents)[0] : null;
+      results['chart-events'] = {
+        status: r1.status,
+        hasEvents: !!earningsEvents,
+        eventCount: earningsEvents ? Object.keys(earningsEvents).length : 0,
+        firstEventSample: firstEvent ? JSON.stringify(firstEvent).slice(0, 300) : null,
+      };
     } catch (e) { results['chart-events'] = { error: (e as Error).message }; }
 
-    // 2. quoteSummary no-auth
+    // 2. quoteSummary on query1 (not query2) — no auth
     try {
       const r2 = await fetch(
-        `https://query2.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings,earningsHistory`,
+        `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings%2CearningsHistory`,
         { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
       );
       const j2 = await r2.json() as Record<string, unknown>;
-      results['quoteSummary-noauth'] = { status: r2.status, sample: JSON.stringify(j2).slice(0, 800) };
-    } catch (e) { results['quoteSummary-noauth'] = { error: (e as Error).message }; }
+      results['quoteSummary-query1-noauth'] = { status: r2.status, sample: JSON.stringify(j2).slice(0, 600) };
+    } catch (e) { results['quoteSummary-query1-noauth'] = { error: (e as Error).message }; }
 
-    // 3. fundamentals-timeseries
+    // 3. quoteSummary v10 on query2 — older endpoint, sometimes works without crumb
     try {
       const r3 = await fetch(
-        `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=quarterlyEpsActual,quarterlyEpsEstimate&period1=0&period2=9999999999`,
+        `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings%2CearningsHistory`,
         { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
       );
       const j3 = await r3.json() as Record<string, unknown>;
-      results['fundamentals-timeseries'] = { status: r3.status, sample: JSON.stringify(j3).slice(0, 800) };
+      results['quoteSummary-v10-query2'] = { status: r3.status, sample: JSON.stringify(j3).slice(0, 600) };
+    } catch (e) { results['quoteSummary-v10-query2'] = { error: (e as Error).message }; }
+
+    // 4. fundamentals-timeseries — single type (no comma issue)
+    try {
+      const r4 = await fetch(
+        `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}?type=quarterlyEpsActual&period1=493590046&period2=9999999999`,
+        { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Referer': 'https://finance.yahoo.com/' }, cache: 'no-store' }
+      );
+      const j4 = await r4.json() as Record<string, unknown>;
+      results['fundamentals-timeseries'] = { status: r4.status, sample: JSON.stringify(j4).slice(0, 600) };
     } catch (e) { results['fundamentals-timeseries'] = { error: (e as Error).message }; }
 
     return NextResponse.json(results);
