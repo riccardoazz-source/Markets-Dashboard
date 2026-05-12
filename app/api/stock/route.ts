@@ -113,16 +113,16 @@ export async function GET(req: NextRequest) {
     const symbol = req.nextUrl.searchParams.get('symbol') ?? 'AAPL';
     const results: Record<string, unknown> = {};
 
-    // Step 1: try to fetch the B cookie from fc.yahoo.com
+    // Step 1: try to fetch the cookie from fc.yahoo.com (Yahoo uses A3= now, not B=)
     let cookie = '';
     try {
       const cookieRes = await fetch('https://fc.yahoo.com', {
         headers: { 'User-Agent': UA }, redirect: 'follow', cache: 'no-store',
       });
       const raw = cookieRes.headers.get('set-cookie') ?? '';
-      const bMatch = raw.match(/\bB=([^;,\s]+)/);
-      cookie = bMatch ? `B=${bMatch[1]}` : '';
-      results['fc-cookie'] = { status: cookieRes.status, cookieFound: !!cookie, rawSnippet: raw.slice(0, 200) };
+      const cookieMatch = raw.match(/^([A-Za-z0-9_]+=\S+?)(?=;|,|$)/);
+      cookie = cookieMatch ? cookieMatch[1] : '';
+      results['fc-cookie'] = { status: cookieRes.status, cookieFound: !!cookie, cookieName: cookie.split('=')[0] || null, rawSnippet: raw.slice(0, 200) };
     } catch (e) {
       results['fc-cookie'] = { error: (e as Error).message };
     }
@@ -148,7 +148,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Step 3: try v10 quoteSummary with crumb on query2 + query1
-    if (crumb) {
+    if (crumb && cookie) {
       for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
         const url = `https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings%2CearningsHistory&crumb=${encodeURIComponent(crumb)}`;
         try {

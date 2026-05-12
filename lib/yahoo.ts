@@ -66,8 +66,11 @@ async function fetchCrumb(): Promise<CrumbSession> {
     4_000,
   );
   const raw = cookieRes.headers.get('set-cookie') ?? '';
-  const bMatch = raw.match(/\bB=([^;,\s]+)/);
-  const cookie = bMatch ? `B=${bMatch[1]}` : '';
+  // Yahoo switched from B= to A3= cookies; extract first name=value pair regardless of name
+  const cookieMatch = raw.match(/^([A-Za-z0-9_]+=\S+?)(?=;|,|$)/);
+  const cookie = cookieMatch ? cookieMatch[1] : '';
+
+  if (!cookie) throw new Error('[yahoo] fc.yahoo.com set no cookie');
 
   const crumbRes = await fetchWithTimeout(
     'https://query1.finance.yahoo.com/v1/test/getcrumb',
@@ -597,38 +600,44 @@ async function fetchQuoteSummary(
   modules: string,
   timeoutMs = 8_000,
 ): Promise<Record<string, unknown> | null> {
-  // Try no-auth first (query2 often passes Vercel Edge)
+  // v11 no-auth is always 404; v10 returns 401 "Invalid Crumb" — requires crumb auth.
+  // Fetch crumb first, then try v10 on query2 and query1 with crumb + cookie.
+  let s: CrumbSession;
+  try { s = await getSession(); } catch (e) {
+    console.warn('[quoteSummary] crumb fetch failed:', (e as Error).message);
+    return null;
+  }
+
   for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
-    const url = `https://${host}/v11/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`;
+    const url = `https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`
+      + `?modules=${encodeURIComponent(modules)}&crumb=${encodeURIComponent(s.crumb)}`;
     try {
       const res = await fetchWithTimeout(url, {
-        headers: {
-          'User-Agent': UA,
-          'Accept': 'application/json',
-          'Referer': 'https://finance.yahoo.com/',
-        },
+        headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' },
       }, timeoutMs);
+      if (res.status === 401 || res.status === 403) {
+        // Crumb expired — refresh once and retry on the same host
+        session = null;
+        try { s = await getSession(); } catch { return null; }
+        const retry = await fetchWithTimeout(
+          `https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`
+          + `?modules=${encodeURIComponent(modules)}&crumb=${encodeURIComponent(s.crumb)}`,
+          { headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' } },
+          timeoutMs,
+        );
+        if (!retry.ok) continue;
+        const json = await retry.json() as QuoteSummaryRoot;
+        const result = json?.quoteSummary?.result?.[0];
+        if (result) return result;
+        continue;
+      }
       if (!res.ok) continue;
       const json = await res.json() as QuoteSummaryRoot;
       const result = json?.quoteSummary?.result?.[0];
       if (result) return result;
     } catch { /* try next host */ }
   }
-  // Crumb auth fallback
-  let s: CrumbSession;
-  try { s = await getSession(); } catch { return null; }
-  const url = `https://query1.finance.yahoo.com/v11/finance/quoteSummary/${encodeURIComponent(symbol)}`
-    + `?modules=${modules}&crumb=${encodeURIComponent(s.crumb)}`;
-  try {
-    const res = await fetchWithTimeout(url, {
-      headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' },
-    }, timeoutMs);
-    if (!res.ok) return null;
-    const json = await res.json() as QuoteSummaryRoot;
-    return json?.quoteSummary?.result?.[0] ?? null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings | null> {
