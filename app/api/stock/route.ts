@@ -95,7 +95,7 @@ async function searchYahoo(q: string, timeoutMs = 5000): Promise<SearchHit[]> {
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') ?? 'history';
 
-  // ---- Earnings (quarterly EPS history) ----
+  // ---- Earnings (quarterly EPS history + financials) ----
   if (mode === 'earnings') {
     const symbol = req.nextUrl.searchParams.get('symbol');
     if (!symbol) return NextResponse.json({ error: 'No symbol' }, { status: 400 });
@@ -103,68 +103,11 @@ export async function GET(req: NextRequest) {
     const cached = getCached(key, 6 * 60 * 60_000); // 6h — earnings update infrequently
     if (cached) return NextResponse.json(cached);
     const data = await fetchYahooEarnings(symbol);
-    const payload = data ?? { quarterly: [], currency: 'USD' };
-    if (data && data.quarterly.length > 0) cache.set(key, { data: payload, ts: Date.now() });
+    const payload = data ?? { quarterly: [], financials: [], currency: 'USD' };
+    if (data && (data.quarterly.length > 0 || data.financials.length > 0)) {
+      cache.set(key, { data: payload, ts: Date.now() });
+    }
     return NextResponse.json(payload);
-  }
-
-  // ---- Earnings debug — raw Yahoo responses (no cache) ----
-  if (mode === 'earnings-debug') {
-    const symbol = req.nextUrl.searchParams.get('symbol') ?? 'AAPL';
-    const results: Record<string, unknown> = {};
-
-    // Step 1: try to fetch the cookie from fc.yahoo.com (Yahoo uses A3= now, not B=)
-    let cookie = '';
-    try {
-      const cookieRes = await fetch('https://fc.yahoo.com', {
-        headers: { 'User-Agent': UA }, redirect: 'follow', cache: 'no-store',
-      });
-      const raw = cookieRes.headers.get('set-cookie') ?? '';
-      const cookieMatch = raw.match(/^([A-Za-z0-9_]+=\S+?)(?=;|,|$)/);
-      cookie = cookieMatch ? cookieMatch[1] : '';
-      results['fc-cookie'] = { status: cookieRes.status, cookieFound: !!cookie, cookieName: cookie.split('=')[0] || null, rawSnippet: raw.slice(0, 200) };
-    } catch (e) {
-      results['fc-cookie'] = { error: (e as Error).message };
-    }
-
-    // Step 2: try to fetch the crumb
-    let crumb = '';
-    if (cookie) {
-      try {
-        const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-          headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'text/plain,*/*' },
-          cache: 'no-store',
-        });
-        const text = await crumbRes.text();
-        crumb = text.trim();
-        const valid = crumb && !crumb.toLowerCase().includes('<!doctype');
-        results['crumb'] = { status: crumbRes.status, valid, crumbSnippet: crumb.slice(0, 30) };
-        if (!valid) crumb = '';
-      } catch (e) {
-        results['crumb'] = { error: (e as Error).message };
-      }
-    } else {
-      results['crumb'] = { skipped: 'no cookie' };
-    }
-
-    // Step 3: try v10 quoteSummary with crumb on query2 + query1
-    if (crumb && cookie) {
-      for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
-        const url = `https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=earnings%2CearningsHistory&crumb=${encodeURIComponent(crumb)}`;
-        try {
-          const r = await fetch(url, {
-            headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'application/json' },
-            cache: 'no-store',
-          });
-          const j = await r.json() as Record<string, unknown>;
-          results[`quoteSummary-v10-${host.split('.')[0]}-crumb`] = { status: r.status, sample: JSON.stringify(j).slice(0, 600) };
-        } catch (e) {
-          results[`quoteSummary-v10-${host.split('.')[0]}-crumb`] = { error: (e as Error).message };
-        }
-      }
-    }
-
-    return NextResponse.json(results);
   }
 
   // ---- Search by ticker / ISIN / name ----

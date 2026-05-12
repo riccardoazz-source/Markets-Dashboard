@@ -575,8 +575,20 @@ export interface YahooEarningsPoint {
   estimate?: number;   // EPS estimate (if available)
 }
 
+export interface YahooFinancialQuarter {
+  date: string;             // YYYY-MM-DD (period end)
+  revenue?: number;
+  costOfRevenue?: number;
+  grossProfit?: number;
+  operatingIncome?: number;
+  netIncome?: number;
+  eps?: number;
+  epsEstimate?: number;
+}
+
 export interface YahooEarnings {
   quarterly: YahooEarningsPoint[];
+  financials: YahooFinancialQuarter[];
   currency: string;
 }
 
@@ -640,26 +652,162 @@ async function fetchQuoteSummary(
   return null;
 }
 
-export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings | null> {
-  // Try the chart endpoint with events=earnings first — works without auth.
-  // This gives us historical quarterly EPS (actual + estimate) for many years.
-  const chartEarnings = await fetchEarningsFromChart(symbol);
-  if (chartEarnings && chartEarnings.quarterly.length > 0) {
-    console.log(`[yahoo-earnings] ${symbol}: ${chartEarnings.quarterly.length} quarters via chart events`);
-    return chartEarnings;
+// fundamentals-timeseries returns 20+ years of quarterly metrics with crumb auth.
+// Used for the long EPS history + revenue/costs/profit.
+const FUNDAMENTALS_TYPES = [
+  'quarterlyTotalRevenue',
+  'quarterlyCostOfRevenue',
+  'quarterlyGrossProfit',
+  'quarterlyOperatingIncome',
+  'quarterlyNetIncome',
+  'quarterlyEpsActual',
+  'quarterlyEpsEstimate',
+  'quarterlyDilutedEPS',
+  'quarterlyBasicEPS',
+] as const;
+
+type FundamentalEntry = {
+  asOfDate?: string;
+  currencyCode?: string;
+  reportedValue?: { raw?: number };
+};
+
+async function fetchFundamentalsTimeseries(
+  symbol: string,
+  timeoutMs = 10_000,
+): Promise<{ byType: Record<string, FundamentalEntry[]>; currency: string } | null> {
+  let s: CrumbSession;
+  try { s = await getSession(); }
+  catch (e) {
+    console.warn(`[fundamentals] ${symbol}: crumb fetch failed:`, (e as Error).message);
+    return null;
   }
 
-  // Fallback to quoteSummary (requires crumb auth — may fail on Vercel Edge)
-  console.log(`[yahoo-earnings] ${symbol}: chart events empty, trying quoteSummary`);
-  const result = await fetchQuoteSummary(symbol, 'earnings,earningsHistory');
+  // 30 years back is enough for any public company; period2 future-proofs against clock skew.
+  const now = Math.floor(Date.now() / 1000);
+  const period1 = now - 30 * 365 * 86_400;
+  const period2 = now + 60 * 86_400;
+  const typeParam = FUNDAMENTALS_TYPES.join(',');
+
+  for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
+    const url = `https://${host}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}`
+      + `?symbol=${encodeURIComponent(symbol)}`
+      + `&type=${encodeURIComponent(typeParam)}`
+      + `&period1=${period1}&period2=${period2}`
+      + `&lang=en-US&region=US`
+      + `&crumb=${encodeURIComponent(s.crumb)}`;
+    try {
+      let res = await fetchWithTimeout(url, {
+        headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' },
+      }, timeoutMs);
+      if (res.status === 401 || res.status === 403) {
+        session = null;
+        try { s = await getSession(); } catch { continue; }
+        const retryUrl = `https://${host}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}`
+          + `?symbol=${encodeURIComponent(symbol)}&type=${encodeURIComponent(typeParam)}`
+          + `&period1=${period1}&period2=${period2}&lang=en-US&region=US`
+          + `&crumb=${encodeURIComponent(s.crumb)}`;
+        res = await fetchWithTimeout(retryUrl, {
+          headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' },
+        }, timeoutMs);
+      }
+      if (!res.ok) continue;
+      const json = await res.json() as {
+        timeseries?: { result?: Array<Record<string, unknown> & { meta?: { type?: string[] } }> };
+      };
+      const results = json?.timeseries?.result;
+      if (!Array.isArray(results) || results.length === 0) continue;
+      const byType: Record<string, FundamentalEntry[]> = {};
+      let currency = 'USD';
+      for (const r of results) {
+        const type = r?.meta?.type?.[0];
+        if (!type) continue;
+        const arr = r[type];
+        if (!Array.isArray(arr)) continue;
+        const entries = arr.filter((e): e is FundamentalEntry => e && typeof e === 'object');
+        if (entries.length === 0) continue;
+        byType[type] = entries;
+        const c = entries.find(e => e.currencyCode)?.currencyCode;
+        if (c) currency = c;
+      }
+      if (Object.keys(byType).length === 0) continue;
+      return { byType, currency };
+    } catch (e) {
+      console.warn(`[fundamentals] ${symbol} ${host} failed:`, (e as Error).message);
+    }
+  }
+  return null;
+}
+
+function buildFinancialsFromTimeseries(
+  data: { byType: Record<string, FundamentalEntry[]>; currency: string },
+): { financials: YahooFinancialQuarter[]; epsPoints: YahooEarningsPoint[] } {
+  const byDate = new Map<string, YahooFinancialQuarter>();
+  const mapField: Record<string, keyof YahooFinancialQuarter> = {
+    quarterlyTotalRevenue: 'revenue',
+    quarterlyCostOfRevenue: 'costOfRevenue',
+    quarterlyGrossProfit: 'grossProfit',
+    quarterlyOperatingIncome: 'operatingIncome',
+    quarterlyNetIncome: 'netIncome',
+    quarterlyEpsActual: 'eps',
+    quarterlyEpsEstimate: 'epsEstimate',
+  };
+  for (const [type, entries] of Object.entries(data.byType)) {
+    const field = mapField[type];
+    if (!field) continue;
+    for (const e of entries) {
+      const date = e?.asOfDate;
+      const value = e?.reportedValue?.raw;
+      if (typeof date === 'string' && typeof value === 'number' && isFinite(value)) {
+        const existing = byDate.get(date) ?? { date };
+        (existing as unknown as Record<string, unknown>)[field] = value;
+        byDate.set(date, existing);
+      }
+    }
+  }
+
+  // Fallback EPS: if epsActual missing for a quarter, use dilutedEPS, then basicEPS.
+  for (const fallback of ['quarterlyDilutedEPS', 'quarterlyBasicEPS']) {
+    const entries = data.byType[fallback] ?? [];
+    for (const e of entries) {
+      const date = e?.asOfDate;
+      const value = e?.reportedValue?.raw;
+      if (typeof date === 'string' && typeof value === 'number' && isFinite(value)) {
+        const existing = byDate.get(date) ?? { date };
+        if (existing.eps == null) existing.eps = value;
+        byDate.set(date, existing);
+      }
+    }
+  }
+
+  const financials = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const epsPoints: YahooEarningsPoint[] = financials
+    .filter(q => q.eps != null)
+    .map(q => ({ date: q.date, period: q.date, eps: q.eps as number, estimate: q.epsEstimate }));
+  return { financials, epsPoints };
+}
+
+export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings | null> {
+  // Primary: fundamentals-timeseries with crumb (long history + financials)
+  const ts = await fetchFundamentalsTimeseries(symbol);
+  if (ts) {
+    const { financials, epsPoints } = buildFinancialsFromTimeseries(ts);
+    if (epsPoints.length > 0 || financials.length > 0) {
+      console.log(`[yahoo-earnings] ${symbol}: ${epsPoints.length} EPS / ${financials.length} financial quarters via timeseries`);
+      return { quarterly: epsPoints, financials, currency: ts.currency };
+    }
+  }
+
+  // Fallback: v10 quoteSummary (only ~4 quarters of EPS, but better than nothing)
+  console.log(`[yahoo-earnings] ${symbol}: timeseries empty, trying quoteSummary fallback`);
+  const result = await fetchQuoteSummary(symbol, 'earnings,earningsHistory,incomeStatementHistoryQuarterly');
   if (!result) {
-    console.warn(`[yahoo-earnings] ${symbol}: quoteSummary failed`);
+    console.warn(`[yahoo-earnings] ${symbol}: all sources failed`);
     return null;
   }
 
   const map = new Map<string, YahooEarningsPoint>();
 
-  // earningsHistory.history: timestamped EPS for past quarters
   type HistEntry = {
     quarter?: { raw?: number };
     epsActual?: { raw?: number };
@@ -673,15 +821,12 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
     if (typeof ts === 'number' && typeof actual === 'number' && isFinite(actual)) {
       const date = new Date(ts * 1000).toISOString().slice(0, 10);
       map.set(date, {
-        date,
-        period: date,
-        eps: actual,
+        date, period: date, eps: actual,
         estimate: typeof estimate === 'number' ? estimate : undefined,
       });
     }
   }
 
-  // earnings.earningsChart.quarterly: additional quarters keyed by "NQYYYY"
   type EarnQ = { date?: string; actual?: { raw?: number }; estimate?: { raw?: number } };
   const earnings = result.earnings as
     | { earningsChart?: { quarterly?: EarnQ[] }; financialCurrency?: string }
@@ -695,81 +840,44 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
       const date = quarterToEndDate(periodStr);
       if (date && !map.has(date)) {
         map.set(date, {
-          date,
-          period: periodStr,
-          eps: actual,
+          date, period: periodStr, eps: actual,
           estimate: typeof estimate === 'number' ? estimate : undefined,
         });
       }
     }
   }
 
-  const quarterly = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
-  if (!quarterly.length) {
-    console.warn(`[yahoo-earnings] ${symbol}: quoteSummary returned but no usable quarters`);
-    return null;
-  }
-  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} quarters via quoteSummary`);
-  return { quarterly, currency: earnings?.financialCurrency ?? 'USD' };
-}
-
-// Alternative path: v8/finance/chart with events=earnings — no auth required.
-// Yahoo embeds quarterly earnings (epsActual + epsEstimate) in the chart events.
-async function fetchEarningsFromChart(symbol: string): Promise<YahooEarnings | null> {
-  // Request 10y of monthly data with earnings events — enough to get ~40 quarters
-  const query = 'range=10y&interval=1mo&events=earnings';
-  const result = await fetchChartRawNoAuth(symbol, query, 8_000);
-  if (!result) return null;
-
-  const meta = (result.meta as Record<string, unknown> | undefined) ?? {};
-  const currency = (meta.currency as string) ?? 'USD';
-
-  const events = result.events as Record<string, unknown> | undefined;
-  const earningsEvents = events?.earnings as
-    | Record<string, {
-        epsActual?: number | { raw?: number };
-        epsEstimate?: number | { raw?: number };
-        date?: number;
-        dateFormatted?: string;
-        quarter?: string;
-      }>
-    | undefined;
-  if (!earningsEvents) return null;
-
-  const toNum = (v: unknown): number | undefined => {
-    if (typeof v === 'number' && isFinite(v)) return v;
-    if (v && typeof v === 'object' && 'raw' in (v as Record<string, unknown>)) {
-      const raw = (v as { raw?: number }).raw;
-      return typeof raw === 'number' && isFinite(raw) ? raw : undefined;
-    }
-    return undefined;
+  // Optional: limited income statement history (~4 quarters)
+  const financialsMap = new Map<string, YahooFinancialQuarter>();
+  type IsEntry = {
+    endDate?: { fmt?: string };
+    totalRevenue?: { raw?: number };
+    costOfRevenue?: { raw?: number };
+    grossProfit?: { raw?: number };
+    operatingIncome?: { raw?: number };
+    netIncome?: { raw?: number };
   };
-
-  const out: YahooEarningsPoint[] = [];
-  for (const k of Object.keys(earningsEvents)) {
-    const ev = earningsEvents[k];
-    const actual = toNum(ev?.epsActual);
-    if (actual == null) continue;
-    const estimate = toNum(ev?.epsEstimate);
-    let date: string | null = null;
-    if (typeof ev?.dateFormatted === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ev.dateFormatted)) {
-      date = ev.dateFormatted;
-    } else if (typeof ev?.date === 'number' && ev.date > 0) {
-      date = new Date(ev.date * 1000).toISOString().slice(0, 10);
-    } else {
-      const ts = Number(k);
-      if (isFinite(ts) && ts > 0) date = new Date(ts * 1000).toISOString().slice(0, 10);
-    }
+  const isHistory = (result.incomeStatementHistoryQuarterly as { incomeStatementHistory?: IsEntry[] } | undefined)
+    ?.incomeStatementHistory ?? [];
+  for (const e of isHistory) {
+    const date = e?.endDate?.fmt;
     if (!date) continue;
-    out.push({
+    financialsMap.set(date, {
       date,
-      period: ev?.quarter ?? date,
-      eps: actual,
-      estimate,
+      revenue: e?.totalRevenue?.raw,
+      costOfRevenue: e?.costOfRevenue?.raw,
+      grossProfit: e?.grossProfit?.raw,
+      operatingIncome: e?.operatingIncome?.raw,
+      netIncome: e?.netIncome?.raw,
     });
   }
 
-  out.sort((a, b) => a.date.localeCompare(b.date));
-  if (!out.length) return null;
-  return { quarterly: out, currency };
+  const quarterly = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const financials = Array.from(financialsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  if (!quarterly.length && !financials.length) {
+    console.warn(`[yahoo-earnings] ${symbol}: quoteSummary returned but no usable quarters`);
+    return null;
+  }
+  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} EPS / ${financials.length} financial quarters via quoteSummary`);
+  return { quarterly, financials, currency: earnings?.financialCurrency ?? 'USD' };
 }

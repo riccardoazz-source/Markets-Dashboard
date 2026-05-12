@@ -17,7 +17,30 @@ import clsx from 'clsx';
 import { Search, X } from 'lucide-react';
 
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
-interface EarningsData { quarterly: EarningsPoint[]; currency: string }
+interface FinancialPoint {
+  date: string;
+  revenue?: number;
+  costOfRevenue?: number;
+  grossProfit?: number;
+  operatingIncome?: number;
+  netIncome?: number;
+}
+interface EarningsData {
+  quarterly: EarningsPoint[];
+  financials: FinancialPoint[];
+  currency: string;
+}
+
+type Overlay = 'none' | 'eps' | 'financials';
+
+function formatBig(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toFixed(0);
+}
 
 const TF_OPTIONS: Timeframe[] = ['1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
@@ -41,12 +64,13 @@ function formatXDate(dateStr: string, data: HistoricalPoint[]) {
 }
 
 function DualChart({
-  prices, totalReturn, currency, eps,
+  prices, totalReturn, currency, eps, financials,
 }: {
   prices: HistoricalPoint[];
   totalReturn: HistoricalPoint[];
   currency: string;
-  eps?: EarningsPoint[];   // when present, overlay quarterly EPS bars on a secondary Y-axis
+  eps?: EarningsPoint[];          // when present, overlay quarterly EPS bars on right axis
+  financials?: FinancialPoint[];  // when present, overlay revenue/profit bars on right axis
 }) {
   if (!prices.length) return null;
   const hasDivs = totalReturn !== prices && totalReturn.length > 0 &&
@@ -55,11 +79,13 @@ function DualChart({
   const firstDate = prices[0].date;
   const lastDate = prices[prices.length - 1].date;
   const visibleEps = (eps ?? []).filter(e => e.date >= firstDate && e.date <= lastDate);
+  const visibleFin = (financials ?? []).filter(e => e.date >= firstDate && e.date <= lastDate);
   const showEps = visibleEps.length > 0;
+  const showFin = visibleFin.length > 0;
 
   const priceMap = new Map(prices.map(d => [d.date, d.close]));
   const trMap = new Map(totalReturn.map(d => [d.date, d.close]));
-  // Snap each EPS date to the nearest price date so bars land on actual trading days
+  // Snap each event date to the nearest trading day so bars land on actual price dates.
   const priceDates = prices.map(p => p.date);
   function nearestPriceDate(d: string): string {
     let lo = 0, hi = priceDates.length - 1;
@@ -71,20 +97,32 @@ function DualChart({
   }
   const epsMap = new Map<string, number>();
   for (const e of visibleEps) epsMap.set(nearestPriceDate(e.date), e.eps);
+  const revMap = new Map<string, number>();
+  const profMap = new Map<string, number>();
+  for (const f of visibleFin) {
+    const d = nearestPriceDate(f.date);
+    if (f.revenue != null) revMap.set(d, f.revenue);
+    const profit = f.netIncome ?? f.operatingIncome ?? f.grossProfit;
+    if (profit != null) profMap.set(d, profit);
+  }
 
   const allDates = Array.from(new Set([
     ...priceMap.keys(),
     ...trMap.keys(),
     ...epsMap.keys(),
+    ...revMap.keys(),
+    ...profMap.keys(),
   ])).sort();
   const chartData = allDates.map(date => ({
     date,
     price: priceMap.get(date) ?? null,
     tr: hasDivs ? (trMap.get(date) ?? null) : undefined,
     eps: epsMap.get(date) ?? null,
+    revenue: revMap.get(date) ?? null,
+    profit: profMap.get(date) ?? null,
   }));
 
-  const decimals = (prices[prices.length - 1]?.close ?? 0) < 10 ? 2 : 2;
+  const decimals = 2;
   const isUp = (prices[prices.length - 1]?.close ?? 0) >= (prices[0]?.close ?? 0);
 
   return (
@@ -107,10 +145,18 @@ function DualChart({
             tickFormatter={v => (v as number).toFixed(2)}
             domain={['auto', 'auto']} />
         )}
+        {showFin && (
+          <YAxis yAxisId="fin" orientation="right"
+            tick={{ fill: '#60a5fa', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
+            tickFormatter={v => formatBig(v as number)}
+            domain={['auto', 'auto']} />
+        )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
           formatter={(value: number, name: string) => {
             if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, 'EPS (qtr)'];
+            if (name === 'revenue') return [`${formatBig(value)} ${currency}`, 'Revenue (qtr)'];
+            if (name === 'profit') return [`${formatBig(value)} ${currency}`, 'Net Income (qtr)'];
             const label = name === 'price' ? 'Price' : 'Total Return (incl. div.)';
             return [formatPrice(value, currency), label];
           }}
@@ -123,7 +169,13 @@ function DualChart({
             strokeWidth={2} strokeDasharray="6 3" dot={false} activeDot={{ r: 4 }} connectNulls name="tr" />
         )}
         {showEps && (
-          <Bar yAxisId="eps" dataKey="eps" fill="#f59e0b" name="eps" barSize={8} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="eps" dataKey="eps" fill="#f59e0b" name="eps" barSize={6} radius={[2, 2, 0, 0]} />
+        )}
+        {showFin && (
+          <>
+            <Bar yAxisId="fin" dataKey="revenue" fill="#60a5fa" name="revenue" barSize={8} radius={[2, 2, 0, 0]} />
+            <Bar yAxisId="fin" dataKey="profit" fill="#a78bfa" name="profit" barSize={5} radius={[2, 2, 0, 0]} />
+          </>
         )}
       </ComposedChart>
     </ResponsiveContainer>
@@ -148,6 +200,36 @@ function DividendsBarChart({ dividends, currency }: { dividends: DividendEvent[]
           labelFormatter={label => { try { return format(parseISO(label as string), 'MMM d, yyyy'); } catch { return label as string; } }}
         />
         <Bar dataKey="amount" fill="#10b981" radius={[2, 2, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function FinancialsBarChart({ data, currency }: { data: FinancialPoint[]; currency: string }) {
+  if (!data.length) return null;
+  const rows = data.map(d => ({
+    period: d.date.slice(0, 7),
+    revenue: d.revenue ?? null,
+    costOfRevenue: d.costOfRevenue ?? null,
+    netIncome: d.netIncome ?? null,
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={rows} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+        <XAxis dataKey="period" tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={30} />
+        <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
+          tickFormatter={v => formatBig(v as number)} />
+        <Tooltip
+          contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
+          formatter={(value: number, name: string) => [
+            `${formatBig(value)} ${currency}`,
+            name === 'revenue' ? 'Revenue' : name === 'costOfRevenue' ? 'Cost of revenue' : 'Net income',
+          ]}
+        />
+        <Bar dataKey="revenue" fill="#60a5fa" radius={[2, 2, 0, 0]} name="revenue" />
+        <Bar dataKey="costOfRevenue" fill="#475569" radius={[2, 2, 0, 0]} name="costOfRevenue" />
+        <Bar dataKey="netIncome" fill="#a78bfa" radius={[2, 2, 0, 0]} name="netIncome" />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -193,7 +275,7 @@ export function StockSection() {
   const [data, setData] = useState<StockData | null>(null);
   const [earnings, setEarnings] = useState<EarningsData | null>(null);
   const [earningsLoading, setEarningsLoading] = useState(false);
-  const [overlayEPS, setOverlayEPS] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay>('none');
   const [loading, setLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -237,15 +319,17 @@ export function StockSection() {
 
   // Earnings — fetched once per symbol (cheap; doesn't depend on timeframe)
   useEffect(() => {
-    if (!selected) { setEarnings(null); setOverlayEPS(false); setEarningsLoading(false); return; }
+    if (!selected) { setEarnings(null); setOverlay('none'); setEarningsLoading(false); return; }
     let cancelled = false;
     setEarnings(null);
+    setOverlay('none');
     setEarningsLoading(true);
     fetch(`/api/stock?mode=earnings&symbol=${encodeURIComponent(selected.symbol)}`)
       .then(r => r.json())
       .then((d: EarningsData) => {
         if (cancelled) return;
-        setEarnings(d?.quarterly?.length ? d : null);
+        const hasAny = (d?.quarterly?.length ?? 0) > 0 || (d?.financials?.length ?? 0) > 0;
+        setEarnings(hasAny ? d : null);
         setEarningsLoading(false);
       })
       .catch(() => { if (!cancelled) { setEarnings(null); setEarningsLoading(false); } });
@@ -325,7 +409,7 @@ export function StockSection() {
             <TimeframeSelector value={timeframe} onChange={setTimeframe} options={TF_OPTIONS} />
           </div>
 
-          {/* Legend for dual lines + EPS toggle */}
+          {/* Legend for dual lines + overlay toggles (EPS / Financials) */}
           {!loading && prices.length > 0 && (
             <div className="flex items-center justify-between gap-2 flex-wrap text-[11px]">
               <div className="flex items-center gap-4 flex-wrap">
@@ -341,30 +425,61 @@ export function StockSection() {
                     </div>
                   </>
                 )}
-                {overlayEPS && earnings && earnings.quarterly.length > 0 && (
+                {overlay === 'eps' && earnings && earnings.quarterly.length > 0 && (
                   <div className="flex items-center gap-1.5">
                     <span className="w-3 h-3 bg-amber-500 inline-block rounded-sm" />
                     <span className="text-gray-400">EPS (quarterly, right axis)</span>
                   </div>
                 )}
+                {overlay === 'financials' && earnings && earnings.financials.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 bg-blue-400 inline-block rounded-sm" />
+                      <span className="text-gray-400">Revenue</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 bg-violet-400 inline-block rounded-sm" />
+                      <span className="text-gray-400">Net Income (right axis)</span>
+                    </div>
+                  </>
+                )}
               </div>
-              {earningsLoading ? (
-                <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border rounded-full animate-pulse">
-                  Loading EPS…
-                </span>
-              ) : earnings && earnings.quarterly.length > 0 ? (
-                <button onClick={() => setOverlayEPS(s => !s)}
-                  className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
-                    overlayEPS
-                      ? 'border-amber-400 text-amber-400 bg-amber-400/10'
-                      : 'border-border text-gray-400 hover:text-gray-200')}>
-                  {overlayEPS ? 'Hide EPS on chart' : 'Show EPS on chart'}
-                </button>
-              ) : (
-                <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">
-                  No EPS data
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {earningsLoading ? (
+                  <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border rounded-full animate-pulse">
+                    Loading earnings…
+                  </span>
+                ) : (
+                  <>
+                    {earnings && earnings.quarterly.length > 0 ? (
+                      <button onClick={() => setOverlay(o => o === 'eps' ? 'none' : 'eps')}
+                        className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
+                          overlay === 'eps'
+                            ? 'border-amber-400 text-amber-400 bg-amber-400/10'
+                            : 'border-border text-gray-400 hover:text-gray-200')}>
+                        {overlay === 'eps' ? 'Hide EPS' : 'Show EPS'}
+                      </button>
+                    ) : (
+                      <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">
+                        No EPS data
+                      </span>
+                    )}
+                    {earnings && earnings.financials.length > 0 ? (
+                      <button onClick={() => setOverlay(o => o === 'financials' ? 'none' : 'financials')}
+                        className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
+                          overlay === 'financials'
+                            ? 'border-blue-400 text-blue-400 bg-blue-400/10'
+                            : 'border-border text-gray-400 hover:text-gray-200')}>
+                        {overlay === 'financials' ? 'Hide Revenue/Profit' : 'Show Revenue/Profit'}
+                      </button>
+                    ) : (
+                      <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">
+                        No financials
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )}
 
@@ -399,7 +514,8 @@ export function StockSection() {
               prices={prices}
               totalReturn={totalReturn}
               currency={currency}
-              eps={overlayEPS ? earnings?.quarterly : undefined}
+              eps={overlay === 'eps' ? earnings?.quarterly : undefined}
+              financials={overlay === 'financials' ? earnings?.financials : undefined}
             />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-500 text-sm">
@@ -420,9 +536,20 @@ export function StockSection() {
             <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
               <p className="text-xs text-gray-300 font-semibold">
                 Earnings per share (quarterly)
-                <span className="text-gray-500 font-normal ml-1">· last {earnings.quarterly.length} reported quarters</span>
+                <span className="text-gray-500 font-normal ml-1">· {earnings.quarterly.length} reported quarters</span>
               </p>
               <EarningsBarChart quarterly={earnings.quarterly} currency={earnings.currency || currency} />
+            </div>
+          )}
+
+          {/* Financials chart (revenue / costs / net income) */}
+          {!loading && earnings && earnings.financials.length > 0 && (
+            <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
+              <p className="text-xs text-gray-300 font-semibold">
+                Revenue · Costs · Profit (quarterly)
+                <span className="text-gray-500 font-normal ml-1">· {earnings.financials.length} reported quarters</span>
+              </p>
+              <FinancialsBarChart data={earnings.financials} currency={earnings.currency || currency} />
             </div>
           )}
 
@@ -443,7 +570,7 @@ export function StockSection() {
           )}
 
           <p className="text-[10px] text-gray-700">
-            Solid line = price · Dashed line = total return (dividends reinvested at ex-date) · Orange bars (when enabled) = quarterly EPS on the right axis.
+            Solid line = price · Dashed line = total return (dividends reinvested at ex-date) · Orange bars = quarterly EPS · Blue/violet bars = quarterly revenue/net income (right axis when overlay enabled).
             IRR ({timeframe}) = CAGR of the total-return series · IRR (cash flow) = rate that zeros the NPV of discrete cashflows.
             Source: Yahoo Finance · Not financial advice.
           </p>
