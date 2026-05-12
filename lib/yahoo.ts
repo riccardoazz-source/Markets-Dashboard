@@ -687,36 +687,40 @@ async function fetchFundamentalsTimeseries(
   const now = Math.floor(Date.now() / 1000);
   const period1 = now - 30 * 365 * 86_400;
   const period2 = now + 60 * 86_400;
+  // Yahoo expects literal commas in the type parameter — do NOT encodeURIComponent the whole string.
   const typeParam = FUNDAMENTALS_TYPES.join(',');
 
   for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
-    const url = `https://${host}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}`
+    const buildUrl = (crumb: string) =>
+      `https://${host}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}`
       + `?symbol=${encodeURIComponent(symbol)}`
-      + `&type=${encodeURIComponent(typeParam)}`
+      + `&type=${typeParam}`           // commas must be literal, not %2C
       + `&period1=${period1}&period2=${period2}`
       + `&lang=en-US&region=US`
-      + `&crumb=${encodeURIComponent(s.crumb)}`;
+      + `&crumb=${encodeURIComponent(crumb)}`;
     try {
-      let res = await fetchWithTimeout(url, {
+      let res = await fetchWithTimeout(buildUrl(s.crumb), {
         headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' },
       }, timeoutMs);
       if (res.status === 401 || res.status === 403) {
         session = null;
         try { s = await getSession(); } catch { continue; }
-        const retryUrl = `https://${host}/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(symbol)}`
-          + `?symbol=${encodeURIComponent(symbol)}&type=${encodeURIComponent(typeParam)}`
-          + `&period1=${period1}&period2=${period2}&lang=en-US&region=US`
-          + `&crumb=${encodeURIComponent(s.crumb)}`;
-        res = await fetchWithTimeout(retryUrl, {
+        res = await fetchWithTimeout(buildUrl(s.crumb), {
           headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' },
         }, timeoutMs);
       }
-      if (!res.ok) continue;
+      if (!res.ok) {
+        console.warn(`[fundamentals] ${symbol} ${host}: HTTP ${res.status}`);
+        continue;
+      }
       const json = await res.json() as {
         timeseries?: { result?: Array<Record<string, unknown> & { meta?: { type?: string[] } }> };
       };
       const results = json?.timeseries?.result;
-      if (!Array.isArray(results) || results.length === 0) continue;
+      if (!Array.isArray(results) || results.length === 0) {
+        console.warn(`[fundamentals] ${symbol} ${host}: empty result array`);
+        continue;
+      }
       const byType: Record<string, FundamentalEntry[]> = {};
       let currency = 'USD';
       for (const r of results) {
@@ -730,7 +734,12 @@ async function fetchFundamentalsTimeseries(
         const c = entries.find(e => e.currencyCode)?.currencyCode;
         if (c) currency = c;
       }
-      if (Object.keys(byType).length === 0) continue;
+      if (Object.keys(byType).length === 0) {
+        console.warn(`[fundamentals] ${symbol} ${host}: result array has no recognizable types`);
+        continue;
+      }
+      const quarterCount = byType['quarterlyEpsActual']?.length ?? byType['quarterlyTotalRevenue']?.length ?? 0;
+      console.log(`[fundamentals] ${symbol} ${host}: ${quarterCount} quarters, types: ${Object.keys(byType).join(',')}`);
       return { byType, currency };
     } catch (e) {
       console.warn(`[fundamentals] ${symbol} ${host} failed:`, (e as Error).message);
@@ -850,7 +859,7 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
   // Optional: limited income statement history (~4 quarters)
   const financialsMap = new Map<string, YahooFinancialQuarter>();
   type IsEntry = {
-    endDate?: { fmt?: string };
+    endDate?: { raw?: number; fmt?: string };
     totalRevenue?: { raw?: number };
     costOfRevenue?: { raw?: number };
     grossProfit?: { raw?: number };
@@ -860,7 +869,11 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
   const isHistory = (result.incomeStatementHistoryQuarterly as { incomeStatementHistory?: IsEntry[] } | undefined)
     ?.incomeStatementHistory ?? [];
   for (const e of isHistory) {
-    const date = e?.endDate?.fmt;
+    // prefer unix timestamp (raw) over fmt string which may vary by locale
+    const rawTs = e?.endDate?.raw;
+    const date = rawTs != null
+      ? new Date(rawTs * 1000).toISOString().slice(0, 10)
+      : e?.endDate?.fmt ?? null;
     if (!date) continue;
     financialsMap.set(date, {
       date,
