@@ -110,6 +110,57 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(payload);
   }
 
+  // ---- Earnings structure debug (no cache) ----
+  if (mode === 'qs-debug') {
+    const sym = req.nextUrl.searchParams.get('symbol') ?? 'AAPL';
+    let cookie = '', crumb = '';
+    try {
+      const cr = await fetch('https://fc.yahoo.com', { headers: { 'User-Agent': UA }, redirect: 'follow', cache: 'no-store' });
+      const raw = cr.headers.get('set-cookie') ?? '';
+      const m = raw.match(/^([A-Za-z0-9_]+=\S+?)(?=;|,|$)/);
+      cookie = m ? m[1] : '';
+    } catch { /* */ }
+    if (cookie) {
+      try {
+        const r = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb',
+          { headers: { 'User-Agent': UA, Cookie: cookie, Accept: 'text/plain,*/*' }, cache: 'no-store' });
+        const t = (await r.text()).trim();
+        if (t && !t.toLowerCase().startsWith('<!')) crumb = t;
+      } catch { /* */ }
+    }
+    if (!crumb) return NextResponse.json({ error: 'no crumb', cookie: cookie.slice(0, 30) });
+    const mods = 'earnings,earningsHistory,incomeStatementHistoryQuarterly,incomeStatementHistory';
+    const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(sym)}`
+      + `?modules=${encodeURIComponent(mods)}&crumb=${encodeURIComponent(crumb)}`;
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': UA, Cookie: cookie, Accept: 'application/json' }, cache: 'no-store' });
+      const j = await r.json() as Record<string, unknown>;
+      const res = (j?.quoteSummary as Record<string, unknown> | undefined)?.result;
+      const data = Array.isArray(res) ? res[0] as Record<string, unknown> : null;
+      if (!data) return NextResponse.json({ status: r.status, raw: JSON.stringify(j).slice(0, 800) });
+      return NextResponse.json({
+        status: r.status,
+        earningsHistoryCount: (data?.earningsHistory as Record<string, unknown> | undefined)
+          ? ((data.earningsHistory as Record<string, unknown[]>)?.history?.length ?? 0) : 'missing',
+        earningsChartQtrCount: ((data?.earnings as Record<string, unknown> | undefined)
+          ?.earningsChart as Record<string, unknown[]> | undefined)?.quarterly?.length ?? 'missing',
+        financialsChartYearlyCount: ((data?.earnings as Record<string, unknown> | undefined)
+          ?.financialsChart as Record<string, unknown[]> | undefined)?.yearly?.length ?? 'missing',
+        financialsChartYearlySample: JSON.stringify(
+          (((data?.earnings as Record<string, unknown> | undefined)
+            ?.financialsChart as Record<string, unknown[]> | undefined)?.yearly ?? []).slice(0, 2)
+        ).slice(0, 300),
+        incomeStmtQtrCount: (data?.incomeStatementHistoryQuarterly as Record<string, unknown> | undefined)
+          ? ((data.incomeStatementHistoryQuarterly as Record<string, unknown[]>)?.incomeStatementHistory?.length ?? 0) : 'missing',
+        incomeStmtAnnualCount: (data?.incomeStatementHistory as Record<string, unknown> | undefined)
+          ? ((data.incomeStatementHistory as Record<string, unknown[]>)?.incomeStatementHistory?.length ?? 0) : 'missing',
+        incomeStmtAnnualSample: JSON.stringify(
+          ((data?.incomeStatementHistory as Record<string, unknown[]> | undefined)?.incomeStatementHistory ?? []).slice(0, 1)
+        ).slice(0, 500),
+      });
+    } catch (e) { return NextResponse.json({ error: (e as Error).message }); }
+  }
+
   // ---- Search by ticker / ISIN / name ----
   if (mode === 'search') {
     const q = (req.nextUrl.searchParams.get('q') ?? '').trim();
