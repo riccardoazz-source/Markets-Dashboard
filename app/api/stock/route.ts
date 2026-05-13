@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchYahooData, fetchYahooEarnings } from '@/lib/yahoo';
+import { fetchFmpEarnings } from '@/lib/fmp';
 import { subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
 export const runtime = 'edge';
@@ -100,9 +101,16 @@ export async function GET(req: NextRequest) {
     const symbol = req.nextUrl.searchParams.get('symbol');
     if (!symbol) return NextResponse.json({ error: 'No symbol' }, { status: 400 });
     const key = `earn:${symbol}`;
-    const cached = getCached(key, 60 * 60_000); // 1h cache (down from 6h to surface fixes faster)
+    const cached = getCached(key, 60 * 60_000); // 1h cache
     if (cached) return NextResponse.json(cached);
-    const data = await fetchYahooEarnings(symbol);
+
+    // FMP (primary): 5y quarterly + 20y annual on the free tier
+    let data = await fetchFmpEarnings(symbol);
+    // Yahoo fallback: in case FMP doesn't cover the symbol (some non-US tickers)
+    if (!data || (data.quarterly.length === 0 && data.financials.length === 0)) {
+      data = await fetchYahooEarnings(symbol);
+    }
+
     const payload = data ?? { quarterly: [], financials: [], currency: 'USD' };
     if (data && (data.quarterly.length > 0 || data.financials.length > 0)) {
       cache.set(key, { data: payload, ts: Date.now() });
