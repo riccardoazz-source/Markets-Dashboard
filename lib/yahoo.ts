@@ -797,7 +797,7 @@ function buildFinancialsFromTimeseries(
 }
 
 export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings | null> {
-  // Run both sources in parallel — timeseries for breadth, quoteSummary for actual past data.
+  // Run both sources in parallel.
   const [tsData, qsResult] = await Promise.all([
     fetchFundamentalsTimeseries(symbol).catch(() => null),
     fetchQuoteSummary(
@@ -811,7 +811,7 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
   let currency = 'USD';
   const today = new Date().toISOString().slice(0, 10);
 
-  // Seed from timeseries — only past/current quarters (timeseries includes forward estimates)
+  // 1. Seed from fundamentals-timeseries (past quarters only — strips forward estimates)
   if (tsData) {
     const { financials: tsFinancials, epsPoints: tsEps } = buildFinancialsFromTimeseries(tsData);
     currency = tsData.currency;
@@ -823,75 +823,55 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
     }
   }
 
-  // Overlay with quoteSummary — actual reported EPS with correct fiscal-period timestamps
   if (qsResult) {
-    type HistEntry = { quarter?: { raw?: number }; epsActual?: { raw?: number }; epsEstimate?: { raw?: number } };
-    const hist = (qsResult.earningsHistory as { history?: HistEntry[] } | undefined)?.history ?? [];
-    for (const h of hist) {
-      const rawTs = h?.quarter?.raw;
-      const actual = h?.epsActual?.raw;
-      const estimate = h?.epsEstimate?.raw;
-      if (typeof rawTs === 'number' && typeof actual === 'number' && isFinite(actual)) {
-        const date = new Date(rawTs * 1000).toISOString().slice(0, 10);
-        // Always overwrite timeseries entry — quoteSummary has the actual reported value
-        epsMap.set(date, {
-          date, period: date, eps: actual,
-          estimate: typeof estimate === 'number' ? estimate : undefined,
-        });
-      }
-    }
-
-    type EarnQ = { date?: string; actual?: { raw?: number }; estimate?: { raw?: number } };
-    type EarnY = { date?: number | string; actual?: { raw?: number }; estimate?: { raw?: number } };
-    const earnings = qsResult.earnings as
-      | { earningsChart?: { quarterly?: EarnQ[]; yearly?: EarnY[] }; financialCurrency?: string }
-      | undefined;
-    if (earnings?.financialCurrency) currency = earnings.financialCurrency;
-    const eqs = earnings?.earningsChart?.quarterly ?? [];
-    for (const q of eqs) {
-      const periodStr = q?.date ?? '';
-      const actual = q?.actual?.raw;
-      const estimate = q?.estimate?.raw;
-      if (typeof actual === 'number' && isFinite(actual)) {
-        const date = quarterToEndDate(periodStr);
-        if (date && !epsMap.has(date)) {
-          epsMap.set(date, {
-            date, period: periodStr, eps: actual,
-            estimate: typeof estimate === 'number' ? estimate : undefined,
-          });
-        }
-      }
-    }
-    // Yearly EPS — extends history 4 fiscal years beyond the ~4 most recent quarters
-    const eys = earnings?.earningsChart?.yearly ?? [];
-    for (const y of eys) {
-      const yr = typeof y?.date === 'number' ? y.date : Number(y?.date);
-      const actual = y?.actual?.raw;
-      if (Number.isInteger(yr) && yr > 1900 && typeof actual === 'number' && isFinite(actual)) {
-        // Place annual point at Dec 31 of that calendar year as a reasonable anchor
-        const date = `${yr}-12-31`;
-        if (!epsMap.has(date)) {
-          epsMap.set(date, { date, period: `FY${yr}`, eps: actual });
-        }
-      }
-    }
-
+    type RV = { raw?: number };
     type IsEntry = {
       endDate?: { raw?: number; fmt?: string };
-      totalRevenue?: { raw?: number };
-      costOfRevenue?: { raw?: number };
-      grossProfit?: { raw?: number };
-      operatingIncome?: { raw?: number };
-      netIncome?: { raw?: number };
+      totalRevenue?: RV;
+      costOfRevenue?: RV;
+      grossProfit?: RV;
+      operatingIncome?: RV;
+      netIncome?: RV;
+      dilutedEPS?: RV;
+      basicEPS?: RV;
     };
-    const isHistory = (qsResult.incomeStatementHistoryQuarterly as { incomeStatementHistory?: IsEntry[] } | undefined)
+
+    // 2. Annual income statement — 4 fiscal years of revenue/costs/profit + diluted EPS
+    const annualIs = (qsResult.incomeStatementHistory as { incomeStatementHistory?: IsEntry[] } | undefined)
       ?.incomeStatementHistory ?? [];
-    for (const e of isHistory) {
+    for (const e of annualIs) {
       const rawTs = e?.endDate?.raw;
       const date = rawTs != null
         ? new Date(rawTs * 1000).toISOString().slice(0, 10)
         : e?.endDate?.fmt ?? null;
-      if (!date) continue;
+      if (!date || date > today) continue;
+      // Financials: only set if not already present (don't clobber quarterly with annual)
+      if (!financialsMap.has(date)) {
+        financialsMap.set(date, {
+          date,
+          revenue: e?.totalRevenue?.raw,
+          costOfRevenue: e?.costOfRevenue?.raw,
+          grossProfit: e?.grossProfit?.raw,
+          operatingIncome: e?.operatingIncome?.raw,
+          netIncome: e?.netIncome?.raw,
+        });
+      }
+      // Annual EPS — prefer diluted, fall back to basic. Only add if no quarterly entry exists.
+      const annualEps = e?.dilutedEPS?.raw ?? e?.basicEPS?.raw;
+      if (typeof annualEps === 'number' && isFinite(annualEps) && !epsMap.has(date)) {
+        epsMap.set(date, { date, period: `FY ${date.slice(0, 4)}`, eps: annualEps });
+      }
+    }
+
+    // 3. Quarterly income statement — 4 most recent quarters of revenue/costs/profit + diluted EPS
+    const quarterlyIs = (qsResult.incomeStatementHistoryQuarterly as { incomeStatementHistory?: IsEntry[] } | undefined)
+      ?.incomeStatementHistory ?? [];
+    for (const e of quarterlyIs) {
+      const rawTs = e?.endDate?.raw;
+      const date = rawTs != null
+        ? new Date(rawTs * 1000).toISOString().slice(0, 10)
+        : e?.endDate?.fmt ?? null;
+      if (!date || date > today) continue;
       const existing = financialsMap.get(date) ?? { date };
       financialsMap.set(date, {
         ...existing,
@@ -902,26 +882,88 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
         operatingIncome: e?.operatingIncome?.raw ?? existing.operatingIncome,
         netIncome: e?.netIncome?.raw ?? existing.netIncome,
       });
+      // Quarterly diluted EPS — supplements earningsHistory
+      const qEps = e?.dilutedEPS?.raw ?? e?.basicEPS?.raw;
+      if (typeof qEps === 'number' && isFinite(qEps) && !epsMap.has(date)) {
+        epsMap.set(date, { date, period: date, eps: qEps });
+      }
     }
-    // Annual income statement — extends financials 4 fiscal years beyond the quarters
-    const annualIs = (qsResult.incomeStatementHistory as { incomeStatementHistory?: IsEntry[] } | undefined)
-      ?.incomeStatementHistory ?? [];
-    for (const e of annualIs) {
-      const rawTs = e?.endDate?.raw;
-      const date = rawTs != null
-        ? new Date(rawTs * 1000).toISOString().slice(0, 10)
-        : e?.endDate?.fmt ?? null;
-      if (!date) continue;
-      // Don't clobber quarterly data with annual; only add when no entry exists for that date
-      if (financialsMap.has(date)) continue;
+
+    // 4. earnings module — financialsChart provides another source of revenue + net income
+    type FChartEntry = { date?: number | string; revenue?: RV; earnings?: RV };
+    const earningsModule = qsResult.earnings as {
+      earningsChart?: { quarterly?: Array<{ date?: string; actual?: RV; estimate?: RV }> };
+      financialsChart?: { yearly?: FChartEntry[]; quarterly?: FChartEntry[] };
+      financialCurrency?: string;
+    } | undefined;
+    if (earningsModule?.financialCurrency) currency = earningsModule.financialCurrency;
+
+    // Annual revenue + earnings (net income) from financialsChart.yearly.
+    // date is the fiscal year number (e.g. 2024 for FY2024).
+    for (const y of earningsModule?.financialsChart?.yearly ?? []) {
+      const yr = typeof y.date === 'number' ? y.date : Number(y.date);
+      if (!Number.isInteger(yr) || yr < 1990 || yr > 2100) continue;
+      // Anchor annual financials at Dec 31 of fiscal year unless we already have a fiscal-year-end entry
+      const anchorDate = `${yr}-12-31`;
+      if (anchorDate > today) continue;
+      // Skip if we already have an entry in this calendar year (probably the fiscal year end from incomeStatementHistory)
+      const hasYearEntry = Array.from(financialsMap.keys()).some(d => d.startsWith(`${yr}-`));
+      if (!hasYearEntry) {
+        financialsMap.set(anchorDate, {
+          date: anchorDate,
+          revenue: y.revenue?.raw,
+          netIncome: y.earnings?.raw,
+        });
+      }
+    }
+
+    // Quarterly revenue + earnings from financialsChart.quarterly — fills gaps in incomeStatementHistoryQuarterly
+    for (const q of earningsModule?.financialsChart?.quarterly ?? []) {
+      const periodStr = typeof q.date === 'string' ? q.date : '';
+      if (!periodStr) continue;
+      const date = quarterToEndDate(periodStr);
+      if (!date || date > today) continue;
+      const existing = financialsMap.get(date) ?? { date };
       financialsMap.set(date, {
+        ...existing,
         date,
-        revenue: e?.totalRevenue?.raw,
-        costOfRevenue: e?.costOfRevenue?.raw,
-        grossProfit: e?.grossProfit?.raw,
-        operatingIncome: e?.operatingIncome?.raw,
-        netIncome: e?.netIncome?.raw,
+        revenue: existing.revenue ?? q.revenue?.raw,
+        netIncome: existing.netIncome ?? q.earnings?.raw,
       });
+    }
+
+    // 5. earningsHistory — authoritative quarterly EPS actuals (overwrites timeseries/income-statement EPS)
+    type HistEntry = { quarter?: RV; epsActual?: RV; epsEstimate?: RV };
+    const hist = (qsResult.earningsHistory as { history?: HistEntry[] } | undefined)?.history ?? [];
+    for (const h of hist) {
+      const rawTs = h?.quarter?.raw;
+      const actual = h?.epsActual?.raw;
+      const estimate = h?.epsEstimate?.raw;
+      if (typeof rawTs === 'number' && typeof actual === 'number' && isFinite(actual)) {
+        const date = new Date(rawTs * 1000).toISOString().slice(0, 10);
+        if (date <= today) {
+          epsMap.set(date, {
+            date, period: date, eps: actual,
+            estimate: typeof estimate === 'number' ? estimate : undefined,
+          });
+        }
+      }
+    }
+
+    // 6. earningsChart.quarterly — backup quarterly EPS (in "3Q2025" format)
+    for (const q of earningsModule?.earningsChart?.quarterly ?? []) {
+      const periodStr = q?.date ?? '';
+      const actual = q?.actual?.raw;
+      const estimate = q?.estimate?.raw;
+      if (typeof actual === 'number' && isFinite(actual)) {
+        const date = quarterToEndDate(periodStr);
+        if (date && date <= today && !epsMap.has(date)) {
+          epsMap.set(date, {
+            date, period: periodStr, eps: actual,
+            estimate: typeof estimate === 'number' ? estimate : undefined,
+          });
+        }
+      }
     }
   }
 
@@ -932,6 +974,6 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
     console.warn(`[yahoo-earnings] ${symbol}: all sources returned no usable data`);
     return null;
   }
-  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} EPS / ${financials.length} financial quarters (merged)`);
+  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} EPS / ${financials.length} financial entries`);
   return { quarterly, financials, currency };
 }
