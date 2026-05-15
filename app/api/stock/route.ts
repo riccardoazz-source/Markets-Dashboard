@@ -101,7 +101,7 @@ export async function GET(req: NextRequest) {
     const symbol = req.nextUrl.searchParams.get('symbol');
     if (!symbol) return NextResponse.json({ error: 'No symbol' }, { status: 400 });
     const key = `earn:${symbol}`;
-    const cached = getCached(key, 60 * 60_000); // 1h cache
+    const cached = getCached(key, 60 * 60_000);
     if (cached) return NextResponse.json(cached);
 
     // FMP (primary): 5y quarterly + 20y annual on the free tier
@@ -116,6 +116,18 @@ export async function GET(req: NextRequest) {
       cache.set(key, { data: payload, ts: Date.now() });
     }
     return NextResponse.json(payload);
+  }
+
+  // ---- Quick earnings diagnostic (no cache) ----
+  if (mode === 'diag') {
+    const sym = req.nextUrl.searchParams.get('symbol') ?? 'AAPL';
+    const [fmp, yahoo] = await Promise.all([
+      fetchFmpEarnings(sym).catch((e: Error) => ({ error: e.message })),
+      fetchYahooEarnings(sym).catch((e: Error) => ({ error: e.message })),
+    ]);
+    const fmpResult = fmp && 'quarterly' in fmp ? `OK: ${fmp.quarterly.length} EPS, ${fmp.financials.length} fin` : `FAIL: ${JSON.stringify(fmp)}`;
+    const yahooResult = yahoo && 'quarterly' in yahoo ? `OK: ${yahoo.quarterly.length} EPS, ${yahoo.financials.length} fin / first EPS: ${JSON.stringify(yahoo.quarterly[0])} / first fin: ${JSON.stringify(yahoo.financials[0])}` : `FAIL: ${JSON.stringify(yahoo)}`;
+    return NextResponse.json({ fmpApiKey: !!process.env.FMP_API_KEY, fmp: fmpResult, yahoo: yahooResult });
   }
 
   // ---- Search by ticker / ISIN / name ----
