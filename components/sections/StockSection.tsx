@@ -78,10 +78,14 @@ function DualChart({
 
   const firstDate = prices[0].date;
   const lastDate = prices[prices.length - 1].date;
-  const visibleEps = (eps ?? []).filter(e => e.date >= firstDate && e.date <= lastDate);
-  const visibleFin = (financials ?? []).filter(e => e.date >= firstDate && e.date <= lastDate);
-  const showEps = visibleEps.length > 0;
-  const showFin = visibleFin.length > 0;
+
+  // For EPS/financials overlays: always include the most recent entries up to lastDate,
+  // regardless of firstDate. Snapping to price dates means bars land on visible data points.
+  // We keep up to 12 entries to avoid clutter on long charts.
+  const sortedEps = [...(eps ?? [])].filter(e => e.date <= lastDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
+  const sortedFin = [...(financials ?? [])].filter(e => e.date <= lastDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
+  const showEps = sortedEps.length > 0;
+  const showFin = sortedFin.length > 0;
 
   const priceMap = new Map(prices.map(d => [d.date, d.close]));
   const trMap = new Map(totalReturn.map(d => [d.date, d.close]));
@@ -96,10 +100,10 @@ function DualChart({
     return priceDates[lo] ?? d;
   }
   const epsMap = new Map<string, number>();
-  for (const e of visibleEps) epsMap.set(nearestPriceDate(e.date), e.eps);
+  for (const e of sortedEps) epsMap.set(nearestPriceDate(e.date), e.eps);
   const revMap = new Map<string, number>();
   const profMap = new Map<string, number>();
-  for (const f of visibleFin) {
+  for (const f of sortedFin) {
     const d = nearestPriceDate(f.date);
     if (f.revenue != null) revMap.set(d, f.revenue);
     const profit = f.netIncome ?? f.operatingIncome ?? f.grossProfit;
