@@ -24,6 +24,7 @@ interface FinancialPoint {
   grossProfit?: number;
   operatingIncome?: number;
   netIncome?: number;
+  isAnnual?: boolean;
 }
 interface EarningsData {
   quarterly: EarningsPoint[];
@@ -81,9 +82,9 @@ function DualChart({
 
   // For EPS/financials overlays: always include the most recent entries up to lastDate,
   // regardless of firstDate. Snapping to price dates means bars land on visible data points.
-  // We keep up to 12 entries to avoid clutter on long charts.
-  const sortedEps = [...(eps ?? [])].filter(e => e.date <= lastDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
-  const sortedFin = [...(financials ?? [])].filter(e => e.date <= lastDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
+  // Quarterly-only (skip annual aggregates that mix scale) — last 16 quarters max.
+  const sortedEps = [...(eps ?? [])].filter(e => e.date <= lastDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 16);
+  const sortedFin = [...(financials ?? [])].filter(e => !e.isAnnual && e.date <= lastDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 16);
   const showEps = sortedEps.length > 0;
   const showFin = sortedFin.length > 0;
 
@@ -147,19 +148,19 @@ function DualChart({
           <YAxis yAxisId="eps" orientation="right"
             tick={{ fill: '#f59e0b', fontSize: 11 }} axisLine={false} tickLine={false} width={48}
             tickFormatter={v => (v as number).toFixed(2)}
-            domain={['auto', 'auto']} />
+            domain={[0, 'auto']} />
         )}
         {showFin && (
           <YAxis yAxisId="fin" orientation="right"
             tick={{ fill: '#60a5fa', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
             tickFormatter={v => formatBig(v as number)}
-            domain={['auto', 'auto']} />
+            domain={[0, 'auto']} />
         )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
           formatter={(value: number, name: string) => {
             if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, 'EPS (qtr)'];
-            if (name === 'revenue') return [`${formatBig(value)} ${currency}`, 'Revenue (qtr)'];
+            if (name === 'revenue') return [`${formatBig(value)} ${currency}`, 'Revenue'];
             if (name === 'profit') return [`${formatBig(value)} ${currency}`, 'Net Income (qtr)'];
             const label = name === 'price' ? 'Price' : 'Total Return (incl. div.)';
             return [formatPrice(value, currency), label];

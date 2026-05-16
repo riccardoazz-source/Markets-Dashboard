@@ -584,6 +584,7 @@ export interface YahooFinancialQuarter {
   netIncome?: number;
   eps?: number;
   epsEstimate?: number;
+  isAnnual?: boolean;       // true for full-year income statements (not quarterly)
 }
 
 export interface YahooEarnings {
@@ -854,6 +855,7 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
           grossProfit: e?.grossProfit?.raw,
           operatingIncome: e?.operatingIncome?.raw,
           netIncome: e?.netIncome?.raw,
+          isAnnual: true,
         });
       }
       // Annual EPS — prefer diluted, fall back to basic. Only add if no quarterly entry exists.
@@ -876,6 +878,7 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
       financialsMap.set(date, {
         ...existing,
         date,
+        isAnnual: false, // confirmed quarterly by incomeStatementHistoryQuarterly
         revenue: e?.totalRevenue?.raw ?? existing.revenue,
         costOfRevenue: e?.costOfRevenue?.raw ?? existing.costOfRevenue,
         grossProfit: e?.grossProfit?.raw ?? existing.grossProfit,
@@ -913,6 +916,7 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
           date: anchorDate,
           revenue: y.revenue?.raw,
           netIncome: y.earnings?.raw,
+          isAnnual: true,
         });
       }
     }
@@ -927,6 +931,7 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
       financialsMap.set(date, {
         ...existing,
         date,
+        isAnnual: false, // confirmed quarterly by financialsChart
         revenue: existing.revenue ?? q.revenue?.raw,
         netIncome: existing.netIncome ?? q.earnings?.raw,
       });

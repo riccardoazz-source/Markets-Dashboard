@@ -72,6 +72,7 @@ export async function fetchFmpEarnings(symbol: string): Promise<YahooEarnings | 
     if (q.reportedCurrency) currency = q.reportedCurrency;
     financialsMap.set(q.date, {
       date: q.date,
+      isAnnual: false,
       revenue: q.revenue,
       costOfRevenue: q.costOfRevenue,
       grossProfit: q.grossProfit,
@@ -97,6 +98,7 @@ export async function fetchFmpEarnings(symbol: string): Promise<YahooEarnings | 
         grossProfit: a.grossProfit,
         operatingIncome: a.operatingIncome,
         netIncome: a.netIncome,
+        isAnnual: true,
       });
     }
     const eps = typeof a.epsdiluted === 'number' ? a.epsdiluted : a.eps;
