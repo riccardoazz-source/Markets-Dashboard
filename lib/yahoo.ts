@@ -769,7 +769,7 @@ function buildFinancialsFromTimeseries(
       const date = e?.asOfDate;
       const value = e?.reportedValue?.raw;
       if (typeof date === 'string' && typeof value === 'number' && isFinite(value)) {
-        const existing = byDate.get(date) ?? { date };
+        const existing = byDate.get(date) ?? { date, isAnnual: false };
         (existing as unknown as Record<string, unknown>)[field] = value;
         byDate.set(date, existing);
       }

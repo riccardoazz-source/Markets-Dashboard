@@ -112,9 +112,11 @@ export async function GET(req: NextRequest) {
     }
 
     const payload = data ?? { quarterly: [], financials: [], currency: 'USD' };
-    // Only full-hour cache when we have BOTH EPS and financials; otherwise short cache
-    // so a degraded fetch (e.g. crumb-auth hiccup) doesn't stick for an hour.
-    if (data && data.quarterly.length > 0 && data.financials.length > 0) {
+    // Only full-hour cache when we have BOTH EPS and financials WITH at least one revenue value.
+    // Without the revenue check, a degraded fetch (crumb-auth hiccup returning entries with
+    // revenue:undefined) would stick for an hour and show 0 bars in the overlay chart.
+    const hasRevenue = data?.financials.some(f => f.revenue != null) ?? false;
+    if (data && data.quarterly.length > 0 && data.financials.length > 0 && hasRevenue) {
       cache.set(key, { data: payload, ts: Date.now() });
     } else if (data && (data.quarterly.length > 0 || data.financials.length > 0)) {
       // Partial: re-try after 60s by using a backdated timestamp
@@ -135,6 +137,7 @@ export async function GET(req: NextRequest) {
     const yahooFinDump = yahoo && 'financials' in yahoo
       ? yahoo.financials.map(f => ({
           date: f.date,
+          annual: f.isAnnual ?? null,
           rev: f.revenue != null ? `${(f.revenue / 1e9).toFixed(1)}B` : 'MISSING',
           cogs: f.costOfRevenue != null ? `${(f.costOfRevenue / 1e9).toFixed(1)}B` : 'MISSING',
           ni: f.netIncome != null ? `${(f.netIncome / 1e9).toFixed(1)}B` : 'MISSING',
