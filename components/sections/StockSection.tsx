@@ -181,8 +181,13 @@ function DualChart({
         )}
         {showFin && (
           <>
-            <Bar yAxisId="fin" dataKey="revenue" fill="#60a5fa" name="revenue" barSize={8} radius={[2, 2, 0, 0]} />
-            <Bar yAxisId="fin" dataKey="profit" fill="#a78bfa" name="profit" barSize={5} radius={[2, 2, 0, 0]} />
+            <Bar yAxisId="fin" dataKey="revenue" fill="#60a5fa" name="revenue"
+              barSize={14} minPointSize={2} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+            {/* Profit rendered as Line+dot (not Bar) so Recharts doesn't group it with the revenue
+                Bar — grouped bars collapse to ~0px width on dense category axes (5Y = 1250 slots). */}
+            <Line yAxisId="fin" type="monotone" dataKey="profit" stroke="#a78bfa"
+              strokeWidth={0} dot={{ r: 4, fill: '#a78bfa', stroke: '#a78bfa' }}
+              activeDot={{ r: 5 }} name="profit" connectNulls={false} isAnimationActive={false} />
           </>
         )}
       </ComposedChart>
@@ -443,11 +448,11 @@ export function StockSection() {
                   <>
                     <div className="flex items-center gap-1.5">
                       <span className="w-3 h-3 bg-blue-400 inline-block rounded-sm" />
-                      <span className="text-gray-400">Revenue</span>
+                      <span className="text-gray-400">Revenue (bar)</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-violet-400 inline-block rounded-sm" />
-                      <span className="text-gray-400">Net Income (right axis)</span>
+                      <span className="w-2.5 h-2.5 bg-violet-400 inline-block rounded-full" />
+                      <span className="text-gray-400">Net Income (dot, right axis)</span>
                     </div>
                   </>
                 )}
