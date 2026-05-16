@@ -126,8 +126,28 @@ export async function GET(req: NextRequest) {
       fetchYahooEarnings(sym).catch((e: Error) => ({ error: e.message })),
     ]);
     const fmpResult = fmp && 'quarterly' in fmp ? `OK: ${fmp.quarterly.length} EPS, ${fmp.financials.length} fin` : `FAIL: ${JSON.stringify(fmp)}`;
-    const yahooResult = yahoo && 'quarterly' in yahoo ? `OK: ${yahoo.quarterly.length} EPS, ${yahoo.financials.length} fin / first EPS: ${JSON.stringify(yahoo.quarterly[0])} / first fin: ${JSON.stringify(yahoo.financials[0])}` : `FAIL: ${JSON.stringify(yahoo)}`;
-    return NextResponse.json({ fmpApiKey: !!process.env.FMP_API_KEY, fmp: fmpResult, yahoo: yahooResult });
+    // Show all financials with which fields are populated
+    const yahooFinDump = yahoo && 'financials' in yahoo
+      ? yahoo.financials.map(f => ({
+          date: f.date,
+          rev: f.revenue != null ? `${(f.revenue / 1e9).toFixed(1)}B` : 'MISSING',
+          cogs: f.costOfRevenue != null ? `${(f.costOfRevenue / 1e9).toFixed(1)}B` : 'MISSING',
+          ni: f.netIncome != null ? `${(f.netIncome / 1e9).toFixed(1)}B` : 'MISSING',
+        }))
+      : null;
+    const yahooEpsDump = yahoo && 'quarterly' in yahoo
+      ? yahoo.quarterly.slice(-6).map(e => ({ date: e.date, eps: e.eps }))
+      : null;
+    const yahooResult = yahoo && 'quarterly' in yahoo
+      ? `OK: ${yahoo.quarterly.length} EPS / ${yahoo.financials.length} fin`
+      : `FAIL: ${JSON.stringify(yahoo)}`;
+    return NextResponse.json({
+      fmpApiKey: !!process.env.FMP_API_KEY,
+      fmp: fmpResult,
+      yahoo: yahooResult,
+      yahooFinancials: yahooFinDump,
+      yahooEps: yahooEpsDump,
+    });
   }
 
   // ---- Search by ticker / ISIN / name ----

@@ -974,6 +974,8 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
     console.warn(`[yahoo-earnings] ${symbol}: all sources returned no usable data`);
     return null;
   }
-  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} EPS / ${financials.length} financial entries`);
+  const withRevenue = financials.filter(f => f.revenue != null).length;
+  const withNetIncome = financials.filter(f => f.netIncome != null).length;
+  console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} EPS / ${financials.length} fin (${withRevenue} w/ revenue, ${withNetIncome} w/ netIncome) / modules: ${Object.keys(qsResult ?? {}).join(',')}`);
   return { quarterly, financials, currency };
 }
