@@ -112,8 +112,13 @@ export async function GET(req: NextRequest) {
     }
 
     const payload = data ?? { quarterly: [], financials: [], currency: 'USD' };
-    if (data && (data.quarterly.length > 0 || data.financials.length > 0)) {
+    // Only full-hour cache when we have BOTH EPS and financials; otherwise short cache
+    // so a degraded fetch (e.g. crumb-auth hiccup) doesn't stick for an hour.
+    if (data && data.quarterly.length > 0 && data.financials.length > 0) {
       cache.set(key, { data: payload, ts: Date.now() });
+    } else if (data && (data.quarterly.length > 0 || data.financials.length > 0)) {
+      // Partial: re-try after 60s by using a backdated timestamp
+      cache.set(key, { data: payload, ts: Date.now() - 59 * 60_000 });
     }
     return NextResponse.json(payload);
   }
