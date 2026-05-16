@@ -135,7 +135,10 @@ function DualChart({
 
   return (
     <ResponsiveContainer width="100%" height={260}>
-      <ComposedChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+      {/* key forces a fresh ComposedChart mount when the overlay changes — Recharts'
+          internal layout doesn't always recompute when YAxis components are added/removed. */}
+      <ComposedChart key={`chart-${showEps ? 'eps' : ''}${showFin ? 'fin' : ''}`}
+        data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
         <XAxis dataKey="date" tickFormatter={d => formatXDate(d as string, prices)}
           tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={50} />
@@ -164,7 +167,6 @@ function DualChart({
           formatter={(value: number, name: string) => {
             if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, 'EPS (qtr)'];
             if (name === 'revenue') return [`${formatBig(value)} ${currency}`, 'Revenue'];
-            if (name === 'profit') return [`${formatBig(value)} ${currency}`, 'Net Income (qtr)'];
             const label = name === 'price' ? 'Price' : 'Total Return (incl. div.)';
             return [formatPrice(value, currency), label];
           }}
@@ -180,15 +182,7 @@ function DualChart({
           <Bar yAxisId="eps" dataKey="eps" fill="#f59e0b" name="eps" barSize={6} radius={[2, 2, 0, 0]} />
         )}
         {showFin && (
-          <>
-            <Bar yAxisId="fin" dataKey="revenue" fill="#60a5fa" name="revenue"
-              barSize={14} minPointSize={2} radius={[2, 2, 0, 0]} isAnimationActive={false} />
-            {/* Profit rendered as Line+dot (not Bar) so Recharts doesn't group it with the revenue
-                Bar — grouped bars collapse to ~0px width on dense category axes (5Y = 1250 slots). */}
-            <Line yAxisId="fin" type="monotone" dataKey="profit" stroke="#a78bfa"
-              strokeWidth={0} dot={{ r: 4, fill: '#a78bfa', stroke: '#a78bfa' }}
-              activeDot={{ r: 5 }} name="profit" connectNulls={false} isAnimationActive={false} />
-          </>
+          <Bar yAxisId="fin" dataKey="revenue" fill="#60a5fa" name="revenue" barSize={6} radius={[2, 2, 0, 0]} />
         )}
       </ComposedChart>
     </ResponsiveContainer>
@@ -445,16 +439,10 @@ export function StockSection() {
                   </div>
                 )}
                 {overlay === 'financials' && earnings && earnings.financials.length > 0 && (
-                  <>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 bg-blue-400 inline-block rounded-sm" />
-                      <span className="text-gray-400">Revenue (bar)</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 bg-violet-400 inline-block rounded-full" />
-                      <span className="text-gray-400">Net Income (dot, right axis)</span>
-                    </div>
-                  </>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 bg-blue-400 inline-block rounded-sm" />
+                    <span className="text-gray-400">Revenue (quarterly, right axis)</span>
+                  </div>
                 )}
               </div>
               <div className="flex items-center gap-1.5">
@@ -483,7 +471,7 @@ export function StockSection() {
                           overlay === 'financials'
                             ? 'border-blue-400 text-blue-400 bg-blue-400/10'
                             : 'border-border text-gray-400 hover:text-gray-200')}>
-                        {overlay === 'financials' ? 'Hide Revenue/Profit' : 'Show Revenue/Profit'}
+                        {overlay === 'financials' ? 'Hide Revenue' : 'Show Revenue'}
                       </button>
                     ) : (
                       <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">
