@@ -10,7 +10,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart,
+  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
@@ -87,10 +87,7 @@ function DualChart({
   // the bar count to what fits the chart.
   const inRange = (d: string) => d >= firstDate && d <= lastDate;
   const sortedEps = [...(eps ?? [])].filter(e => inRange(e.date)).sort((a, b) => b.date.localeCompare(a.date));
-  const finCandidates = [...(financials ?? [])].filter(e => inRange(e.date));
-  const quarterlyOnly = finCandidates.filter(e => !e.isAnnual);
-  const finPool = quarterlyOnly.length >= 2 ? quarterlyOnly : finCandidates;
-  const sortedFin = finPool.sort((a, b) => b.date.localeCompare(a.date));
+  const sortedFin = [...(financials ?? [])].filter(e => inRange(e.date)).sort((a, b) => b.date.localeCompare(a.date));
   const showEps = sortedEps.length > 0;
   const showFin = sortedFin.length > 0;
 
@@ -107,12 +104,18 @@ function DualChart({
     return priceDates[lo] ?? d;
   }
   const epsMap = new Map<string, number>();
-  for (const e of sortedEps) epsMap.set(nearestPriceDate(e.date), e.eps);
+  const epsIsAnnualMap = new Map<string, boolean>();
+  for (const e of sortedEps) {
+    const d = nearestPriceDate(e.date);
+    epsMap.set(d, e.eps);
+    epsIsAnnualMap.set(d, e.period.startsWith('FY '));
+  }
   const revMap = new Map<string, number>();
+  const revIsAnnualMap = new Map<string, boolean>();
   const profMap = new Map<string, number>();
   for (const f of sortedFin) {
     const d = nearestPriceDate(f.date);
-    if (f.revenue != null) revMap.set(d, f.revenue);
+    if (f.revenue != null) { revMap.set(d, f.revenue); revIsAnnualMap.set(d, f.isAnnual ?? false); }
     const profit = f.netIncome ?? f.operatingIncome ?? f.grossProfit;
     if (profit != null) profMap.set(d, profit);
   }
@@ -129,7 +132,9 @@ function DualChart({
     price: priceMap.get(date) ?? null,
     tr: hasDivs ? (trMap.get(date) ?? null) : undefined,
     eps: epsMap.get(date) ?? null,
+    epsIsAnnual: epsIsAnnualMap.get(date) ?? false,
     revenue: revMap.get(date) ?? null,
+    revIsAnnual: revIsAnnualMap.get(date) ?? false,
     profit: profMap.get(date) ?? null,
   }));
 
@@ -167,9 +172,9 @@ function DualChart({
         )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
-          formatter={(value: number, name: string) => {
-            if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, 'EPS (qtr)'];
-            if (name === 'revenue') return [`${formatBig(value)} ${currency}`, 'Revenue'];
+          formatter={(value: number, name: string, props: { payload?: { epsIsAnnual?: boolean; revIsAnnual?: boolean } }) => {
+            if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, props.payload?.epsIsAnnual ? 'EPS (annual)' : 'EPS (quarterly)'];
+            if (name === 'revenue') return [`${formatBig(value)} ${currency}`, props.payload?.revIsAnnual ? 'Revenue (annual)' : 'Revenue (quarterly)'];
             const label = name === 'price' ? 'Price' : 'Total Return (incl. div.)';
             return [formatPrice(value, currency), label];
           }}
@@ -182,10 +187,18 @@ function DualChart({
             strokeWidth={2} strokeDasharray="6 3" dot={false} activeDot={{ r: 4 }} connectNulls name="tr" />
         )}
         {showEps && (
-          <Bar yAxisId="eps" dataKey="eps" fill="#f59e0b" name="eps" barSize={6} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="eps" dataKey="eps" name="eps" barSize={6} radius={[2, 2, 0, 0]}>
+            {chartData.map((entry, i) => (
+              <Cell key={i} fill={entry.epsIsAnnual ? '#b45309' : '#f59e0b'} />
+            ))}
+          </Bar>
         )}
         {showFin && (
-          <Bar yAxisId="fin" dataKey="revenue" fill="#60a5fa" name="revenue" barSize={6} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="fin" dataKey="revenue" name="revenue" barSize={6} radius={[2, 2, 0, 0]}>
+            {chartData.map((entry, i) => (
+              <Cell key={i} fill={entry.revIsAnnual ? '#1d4ed8' : '#60a5fa'} />
+            ))}
+          </Bar>
         )}
       </ComposedChart>
     </ResponsiveContainer>
@@ -436,16 +449,28 @@ export function StockSection() {
                   </>
                 )}
                 {overlay === 'eps' && earnings && earnings.quarterly.length > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 bg-amber-500 inline-block rounded-sm" />
-                    <span className="text-gray-400">EPS (quarterly, right axis)</span>
-                  </div>
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 bg-amber-500 inline-block rounded-sm" />
+                      <span className="text-gray-400">EPS quarterly</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 inline-block rounded-sm" style={{ backgroundColor: '#b45309' }} />
+                      <span className="text-gray-400">EPS annual</span>
+                    </div>
+                  </>
                 )}
                 {overlay === 'financials' && earnings && earnings.financials.length > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 bg-blue-400 inline-block rounded-sm" />
-                    <span className="text-gray-400">Revenue (quarterly, right axis)</span>
-                  </div>
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 bg-blue-400 inline-block rounded-sm" />
+                      <span className="text-gray-400">Revenue quarterly</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 inline-block rounded-sm" style={{ backgroundColor: '#1d4ed8' }} />
+                      <span className="text-gray-400">Revenue annual</span>
+                    </div>
+                  </>
                 )}
               </div>
               <div className="flex items-center gap-1.5">
