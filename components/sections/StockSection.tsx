@@ -77,17 +77,20 @@ function DualChart({
   const hasDivs = totalReturn !== prices && totalReturn.length > 0 &&
     Math.abs((totalReturn[totalReturn.length - 1]?.close ?? 0) - (prices[prices.length - 1]?.close ?? 0)) > 0.0001;
 
+  const firstDate = prices[0].date;
   const lastDate = prices[prices.length - 1].date;
 
-  // For EPS/financials overlays: always include the most recent entries up to lastDate.
-  // Prefer quarterly entries if at least 2 exist; otherwise fall back to annual so the user
+  // For EPS/financials overlays: include all entries within the visible price range.
+  // Prefer quarterly entries if at least 2 exist; fall back to annual so the user
   // always sees bars when data is available. Snapping to price dates means bars land on
-  // visible data points.
-  const sortedEps = [...(eps ?? [])].filter(e => e.date <= lastDate).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 16);
-  const finCandidates = [...(financials ?? [])].filter(e => e.date <= lastDate);
+  // visible data points. No artificial slice — the visible-range filter naturally limits
+  // the bar count to what fits the chart.
+  const inRange = (d: string) => d >= firstDate && d <= lastDate;
+  const sortedEps = [...(eps ?? [])].filter(e => inRange(e.date)).sort((a, b) => b.date.localeCompare(a.date));
+  const finCandidates = [...(financials ?? [])].filter(e => inRange(e.date));
   const quarterlyOnly = finCandidates.filter(e => !e.isAnnual);
   const finPool = quarterlyOnly.length >= 2 ? quarterlyOnly : finCandidates;
-  const sortedFin = finPool.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 16);
+  const sortedFin = finPool.sort((a, b) => b.date.localeCompare(a.date));
   const showEps = sortedEps.length > 0;
   const showFin = sortedFin.length > 0;
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchYahooData, fetchYahooEarnings } from '@/lib/yahoo';
-import { fetchFmpEarnings } from '@/lib/fmp';
+import { fetchYahooData, fetchYahooEarnings, type YahooEarnings } from '@/lib/yahoo';
+import { fetchSecEarnings } from '@/lib/sec';
 import { subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
 export const runtime = 'edge';
@@ -104,9 +104,10 @@ export async function GET(req: NextRequest) {
     const cached = getCached(key, 60 * 60_000);
     if (cached) return NextResponse.json(cached);
 
-    // FMP (primary): 5y quarterly + 20y annual on the free tier
-    let data = await fetchFmpEarnings(symbol);
-    // Yahoo fallback: in case FMP doesn't cover the symbol (some non-US tickers)
+    // SEC EDGAR (primary, US tickers only): ~15+ years of quarterly + annual from 10-K/10-Q XBRL.
+    let data = await fetchSecEarnings(symbol);
+    // Yahoo fallback for non-US tickers (BMW.DE, ENI.MI, ...) and US symbols
+    // SEC doesn't list (rare — ADRs, recent IPOs not yet in ticker map).
     if (!data || (data.quarterly.length === 0 && data.financials.length === 0)) {
       data = await fetchYahooEarnings(symbol);
     }
@@ -128,33 +129,26 @@ export async function GET(req: NextRequest) {
   // ---- Quick earnings diagnostic (no cache) ----
   if (mode === 'diag') {
     const sym = req.nextUrl.searchParams.get('symbol') ?? 'AAPL';
-    const [fmp, yahoo] = await Promise.all([
-      fetchFmpEarnings(sym).catch((e: Error) => ({ error: e.message })),
+    const [sec, yahoo] = await Promise.all([
+      fetchSecEarnings(sym).catch((e: Error) => ({ error: e.message })),
       fetchYahooEarnings(sym).catch((e: Error) => ({ error: e.message })),
     ]);
-    const fmpResult = fmp && 'quarterly' in fmp ? `OK: ${fmp.quarterly.length} EPS, ${fmp.financials.length} fin` : `FAIL: ${JSON.stringify(fmp)}`;
-    // Show all financials with which fields are populated
-    const yahooFinDump = yahoo && 'financials' in yahoo
-      ? yahoo.financials.map(f => ({
+    const fmtSrc = (src: unknown) => src && typeof src === 'object' && 'quarterly' in src && 'financials' in src
+      ? `OK: ${(src as YahooEarnings).quarterly.length} EPS / ${(src as YahooEarnings).financials.length} fin`
+      : `FAIL: ${JSON.stringify(src)}`;
+    const dumpFin = (src: unknown) => src && typeof src === 'object' && 'financials' in src
+      ? (src as YahooEarnings).financials.slice(-12).map(f => ({
           date: f.date,
           annual: f.isAnnual ?? null,
           rev: f.revenue != null ? `${(f.revenue / 1e9).toFixed(1)}B` : 'MISSING',
-          cogs: f.costOfRevenue != null ? `${(f.costOfRevenue / 1e9).toFixed(1)}B` : 'MISSING',
           ni: f.netIncome != null ? `${(f.netIncome / 1e9).toFixed(1)}B` : 'MISSING',
         }))
       : null;
-    const yahooEpsDump = yahoo && 'quarterly' in yahoo
-      ? yahoo.quarterly.slice(-6).map(e => ({ date: e.date, eps: e.eps }))
-      : null;
-    const yahooResult = yahoo && 'quarterly' in yahoo
-      ? `OK: ${yahoo.quarterly.length} EPS / ${yahoo.financials.length} fin`
-      : `FAIL: ${JSON.stringify(yahoo)}`;
     return NextResponse.json({
-      fmpApiKey: !!process.env.FMP_API_KEY,
-      fmp: fmpResult,
-      yahoo: yahooResult,
-      yahooFinancials: yahooFinDump,
-      yahooEps: yahooEpsDump,
+      sec: fmtSrc(sec),
+      secFinancials: dumpFin(sec),
+      yahoo: fmtSrc(yahoo),
+      yahooFinancials: dumpFin(yahoo),
     });
   }
 
