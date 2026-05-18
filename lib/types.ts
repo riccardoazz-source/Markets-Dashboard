@@ -12,6 +12,7 @@ export interface QuoteData {
   high52w?: number | null;
   low52w?: number | null;
   fiftyTwoWeekChangePercent?: number | null;
+  ytdChangePercent?: number | null;
   volume?: number | null;
 }
 
@@ -43,6 +44,7 @@ export interface CryptoData {
   change24hPercent: number;
   change7dPercent?: number;
   change1yPercent?: number | null;
+  ytdChangePercent?: number | null;
   marketCap: number;
   volume24h: number;
   image?: string;

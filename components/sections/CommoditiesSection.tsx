@@ -10,11 +10,11 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
-type SortKey = 'changePercent' | 'fiftyTwoWeekChangePercent';
+type SortKey = 'changePercent' | 'ytdChangePercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'changePercent',              label: 'Day' },
-  { value: 'fiftyTwoWeekChangePercent',  label: '1Y'  },
+  { value: 'changePercent',      label: 'Day' },
+  { value: 'ytdChangePercent',   label: 'YTD' },
 ];
 
 export function CommoditiesSection() {
@@ -67,9 +67,9 @@ export function CommoditiesSection() {
     const qa = quotes[a.symbol];
     const qb = quotes[b.symbol];
     const av: number | null | undefined =
-      sortBy === 'changePercent' ? qa?.changePercent : qa?.fiftyTwoWeekChangePercent;
+      sortBy === 'changePercent' ? qa?.changePercent : qa?.ytdChangePercent;
     const bv: number | null | undefined =
-      sortBy === 'changePercent' ? qb?.changePercent : qb?.fiftyTwoWeekChangePercent;
+      sortBy === 'changePercent' ? qb?.changePercent : qb?.ytdChangePercent;
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;
@@ -109,7 +109,7 @@ export function CommoditiesSection() {
           {sorted.map(com => {
             const q = quotes[com.symbol];
             const day = q?.changePercent ?? 0;
-            const oneY = q?.fiftyTwoWeekChangePercent;
+            const ytd = q?.ytdChangePercent;
             const isUp = day >= 0;
             const isSelected = selected === com.symbol;
             return (
@@ -128,9 +128,9 @@ export function CommoditiesSection() {
                       {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                       {formatPercent(day)} <span className="text-[10px] font-medium opacity-70">day</span>
                     </div>
-                    {oneY != null && (
-                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(oneY))}>
-                        1Y: {formatPercent(oneY, 1)}
+                    {ytd != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(ytd))}>
+                        YTD: {formatPercent(ytd, 1)}
                       </p>
                     )}
                   </>
@@ -161,8 +161,8 @@ export function CommoditiesSection() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             <Stat label="Price" value={formatPrice(selectedQuote.price)} />
             <Stat label="Day Change" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
-            {selectedQuote.fiftyTwoWeekChangePercent != null && (
-              <Stat label="1Y Return" value={formatPercent(selectedQuote.fiftyTwoWeekChangePercent)} color={colorForPercent(selectedQuote.fiftyTwoWeekChangePercent)} />
+            {selectedQuote.ytdChangePercent != null && (
+              <Stat label="YTD Return" value={formatPercent(selectedQuote.ytdChangePercent)} color={colorForPercent(selectedQuote.ytdChangePercent)} />
             )}
             {cagrData && (
               <>

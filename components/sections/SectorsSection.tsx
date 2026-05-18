@@ -14,19 +14,20 @@ interface SectorLiveData {
   price: number | null;
   changePercent: number | null;
   oneYearReturn: number | null;
+  ytdReturn: number | null;
   high52w: number | null;
   low52w: number | null;
 }
 
 // Seed grid immediately from static config — never empty
 const INITIAL: SectorLiveData = {
-  price: null, changePercent: null, oneYearReturn: null,
+  price: null, changePercent: null, oneYearReturn: null, ytdReturn: null,
   high52w: null, low52w: null,
 };
 
 const SORT_OPTIONS = [
   { value: 'changePercent', label: 'Day' },
-  { value: 'oneYearReturn', label: '1Y'  },
+  { value: 'ytdReturn',     label: 'YTD' },
 ];
 
 export function SectorsSection() {
@@ -48,6 +49,7 @@ export function SectorsSection() {
         price: number | null;
         changePercent: number | null;
         oneYearReturn: number | null;
+        ytdReturn: number | null;
         high52w: number | null;
         low52w: number | null;
       }>;
@@ -144,7 +146,7 @@ export function SectorsSection() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
         {sorted.map(sector => {
           const day = sector.changePercent;
-          const oneY = sector.oneYearReturn;
+          const ytd = sector.ytdReturn;
           const primary = getValue(sector);
           const isHot = sector.rank <= 2 && (day ?? 0) > 0;
           const isSelected = selected === sector.symbol;
@@ -177,9 +179,9 @@ export function SectorsSection() {
                       : '—'
                     }
                   </div>
-                  {oneY != null && (
-                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(oneY))}>
-                      1Y: {formatPercent(oneY, 1)}
+                  {ytd != null && (
+                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(ytd))}>
+                      YTD: {formatPercent(ytd, 1)}
                     </p>
                   )}
                 </>
@@ -209,7 +211,7 @@ export function SectorsSection() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {selectedSector.price != null && <Stat label="Price" value={`$${selectedSector.price.toFixed(2)}`} />}
             {selectedSector.changePercent != null && <Stat label="Day" value={formatPercent(selectedSector.changePercent)} color={colorForPercent(selectedSector.changePercent)} />}
-            {selectedSector.oneYearReturn != null && <Stat label="1Y" value={formatPercent(selectedSector.oneYearReturn)} color={colorForPercent(selectedSector.oneYearReturn)} />}
+            {selectedSector.ytdReturn != null && <Stat label="YTD" value={formatPercent(selectedSector.ytdReturn)} color={colorForPercent(selectedSector.ytdReturn)} />}
             {cagrData && <>
               <Stat label={`Return ${timeframe}`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
               <Stat label={`CAGR ${timeframe}`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />

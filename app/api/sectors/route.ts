@@ -23,7 +23,7 @@ export async function GET() {
       return NextResponse.json(
         SECTORS.map((s, i) => ({
           symbol: s.symbol, name: s.name, category: s.category,
-          price: null, changePercent: null, oneYearReturn: null,
+          price: null, changePercent: null, oneYearReturn: null, ytdReturn: null,
           high52w: null, low52w: null, rank: i + 1,
         }))
       );
@@ -38,6 +38,7 @@ export async function GET() {
         price: q?.price ?? null,
         changePercent: q?.changePercent ?? null,
         oneYearReturn: q?.fiftyTwoWeekChangePercent ?? null,
+        ytdReturn: q?.ytdChangePercent ?? null,
         high52w: q?.high52w ?? null,
         low52w: q?.low52w ?? null,
       };

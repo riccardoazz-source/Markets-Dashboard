@@ -212,9 +212,10 @@ function DualChart({
         const ttm = qEps[idx - 3].eps + qEps[idx - 2].eps + qEps[idx - 1].eps + qEps[idx].eps;
         if (ttm > 0) {
           const pe = p.close / ttm;
-          // Clamp to 200x so bubble periods hit the ceiling rather than being excluded.
+          // Clamp at 500x: handles TSLA (~435x) and most bubble peaks without
+          // letting near-zero TTM EPS (MSTR-style) blow the axis to 50,000x.
           // The stat card always shows the real (unclamped) P/E.
-          peMap.set(p.date, Math.min(pe, 200));
+          if (pe < 5000) peMap.set(p.date, Math.min(pe, 500));
         }
       }
     }

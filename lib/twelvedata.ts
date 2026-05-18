@@ -51,6 +51,7 @@ export interface TDQuote {
   high52w: number | null;
   low52w: number | null;
   fiftyTwoWeekChangePercent: number | null;
+  ytdChangePercent: number | null;
   trailingPE: number | null;
   forwardPE: number | null;
   marketCap: number | null;
@@ -96,8 +97,9 @@ function parseQuoteItem(
     currency: (q.currency as string) ?? 'USD',
     high52w: fw?.high ? parseFloat(fw.high) : null,
     low52w: fw?.low ? parseFloat(fw.low) : null,
-    // Twelve Data doesn't expose 52W return % directly in quote; skip for now
+    // Twelve Data doesn't expose 52W return % or YTD directly in quote; skip for now
     fiftyTwoWeekChangePercent: null,
+    ytdChangePercent: null,
     trailingPE: null,
     forwardPE: null,
     marketCap: null,

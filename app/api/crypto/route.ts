@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CRYPTO_IDS } from '@/lib/config';
+import { fetchYahooQuotes } from '@/lib/yahoo';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -54,23 +55,39 @@ export async function GET(req: NextRequest) {
     const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h,7d,1y`;
 
     try {
-      const res = await fetchCGWithRetry(url);
-      if (!res.ok) throw new Error(`CoinGecko: ${res.status}`);
-      const raw = await res.json() as Array<Record<string, unknown>>;
+      // CoinGecko has no YTD field — fetch Yahoo quotes for the same coins in
+      // parallel (BTC-USD, ETH-USD…) so we can attach YTD from Yahoo's chart data.
+      const ytdSymbols = CRYPTO_IDS.map(c => `${c.symbol}-USD`);
+      const [cgRes, yQuotes] = await Promise.all([
+        fetchCGWithRetry(url),
+        fetchYahooQuotes(ytdSymbols).catch(() => []),
+      ]);
+      if (!cgRes.ok) throw new Error(`CoinGecko: ${cgRes.status}`);
+      const raw = await cgRes.json() as Array<Record<string, unknown>>;
 
-      const data = raw.map(coin => ({
-        id: coin.id,
-        symbol: (coin.symbol as string)?.toUpperCase(),
-        name: coin.name,
-        price: coin.current_price,
-        change24h: coin.price_change_24h,
-        change24hPercent: coin.price_change_percentage_24h,
-        change7dPercent: coin.price_change_percentage_7d_in_currency,
-        change1yPercent: coin.price_change_percentage_1y_in_currency ?? null,
-        marketCap: coin.market_cap,
-        volume24h: coin.total_volume,
-        image: coin.image,
-      }));
+      const ytdMap = new Map<string, number | null>();
+      for (const q of yQuotes) {
+        const cgSymbol = q.symbol.replace(/-USD$/, '').toUpperCase();
+        ytdMap.set(cgSymbol, q.ytdChangePercent);
+      }
+
+      const data = raw.map(coin => {
+        const sym = (coin.symbol as string)?.toUpperCase();
+        return {
+          id: coin.id,
+          symbol: sym,
+          name: coin.name,
+          price: coin.current_price,
+          change24h: coin.price_change_24h,
+          change24hPercent: coin.price_change_percentage_24h,
+          change7dPercent: coin.price_change_percentage_7d_in_currency,
+          change1yPercent: coin.price_change_percentage_1y_in_currency ?? null,
+          ytdChangePercent: ytdMap.get(sym) ?? null,
+          marketCap: coin.market_cap,
+          volume24h: coin.total_volume,
+          image: coin.image,
+        };
+      });
 
       setCached('markets', data);
       return NextResponse.json(data);

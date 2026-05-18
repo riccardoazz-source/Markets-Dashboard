@@ -26,10 +26,24 @@ export interface YahooQuote {
   high52w: number | null;
   low52w: number | null;
   fiftyTwoWeekChangePercent: number | null;
+  ytdChangePercent: number | null;
   trailingPE: number | null;
   forwardPE: number | null;
   marketCap: number | null;
   volume: number | null;
+}
+
+// YTD reference: first valid close on/after Jan 1 of the current year.
+// timestamps and closes are aligned 1:1 from the Yahoo chart response.
+function computeYtd(price: number, timestamps: number[], closes: (number | null)[]): number | null {
+  const yearStart = Math.floor(new Date(new Date().getUTCFullYear(), 0, 1).getTime() / 1000);
+  for (let i = 0; i < timestamps.length; i++) {
+    const c = closes[i];
+    if (c != null && c > 0 && timestamps[i] >= yearStart) {
+      return ((price - c) / c) * 100;
+    }
+  }
+  return null;
 }
 
 interface CrumbSession { cookie: string; crumb: string; ts: number }
@@ -336,6 +350,8 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
         (it.fiftyTwoWeekChangePercent as number) != null
           ? (it.fiftyTwoWeekChangePercent as number) * 100
           : null,
+      ytdChangePercent:
+        (it.ytdReturn as number) != null ? (it.ytdReturn as number) * 100 : null,
       trailingPE: (it.trailingPE as number) ?? null,
       forwardPE: (it.forwardPE as number) ?? null,
       marketCap: (it.marketCap as number) ?? null,
@@ -357,6 +373,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
   const price = Number(m.regularMarketPrice) || 0;
   if (price <= 0) return null;
 
+  const timestamps = (result.timestamp as number[]) ?? [];
   const indicators = result.indicators as Record<string, unknown> | undefined;
   const quotes = indicators?.quote as Array<Record<string, unknown>> | undefined;
   const closes = (quotes?.[0]?.close as (number | null)[] | undefined) ?? [];
@@ -390,6 +407,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     high52w: (m.fiftyTwoWeekHigh as number) ?? null,
     low52w: (m.fiftyTwoWeekLow as number) ?? null,
     fiftyTwoWeekChangePercent,
+    ytdChangePercent: computeYtd(price, timestamps, closes),
     trailingPE: null,
     forwardPE: null,
     marketCap: null,
@@ -433,6 +451,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
     const price = Number(m.regularMarketPrice) || 0;
     if (price <= 0) return null;
 
+    const timestamps = (result.timestamp as number[]) ?? [];
     const indicators = result.indicators as Record<string, unknown> | undefined;
     const quotes = indicators?.quote as Array<Record<string, unknown>> | undefined;
     const closes = (quotes?.[0]?.close as (number | null)[] | undefined) ?? [];
@@ -467,6 +486,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       high52w: (m.fiftyTwoWeekHigh as number) ?? null,
       low52w: (m.fiftyTwoWeekLow as number) ?? null,
       fiftyTwoWeekChangePercent,
+      ytdChangePercent: computeYtd(price, timestamps, closes),
       trailingPE: null,
       forwardPE: null,
       marketCap: null,
@@ -529,6 +549,7 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
           it.fiftyTwoWeekChangePercent != null
             ? Number(it.fiftyTwoWeekChangePercent) * 100
             : null,
+        ytdChangePercent: it.ytdReturn != null ? Number(it.ytdReturn) * 100 : null,
         trailingPE: it.trailingPE != null ? Number(it.trailingPE) : null,
         forwardPE:  it.forwardPE  != null ? Number(it.forwardPE)  : null,
         marketCap:  it.marketCap  != null ? Number(it.marketCap)  : null,
