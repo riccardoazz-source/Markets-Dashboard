@@ -210,9 +210,12 @@ function DualChart({
       while (idx + 1 < qEps.length && qEps[idx + 1].date <= p.date) idx++;
       if (idx >= 3) {
         const ttm = qEps[idx - 3].eps + qEps[idx - 2].eps + qEps[idx - 1].eps + qEps[idx].eps;
-        const pe = ttm > 0 ? p.close / ttm : null;
-        // Cap at 150x to prevent extreme values (e.g. near-zero TTM EPS) from distorting the axis.
-        if (pe != null && pe > 0 && pe <= 150) peMap.set(p.date, pe);
+        if (ttm > 0) {
+          const pe = p.close / ttm;
+          // Clamp to 200x so bubble periods hit the ceiling rather than being excluded.
+          // The stat card always shows the real (unclamped) P/E.
+          peMap.set(p.date, Math.min(pe, 200));
+        }
       }
     }
   }
