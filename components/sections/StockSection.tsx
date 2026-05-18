@@ -308,27 +308,29 @@ function DualChart({
             if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
             return n.toFixed(decimals);
           }}
-          domain={['auto', 'auto']} />
+          domain={[(dataMin: number) => dataMin * 0.97, (dataMax: number) => dataMax * 1.03]} />
         {showEps && (
           <YAxis yAxisId="eps" orientation="right"
             tick={{ fill: '#f59e0b', fontSize: 11 }} axisLine={false} tickLine={false} width={48}
             tickFormatter={v => (v as number).toFixed(2)}
-            domain={[0, 'auto']} />
+            domain={[0, (dataMax: number) => Math.max(dataMax * 1.05, dataMax + 0.1)]} />
         )}
         {showFin && (
           <YAxis yAxisId="fin" orientation="right"
             tick={{ fill: '#60a5fa', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
             tickFormatter={v => formatBig(v as number)}
-            domain={[0, 'auto']} />
+            domain={[0, (dataMax: number) => dataMax * 1.05]} />
         )}
         {showPe && (
           <YAxis yAxisId="pe" orientation="right"
             tick={{ fill: '#a3e635', fontSize: 11 }} axisLine={false} tickLine={false} width={42}
             tickFormatter={v => `${(v as number).toFixed(0)}x`}
-            domain={[0, 'auto']} />
+            domain={[0, (dataMax: number) => dataMax * 1.05]} />
         )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
+          itemStyle={{ color: '#e2e8f0' }}
+          labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
           formatter={(value: number, name: string, props: { payload?: { epsIsAnnual?: boolean; revIsAnnual?: boolean } }) => {
             if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, props.payload?.epsIsAnnual ? 'EPS (annual)' : 'EPS (quarterly)'];
             if (name === 'revenue') return [`${formatBig(value)} ${currency}`, props.payload?.revIsAnnual ? 'Revenue (annual)' : 'Revenue (quarterly)'];
@@ -386,6 +388,8 @@ function DividendsBarChart({ dividends, currency }: { dividends: DividendEvent[]
           tickFormatter={v => (v as number).toFixed(2)} />
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
+          itemStyle={{ color: '#e2e8f0' }}
+          labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
           formatter={(value: number) => [formatPrice(value, currency), 'Dividend']}
           labelFormatter={label => { try { return format(parseISO(label as string), 'MMM d, yyyy'); } catch { return label as string; } }}
         />
@@ -412,6 +416,8 @@ function FinancialsBarChart({ data, currency }: { data: FinancialPoint[]; curren
           tickFormatter={v => formatBig(v as number)} />
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
+          itemStyle={{ color: '#e2e8f0' }}
+          labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
           formatter={(value: number, name: string) => [
             `${formatBig(value)} ${currency}`,
             name === 'revenue' ? 'Revenue' : name === 'costOfRevenue' ? 'Cost of revenue' : 'Net income',
@@ -442,6 +448,8 @@ function EarningsBarChart({ quarterly, currency }: { quarterly: EarningsPoint[];
           tickFormatter={v => (v as number).toFixed(2)} />
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
+          itemStyle={{ color: '#e2e8f0' }}
+          labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
           formatter={(value: number, name: string) => [
             `${value.toFixed(2)} ${currency}`,
             name === 'eps' ? 'EPS (actual)' : 'EPS (estimate)',
