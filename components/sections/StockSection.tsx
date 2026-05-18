@@ -194,21 +194,21 @@ function DualChart({
           <Line yAxisId="price" type="monotone" dataKey="tr" stroke={isUp ? '#34d399' : '#f87171'}
             strokeWidth={2} strokeDasharray="6 3" dot={false} activeDot={{ r: 4 }} connectNulls name="tr" />
         )}
-        {/* stackId is required to prevent Recharts from dividing slot-width across
-            both bars (which collapsed them to ~0px on dense category axes). Since
-            quarterly and annual entries never share an end date (sec.ts dedup),
-            only one segment is non-null per x, so visually each date shows one bar. */}
+        {/* Two grouped bars per overlay — quarterly and annual. Since each date has
+            only one of the two non-null (sec.ts dedup), there's no real overlap;
+            Recharts places them at slightly offset x within each slot. Explicit
+            barSize prevents the slot-division-collapse that hit two unsized bars. */}
         {showEps && (
-          <Bar yAxisId="eps" dataKey="epsQ" stackId="eps" name="epsQ" fill="#f59e0b" barSize={6} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="eps" dataKey="epsQ" name="epsQ" fill="#f59e0b" barSize={6} radius={[2, 2, 0, 0]} />
         )}
         {showEps && (
-          <Bar yAxisId="eps" dataKey="epsA" stackId="eps" name="epsA" fill="#dc2626" barSize={6} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="eps" dataKey="epsA" name="epsA" fill="#dc2626" barSize={6} radius={[2, 2, 0, 0]} />
         )}
         {showFin && (
-          <Bar yAxisId="fin" dataKey="revQ" stackId="rev" name="revQ" fill="#60a5fa" barSize={6} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="fin" dataKey="revQ" name="revQ" fill="#60a5fa" barSize={6} radius={[2, 2, 0, 0]} />
         )}
         {showFin && (
-          <Bar yAxisId="fin" dataKey="revA" stackId="rev" name="revA" fill="#8b5cf6" barSize={6} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="fin" dataKey="revA" name="revA" fill="#8b5cf6" barSize={6} radius={[2, 2, 0, 0]} />
         )}
       </ComposedChart>
     </ResponsiveContainer>
