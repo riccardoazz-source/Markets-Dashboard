@@ -45,8 +45,39 @@ function formatBig(n: number): string {
 
 // Trailing-twelve-months EPS: sum of the four most-recent quarterly entries.
 // Falls back to the latest annual figure if four quarters aren't available.
+// Many companies (e.g. NVDA) don't file Q4 as a separate XBRL quarterly fact —
+// it only exists implicitly as FY − (Q1+Q2+Q3). This function fills that gap:
+// when it finds a >130-day hole between consecutive quarterly entries and an
+// annual entry covers the gap, it derives Q4 = Annual − (Q1+Q2+Q3).
+function buildCompleteQuarterlyEps(eps: EarningsPoint[]): EarningsPoint[] {
+  const quarterly = eps
+    .filter(e => !e.period.startsWith('FY '))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const annuals = eps
+    .filter(e => e.period.startsWith('FY '))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (!annuals.length) return quarterly;
+
+  const result = [...quarterly];
+  const qDates = new Set(quarterly.map(q => q.date));
+
+  for (const annual of annuals) {
+    if (qDates.has(annual.date)) continue; // Q4 already filed explicitly
+    // Find the 3 quarterly entries inside this fiscal year (within 385 days before year-end)
+    const fyStartMs = new Date(annual.date).getTime() - 385 * 86_400_000;
+    const fyStartStr = new Date(fyStartMs).toISOString().slice(0, 10);
+    const fyQs = quarterly.filter(q => q.date > fyStartStr && q.date <= annual.date);
+    if (fyQs.length !== 3) continue; // can't safely derive Q4
+    const derived = annual.eps - fyQs.reduce((s, q) => s + q.eps, 0);
+    result.push({ date: annual.date, period: annual.date, eps: derived });
+    qDates.add(annual.date);
+  }
+
+  return result.sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function computeTtmEps(eps: EarningsPoint[]): number | null {
-  const q = eps.filter(e => !e.period.startsWith('FY ')).sort((a, b) => b.date.localeCompare(a.date));
+  const q = buildCompleteQuarterlyEps(eps).sort((a, b) => b.date.localeCompare(a.date));
   if (q.length >= 4) return q.slice(0, 4).reduce((s, e) => s + e.eps, 0);
   const a = eps.filter(e => e.period.startsWith('FY ')).sort((a, b) => b.date.localeCompare(a.date));
   return a[0]?.eps ?? null;
@@ -56,7 +87,7 @@ function computeTtmEps(eps: EarningsPoint[]): number | null {
 // Skips negative/zero TTM EPS (P/E meaningless) and extreme outliers from near-zero TTM.
 function computeAvgPe(prices: HistoricalPoint[], eps: EarningsPoint[]): number | null {
   if (!prices.length || !eps.length) return null;
-  const qEps = eps.filter(e => !e.period.startsWith('FY ')).sort((a, b) => a.date.localeCompare(b.date));
+  const qEps = buildCompleteQuarterlyEps(eps);
   if (qEps.length < 4) return null;
   let idx = -1, sum = 0, n = 0;
   for (const p of prices) {
@@ -220,9 +251,7 @@ function DualChart({
   // so the whole sweep is O(prices + epsQuarters).
   const peMap = new Map<string, number>();
   if (showEps) {
-    const qEps = (eps ?? [])
-      .filter(e => !e.period.startsWith('FY '))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    const qEps = buildCompleteQuarterlyEps(eps ?? []);
     let idx = -1;
     for (const p of prices) {
       while (idx + 1 < qEps.length && qEps[idx + 1].date <= p.date) idx++;
