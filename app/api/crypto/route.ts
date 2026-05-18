@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CRYPTO_IDS } from '@/lib/config';
-import { fetchYahooQuotes } from '@/lib/yahoo';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -32,6 +31,41 @@ async function fetchCG(url: string, timeoutMs = 12_000): Promise<Response> {
   }
 }
 
+// Single Yahoo v7 batch call for crypto YTD — returns Map<'BTC-USD', ytdPct>
+// Yahoo's ytdReturn field (decimal) is populated for crypto tickers like BTC-USD.
+async function fetchCryptoYtd(symbols: string[]): Promise<Map<string, number | null>> {
+  const map = new Map<string, number | null>();
+  if (!symbols.length) return map;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const url =
+      `https://query2.finance.yahoo.com/v7/finance/quote` +
+      `?symbols=${encodeURIComponent(symbols.join(','))}&formatted=false&lang=en-US&region=US`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://finance.yahoo.com/',
+      },
+      signal: ctrl.signal,
+      cache: 'no-store',
+    });
+    if (!res.ok) return map;
+    const json = await res.json() as { quoteResponse?: { result?: Record<string, unknown>[] } };
+    for (const it of json?.quoteResponse?.result ?? []) {
+      const sym = (it.symbol as string) ?? '';
+      if (!sym) continue;
+      const ytdRaw = it.ytdReturn;
+      const ytd = ytdRaw != null ? Number(ytdRaw) * 100 : null;
+      map.set(sym, ytd != null && isFinite(ytd) ? ytd : null);
+    }
+  } catch { /* ignore — returns empty map */ } finally {
+    clearTimeout(t);
+  }
+  return map;
+}
+
 // CoinGecko free tier rate-limits at 30/min — retry with backoff on 429/5xx
 async function fetchCGWithRetry(url: string): Promise<Response> {
   let res = await fetchCG(url);
@@ -55,21 +89,14 @@ export async function GET(req: NextRequest) {
     const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h,7d,1y`;
 
     try {
-      // CoinGecko has no YTD field — fetch Yahoo quotes for the same coins in
-      // parallel (BTC-USD, ETH-USD…) so we can attach YTD from Yahoo's chart data.
+      // CoinGecko has no YTD field — single Yahoo v7 batch call for BTC-USD, ETH-USD…
       const ytdSymbols = CRYPTO_IDS.map(c => `${c.symbol}-USD`);
-      const [cgRes, yQuotes] = await Promise.all([
+      const [cgRes, ytdMap] = await Promise.all([
         fetchCGWithRetry(url),
-        fetchYahooQuotes(ytdSymbols).catch(() => []),
+        fetchCryptoYtd(ytdSymbols).catch(() => new Map<string, number | null>()),
       ]);
       if (!cgRes.ok) throw new Error(`CoinGecko: ${cgRes.status}`);
       const raw = await cgRes.json() as Array<Record<string, unknown>>;
-
-      const ytdMap = new Map<string, number | null>();
-      for (const q of yQuotes) {
-        const cgSymbol = q.symbol.replace(/-USD$/, '').toUpperCase();
-        ytdMap.set(cgSymbol, q.ytdChangePercent);
-      }
 
       const data = raw.map(coin => {
         const sym = (coin.symbol as string)?.toUpperCase();
@@ -82,7 +109,7 @@ export async function GET(req: NextRequest) {
           change24hPercent: coin.price_change_percentage_24h,
           change7dPercent: coin.price_change_percentage_7d_in_currency,
           change1yPercent: coin.price_change_percentage_1y_in_currency ?? null,
-          ytdChangePercent: ytdMap.get(sym) ?? null,
+          ytdChangePercent: ytdMap.get(`${sym}-USD`) ?? null,
           marketCap: coin.market_cap,
           volume24h: coin.total_volume,
           image: coin.image,
