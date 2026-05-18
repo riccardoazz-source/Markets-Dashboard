@@ -195,14 +195,17 @@ export async function fetchSecEarnings(symbol: string): Promise<YahooEarnings | 
   for (const [date, e] of annualEntries) finMap.set(date, e);
 
   const epsMap = new Map<string, YahooEarningsPoint>();
-  for (const [date, f] of dedupeByEnd(epsFacts.filter(isQuarterly))) {
-    if (date > today) continue;
-    epsMap.set(date, { date, period: date, eps: f.val });
-  }
-  // Annual overrides quarterly at year-end (same priority as financials).
+  // Annual first — fills year-ends where no separate Q4 quarterly is filed.
   for (const [date, f] of dedupeByEnd(epsFacts.filter(isAnnual))) {
     if (date > today) continue;
     epsMap.set(date, { date, period: `FY ${date.slice(0, 4)}`, eps: f.val });
+  }
+  // Quarterly OVERRIDES annual at fiscal year-end. TTM = sum of the last 4
+  // *quarterly* EPS, so the Q4 quarterly value must be preserved (not the FY total).
+  // For NVDA in May 2026 the wrong order made TTM skip Q4 FY26 → P/E ~56x instead of ~46x.
+  for (const [date, f] of dedupeByEnd(epsFacts.filter(isQuarterly))) {
+    if (date > today) continue;
+    epsMap.set(date, { date, period: date, eps: f.val });
   }
 
   const quarterly = Array.from(epsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
