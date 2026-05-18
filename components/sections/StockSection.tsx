@@ -10,7 +10,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart,
+  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
@@ -127,22 +127,16 @@ function DualChart({
     ...revMap.keys(),
     ...profMap.keys(),
   ])).sort();
-  const chartData = allDates.map(date => {
-    const epsVal = epsMap.get(date);
-    const epsAnnual = epsIsAnnualMap.get(date) ?? false;
-    const revVal = revMap.get(date);
-    const revAnnual = revIsAnnualMap.get(date) ?? false;
-    return {
-      date,
-      price: priceMap.get(date) ?? null,
-      tr: hasDivs ? (trMap.get(date) ?? null) : undefined,
-      epsQ: epsVal != null && !epsAnnual ? epsVal : null,
-      epsA: epsVal != null && epsAnnual ? epsVal : null,
-      revQ: revVal != null && !revAnnual ? revVal : null,
-      revA: revVal != null && revAnnual ? revVal : null,
-      profit: profMap.get(date) ?? null,
-    };
-  });
+  const chartData = allDates.map(date => ({
+    date,
+    price: priceMap.get(date) ?? null,
+    tr: hasDivs ? (trMap.get(date) ?? null) : undefined,
+    eps: epsMap.get(date) ?? null,
+    epsIsAnnual: epsIsAnnualMap.get(date) ?? false,
+    revenue: revMap.get(date) ?? null,
+    revIsAnnual: revIsAnnualMap.get(date) ?? false,
+    profit: profMap.get(date) ?? null,
+  }));
 
   const decimals = 2;
   const isUp = (prices[prices.length - 1]?.close ?? 0) >= (prices[0]?.close ?? 0);
@@ -168,21 +162,19 @@ function DualChart({
           <YAxis yAxisId="eps" orientation="right"
             tick={{ fill: '#f59e0b', fontSize: 11 }} axisLine={false} tickLine={false} width={48}
             tickFormatter={v => (v as number).toFixed(2)}
-            domain={[0, 'auto']} />
+            domain={[(d: number) => Math.min(0, d), 'auto']} />
         )}
         {showFin && (
           <YAxis yAxisId="fin" orientation="right"
             tick={{ fill: '#60a5fa', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
             tickFormatter={v => formatBig(v as number)}
-            domain={[0, 'auto']} />
+            domain={[(d: number) => Math.min(0, d), 'auto']} />
         )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
-          formatter={(value: number, name: string) => {
-            if (name === 'epsQ') return [`${value.toFixed(2)} ${currency}`, 'EPS (quarterly)'];
-            if (name === 'epsA') return [`${value.toFixed(2)} ${currency}`, 'EPS (annual)'];
-            if (name === 'revQ') return [`${formatBig(value)} ${currency}`, 'Revenue (quarterly)'];
-            if (name === 'revA') return [`${formatBig(value)} ${currency}`, 'Revenue (annual)'];
+          formatter={(value: number, name: string, props: { payload?: { epsIsAnnual?: boolean; revIsAnnual?: boolean } }) => {
+            if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, props.payload?.epsIsAnnual ? 'EPS (annual)' : 'EPS (quarterly)'];
+            if (name === 'revenue') return [`${formatBig(value)} ${currency}`, props.payload?.revIsAnnual ? 'Revenue (annual)' : 'Revenue (quarterly)'];
             const label = name === 'price' ? 'Price' : 'Total Return (incl. div.)';
             return [formatPrice(value, currency), label];
           }}
@@ -194,21 +186,22 @@ function DualChart({
           <Line yAxisId="price" type="monotone" dataKey="tr" stroke={isUp ? '#34d399' : '#f87171'}
             strokeWidth={2} strokeDasharray="6 3" dot={false} activeDot={{ r: 4 }} connectNulls name="tr" />
         )}
-        {/* Two grouped bars per overlay — quarterly and annual. Since each date has
-            only one of the two non-null (sec.ts dedup), there's no real overlap;
-            Recharts places them at slightly offset x within each slot. Explicit
-            barSize prevents the slot-division-collapse that hit two unsized bars. */}
+        {/* Single Bar per overlay with Cell for per-bar coloring — amber/red for EPS,
+            blue/violet for revenue. Single Bar avoids the 0px-width collapse that
+            hits two grouped bars on a dense category axis. */}
         {showEps && (
-          <Bar yAxisId="eps" dataKey="epsQ" name="epsQ" fill="#f59e0b" barSize={6} radius={[2, 2, 0, 0]} />
-        )}
-        {showEps && (
-          <Bar yAxisId="eps" dataKey="epsA" name="epsA" fill="#dc2626" barSize={6} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="eps" dataKey="eps" name="eps" barSize={6} radius={[2, 2, 0, 0]}>
+            {chartData.map((entry, i) => (
+              <Cell key={i} fill={entry.epsIsAnnual ? '#dc2626' : '#f59e0b'} />
+            ))}
+          </Bar>
         )}
         {showFin && (
-          <Bar yAxisId="fin" dataKey="revQ" name="revQ" fill="#60a5fa" barSize={6} radius={[2, 2, 0, 0]} />
-        )}
-        {showFin && (
-          <Bar yAxisId="fin" dataKey="revA" name="revA" fill="#8b5cf6" barSize={6} radius={[2, 2, 0, 0]} />
+          <Bar yAxisId="fin" dataKey="revenue" name="revenue" barSize={6} radius={[2, 2, 0, 0]}>
+            {chartData.map((entry, i) => (
+              <Cell key={i} fill={entry.revIsAnnual ? '#8b5cf6' : '#60a5fa'} />
+            ))}
+          </Bar>
         )}
       </ComposedChart>
     </ResponsiveContainer>
