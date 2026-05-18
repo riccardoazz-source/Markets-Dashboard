@@ -10,7 +10,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceLine,
+  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
@@ -262,13 +262,13 @@ function DualChart({
           <YAxis yAxisId="eps" orientation="right"
             tick={{ fill: '#f59e0b', fontSize: 11 }} axisLine={false} tickLine={false} width={48}
             tickFormatter={v => (v as number).toFixed(2)}
-            domain={[(d: number) => Math.min(0, d), 'auto']} />
+            domain={[0, 'auto']} />
         )}
         {showFin && (
           <YAxis yAxisId="fin" orientation="right"
             tick={{ fill: '#60a5fa', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
             tickFormatter={v => formatBig(v as number)}
-            domain={[(d: number) => Math.min(0, d), 'auto']} />
+            domain={[0, 'auto']} />
         )}
         {showPe && (
           <YAxis yAxisId="pe" orientation="right"
@@ -293,10 +293,8 @@ function DualChart({
           <Line yAxisId="price" type="monotone" dataKey="tr" stroke={isUp ? '#34d399' : '#f87171'}
             strokeWidth={2} strokeDasharray="6 3" dot={false} activeDot={{ r: 4 }} connectNulls name="tr" />
         )}
-        {/* Zero reference line on EPS axis so the baseline is always visible,
-            even when the domain extends into negative territory. */}
-        {showEps && <ReferenceLine yAxisId="eps" y={0} stroke="#4b5563" strokeWidth={1} />}
-        {showFin && <ReferenceLine yAxisId="fin" y={0} stroke="#4b5563" strokeWidth={1} />}
+        {/* EPS/fin axes use domain [0, auto] so the zero line coincides with the
+            chart bottom (price X-axis). Negative EPS / revenue values are clipped. */}
         {/* Single Bar per overlay with Cell for per-bar coloring — amber/red for EPS,
             blue/violet for revenue. Single Bar avoids the 0px-width collapse that
             hits two grouped bars on a dense category axis. */}
@@ -638,10 +636,11 @@ export function StockSection() {
                         No financials
                       </span>
                     )}
-                    {/* Reporting cadence badge — shown alongside the EPS toggle */}
+                    {/* Reporting cadence badge — colored to match EPS bars so the user
+                        can tell at a glance how often the company reports. */}
                     {reportFreq && (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-bg-input border border-border text-gray-400">
-                        {reportFreq}
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-amber-400/10 border border-amber-400/50 text-amber-300 font-medium">
+                        Reports {reportFreq}
                       </span>
                     )}
                   </>
