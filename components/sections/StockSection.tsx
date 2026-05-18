@@ -10,7 +10,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell,
+  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceLine,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
@@ -210,7 +210,9 @@ function DualChart({
       while (idx + 1 < qEps.length && qEps[idx + 1].date <= p.date) idx++;
       if (idx >= 3) {
         const ttm = qEps[idx - 3].eps + qEps[idx - 2].eps + qEps[idx - 1].eps + qEps[idx].eps;
-        if (ttm > 0) peMap.set(p.date, p.close / ttm);
+        const pe = ttm > 0 ? p.close / ttm : null;
+        // Cap at 150x to prevent extreme values (e.g. near-zero TTM EPS) from distorting the axis.
+        if (pe != null && pe > 0 && pe <= 150) peMap.set(p.date, pe);
       }
     }
   }
@@ -272,7 +274,7 @@ function DualChart({
           <YAxis yAxisId="pe" orientation="right"
             tick={{ fill: '#a3e635', fontSize: 11 }} axisLine={false} tickLine={false} width={42}
             tickFormatter={v => `${(v as number).toFixed(0)}x`}
-            domain={['auto', 'auto']} />
+            domain={[0, 'auto']} />
         )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
@@ -291,6 +293,10 @@ function DualChart({
           <Line yAxisId="price" type="monotone" dataKey="tr" stroke={isUp ? '#34d399' : '#f87171'}
             strokeWidth={2} strokeDasharray="6 3" dot={false} activeDot={{ r: 4 }} connectNulls name="tr" />
         )}
+        {/* Zero reference line on EPS axis so the baseline is always visible,
+            even when the domain extends into negative territory. */}
+        {showEps && <ReferenceLine yAxisId="eps" y={0} stroke="#4b5563" strokeWidth={1} />}
+        {showFin && <ReferenceLine yAxisId="fin" y={0} stroke="#4b5563" strokeWidth={1} />}
         {/* Single Bar per overlay with Cell for per-bar coloring — amber/red for EPS,
             blue/violet for revenue. Single Bar avoids the 0px-width collapse that
             hits two grouped bars on a dense category axis. */}
@@ -599,7 +605,7 @@ export function StockSection() {
                   </>
                 )}
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 {earningsLoading ? (
                   <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border rounded-full animate-pulse">
                     Loading earnings…
@@ -632,17 +638,16 @@ export function StockSection() {
                         No financials
                       </span>
                     )}
+                    {/* Reporting cadence badge — shown alongside the EPS toggle */}
+                    {reportFreq && (
+                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-bg-input border border-border text-gray-400">
+                        {reportFreq}
+                      </span>
+                    )}
                   </>
                 )}
               </div>
             </div>
-          )}
-
-          {/* Reporting cadence detected from EPS filing intervals */}
-          {!loading && !earningsLoading && reportFreq && (
-            <p className="text-[10px] text-gray-500 -mt-1 text-right">
-              Reports EPS <span className="text-gray-300">{reportFreq}</span>
-            </p>
           )}
 
           {/* Stats */}
@@ -661,21 +666,31 @@ export function StockSection() {
               {nrIRR != null && (
                 <Stat label="IRR (cash flow)" value={formatPercent(nrIRR * 100)} color={colorForPercent(nrIRR * 100)} />
               )}
-              {peTtm != null && peTtm > 0 && (
+              {peTtm != null && peTtm > 0 && peTtm <= 1000 ? (
                 <Stat label="P/E (TTM)" value={`${peTtm.toFixed(1)}x`} />
-              )}
-              {divYield != null && (
+              ) : epsList.length > 0 && peTtm == null ? (
+                <Stat label="P/E (TTM)" value="N/A" color="text-gray-600" />
+              ) : null}
+              {divYield != null ? (
                 <Stat label="Div. yield (TTM)" value={formatPercent(divYield)} color={colorForPercent(divYield)} />
+              ) : (
+                <Stat label="Div. yield (TTM)" value="—" color="text-gray-600" />
               )}
-              {divCagr && (
+              {divCagr ? (
                 <Stat label={`Div. CAGR (${divCagr.years}y)`} value={formatPercent(divCagr.cagr)} color={colorForPercent(divCagr.cagr)} />
+              ) : (
+                <Stat label="Div. CAGR" value="—" color="text-gray-600" />
               )}
-              {epsCagr && (
+              {epsCagr ? (
                 <Stat label={`EPS CAGR (${epsCagr.years}y)`} value={formatPercent(epsCagr.cagr)} color={colorForPercent(epsCagr.cagr)} />
-              )}
-              {revCagr && (
+              ) : epsList.length > 0 ? (
+                <Stat label="EPS CAGR" value="N/A" color="text-gray-600" />
+              ) : null}
+              {revCagr ? (
                 <Stat label={`Revenue CAGR (${revCagr.years}y)`} value={formatPercent(revCagr.cagr)} color={colorForPercent(revCagr.cagr)} />
-              )}
+              ) : finList.length > 0 ? (
+                <Stat label="Revenue CAGR" value="N/A" color="text-gray-600" />
+              ) : null}
               {data.meta.high52w != null && <Stat label="52W High" value={formatPrice(data.meta.high52w, currency)} />}
               {data.meta.low52w != null && <Stat label="52W Low" value={formatPrice(data.meta.low52w, currency)} />}
               {dividends.length > 0 && (
