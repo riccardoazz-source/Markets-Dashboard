@@ -52,6 +52,24 @@ function computeTtmEps(eps: EarningsPoint[]): number | null {
   return a[0]?.eps ?? null;
 }
 
+// Arithmetic mean of rolling-TTM P/E across every price point in the period.
+// Skips negative/zero TTM EPS (P/E meaningless) and extreme outliers from near-zero TTM.
+function computeAvgPe(prices: HistoricalPoint[], eps: EarningsPoint[]): number | null {
+  if (!prices.length || !eps.length) return null;
+  const qEps = eps.filter(e => !e.period.startsWith('FY ')).sort((a, b) => a.date.localeCompare(b.date));
+  if (qEps.length < 4) return null;
+  let idx = -1, sum = 0, n = 0;
+  for (const p of prices) {
+    while (idx + 1 < qEps.length && qEps[idx + 1].date <= p.date) idx++;
+    if (idx < 3) continue;
+    const ttm = qEps[idx - 3].eps + qEps[idx - 2].eps + qEps[idx - 1].eps + qEps[idx].eps;
+    if (ttm <= 0) continue;
+    const pe = p.close / ttm;
+    if (pe < 5000) { sum += pe; n++; }
+  }
+  return n > 0 ? sum / n : null;
+}
+
 // Annual dividend yield using the trailing-12-months sum / current price.
 function computeDivYield(divs: DividendEvent[], price: number): number | null {
   if (!divs.length || !price) return null;
@@ -503,6 +521,7 @@ export function StockSection() {
   const finList = earnings?.financials ?? [];
   const ttmEps = epsList.length > 0 ? computeTtmEps(epsList) : null;
   const peTtm = ttmEps && data?.meta?.price ? data.meta.price / ttmEps : null;
+  const avgPe = computeAvgPe(prices, epsList);
   const divYield = computeDivYield(dividends, data?.meta?.price ?? 0);
   const divCagr = computeDivCAGR(dividends);
   const epsCagr = computeEpsCAGR(epsList);
@@ -670,9 +689,14 @@ export function StockSection() {
                 <Stat label="IRR (cash flow)" value={formatPercent(nrIRR * 100)} color={colorForPercent(nrIRR * 100)} />
               )}
               {peTtm != null && peTtm > 0 && peTtm <= 1000 ? (
-                <Stat label="P/E (TTM)" value={`${peTtm.toFixed(1)}x`} />
+                <Stat label="P/E (TTM)" value={`${peTtm.toFixed(1)}x`} color="text-sky-400" />
               ) : epsList.length > 0 && peTtm == null ? (
                 <Stat label="P/E (TTM)" value="N/A" color="text-gray-600" />
+              ) : null}
+              {avgPe != null && avgPe > 0 && avgPe <= 1000 ? (
+                <Stat label={`Avg P/E (${timeframe})`} value={`${avgPe.toFixed(1)}x`} color="text-sky-400" />
+              ) : epsList.length > 0 ? (
+                <Stat label={`Avg P/E (${timeframe})`} value="N/A" color="text-gray-600" />
               ) : null}
               {divYield != null ? (
                 <Stat label="Div. yield (TTM)" value={formatPercent(divYield)} color={colorForPercent(divYield)} />
