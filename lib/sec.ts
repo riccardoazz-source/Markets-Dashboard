@@ -186,22 +186,22 @@ export async function fetchSecEarnings(symbol: string): Promise<YahooEarnings | 
   const quarterlyEntries = buildEntries(false);
   const annualEntries = buildEntries(true);
 
-  // Prefer quarterly when both exist for the same fiscal year. Annual entries
-  // fill in older years (pre-XBRL = pre-~2009) that have no quarterly data.
-  const quarterlyYears = new Set(Array.from(quarterlyEntries.keys()).map(d => d.slice(0, 4)));
+  // Prefer ANNUAL when both exist at the same year-end (e.g. ACN files standalone
+  // Q4 + 10-K; annual gives the user the "full-year" reference at year-end).
+  // Quarterly fills the other three quarter-ends. The annual entry carries
+  // isAnnual: true (set by buildEntries) so the chart can color it differently.
   const finMap = new Map<string, YahooFinancialQuarter>();
-  for (const [date, e] of annualEntries) {
-    if (!quarterlyYears.has(date.slice(0, 4))) finMap.set(date, e);
-  }
   for (const [date, e] of quarterlyEntries) finMap.set(date, e);
+  for (const [date, e] of annualEntries) finMap.set(date, e);
 
   const epsMap = new Map<string, YahooEarningsPoint>();
   for (const [date, f] of dedupeByEnd(epsFacts.filter(isQuarterly))) {
     if (date > today) continue;
     epsMap.set(date, { date, period: date, eps: f.val });
   }
+  // Annual overrides quarterly at year-end (same priority as financials).
   for (const [date, f] of dedupeByEnd(epsFacts.filter(isAnnual))) {
-    if (date > today || epsMap.has(date)) continue;
+    if (date > today) continue;
     epsMap.set(date, { date, period: `FY ${date.slice(0, 4)}`, eps: f.val });
   }
 

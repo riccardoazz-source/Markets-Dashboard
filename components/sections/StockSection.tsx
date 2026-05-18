@@ -43,6 +43,83 @@ function formatBig(n: number): string {
   return n.toFixed(0);
 }
 
+// Trailing-twelve-months EPS: sum of the four most-recent quarterly entries.
+// Falls back to the latest annual figure if four quarters aren't available.
+function computeTtmEps(eps: EarningsPoint[]): number | null {
+  const q = eps.filter(e => !e.period.startsWith('FY ')).sort((a, b) => b.date.localeCompare(a.date));
+  if (q.length >= 4) return q.slice(0, 4).reduce((s, e) => s + e.eps, 0);
+  const a = eps.filter(e => e.period.startsWith('FY ')).sort((a, b) => b.date.localeCompare(a.date));
+  return a[0]?.eps ?? null;
+}
+
+// Annual dividend yield using the trailing-12-months sum / current price.
+function computeDivYield(divs: DividendEvent[], price: number): number | null {
+  if (!divs.length || !price) return null;
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
+  const ttm = divs.filter(d => new Date(d.date) >= cutoff).reduce((s, d) => s + d.amount, 0);
+  return ttm > 0 ? (ttm / price) * 100 : null;
+}
+
+// CAGR over full calendar years of dividend totals. Ignores the current (partial)
+// year so two partial-year halves don't skew the rate.
+function computeDivCAGR(divs: DividendEvent[]): { cagr: number; years: number } | null {
+  if (divs.length < 4) return null;
+  const byYear = new Map<number, number>();
+  for (const d of divs) {
+    const y = new Date(d.date).getFullYear();
+    byYear.set(y, (byYear.get(y) ?? 0) + d.amount);
+  }
+  const years = Array.from(byYear.keys()).sort();
+  const currentYear = new Date().getFullYear();
+  const full = years.filter(y => y < currentYear && (byYear.get(y) ?? 0) > 0);
+  if (full.length < 2) return null;
+  const first = byYear.get(full[0])!;
+  const last = byYear.get(full[full.length - 1])!;
+  const n = full[full.length - 1] - full[0];
+  if (first <= 0 || last <= 0 || n <= 0) return null;
+  return { cagr: (Math.pow(last / first, 1 / n) - 1) * 100, years: n };
+}
+
+// CAGR from earliest to latest annual EPS entry.
+function computeEpsCAGR(eps: EarningsPoint[]): { cagr: number; years: number } | null {
+  const annual = eps.filter(e => e.period.startsWith('FY ')).sort((a, b) => a.date.localeCompare(b.date));
+  if (annual.length < 2) return null;
+  const first = annual[0].eps;
+  const last = annual[annual.length - 1].eps;
+  const n = parseInt(annual[annual.length - 1].period.slice(3), 10) - parseInt(annual[0].period.slice(3), 10);
+  // Sign-flips make CAGR meaningless; skip.
+  if (first <= 0 || last <= 0 || n <= 0) return null;
+  return { cagr: (Math.pow(last / first, 1 / n) - 1) * 100, years: n };
+}
+
+// CAGR from earliest to latest annual revenue entry.
+function computeRevenueCAGR(fin: FinancialPoint[]): { cagr: number; years: number } | null {
+  const annual = fin.filter(f => f.isAnnual && f.revenue != null).sort((a, b) => a.date.localeCompare(b.date));
+  if (annual.length < 2) return null;
+  const first = annual[0].revenue!;
+  const last = annual[annual.length - 1].revenue!;
+  const n = new Date(annual[annual.length - 1].date).getFullYear() - new Date(annual[0].date).getFullYear();
+  if (first <= 0 || last <= 0 || n <= 0) return null;
+  return { cagr: (Math.pow(last / first, 1 / n) - 1) * 100, years: n };
+}
+
+// Median gap between recent quarterly entries → reporting cadence.
+function detectReportingFreq(eps: EarningsPoint[]): string {
+  const q = eps.filter(e => !e.period.startsWith('FY ')).sort((a, b) => a.date.localeCompare(b.date));
+  if (q.length < 2) return eps.some(e => e.period.startsWith('FY ')) ? 'annual only' : '';
+  const recent = q.slice(-8);
+  const deltas: number[] = [];
+  for (let i = 1; i < recent.length; i++) {
+    deltas.push((new Date(recent[i].date).getTime() - new Date(recent[i - 1].date).getTime()) / 86_400_000);
+  }
+  deltas.sort((a, b) => a - b);
+  const med = deltas[Math.floor(deltas.length / 2)];
+  if (med <= 100) return 'quarterly';
+  if (med <= 200) return 'semi-annual';
+  return 'less frequent';
+}
+
 const TF_OPTIONS: Timeframe[] = ['1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface SearchHit { symbol: string; name: string; exchange: string; type: string }
@@ -120,12 +197,32 @@ function DualChart({
     if (profit != null) profMap.set(d, profit);
   }
 
+  // Rolling P/E using TTM EPS (sum of the last 4 quarterly entries). Advances a
+  // single pointer through the sorted quarterly list as we sweep prices forward,
+  // so the whole sweep is O(prices + epsQuarters).
+  const peMap = new Map<string, number>();
+  if (showEps) {
+    const qEps = (eps ?? [])
+      .filter(e => !e.period.startsWith('FY '))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    let idx = -1;
+    for (const p of prices) {
+      while (idx + 1 < qEps.length && qEps[idx + 1].date <= p.date) idx++;
+      if (idx >= 3) {
+        const ttm = qEps[idx - 3].eps + qEps[idx - 2].eps + qEps[idx - 1].eps + qEps[idx].eps;
+        if (ttm > 0) peMap.set(p.date, p.close / ttm);
+      }
+    }
+  }
+  const showPe = peMap.size > 0;
+
   const allDates = Array.from(new Set([
     ...priceMap.keys(),
     ...trMap.keys(),
     ...epsMap.keys(),
     ...revMap.keys(),
     ...profMap.keys(),
+    ...peMap.keys(),
   ])).sort();
   const chartData = allDates.map(date => ({
     date,
@@ -136,6 +233,7 @@ function DualChart({
     revenue: revMap.get(date) ?? null,
     revIsAnnual: revIsAnnualMap.get(date) ?? false,
     profit: profMap.get(date) ?? null,
+    pe: peMap.get(date) ?? null,
   }));
 
   const decimals = 2;
@@ -145,7 +243,7 @@ function DualChart({
     <ResponsiveContainer width="100%" height={260}>
       {/* key forces a fresh ComposedChart mount when the overlay changes — Recharts'
           internal layout doesn't always recompute when YAxis components are added/removed. */}
-      <ComposedChart key={`chart-${showEps ? 'eps' : ''}${showFin ? 'fin' : ''}`}
+      <ComposedChart key={`chart-${showEps ? 'eps' : ''}${showFin ? 'fin' : ''}${showPe ? 'pe' : ''}`}
         data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
         <XAxis dataKey="date" tickFormatter={d => formatXDate(d as string, prices)}
@@ -170,11 +268,18 @@ function DualChart({
             tickFormatter={v => formatBig(v as number)}
             domain={[(d: number) => Math.min(0, d), 'auto']} />
         )}
+        {showPe && (
+          <YAxis yAxisId="pe" orientation="right"
+            tick={{ fill: '#a3e635', fontSize: 11 }} axisLine={false} tickLine={false} width={42}
+            tickFormatter={v => `${(v as number).toFixed(0)}x`}
+            domain={['auto', 'auto']} />
+        )}
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
           formatter={(value: number, name: string, props: { payload?: { epsIsAnnual?: boolean; revIsAnnual?: boolean } }) => {
             if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, props.payload?.epsIsAnnual ? 'EPS (annual)' : 'EPS (quarterly)'];
             if (name === 'revenue') return [`${formatBig(value)} ${currency}`, props.payload?.revIsAnnual ? 'Revenue (annual)' : 'Revenue (quarterly)'];
+            if (name === 'pe') return [`${value.toFixed(1)}x`, 'P/E (TTM)'];
             const label = name === 'price' ? 'Price' : 'Total Return (incl. div.)';
             return [formatPrice(value, currency), label];
           }}
@@ -202,6 +307,10 @@ function DualChart({
               <Cell key={i} fill={entry.revIsAnnual ? '#8b5cf6' : '#60a5fa'} />
             ))}
           </Bar>
+        )}
+        {showPe && (
+          <Line yAxisId="pe" type="monotone" dataKey="pe" stroke="#a3e635"
+            strokeWidth={1.5} strokeDasharray="3 3" dot={false} connectNulls name="pe" />
         )}
       </ComposedChart>
     </ResponsiveContainer>
@@ -382,6 +491,16 @@ export function StockSection() {
   const currency = data?.meta?.currency ?? 'USD';
   const totalDivs = dividends.reduce((s, d) => d.date >= (prices[0]?.date ?? '') ? s + d.amount : s, 0);
 
+  const epsList = earnings?.quarterly ?? [];
+  const finList = earnings?.financials ?? [];
+  const ttmEps = epsList.length > 0 ? computeTtmEps(epsList) : null;
+  const peTtm = ttmEps && data?.meta?.price ? data.meta.price / ttmEps : null;
+  const divYield = computeDivYield(dividends, data?.meta?.price ?? 0);
+  const divCagr = computeDivCAGR(dividends);
+  const epsCagr = computeEpsCAGR(epsList);
+  const revCagr = computeRevenueCAGR(finList);
+  const reportFreq = detectReportingFreq(epsList);
+
   return (
     <div className="space-y-3">
       {/* Search bar */}
@@ -461,6 +580,10 @@ export function StockSection() {
                       <span className="w-3 h-3 inline-block rounded-sm" style={{ backgroundColor: '#dc2626' }} />
                       <span className="text-gray-400">EPS annual</span>
                     </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-6 border-t-2 border-dashed inline-block" style={{ borderColor: '#a3e635' }} />
+                      <span className="text-gray-400">P/E (TTM)</span>
+                    </div>
                   </>
                 )}
                 {overlay === 'financials' && earnings && earnings.financials.length > 0 && (
@@ -515,6 +638,13 @@ export function StockSection() {
             </div>
           )}
 
+          {/* Reporting cadence detected from EPS filing intervals */}
+          {!loading && !earningsLoading && reportFreq && (
+            <p className="text-[10px] text-gray-500 -mt-1 text-right">
+              Reports EPS <span className="text-gray-300">{reportFreq}</span>
+            </p>
+          )}
+
           {/* Stats */}
           {data?.meta && (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
@@ -530,6 +660,21 @@ export function StockSection() {
               )}
               {nrIRR != null && (
                 <Stat label="IRR (cash flow)" value={formatPercent(nrIRR * 100)} color={colorForPercent(nrIRR * 100)} />
+              )}
+              {peTtm != null && peTtm > 0 && (
+                <Stat label="P/E (TTM)" value={`${peTtm.toFixed(1)}x`} />
+              )}
+              {divYield != null && (
+                <Stat label="Div. yield (TTM)" value={formatPercent(divYield)} color={colorForPercent(divYield)} />
+              )}
+              {divCagr && (
+                <Stat label={`Div. CAGR (${divCagr.years}y)`} value={formatPercent(divCagr.cagr)} color={colorForPercent(divCagr.cagr)} />
+              )}
+              {epsCagr && (
+                <Stat label={`EPS CAGR (${epsCagr.years}y)`} value={formatPercent(epsCagr.cagr)} color={colorForPercent(epsCagr.cagr)} />
+              )}
+              {revCagr && (
+                <Stat label={`Revenue CAGR (${revCagr.years}y)`} value={formatPercent(revCagr.cagr)} color={colorForPercent(revCagr.cagr)} />
               )}
               {data.meta.high52w != null && <Stat label="52W High" value={formatPrice(data.meta.high52w, currency)} />}
               {data.meta.low52w != null && <Stat label="52W Low" value={formatPrice(data.meta.low52w, currency)} />}
