@@ -508,12 +508,13 @@ async function fetchQuotesNoAuth(symbols: string[]): Promise<YahooQuote[]> {
   return results;
 }
 
-// v7 batch WITHOUT crumb — single request, correct % from Yahoo directly.
-// query2 subdomain often passes Vercel Edge without auth.
+// v7 batch WITHOUT crumb — tries query2 then query1 so at least one host
+// usually responds.  query2 passes Vercel IPs more often; query1 is fallback.
 async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
-  const url =
-    `https://query2.finance.yahoo.com/v7/finance/quote` +
-    `?symbols=${encodeURIComponent(symbols.join(','))}&formatted=false&lang=en-US&region=US`;
+  const symStr = encodeURIComponent(symbols.join(','));
+  const qs = `formatted=false&lang=en-US&region=US`;
+  for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
+  const url = `https://${host}/v7/finance/quote?symbols=${symStr}&${qs}`;
   try {
     const res = await fetchWithTimeout(url, {
       headers: {
@@ -522,7 +523,7 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
         'Referer': 'https://finance.yahoo.com/',
       },
     }, 8_000);
-    if (!res.ok) return [];
+    if (!res.ok) { console.warn(`[yahoo-v7-noauth] ${host} HTTP ${res.status}`); continue; }
     const json = await res.json() as { quoteResponse?: { result?: Record<string, unknown>[] } };
     const items = json?.quoteResponse?.result ?? [];
     if (!items.length) return [];
@@ -556,9 +557,9 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
         volume:     it.regularMarketVolume != null ? Number(it.regularMarketVolume) : null,
       };
     }).filter(q => q.price > 0);
-  } catch {
-    return [];
-  }
+  } catch { /* try next host */ }
+  } // end for-host loop
+  return [];
 }
 
 export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]> {
@@ -609,8 +610,11 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
   const noAuthPE = merged.filter(q => q.trailingPE != null && q.trailingPE > 0).length;
   console.log(`[yahoo-pe] v7-noauth: ${merged.length}/${symbols.length} quotes, ${noAuthPE} with PE`);
 
-  // If we already have good coverage, return immediately
-  if (noAuthPE >= symbols.length * 0.5) return merged;
+  // Return early if we have reasonable PE coverage (≥25% of symbols).
+  // Many S&P 500 constituents legitimately lack PE (negative earnings, BRK-B, etc.)
+  // so 100% is impossible. Setting a lower threshold avoids the expensive crumb-auth
+  // path when Yahoo is returning normal no-auth data.
+  if (noAuthPE >= Math.max(symbols.length * 0.25, 100)) return merged;
 
   // 2. v7 with crumb auth — same chunks parallel. Merge with no-auth, preferring
   // whichever entry has PE.
@@ -644,10 +648,12 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
     return !q || q.trailingPE == null || q.trailingPE <= 0;
   });
   if (missing.length > 0) {
-    const target = missing.slice(0, 200);
+    const target = missing.slice(0, 150); // cap symbols to stay within maxDuration
     console.warn(`[yahoo-pe] backfilling PE for ${target.length}/${missing.length} symbols via quoteSummary`);
-    const CONCURRENCY = 25;
+    const CONCURRENCY = 20;
+    const deadline = Date.now() + 18_000; // 18s hard cap — leave room for response serialization
     for (let i = 0; i < target.length; i += CONCURRENCY) {
+      if (Date.now() > deadline) { console.warn('[yahoo-pe] quoteSummary deadline reached'); break; }
       const batch = target.slice(i, i + CONCURRENCY);
       const results = await Promise.all(batch.map(async sym => {
         const qsData = await fetchQuoteSummary(sym, 'summaryDetail,price', 4_000).catch(() => null);

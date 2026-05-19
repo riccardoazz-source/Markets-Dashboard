@@ -1,23 +1,32 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MACRO_INDICATORS, MacroUnit } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
-type Category = 'All' | 'Rates' | 'Inflation' | 'Growth' | 'Employment' | 'Real Estate' | 'Money' | 'Commodities';
-const CATEGORIES: Category[] = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities'];
+const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities'];
 const TF_OPTIONS: Timeframe[] = ['1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface MacroLatest {
   id: string;
   latest: { date: string; value: number } | null;
   prev:   { date: string; value: number } | null;
+}
+
+interface UnifiedIndicator {
+  id: string;
+  name: string;
+  category: string;
+  unit: MacroUnit;
+  isBuiltin: boolean;
+  fetchUrl: string | null; // null → /api/macro; string → /api/scrape
 }
 
 function formatMacroValue(value: number, unit: MacroUnit): string {
@@ -31,13 +40,12 @@ function formatMacroValue(value: number, unit: MacroUnit): string {
     if (value >= 1_000) return `${(value / 1_000).toFixed(1)}M`;
     return `${value.toLocaleString()}K`;
   }
-  // idx
   return value.toFixed(1);
 }
 
 function formatMacroChange(change: number, unit: MacroUnit): string {
   const sign = change >= 0 ? '+' : '';
-  if (unit === '%') return `${sign}${change.toFixed(2)} bps`.replace('bps', change === 0 ? '' : 'bps');
+  if (unit === '%') return `${sign}${change.toFixed(2)}${change === 0 ? '' : ' bps'}`;
   if (unit === 'B$') return `${sign}$${change.toFixed(0)}B`;
   if (unit === 'K') {
     if (Math.abs(change) >= 1_000) return `${sign}${(change / 1_000).toFixed(0)}M`;
@@ -60,8 +68,11 @@ function formatShortDate(dateStr: string): string {
 }
 
 export function MacroSection() {
-  const [category, setCategory] = useState<Category>('All');
+  const [mounted, setMounted] = useState(false);
+  const [sourcesConfig, setSourcesConfig] = useState<SourcesConfig>({ overrides: {}, custom: [] });
+  const [category, setCategory] = useState('All');
   const [data, setData] = useState<Record<string, MacroLatest>>({});
+  const [statusOk, setStatusOk] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -69,45 +80,124 @@ export function MacroSection() {
   const [histLoading, setHistLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
 
-  const fetchData = useCallback(async () => {
-    const ids = MACRO_INDICATORS.map(m => m.id).join(',');
-    try {
-      const res = await fetch(`/api/macro?mode=list&ids=${ids}`);
-      const json = await res.json() as MacroLatest[];
-      const map: Record<string, MacroLatest> = {};
-      json.forEach(d => { map[d.id] = d; });
-      setData(map);
-      setLastUpdate(new Date());
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+  useEffect(() => {
+    setMounted(true);
+    setSourcesConfig(loadSourcesConfig());
+    const handler = () => setSourcesConfig(loadSourcesConfig());
+    window.addEventListener('mkt-sources-changed', handler);
+    return () => window.removeEventListener('mkt-sources-changed', handler);
   }, []);
+
+  const allIndicators = useMemo<UnifiedIndicator[]>(() => [
+    ...MACRO_INDICATORS.map(m => ({
+      id: m.id, name: m.name, category: m.category, unit: m.unit,
+      isBuiltin: true,
+      fetchUrl: mounted ? (sourcesConfig.overrides[m.id] ?? null) : null,
+    })),
+    ...(mounted ? sourcesConfig.custom.map(c => ({
+      id: c.id, name: c.name, category: c.category, unit: c.unit as MacroUnit,
+      isBuiltin: false, fetchUrl: c.url,
+    })) : []),
+  ], [mounted, sourcesConfig]);
+
+  const categories = useMemo(() => {
+    const extraCats = sourcesConfig.custom
+      .map(c => c.category)
+      .filter(cat => !BUILTIN_CATS.includes(cat));
+    return [...BUILTIN_CATS, ...new Set(extraCats)];
+  }, [sourcesConfig.custom]);
+
+  const fetchData = useCallback(async () => {
+    const builtinNormal = allIndicators.filter(ind => ind.isBuiltin && !ind.fetchUrl);
+    const scrapeList = allIndicators.filter(ind => !!ind.fetchUrl);
+
+    const dataUpdates: Record<string, MacroLatest> = {};
+    const okUpdates: Record<string, boolean> = {};
+
+    if (builtinNormal.length > 0) {
+      try {
+        const ids = builtinNormal.map(ind => ind.id).join(',');
+        const res = await fetch(`/api/macro?mode=list&ids=${ids}`);
+        const json = await res.json() as MacroLatest[];
+        json.forEach(d => {
+          dataUpdates[d.id] = d;
+          okUpdates[d.id] = d.latest !== null;
+        });
+      } catch (e) { console.error(e); }
+    }
+
+    if (scrapeList.length > 0) {
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+      const fromStr = twoYearsAgo.toISOString().slice(0, 10);
+
+      await Promise.allSettled(
+        scrapeList.map(async (ind) => {
+          try {
+            const res = await fetch(`/api/scrape?url=${encodeURIComponent(ind.fetchUrl!)}&from=${fromStr}`);
+            const json = await res.json();
+            if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+              const sorted = [...json.data].sort((a: { date: string }, b: { date: string }) =>
+                a.date.localeCompare(b.date)
+              );
+              dataUpdates[ind.id] = {
+                id: ind.id,
+                latest: sorted[sorted.length - 1],
+                prev: sorted.length > 1 ? sorted[sorted.length - 2] : null,
+              };
+              okUpdates[ind.id] = true;
+            } else {
+              dataUpdates[ind.id] = { id: ind.id, latest: null, prev: null };
+              okUpdates[ind.id] = false;
+            }
+          } catch {
+            dataUpdates[ind.id] = { id: ind.id, latest: null, prev: null };
+            okUpdates[ind.id] = false;
+          }
+        })
+      );
+    }
+
+    setData(prev => ({ ...prev, ...dataUpdates }));
+    setStatusOk(prev => ({ ...prev, ...okUpdates }));
+    setLastUpdate(new Date());
+    setLoading(false);
+  }, [allIndicators]);
 
   const fetchHistory = useCallback(async (id: string, tf: Timeframe) => {
     setHistLoading(true);
+    const ind = allIndicators.find(i => i.id === id);
     try {
       const from = getTimeframeStart(tf);
-      const res = await fetch(`/api/macro?mode=history&id=${id}&from=${from}`);
-      const json = await res.json() as HistoricalPoint[];
-      setHistorical(Array.isArray(json) ? json : []);
+      if (ind?.fetchUrl) {
+        const res = await fetch(`/api/scrape?url=${encodeURIComponent(ind.fetchUrl)}&from=${from}`);
+        const json = await res.json();
+        setHistorical(json.success && Array.isArray(json.data) ? json.data : []);
+      } else {
+        const res = await fetch(`/api/macro?mode=history&id=${id}&from=${from}`);
+        const json = await res.json() as HistoricalPoint[];
+        setHistorical(Array.isArray(json) ? json : []);
+      }
     } catch { setHistorical([]); }
     finally { setHistLoading(false); }
-  }, []);
+  }, [allIndicators]);
 
   useEffect(() => {
+    if (!mounted) return;
     fetchData();
-    const id = setInterval(fetchData, 30 * 60_000);
-    return () => clearInterval(id);
-  }, [fetchData]);
+    const intervalId = setInterval(fetchData, 30 * 60_000);
+    return () => clearInterval(intervalId);
+  }, [mounted, fetchData]);
 
   useEffect(() => {
     if (selected) fetchHistory(selected, timeframe);
   }, [selected, timeframe, fetchHistory]);
 
-  const filtered = MACRO_INDICATORS.filter(
-    m => category === 'All' || m.category === category
+  const filtered = allIndicators.filter(
+    ind => category === 'All' || ind.category === category
   );
 
-  const selectedIndicator = MACRO_INDICATORS.find(m => m.id === selected);
+  const selectedIndicator = allIndicators.find(ind => ind.id === selected);
   const cagrData = selectedIndicator ? calculateCAGR(historical, timeframe) : null;
 
   return (
@@ -115,7 +205,7 @@ export function MacroSection() {
       {/* Category filter */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex gap-1.5 flex-wrap">
-          {CATEGORIES.map(c => (
+          {categories.map(c => (
             <button key={c} onClick={() => setCategory(c)}
               className={clsx(
                 'px-3 py-1 text-xs font-semibold rounded-full transition-all',
@@ -146,18 +236,26 @@ export function MacroSection() {
           const prev = d?.prev;
           const change = latest && prev ? latest.value - prev.value : null;
           const isSelected = selected === ind.id;
+          const ok = statusOk[ind.id];
 
           return (
             <button key={ind.id}
               onClick={() => setSelected(isSelected ? null : ind.id)}
               className={clsx(
-                'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
+                'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50 relative',
                 isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
               )}>
+              {/* Status dot */}
+              {ok !== undefined && (
+                <span className={clsx(
+                  'absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full',
+                  ok ? 'bg-emerald-500' : 'bg-red-500'
+                )} />
+              )}
               <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1">
                 {ind.category}
               </p>
-              <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">{ind.name}</p>
+              <p className="text-sm font-semibold text-gray-100 leading-snug mb-2 pr-3">{ind.name}</p>
 
               {latest ? (
                 <>
@@ -195,7 +293,10 @@ export function MacroSection() {
             <div>
               <h3 className="text-base font-bold text-white">{selectedIndicator.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                Series: {selected} · {selectedIndicator.category} · Unit: {selectedIndicator.unit}
+                {selectedIndicator.isBuiltin ? `Series: ${selected} · ` : ''}{selectedIndicator.category} · Unit: {selectedIndicator.unit}
+                {selectedIndicator.fetchUrl && (
+                  <span className="ml-1 text-accent/70">· custom URL</span>
+                )}
               </p>
             </div>
             <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300 shrink-0">

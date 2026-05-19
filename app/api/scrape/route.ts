@@ -1,0 +1,306 @@
+// Universal data-source scraper.
+// Accepts any URL and attempts to extract a time-series of (date, value) pairs.
+// Smart dispatch:
+//   fred.stlouisfed.org/series/ID  →  DBnomics mirror (FRED proxy)
+//   finance.yahoo.com/quote/SYM    →  Yahoo v8 chart
+//   other URL                      →  fetch + parse (JSON / CSV / HTML tables)
+//
+// Called by MacroSection for overridden built-in indicators and custom indicators.
+// Also called by SourcesSection for live status checks.
+
+import { NextRequest, NextResponse } from 'next/server';
+
+export const runtime = 'nodejs';
+export const maxDuration = 20;
+export const dynamic = 'force-dynamic';
+
+const cache = new Map<string, { data: unknown; ts: number }>();
+const TTL = 30 * 60_000;
+
+type DP = { date: string; value: number };
+interface ScrapeResult {
+  success: boolean;
+  data: DP[];
+  message: string;
+  sourceType: string;
+}
+
+const UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+// ─── URL pattern helpers ───────────────────────────────────────────────────
+
+function fredId(url: string): string | null {
+  const m = url.match(/fred\.stlouisfed\.org\/(?:series|graph\/fredgraph\.(?:csv|txt))[?/](?:id=)?([A-Z0-9_.]+)/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+function yahooSym(url: string): string | null {
+  const m = url.match(/finance\.yahoo\.com\/quote\/([^/?&#]+)/i);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+// ─── Date normalization ────────────────────────────────────────────────────
+
+const MON: Record<string, string> = {
+  jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
+  jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12',
+};
+
+function normalizeDate(s: string): string | null {
+  s = s.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}$/.test(s))        return `${s}-01`;
+  // MM/DD/YYYY
+  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2,'0')}-${mdy[2].padStart(2,'0')}`;
+  // DD.MM.YYYY
+  const dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+  // "Jan 2024" / "January 2024"
+  const my = s.match(/^([A-Za-z]{3,9})\s+(\d{4})$/);
+  if (my) { const m = MON[my[1].toLowerCase().slice(0,3)]; if (m) return `${my[2]}-${m}-01`; }
+  // Q1 2024 / 2024-Q1 / 2024Q1
+  const qy = s.match(/(?:^Q([1-4])\s+(\d{4})$|^(\d{4})-?Q([1-4])$)/i);
+  if (qy) {
+    const q = parseInt(qy[1] ?? qy[4]); const y = qy[2] ?? qy[3];
+    return `${y}-${((q-1)*3+1).toString().padStart(2,'0')}-01`;
+  }
+  if (/^\d{4}$/.test(s)) return `${s}-07-01`; // annual → mid-year
+  return null;
+}
+
+// ─── Number parsing (EU "1.234,56" and US "1,234.56") ─────────────────────
+
+function parseNum(s: string): number | null {
+  let n = s.trim().replace(/[$€£¥₹]/g,'').replace(/\s/g,'').replace(/%$/,'');
+  if (n.startsWith('(') && n.endsWith(')')) n = '-' + n.slice(1,-1);
+  // European thousands + decimal: 1.234.567,89
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(n)) n = n.replace(/\./g,'').replace(',','.');
+  else n = n.replace(/,/g,''); // US: strip thousand-commas
+  const v = parseFloat(n);
+  return isFinite(v) ? v : null;
+}
+
+// ─── HTML table extractor ─────────────────────────────────────────────────
+
+function extractFromHtml(html: string, fromDate?: string): DP[] {
+  const tableRx = /<table[^>]*>([\s\S]*?)<\/table>/gi;
+  let best: DP[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = tableRx.exec(html)) !== null) {
+    const rows: string[][] = [];
+    const rowRx = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let rm: RegExpExecArray | null;
+    while ((rm = rowRx.exec(m[1])) !== null) {
+      const cells: string[] = [];
+      const cellRx = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+      let cm: RegExpExecArray | null;
+      while ((cm = cellRx.exec(rm[1])) !== null) {
+        const txt = cm[1]
+          .replace(/<[^>]+>/g,' ')
+          .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<')
+          .replace(/&gt;/gi,'>').replace(/&quot;/gi,'"')
+          .replace(/&#(\d+);/gi, (_,n)=>String.fromCharCode(+n))
+          .replace(/\s+/g,' ').trim();
+        if (txt) cells.push(txt);
+      }
+      if (cells.length >= 2) rows.push(cells);
+    }
+    if (rows.length < 3) continue;
+    const cols = Math.min(rows[0].length, 5);
+    for (let dc = 0; dc < cols; dc++) {
+      for (let vc = 0; vc < cols; vc++) {
+        if (dc === vc) continue;
+        const pts: DP[] = [];
+        for (const row of rows) {
+          if (row.length <= Math.max(dc,vc)) continue;
+          const d = normalizeDate(row[dc]); if (!d) continue;
+          if (fromDate && d < fromDate) continue;
+          const v = parseNum(row[vc]); if (v !== null) pts.push({ date: d, value: v });
+        }
+        if (pts.length > best.length) best = pts;
+      }
+    }
+  }
+  best.sort((a,b)=>a.date.localeCompare(b.date));
+  return best;
+}
+
+// ─── Fetchers ─────────────────────────────────────────────────────────────
+
+async function fetchDBnomics(seriesId: string, fromDate?: string): Promise<{ data: DP[]; msg: string }> {
+  const enc = encodeURIComponent(seriesId);
+  for (const url of [
+    `https://api.db.nomics.world/v22/series/FRED/${enc}/${enc}?observations=1`,
+    `https://api.db.nomics.world/v22/series/FRED/${enc}?observations=1`,
+  ]) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8_000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+      if (!res.ok) continue;
+      const json = await res.json() as {
+        series?: { docs?: Array<{ period?: string[]; value?: (number|string|null)[] }> }
+      };
+      const doc = json?.series?.docs?.[0];
+      if (!doc?.period?.length) continue;
+      const data: DP[] = [];
+      for (let i = 0; i < doc.period!.length; i++) {
+        const d = normalizeDate(doc.period![i]); if (!d) continue;
+        if (fromDate && d < fromDate) continue;
+        const v = doc.value?.[i];
+        const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(String(v));
+        if (isFinite(num)) data.push({ date: d, value: num });
+      }
+      data.sort((a,b)=>a.date.localeCompare(b.date));
+      if (data.length) return { data, msg: `FRED ${seriesId} via DBnomics · ${data.length} pts` };
+    } catch { /* try next */ } finally { clearTimeout(t); }
+  }
+  return { data: [], msg: `FRED ${seriesId}: not found in DBnomics` };
+}
+
+async function fetchYahoo(symbol: string, fromDate?: string): Promise<{ data: DP[]; msg: string }> {
+  const daysAgo = fromDate ? (Date.now() - new Date(fromDate).getTime()) / 86_400_000 : 365;
+  const range = daysAgo > 3500 ? 'max' : daysAgo > 1500 ? '10y' : daysAgo > 800 ? '5y'
+    : daysAgo > 300 ? '1y' : '6mo';
+  const interval = daysAgo > 1500 ? '1mo' : daysAgo > 300 ? '1wk' : '1d';
+  for (const host of ['query2.finance.yahoo.com','query1.finance.yahoo.com']) {
+    const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5_000);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': UA, Accept: 'application/json', Referer: 'https://finance.yahoo.com/' },
+      });
+      if (!res.ok) continue;
+      const json = await res.json() as { chart?: { result?: unknown[] } };
+      const result = json?.chart?.result?.[0] as Record<string,unknown> | undefined;
+      if (!result) continue;
+      const ts = (result.timestamp as number[]) ?? [];
+      const closes = ((result.indicators as Record<string,unknown>)?.quote as Array<Record<string,unknown>>)?.[0]?.close as number[] ?? [];
+      const data: DP[] = [];
+      for (let i = 0; i < ts.length; i++) {
+        const c = closes[i];
+        if (c == null || !isFinite(c) || c <= 0) continue;
+        const d = new Date(ts[i]*1000).toISOString().slice(0,10);
+        if (fromDate && d < fromDate) continue;
+        data.push({ date: d, value: c });
+      }
+      data.sort((a,b)=>a.date.localeCompare(b.date));
+      if (data.length) return { data, msg: `Yahoo Finance ${symbol} · ${data.length} pts` };
+    } catch { /* try next */ } finally { clearTimeout(t); }
+  }
+  return { data: [], msg: `Yahoo Finance ${symbol}: no data` };
+}
+
+async function fetchGeneric(url: string, fromDate?: string): Promise<{ data: DP[]; msg: string; type: string }> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 12_000);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': UA, Accept: 'text/html,application/json,text/csv,*/*' },
+    });
+    if (!res.ok) return { data: [], msg: `HTTP ${res.status} from ${url}`, type: 'error' };
+    const ct = res.headers.get('content-type') ?? '';
+    const text = await res.text();
+
+    // JSON
+    if (ct.includes('json') || (text.trimStart().startsWith('{') || text.trimStart().startsWith('['))) {
+      try {
+        const json = JSON.parse(text);
+        const arr: unknown[] = Array.isArray(json) ? json
+          : (json?.data ?? json?.observations ?? json?.values ?? json?.result ?? []);
+        if (Array.isArray(arr) && arr.length > 0) {
+          const sample = arr[0] as Record<string,unknown>;
+          const dk = Object.keys(sample).find(k => /date|period|time/i.test(k));
+          const vk = Object.keys(sample).find(k => /value|rate|close|amount|level|price/i.test(k));
+          if (dk && vk) {
+            const data: DP[] = [];
+            for (const row of arr as Record<string,unknown>[]) {
+              const d = normalizeDate(String(row[dk]).slice(0,10)); if (!d) continue;
+              if (fromDate && d < fromDate) continue;
+              const v = parseFloat(String(row[vk]));
+              if (isFinite(v)) data.push({ date: d, value: v });
+            }
+            data.sort((a,b)=>a.date.localeCompare(b.date));
+            if (data.length) return { data, msg: `JSON · ${data.length} pts`, type: 'json' };
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // CSV / TSV / semicolon-separated
+    if (ct.includes('csv') || ct.includes('text/plain') || /[,;\t]/.test(text.split('\n')[0] ?? '')) {
+      const sep = text.includes('\t') ? '\t' : text.includes(';') ? ';' : ',';
+      const lines = text.trim().split('\n');
+      const data: DP[] = [];
+      let headerSkipped = false;
+      for (const line of lines) {
+        const parts = line.split(sep).map(p => p.trim().replace(/^"|"$/g,''));
+        if (parts.length < 2) continue;
+        const d = normalizeDate(parts[0]);
+        if (!d && !headerSkipped) { headerSkipped = true; continue; }
+        if (!d) continue;
+        if (fromDate && d < fromDate) continue;
+        for (let ci = 1; ci < parts.length; ci++) {
+          const v = parseNum(parts[ci]);
+          if (v !== null) { data.push({ date: d, value: v }); break; }
+        }
+      }
+      data.sort((a,b)=>a.date.localeCompare(b.date));
+      if (data.length > 1) return { data, msg: `CSV · ${data.length} pts`, type: 'csv' };
+    }
+
+    // HTML table
+    if (ct.includes('html') || text.includes('<table')) {
+      const data = extractFromHtml(text, fromDate);
+      if (data.length) return { data, msg: `HTML table · ${data.length} rows`, type: 'html' };
+      return { data: [], msg: 'No parseable table found on page', type: 'html' };
+    }
+
+    return { data: [], msg: `Unsupported content type: ${ct}`, type: 'unknown' };
+  } catch (e) {
+    return { data: [], msg: `Error: ${(e as Error).message}`, type: 'error' };
+  } finally { clearTimeout(t); }
+}
+
+// ─── GET handler ──────────────────────────────────────────────────────────
+
+export async function GET(req: NextRequest) {
+  const url = req.nextUrl.searchParams.get('url');
+  if (!url) {
+    return NextResponse.json({ success: false, data: [], message: 'Missing url', sourceType: 'error' });
+  }
+  const fromDate = req.nextUrl.searchParams.get('from') ?? undefined;
+  const ck = `${url}|${fromDate ?? ''}`;
+
+  const hit = cache.get(ck);
+  if (hit && Date.now() - hit.ts < TTL) {
+    return NextResponse.json(hit.data, { headers: { 'Cache-Control': 'public, s-maxage=1800, stale-while-revalidate=3600' } });
+  }
+
+  let result: ScrapeResult;
+  const fid = fredId(url);
+  const ysym = yahooSym(url);
+
+  if (fid) {
+    const { data, msg } = await fetchDBnomics(fid, fromDate);
+    result = { success: data.length > 0, data, message: msg, sourceType: 'fred' };
+  } else if (ysym) {
+    const { data, msg } = await fetchYahoo(ysym, fromDate);
+    result = { success: data.length > 0, data, message: msg, sourceType: 'yahoo' };
+  } else {
+    const { data, msg, type } = await fetchGeneric(url, fromDate);
+    result = { success: data.length > 0, data, message: msg, sourceType: type };
+  }
+
+  if (result.success) cache.set(ck, { data: result, ts: Date.now() });
+
+  return NextResponse.json(result, {
+    headers: { 'Cache-Control': result.success ? 'public, s-maxage=1800, stale-while-revalidate=3600' : 'no-store' },
+  });
+}
