@@ -856,25 +856,21 @@ async function fetchMacroSeries(
   // All remaining sources in parallel. Timeouts bumped from list-mode defaults
   // (2-5s) to 8s so MAX timeframe requests have time to download full-history
   // CSVs (CPI has ~950 monthly rows back to 1947).
-  const [fred, dbnomics, treasury, yahoo, nyFed, yahooDff, ecb, bls] = await Promise.all([
+  const [fred, dbnomics, treasury, yahoo, ecb, bls] = await Promise.all([
     fetchFRED(fredId, fromDate, 8_000),
     fetchDBnomicsFRED(fredId, fromDate, 8_000),
     TREASURY_COL[fredId] ? fetchUSTreasury(fredId, fromDate, 6_000) : Promise.resolve<Pts>([]),
     yahooSym             ? fetchYahooYield(yahooSym, fromDate)      : Promise.resolve<Pts>([]),
-    fredId === 'DFF'     ? fetchNYFedEffr(fromDate, 6_000)          : Promise.resolve<Pts>([]),
-    fredId === 'DFF'     ? fetchYahooYield('^IRX', fromDate)        : Promise.resolve<Pts>([]),
-    fredId === 'ECBDFR'  ? fetchECBRate(fromDate, 6_000)            : Promise.resolve<Pts>([]),
+    fredId === 'ECBDFR'  ? fetchECBRate(fromDate, 8_000)            : Promise.resolve<Pts>([]),
     blsSym               ? fetchBLS(blsSym, fromDate, 8_000)        : Promise.resolve<Pts>([]),
   ]);
 
   if (fred.length)     { console.log(`[macro] ${fredId} FRED (${fred.length})`);       return fred; }
   if (dbnomics.length) { console.log(`[macro] ${fredId} DBnomics (${dbnomics.length})`); return dbnomics; }
   if (treasury.length) { console.log(`[macro] ${fredId} Treasury (${treasury.length})`); return treasury; }
-  if (nyFed.length)    { console.log(`[macro] ${fredId} NY Fed (${nyFed.length})`);    return nyFed; }
   if (ecb.length)      { console.log(`[macro] ${fredId} ECB (${ecb.length})`);         return ecb; }
   if (bls.length)      { console.log(`[macro] ${fredId} BLS (${bls.length})`);         return bls; }
   if (yahoo.length)    { console.log(`[macro] ${fredId} Yahoo (${yahoo.length})`);     return yahoo; }
-  if (yahooDff.length) { console.log(`[macro] DFF Yahoo ^IRX (${yahooDff.length})`);  return yahooDff; }
 
   return [];
 }
@@ -932,21 +928,28 @@ export async function GET(req: NextRequest) {
   type Pts = { date: string; value: number }[];
 
   const needsYTnx = ids.includes('DGS10') || ids.includes('T10Y2Y');
-  const needsYIrx = ids.includes('DGS2')  || ids.includes('T10Y2Y') || ids.includes('DFF');
+  const needsYIrx = ids.includes('DGS2')  || ids.includes('T10Y2Y');
 
-  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, nyFedPts, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage] = await Promise.all([
+  const needsWBkd = ids.includes('GDPC1');
+  const needsWBcd = ids.includes('GDP');
+
+  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD] = await Promise.all([
     Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
-    Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 5_000).then(pts => ({ id, pts })))),
+    // Increased from 5s to 8s — DBnomics is the primary fallback for many series
+    // (GDPC1, INDPRO, HOUST, M2SL, ECBDFR) and needs time on cold starts.
+    Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 8_000).then(pts => ({ id, pts })))),
     // BLS: parallel GET requests, each cached 4h by Next.js edge data cache
     blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr) : Promise.resolve(new Map<string, Pts>()),
     needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000, true) : Promise.resolve<Pts>([]),
     needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000, true) : Promise.resolve<Pts>([]),
-    ids.includes('DFF')          ? fetchNYFedEffr(fromStr, 5_000, true)       : Promise.resolve<Pts>([]),
-    ids.includes('ECBDFR')       ? fetchECBRate(fromStr, 5_000)               : Promise.resolve<Pts>([]),
+    ids.includes('ECBDFR')       ? fetchECBRate(fromStr, 8_000)               : Promise.resolve<Pts>([]),
     needsYTnx                    ? fetchYahooYield('^TNX', fromStr)            : Promise.resolve<Pts>([]),
     needsYIrx                    ? fetchYahooYield('^IRX', fromStr)            : Promise.resolve<Pts>([]),
     ids.includes('INDPRO')       ? fetchOECDIndPro(fromStr, 6_000)            : Promise.resolve<Pts>([]),
     ids.includes('MORTGAGE30US') ? fetchFreddieMacMortgage(fromStr, 6_000)    : Promise.resolve<Pts>([]),
+    // WorldBank: last-resort for GDP/GDPC1 if FRED + DBnomics both fail
+    needsWBkd ? fetchWorldBankGDP('NY.GDP.MKTP.KD', fromStr, 6_000) : Promise.resolve<Pts>([]),
+    needsWBcd ? fetchWorldBankGDP('NY.GDP.MKTP.CD', fromStr, 6_000) : Promise.resolve<Pts>([]),
   ]);
 
   const fredMap = new Map(fredResults.map(r => [r.id, r.pts]));
@@ -977,13 +980,13 @@ export async function GET(req: NextRequest) {
     let pts = fredMap.get(id) ?? [];
     if (!pts.length) pts = dbnMap.get(id) ?? [];
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
-    // DFF: NY Fed JSON → Yahoo ^IRX (13W T-Bill ≈ Fed Funds Rate within ~10 bps)
-    if (!pts.length && id === 'DFF')          pts = nyFedPts.length ? nyFedPts : yahooIrx;
     if (!pts.length && id === 'ECBDFR')       pts = ecbPts;
     if (!pts.length && id === 'DGS2')         pts = tDgs2.length  ? tDgs2  : yahooIrx;
     if (!pts.length && id === 'DGS10')        pts = tDgs10.length ? tDgs10 : yahooTnx;
     if (!pts.length && id === 'T10Y2Y')       pts = t10y2yPts;
     if (!pts.length && id === 'INDPRO')       pts = oecdIndPro;
+    if (!pts.length && id === 'GDPC1')        pts = wbKD;
+    if (!pts.length && id === 'GDP')          pts = wbCD;
     if (!pts.length && id === 'MORTGAGE30US') pts = fmMortgage;
     if (!pts.length) return { id, latest: null, prev: null };
     return {

@@ -12,7 +12,7 @@ export interface MacroIndicator {
 
 export const MACRO_INDICATORS: MacroIndicator[] = [
   // Rates
-  { id: 'DFF',       name: 'USA Interest Rate',     category: 'Rates',       unit: '%'   },
+  { id: 'DFEDTARU',  name: 'USA Interest Rate',     category: 'Rates',       unit: '%'   },
   { id: 'ECBDFR',    name: 'EU Interest Rate',      category: 'Rates',       unit: '%'   },
   { id: 'DGS10',     name: 'US 10Y Yield',          category: 'Rates',       unit: '%'   },
   { id: 'DGS2',      name: 'US 2Y Yield',           category: 'Rates',       unit: '%'   },

@@ -87,7 +87,10 @@ export function PriceChart({
             if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
             return n.toFixed(decimals);
           }}
-          domain={['auto', 'auto']}
+          domain={[
+            (dataMin: number) => dataMin >= 0 ? Math.max(0, dataMin * 0.92) : dataMin * 1.08,
+            'auto',
+          ]}
         />
         <Tooltip
           contentStyle={{

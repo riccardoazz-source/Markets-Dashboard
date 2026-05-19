@@ -585,90 +585,38 @@ export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]>
   return fetchQuotesV8Fallback(symbols);
 }
 
-// PE-focused batch quote: v8/chart doesn't carry trailingPE/forwardPE so it
-// can't be used here.
+// PE-focused batch quote: v8/chart doesn't carry trailingPE/forwardPE so only
+// v7 is usable here. Yahoo v7 supports ~100-200 symbols per batch.
 //
-// Strategy A (price + PE together): v7 no-auth sequential in batches of 25
-// with a 60ms gap between batches. Sequential avoids the rate-limiting that
-// killed the original parallel implementation (17 concurrent v7 chunks →
-// Yahoo 429). If v7 no-auth returns nothing on the first chunk, we switch to
-// v7 with crumb for the remainder (same crumb session the rest of the app
-// already uses).
-//
-// Strategy B (PE only, when A fails): per-symbol quoteSummary summaryDetail
-// with crumb auth (the same fetchQuoteSummary path used by fetchYahooEarnings,
-// known to work). Run with limited concurrency to stay under Yahoo rate limits.
+// Strategy: split into chunks of 100, run ALL chunks in parallel (not sequential).
+// 500 symbols → 5 parallel requests → completes in ~5-8s vs 160s sequential.
+// If no-auth returns insufficient PE coverage, retry with crumb auth in parallel.
 export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[]> {
   if (symbols.length === 0) return [];
 
-  const CHUNK = 25;
-  const out: YahooQuote[] = [];
-  let useCrumb = false;
-
+  const CHUNK = 100;
+  const chunks: string[][] = [];
   for (let i = 0; i < symbols.length; i += CHUNK) {
-    const batch = symbols.slice(i, i + CHUNK);
-    let res: YahooQuote[];
-
-    if (!useCrumb) {
-      res = await fetchQuotesV7NoAuth(batch);
-      if (res.length === 0 && i === 0) {
-        // v7 no-auth blocked — switch to crumb for all remaining batches
-        console.warn('[yahoo-pe] v7-noauth failed on first chunk; switching to crumb auth');
-        useCrumb = true;
-        res = await fetchQuotesV7(batch);
-      }
-    } else {
-      res = await fetchQuotesV7(batch);
-    }
-
-    out.push(...res);
-    if (i + CHUNK < symbols.length) {
-      await new Promise(r => setTimeout(r, 60));
-    }
+    chunks.push(symbols.slice(i, i + CHUNK));
   }
 
-  // If BOTH v7 paths returned nothing, fall back to quoteSummary (summaryDetail)
-  // per-symbol with crumb auth. Slower (~300ms/symbol) but highly reliable —
-  // same codepath used by fetchYahooEarnings. Run concurrently 12 at a time.
-  if (out.length === 0) {
-    console.warn('[yahoo-pe] all v7 paths empty — falling back to quoteSummary summaryDetail');
-    const CONCURRENCY = 12;
-    for (let i = 0; i < symbols.length; i += CONCURRENCY) {
-      const batch = symbols.slice(i, i + CONCURRENCY);
-      const results = await Promise.all(batch.map(async sym => {
-        const qsData = await fetchQuoteSummary(sym, 'summaryDetail,price', 6_000).catch(() => null);
-        if (!qsData) return null;
-        const sd = qsData.summaryDetail as Record<string, { raw?: number }> | undefined;
-        const pr = qsData.price as Record<string, { raw?: number } | string | number> | undefined;
-        const price = (pr?.regularMarketPrice as { raw?: number })?.raw ?? 0;
-        const prevClose = (pr?.regularMarketPreviousClose as { raw?: number })?.raw ?? 0;
-        const changePercent = prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0;
-        const marketCap = (pr?.marketCap as { raw?: number })?.raw ?? sd?.marketCap?.raw ?? null;
-        return {
-          symbol: sym,
-          name: (pr?.shortName as string) ?? (pr?.longName as string) ?? sym,
-          price,
-          previousClose: prevClose,
-          change: price - prevClose,
-          changePercent,
-          currency: (pr?.currency as string) ?? 'USD',
-          high52w: null,
-          low52w: null,
-          fiftyTwoWeekChangePercent: null,
-          ytdChangePercent: null,
-          trailingPE: sd?.trailingPE?.raw ?? null,
-          forwardPE: sd?.forwardPE?.raw ?? null,
-          marketCap: typeof marketCap === 'number' ? marketCap : null,
-          volume: null,
-        } satisfies YahooQuote;
-      }));
-      for (const r of results) if (r && r.price > 0) out.push(r);
-      if (i + CONCURRENCY < symbols.length) await new Promise(r => setTimeout(r, 60));
-    }
-  }
+  // 1. Try v7 no-auth in parallel — all chunks simultaneously
+  const noAuthResults = await Promise.all(chunks.map(c => fetchQuotesV7NoAuth(c)));
+  const noAuthOut = noAuthResults.flat();
+  const noAuthPE = noAuthOut.filter(q => q.trailingPE != null && q.trailingPE > 0).length;
+  console.log(`[yahoo-pe] v7-noauth: ${noAuthOut.length} quotes, ${noAuthPE} with PE`);
 
-  console.log(`[yahoo-pe] total: ${out.length}/${symbols.length}`);
-  return out;
+  if (noAuthPE >= 50) return noAuthOut;
+
+  // 2. Try v7 crumb auth in parallel — same chunk structure
+  console.warn('[yahoo-pe] v7-noauth PE coverage low; trying crumb auth');
+  const crumbResults = await Promise.all(chunks.map(c => fetchQuotesV7(c)));
+  const crumbOut = crumbResults.flat();
+  const crumbPE = crumbOut.filter(q => q.trailingPE != null && q.trailingPE > 0).length;
+  console.log(`[yahoo-pe] v7-crumb: ${crumbOut.length} quotes, ${crumbPE} with PE`);
+
+  // Return whichever path gave more PE data
+  return crumbPE >= noAuthPE ? crumbOut : noAuthOut;
 }
 
 // ---------------------------------------------------------------------------
