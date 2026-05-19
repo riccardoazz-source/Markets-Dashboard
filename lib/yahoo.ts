@@ -585,6 +585,50 @@ export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]>
   return fetchQuotesV8Fallback(symbols);
 }
 
+// PE-focused batch quote: v8/chart doesn't carry trailingPE/forwardPE so it
+// can't be used here. Tries v7 no-auth first (batches of 30 to avoid 414/429),
+// then v7 with crumb for any chunks that returned nothing. Daily-% values may
+// be slightly off (corrupt previousClose on noauth) but PE / marketCap fields
+// are reliable from v7.
+export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[]> {
+  if (symbols.length === 0) return [];
+  const CHUNK = 30;
+  const chunks: string[][] = [];
+  for (let i = 0; i < symbols.length; i += CHUNK) chunks.push(symbols.slice(i, i + CHUNK));
+
+  // Pass 1: v7 no-auth in parallel
+  const noAuthResults = await Promise.all(chunks.map(c => fetchQuotesV7NoAuth(c)));
+  const seen = new Set<string>();
+  const out: YahooQuote[] = [];
+  for (const arr of noAuthResults) for (const q of arr) {
+    seen.add(q.symbol.toUpperCase());
+    out.push(q);
+  }
+
+  // Pass 2: identify chunks that returned 0 (likely 401/403/rate-limited) and
+  // retry those through v7 with crumb auth. Don't retry chunks that mostly
+  // succeeded — Yahoo sometimes omits a few symbols and that's expected.
+  const failed: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    if (noAuthResults[i].length === 0) failed.push(...chunks[i]);
+  }
+  if (failed.length > 0) {
+    console.warn(`[yahoo-pe] v7-noauth empty for ${failed.length} symbols — retrying with crumb`);
+    // Retry in chunks of 30, sequential to avoid hammering during auth setup
+    for (let i = 0; i < failed.length; i += CHUNK) {
+      const batch = failed.slice(i, i + CHUNK);
+      const arr = await fetchQuotesV7(batch);
+      for (const q of arr) if (!seen.has(q.symbol.toUpperCase())) {
+        seen.add(q.symbol.toUpperCase());
+        out.push(q);
+      }
+    }
+  }
+
+  console.log(`[yahoo-pe] returned ${out.length}/${symbols.length} (with crumb fallback)`);
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Earnings (quarterly EPS history) via Yahoo quoteSummary
 // ---------------------------------------------------------------------------

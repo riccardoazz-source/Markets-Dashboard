@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import clsx from 'clsx';
 import { SECTORS } from '@/lib/config';
+import { SECTOR_FILTERS, tidyLayerName } from '@/lib/sectorValueChain';
 import { formatPercent, formatMarketCap } from '@/lib/utils';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { RefreshCw, X, ArrowDown, ArrowUp } from 'lucide-react';
 
-// -------------- Types from the new APIs ----------------------------------
+// -------------- Types ----------------------------------------------------
 
 interface Sp500Row {
   symbol: string;
@@ -21,29 +22,9 @@ interface Sp500Row {
   changePercent: number | null;
 }
 
-interface Holding {
-  symbol: string;
-  name: string;
-  weight: number | null;
-  sector: string | null;
-  industry: string | null;
-  price: number | null;
-  changePercent: number | null;
-  trailingPE: number | null;
-  marketCap: number | null;
-}
-
 // -------------- Heatmap color scale --------------------------------------
-// Sorted-by-PE ranks map to a green→red gradient. We bucket by absolute PE
-// value (not rank) so the colors stay comparable across refreshes:
-//   PE ≤ 8   → very-dark-green (deep value)
-//   PE 8-15  → green
-//   PE 15-22 → lime
-//   PE 22-30 → yellow
-//   PE 30-45 → orange
-//   PE 45-80 → red
-//   PE > 80  → very-dark-red
-// Stocks without PE (no earnings / negative) get neutral gray.
+// Bucketed by absolute P/E so colors stay comparable across refreshes.
+// Negative or null PE → neutral gray (loss-making / no earnings).
 function colorForPE(pe: number | null): string {
   if (pe == null || !isFinite(pe) || pe <= 0) return 'bg-slate-700/50 text-slate-400';
   if (pe <= 8)   return 'bg-emerald-700 text-emerald-50';
@@ -166,7 +147,6 @@ export function GeneralSection() {
           </div>
         </div>
 
-        {/* Color legend */}
         <div className="flex items-center gap-1 mb-2 text-[10px] text-gray-500 flex-wrap">
           <span className="mr-1">P/E:</span>
           {[
@@ -217,7 +197,7 @@ export function GeneralSection() {
         <div className="mb-3">
           <h2 className="text-sm sm:text-base font-bold text-white">Sectors · Value Chains</h2>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            Click any sector to see its live value chain (top constituents grouped by industry).
+            Click a sector to see its value chain — companies are filtered from the live S&P 500 list and stacked by GICS sub-industry. Layers and constituents evolve as the index rebalances.
           </p>
         </div>
 
@@ -240,8 +220,8 @@ export function GeneralSection() {
           ))}
         </div>
 
-        {selectedEtf && (
-          <ValueChain etf={selectedEtf} onClose={() => setSelectedEtf(null)} />
+        {selectedEtf && rows.length > 0 && (
+          <ValueChain etf={selectedEtf} allRows={rows} onClose={() => setSelectedEtf(null)} />
         )}
       </div>
     </div>
@@ -250,61 +230,63 @@ export function GeneralSection() {
 
 // -------------- Value Chain panel ---------------------------------------
 
-function ValueChain({ etf, onClose }: { etf: string; onClose: () => void }) {
-  const [holdings, setHoldings] = useState<Holding[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+interface Layer {
+  industry: string;
+  items: Sp500Row[];
+  totalMCap: number;
+}
 
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    setHoldings([]);
-    fetch(`/api/etf-holdings?etf=${encodeURIComponent(etf)}`)
-      .then(r => r.json() as Promise<Holding[] | { error?: string }>)
-      .then(d => {
-        if (Array.isArray(d)) {
-          if (!d.length) setError('No holdings data available for this ETF.');
-          setHoldings(d);
-        } else {
-          setError(d?.error ?? 'Failed to load holdings.');
-        }
-      })
-      .catch(() => setError('Failed to load holdings.'))
-      .finally(() => setLoading(false));
-  }, [etf]);
+function buildLayers(etf: string, rows: Sp500Row[]): Layer[] {
+  const filter = SECTOR_FILTERS[etf];
+  if (!filter) return [];
 
+  let matching: Sp500Row[];
+  if (filter.gicsSector) {
+    const target = filter.gicsSector.toLowerCase();
+    matching = rows.filter(r => r.sector?.toLowerCase() === target);
+  } else if (filter.subIndustryMatch?.length) {
+    const needles = filter.subIndustryMatch.map(s => s.toLowerCase());
+    matching = rows.filter(r => {
+      const si = r.subIndustry?.toLowerCase() ?? '';
+      return needles.some(n => si.includes(n));
+    });
+  } else {
+    matching = [];
+  }
+
+  const groups = new Map<string, Sp500Row[]>();
+  for (const r of matching) {
+    const key = r.subIndustry || 'Other';
+    const arr = groups.get(key) ?? [];
+    arr.push(r);
+    groups.set(key, arr);
+  }
+
+  return Array.from(groups.entries())
+    .map(([industry, items]) => ({
+      industry,
+      items: items.sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)),
+      totalMCap: items.reduce((s, i) => s + (i.marketCap ?? 0), 0),
+    }))
+    .sort((a, b) => b.totalMCap - a.totalMCap);
+}
+
+function ValueChain({ etf, allRows, onClose }: { etf: string; allRows: Sp500Row[]; onClose: () => void }) {
   const sector = SECTORS.find(s => s.symbol === etf);
-
-  // Group by `industry` (GICS sub-industry from assetProfile). This produces
-  // the "layered" view like the Data Centre value chain — companies stack into
-  // rows by their role/sub-industry, which evolves as Yahoo reclassifies them.
-  const groups = useMemo(() => {
-    const map = new Map<string, Holding[]>();
-    for (const h of holdings) {
-      const key = h.industry ?? 'Other';
-      const arr = map.get(key) ?? [];
-      arr.push(h);
-      map.set(key, arr);
-    }
-    // Sort layers by total weight (largest layer first)
-    return Array.from(map.entries())
-      .map(([industry, items]) => ({
-        industry,
-        items: items.sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0)),
-        totalWeight: items.reduce((s, i) => s + (i.weight ?? 0), 0),
-      }))
-      .sort((a, b) => b.totalWeight - a.totalWeight);
-  }, [holdings]);
+  const filter = SECTOR_FILTERS[etf];
+  const layers = useMemo(() => buildLayers(etf, allRows), [etf, allRows]);
+  const totalCompanies = layers.reduce((s, l) => s + l.items.length, 0);
 
   return (
     <div className="mt-4 border-t border-border pt-4">
       <div className="flex items-center justify-between mb-3">
         <div>
           <h3 className="text-sm font-bold text-white">
-            {sector?.name ?? etf} Value Chain
+            {sector?.name ?? etf} · Value Chain
           </h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            Live top holdings of <span className="font-mono text-gray-400">{etf}</span> grouped by GICS industry · refreshes with the ETF&apos;s composition
+            {filter?.description ?? `${sector?.name ?? etf} companies grouped by GICS sub-industry`}
+            {totalCompanies > 0 && ` · ${totalCompanies} S&P 500 companies in ${layers.length} layer${layers.length === 1 ? '' : 's'}`}
           </p>
         </div>
         <button onClick={onClose}
@@ -314,20 +296,20 @@ function ValueChain({ etf, onClose }: { etf: string; onClose: () => void }) {
         </button>
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-8"><LoadingSpinner /></div>
-      ) : error ? (
-        <p className="text-sm text-gray-500 py-4">{error}</p>
+      {!filter ? (
+        <p className="text-sm text-gray-500 py-4">No value-chain definition for {etf} yet.</p>
+      ) : layers.length === 0 ? (
+        <p className="text-sm text-gray-500 py-4">No matching S&P 500 companies for this filter.</p>
       ) : (
         <div className="space-y-3">
-          {groups.map(g => (
+          {layers.map(g => (
             <div key={g.industry} className="border border-border rounded-lg overflow-hidden">
-              <div className="bg-bg px-3 py-1.5 flex items-baseline justify-between">
+              <div className="bg-bg px-3 py-1.5 flex items-baseline justify-between flex-wrap gap-2">
                 <span className="text-xs font-bold text-white uppercase tracking-wide">
-                  {g.industry}
+                  {tidyLayerName(g.industry)}
                 </span>
                 <span className="text-[10px] text-gray-500">
-                  {g.items.length} {g.items.length === 1 ? 'company' : 'companies'} · {(g.totalWeight * 100).toFixed(1)}% of {etf}
+                  {g.items.length} {g.items.length === 1 ? 'company' : 'companies'} · {formatMarketCap(g.totalMCap)} combined MCap
                 </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 p-2">
@@ -347,15 +329,9 @@ function ValueChain({ etf, onClose }: { etf: string; onClose: () => void }) {
                     </div>
                     <div className="text-[10px] text-gray-400 truncate" title={h.name}>{h.name}</div>
                     <div className="flex items-baseline justify-between mt-1.5 text-[10px]">
-                      <span className="text-gray-500">P/E</span>
+                      <span className="text-gray-500">P/E TTM</span>
                       <span className={clsx('font-semibold', h.trailingPE != null && h.trailingPE > 0 ? 'text-sky-400' : 'text-gray-600')}>
                         {h.trailingPE != null && h.trailingPE > 0 ? h.trailingPE.toFixed(1) : '—'}
-                      </span>
-                    </div>
-                    <div className="flex items-baseline justify-between text-[10px]">
-                      <span className="text-gray-500">Weight</span>
-                      <span className="font-semibold text-gray-300">
-                        {h.weight != null ? `${(h.weight * 100).toFixed(1)}%` : '—'}
                       </span>
                     </div>
                     {h.marketCap != null && (
