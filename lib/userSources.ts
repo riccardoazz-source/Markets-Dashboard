@@ -1,6 +1,7 @@
 // Persistent custom data-source configuration stored in localStorage.
 // Built-in indicators (MACRO_INDICATORS) can have their fetch URL overridden;
 // completely new indicators can be added under "custom".
+// Built-in indicators can also be hidden from the Macro tab via "hidden".
 
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$';
 
@@ -18,16 +19,25 @@ export interface SourcesConfig {
   overrides: Record<string, string>;
   // Completely new indicators the user added.
   custom: CustomSource[];
+  // IDs of built-in indicators hidden from the Macro tab.
+  hidden: string[];
 }
 
 const KEY = 'mkt-sources-v2';
-const EMPTY: SourcesConfig = { overrides: {}, custom: [] };
+const EMPTY: SourcesConfig = { overrides: {}, custom: [], hidden: [] };
 
 export function loadSourcesConfig(): SourcesConfig {
   if (typeof window === 'undefined') return EMPTY;
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as SourcesConfig) : EMPTY;
+    if (!raw) return EMPTY;
+    const parsed = JSON.parse(raw) as Partial<SourcesConfig>;
+    // Backward-compat: older stored configs may lack `hidden`
+    return {
+      overrides: parsed.overrides ?? {},
+      custom: parsed.custom ?? [],
+      hidden: parsed.hidden ?? [],
+    };
   } catch {
     return EMPTY;
   }

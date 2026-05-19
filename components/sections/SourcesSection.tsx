@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X } from 'lucide-react';
+import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff } from 'lucide-react';
 import { MACRO_INDICATORS } from '@/lib/config';
 import {
   loadSourcesConfig, saveSourcesConfig, generateId, notifySourcesChanged,
@@ -62,7 +62,7 @@ const BLANK_CUSTOM: Omit<CustomSource, 'id'> = {
 };
 
 export function SourcesSection() {
-  const [config, setConfig] = useState<SourcesConfig>({ overrides: {}, custom: [] });
+  const [config, setConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [] });
   const [statuses, setStatuses] = useState<Record<string, StatusInfo>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editUrl, setEditUrl] = useState('');
@@ -120,6 +120,14 @@ export function SourcesSection() {
     setStatuses(next);
   };
 
+  const toggleHide = (id: string) => {
+    const hidden = config.hidden ?? [];
+    const next = hidden.includes(id)
+      ? hidden.filter(h => h !== id)
+      : [...hidden, id];
+    persist({ ...config, hidden: next });
+  };
+
   // ── Add custom indicator ──────────────────────────────────────────────────
 
   const addCustom = () => {
@@ -132,16 +140,30 @@ export function SourcesSection() {
 
   // ── Live status check ─────────────────────────────────────────────────────
 
-  const checkOne = useCallback(async (id: string, url: string) => {
+  // isBuiltinNoOverride = built-in indicator without a custom URL override.
+  // For these we check via /api/macro (they have native multi-source pipelines).
+  // For overridden built-ins and custom indicators we check via /api/scrape.
+  const checkOne = useCallback(async (id: string, url: string, isBuiltinNoOverride: boolean) => {
     setStatuses(s => ({ ...s, [id]: { status: 'loading', message: '', pts: 0 } }));
+    const from18 = new Date(); from18.setMonth(from18.getMonth() - 18);
+    const fromStr = from18.toISOString().slice(0, 10);
     try {
-      const from18 = new Date(); from18.setMonth(from18.getMonth() - 18);
-      const res = await fetch(`/api/scrape?url=${encodeURIComponent(url)}&from=${from18.toISOString().slice(0,10)}`);
-      const json = await res.json() as { success: boolean; data: unknown[]; message: string };
-      setStatuses(s => ({
-        ...s,
-        [id]: { status: json.success ? 'ok' : 'error', message: json.message, pts: json.data?.length ?? 0 },
-      }));
+      if (isBuiltinNoOverride) {
+        const res = await fetch(`/api/macro?mode=history&id=${id}&from=${fromStr}`);
+        const json = await res.json() as unknown[];
+        const pts = Array.isArray(json) ? json.length : 0;
+        setStatuses(s => ({
+          ...s,
+          [id]: { status: pts > 0 ? 'ok' : 'error', message: pts > 0 ? '' : 'No data from pipeline', pts },
+        }));
+      } else {
+        const res = await fetch(`/api/scrape?url=${encodeURIComponent(url)}&from=${fromStr}`);
+        const json = await res.json() as { success: boolean; data: unknown[]; message: string };
+        setStatuses(s => ({
+          ...s,
+          [id]: { status: json.success ? 'ok' : 'error', message: json.message, pts: json.data?.length ?? 0 },
+        }));
+      }
     } catch (e) {
       setStatuses(s => ({ ...s, [id]: { status: 'error', message: String(e), pts: 0 } }));
     }
@@ -150,15 +172,15 @@ export function SourcesSection() {
   const checkAll = async () => {
     if (!mounted) return;
     setCheckingAll(true);
-    const all: { id: string; url: string }[] = [
-      ...MACRO_INDICATORS.map(m => ({ id: m.id, url: config.overrides[m.id] ?? m.source.url })),
-      ...config.custom.map(c => ({ id: c.id, url: c.url })),
-    ];
-    await Promise.all(all.map(({ id, url }) => checkOne(id, url)));
+    await Promise.all(allIndicators.map(ind =>
+      checkOne(ind.id, ind.effectiveUrl, ind.isBuiltin && !ind.isOverridden)
+    ));
     setCheckingAll(false);
   };
 
   // ── Combined indicator list ───────────────────────────────────────────────
+
+  const hiddenSet = new Set(mounted ? (config.hidden ?? []) : []);
 
   const allIndicators = mounted ? [
     ...MACRO_INDICATORS.map(m => ({
@@ -172,6 +194,7 @@ export function SourcesSection() {
       effectiveUrl: config.overrides[m.id] ?? m.source.url,
       isBuiltin: true,
       isOverridden: !!config.overrides[m.id],
+      isHidden: hiddenSet.has(m.id),
     })),
     ...config.custom.map(c => ({
       id: c.id,
@@ -184,12 +207,13 @@ export function SourcesSection() {
       effectiveUrl: c.url,
       isBuiltin: false,
       isOverridden: false,
+      isHidden: false,
     })),
   ] : MACRO_INDICATORS.map(m => ({
     id: m.id, name: m.name, category: m.category, unit: m.unit,
     sourceLabel: m.source.label, sourceType: m.source.type,
     defaultUrl: m.source.url, effectiveUrl: m.source.url,
-    isBuiltin: true, isOverridden: false,
+    isBuiltin: true, isOverridden: false, isHidden: false,
   }));
 
   const sourceTypeBadge = (t: string) => {
@@ -293,9 +317,17 @@ export function SourcesSection() {
                 const st = statuses[ind.id];
                 return (
                   <tr key={ind.id}
-                    className="border-t border-border align-middle hover:bg-bg-hover/20 transition-colors">
+                    className={clsx(
+                      'border-t border-border align-middle transition-colors',
+                      ind.isHidden ? 'opacity-50 hover:opacity-70' : 'hover:bg-bg-hover/20',
+                    )}>
                     <td className="px-3 py-2">
-                      <div className="font-medium text-gray-100">{ind.name}</div>
+                      <div className="font-medium text-gray-100 flex items-center gap-1.5">
+                        {ind.name}
+                        {ind.isHidden && (
+                          <span className="text-[9px] text-gray-600 border border-gray-700 rounded px-1">hidden</span>
+                        )}
+                      </div>
                       <div className="text-[10px] text-gray-600 font-mono">{ind.id}</div>
                     </td>
                     <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{ind.category}</td>
@@ -345,7 +377,7 @@ export function SourcesSection() {
                             <Edit2 size={12} />
                           </button>
                         )}
-                        <button onClick={() => checkOne(ind.id, ind.effectiveUrl)}
+                        <button onClick={() => checkOne(ind.id, ind.effectiveUrl, ind.isBuiltin && !ind.isOverridden)}
                           title="Test this source" className="p-1 text-gray-500 hover:text-sky-400 transition">
                           <CheckCircle2 size={12} />
                         </button>
@@ -357,6 +389,13 @@ export function SourcesSection() {
                           <button onClick={() => clearOverride(ind.id)}
                             title="Reset to default" className="p-1 text-yellow-600 hover:text-yellow-400 transition text-[10px] font-semibold">
                             ↺
+                          </button>
+                        )}
+                        {ind.isBuiltin && (
+                          <button onClick={() => toggleHide(ind.id)}
+                            title={ind.isHidden ? 'Show in Macro tab' : 'Hide from Macro tab'}
+                            className={clsx('p-1 transition', ind.isHidden ? 'text-gray-600 hover:text-gray-300' : 'text-gray-500 hover:text-yellow-400')}>
+                            {ind.isHidden ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                         )}
                         {!ind.isBuiltin && (

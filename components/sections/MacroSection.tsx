@@ -26,7 +26,8 @@ interface UnifiedIndicator {
   category: string;
   unit: MacroUnit;
   isBuiltin: boolean;
-  fetchUrl: string | null; // null → /api/macro; string → /api/scrape
+  fetchUrl: string | null;      // null → /api/macro; string → /api/scrape
+  fredFallbackUrl?: string;     // if /api/macro fails for a fred-type indicator, retry via /api/scrape
 }
 
 function formatMacroValue(value: number, unit: MacroUnit): string {
@@ -69,7 +70,7 @@ function formatShortDate(dateStr: string): string {
 
 export function MacroSection() {
   const [mounted, setMounted] = useState(false);
-  const [sourcesConfig, setSourcesConfig] = useState<SourcesConfig>({ overrides: {}, custom: [] });
+  const [sourcesConfig, setSourcesConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [] });
   const [category, setCategory] = useState('All');
   const [data, setData] = useState<Record<string, MacroLatest>>({});
   const [statusOk, setStatusOk] = useState<Record<string, boolean>>({});
@@ -88,17 +89,24 @@ export function MacroSection() {
     return () => window.removeEventListener('mkt-sources-changed', handler);
   }, []);
 
-  const allIndicators = useMemo<UnifiedIndicator[]>(() => [
-    ...MACRO_INDICATORS.map(m => ({
-      id: m.id, name: m.name, category: m.category, unit: m.unit,
-      isBuiltin: true,
-      fetchUrl: mounted ? (sourcesConfig.overrides[m.id] ?? null) : null,
-    })),
-    ...(mounted ? sourcesConfig.custom.map(c => ({
-      id: c.id, name: c.name, category: c.category, unit: c.unit as MacroUnit,
-      isBuiltin: false, fetchUrl: c.url,
-    })) : []),
-  ], [mounted, sourcesConfig]);
+  const allIndicators = useMemo<UnifiedIndicator[]>(() => {
+    const hiddenSet = new Set(mounted ? (sourcesConfig.hidden ?? []) : []);
+    return [
+      ...MACRO_INDICATORS
+        .filter(m => !hiddenSet.has(m.id))
+        .map(m => ({
+          id: m.id, name: m.name, category: m.category, unit: m.unit,
+          isBuiltin: true,
+          fetchUrl: mounted ? (sourcesConfig.overrides[m.id] ?? null) : null,
+          // FRED-type indicators that fail from /api/macro can fall back to /api/scrape (Node.js)
+          fredFallbackUrl: m.source.type === 'fred' ? m.source.url : undefined,
+        })),
+      ...(mounted ? sourcesConfig.custom.map(c => ({
+        id: c.id, name: c.name, category: c.category, unit: c.unit as MacroUnit,
+        isBuiltin: false, fetchUrl: c.url,
+      })) : []),
+    ];
+  }, [mounted, sourcesConfig]);
 
   const categories = useMemo(() => {
     const extraCats = sourcesConfig.custom
@@ -124,6 +132,34 @@ export function MacroSection() {
           okUpdates[d.id] = d.latest !== null;
         });
       } catch (e) { console.error(e); }
+
+      // FRED fallback: for fred-type indicators that returned null, retry via
+      // /api/scrape (Node.js runtime) which can reach DBnomics more reliably.
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+      const fredFrom = twoYearsAgo.toISOString().slice(0, 10);
+      const failedFred = builtinNormal.filter(
+        ind => ind.fredFallbackUrl && !dataUpdates[ind.id]?.latest
+      );
+      if (failedFred.length > 0) {
+        await Promise.allSettled(failedFred.map(async ind => {
+          try {
+            const res = await fetch(`/api/scrape?url=${encodeURIComponent(ind.fredFallbackUrl!)}&from=${fredFrom}`);
+            const json = await res.json();
+            if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+              const sorted = [...json.data].sort((a: { date: string }, b: { date: string }) =>
+                a.date.localeCompare(b.date)
+              );
+              dataUpdates[ind.id] = {
+                id: ind.id,
+                latest: sorted[sorted.length - 1],
+                prev: sorted.length > 1 ? sorted[sorted.length - 2] : null,
+              };
+              okUpdates[ind.id] = true;
+            }
+          } catch { /* keep null */ }
+        }));
+      }
     }
 
     if (scrapeList.length > 0) {
@@ -167,16 +203,31 @@ export function MacroSection() {
   const fetchHistory = useCallback(async (id: string, tf: Timeframe) => {
     setHistLoading(true);
     const ind = allIndicators.find(i => i.id === id);
+    // /api/scrape returns {date, value}[]; /api/macro returns {date, close}[] (HistoricalPoint)
+    const scrapeToHist = (data: { date: string; value: number }[]): HistoricalPoint[] =>
+      data.map(p => ({ date: p.date, close: p.value }));
     try {
       const from = getTimeframeStart(tf);
       if (ind?.fetchUrl) {
         const res = await fetch(`/api/scrape?url=${encodeURIComponent(ind.fetchUrl)}&from=${from}`);
         const json = await res.json();
-        setHistorical(json.success && Array.isArray(json.data) ? json.data : []);
+        setHistorical(json.success && Array.isArray(json.data) ? scrapeToHist(json.data) : []);
       } else {
         const res = await fetch(`/api/macro?mode=history&id=${id}&from=${from}`);
         const json = await res.json() as HistoricalPoint[];
-        setHistorical(Array.isArray(json) ? json : []);
+        const pts = Array.isArray(json) ? json : [];
+        if (pts.length > 0) {
+          setHistorical(pts);
+        } else if (ind?.fredFallbackUrl) {
+          // FRED fallback via Node.js scrape route for indicators that fail from edge
+          try {
+            const sres = await fetch(`/api/scrape?url=${encodeURIComponent(ind.fredFallbackUrl)}&from=${from}`);
+            const sjson = await sres.json();
+            setHistorical(sjson.success && Array.isArray(sjson.data) ? scrapeToHist(sjson.data) : []);
+          } catch { setHistorical([]); }
+        } else {
+          setHistorical([]);
+        }
       }
     } catch { setHistorical([]); }
     finally { setHistLoading(false); }
