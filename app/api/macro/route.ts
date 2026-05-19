@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // in /api/historical and /api/crypto. Node.js was tried to get different IPs for
 // FRED, but FRED is blocked regardless — edge is strictly better here.
 export const runtime = 'edge';
+export const maxDuration = 25; // edge limit; gives DBnomics + fallbacks room to finish
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -190,6 +191,27 @@ async function fetchFRED(
 // like MORTGAGE30US, ICSA, T10YIE, GDPC1, INDPRO.
 // Canonical path: /v22/series/{provider}/{dataset}/{series}
 // For FRED, each series is its own dataset so both codes are the series id.
+// Normalize DBnomics period strings to YYYY-MM-DD.
+// FRED quarterly series come back as "2024-Q4", annual as "2024", monthly as
+// "2024-12" — the old code only handled YYYY-MM-DD and YYYY-MM, silently
+// dropping quarterly + annual rows (= GDP/GDPC1/INDPRO showing "No data").
+function normalizeDbnomicsPeriod(p: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p)) return p;
+  if (/^\d{4}-\d{2}$/.test(p)) return `${p}-01`;
+  const qm = p.match(/^(\d{4})-Q([1-4])$/);
+  if (qm) {
+    const monthNum = (parseInt(qm[2], 10) - 1) * 3 + 1; // Q1→1, Q2→4, Q3→7, Q4→10
+    return `${qm[1]}-${String(monthNum).padStart(2, '0')}-01`;
+  }
+  const sm = p.match(/^(\d{4})-S([1-2])$/); // semestrial
+  if (sm) {
+    const monthNum = sm[2] === '1' ? 1 : 7;
+    return `${sm[1]}-${String(monthNum).padStart(2, '0')}-01`;
+  }
+  if (/^\d{4}$/.test(p)) return `${p}-07-01`; // annual → mid-year proxy
+  return null;
+}
+
 async function fetchDBnomicsFRED(
   seriesId: string,
   fromDate?: string,
@@ -223,9 +245,8 @@ async function fetchDBnomicsFRED(
         const p = periods[i];
         const v = values[i];
         if (typeof p !== 'string') continue;
-        // dbnomics may return YYYY-MM for monthly series — append day
-        const dateStr = /^\d{4}-\d{2}$/.test(p) ? `${p}-01` : p;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+        const dateStr = normalizeDbnomicsPeriod(p);
+        if (!dateStr) continue;
         const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(String(v));
         if (!isFinite(num)) continue;
         if (fromDate && dateStr < fromDate) continue;
@@ -493,10 +514,13 @@ async function fetchWorldBankGDP(
     const json = await res.json() as [unknown, Array<{ date?: string; value?: number | null }>];
     const rows = Array.isArray(json) ? json[1] : [];
     const pts: { date: string; value: number }[] = [];
+    // Annual data is anchored at mid-year. Don't apply fromDate filter — if
+    // the caller asks for "last 6 months" we'd drop the most recent annual
+    // observation (it's mid-year of the prior fiscal year). Caller should
+    // accept that annual data is sparse.
     for (const r of rows) {
       if (!r.date || r.value == null || !isFinite(r.value)) continue;
-      const dateStr = `${r.date}-07-01`; // annual → mid-year proxy
-      if (fromDate && dateStr < fromDate) continue;
+      const dateStr = `${r.date}-07-01`;
       pts.push({ date: dateStr, value: r.value / 1e9 }); // USD → billions
     }
     pts.sort((a, b) => a.date.localeCompare(b.date));
@@ -683,6 +707,35 @@ const BLS_MAP: Record<string, string> = {
 // Upper bound of the target range — this is what countryeconomy.com / FRED show.
 // Update after each FOMC meeting: https://www.federalreserve.gov/monetarypolicy/openmarket.htm
 const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
+  // Pre-2008: target was a single rate (no range). Approximated as upper bound.
+  { date: '2007-09-18', value: 4.75 },
+  { date: '2007-10-31', value: 4.50 },
+  { date: '2007-12-11', value: 4.25 },
+  { date: '2008-01-22', value: 3.50 },
+  { date: '2008-01-30', value: 3.00 },
+  { date: '2008-03-18', value: 2.25 },
+  { date: '2008-04-30', value: 2.00 },
+  { date: '2008-10-08', value: 1.50 },
+  { date: '2008-10-29', value: 1.00 },
+  // Target range system introduced Dec 2008
+  { date: '2008-12-16', value: 0.25 },
+  // Zero lower bound era 2008-12-16 → 2015-12-15
+  { date: '2015-12-16', value: 0.50 },
+  { date: '2016-12-14', value: 0.75 },
+  { date: '2017-03-15', value: 1.00 },
+  { date: '2017-06-14', value: 1.25 },
+  { date: '2017-12-13', value: 1.50 },
+  { date: '2018-03-21', value: 1.75 },
+  { date: '2018-06-13', value: 2.00 },
+  { date: '2018-09-26', value: 2.25 },
+  { date: '2018-12-19', value: 2.50 },
+  { date: '2019-07-31', value: 2.25 },
+  { date: '2019-09-18', value: 2.00 },
+  { date: '2019-10-30', value: 1.75 },
+  // COVID emergency cuts
+  { date: '2020-03-03', value: 1.25 },
+  { date: '2020-03-15', value: 0.25 },
+  // 2022-2023 hike cycle
   { date: '2022-03-16', value: 0.50 },
   { date: '2022-05-04', value: 1.00 },
   { date: '2022-06-15', value: 1.75 },
@@ -694,6 +747,7 @@ const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
   { date: '2023-03-22', value: 5.00 },
   { date: '2023-05-03', value: 5.25 },
   { date: '2023-07-26', value: 5.50 },
+  // 2024-2026 cut cycle
   { date: '2024-09-18', value: 5.00 },
   { date: '2024-11-07', value: 4.75 },
   { date: '2024-12-18', value: 4.50 },
@@ -969,10 +1023,11 @@ export async function GET(req: NextRequest) {
   const cached = getCached(key, TTL);
   if (cached) return NextResponse.json(cached, { headers: CACHE_HEADERS });
 
-  // Fetch last 2 years so step-function series (rates, quarterly GDP) always
-  // have at least one data point regardless of update frequency.
+  // Fetch last 18 months: enough to capture latest + previous for quarterly
+  // (GDP) and step-function series (rate decisions), while keeping payloads
+  // small for daily series like DGS10.
   const from = new Date();
-  from.setFullYear(from.getFullYear() - 2);
+  from.setMonth(from.getMonth() - 18);
   const fromStr = from.toISOString().split('T')[0];
 
   // ── Parallel fetch: FRED + all fallback sources start simultaneously ──
@@ -992,21 +1047,22 @@ export async function GET(req: NextRequest) {
 
   const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD] = await Promise.all([
     Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
-    // Increased from 5s to 8s — DBnomics is the primary fallback for many series
-    // (GDPC1, INDPRO, HOUST, M2SL, ECBDFR) and needs time on cold starts.
-    Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 8_000).then(pts => ({ id, pts })))),
+    // DBnomics 6s — primary fallback for GDPC1/INDPRO/HOUST/M2SL/ECBDFR.
+    // Lowered from 8s: most responses come back in <2s; longer waits just
+    // delay the response without adding signal.
+    Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 6_000).then(pts => ({ id, pts })))),
     // BLS: parallel GET requests, each cached 4h by Next.js edge data cache
     blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr) : Promise.resolve(new Map<string, Pts>()),
-    needsT2  ? fetchUSTreasury('DGS2',  fromStr, 5_000, true) : Promise.resolve<Pts>([]),
-    needsT10 ? fetchUSTreasury('DGS10', fromStr, 5_000, true) : Promise.resolve<Pts>([]),
-    ids.includes('ECBDFR')       ? fetchECBRate(fromStr, 8_000)               : Promise.resolve<Pts>([]),
+    needsT2  ? fetchUSTreasury('DGS2',  fromStr, 4_000, true) : Promise.resolve<Pts>([]),
+    needsT10 ? fetchUSTreasury('DGS10', fromStr, 4_000, true) : Promise.resolve<Pts>([]),
+    ids.includes('ECBDFR')       ? fetchECBRate(fromStr, 5_000)               : Promise.resolve<Pts>([]),
     needsYTnx                    ? fetchYahooYield('^TNX', fromStr)            : Promise.resolve<Pts>([]),
     needsYIrx                    ? fetchYahooYield('^IRX', fromStr)            : Promise.resolve<Pts>([]),
-    ids.includes('INDPRO')       ? fetchOECDIndPro(fromStr, 6_000)            : Promise.resolve<Pts>([]),
-    ids.includes('MORTGAGE30US') ? fetchFreddieMacMortgage(fromStr, 6_000)    : Promise.resolve<Pts>([]),
+    ids.includes('INDPRO')       ? fetchOECDIndPro(fromStr, 5_000)            : Promise.resolve<Pts>([]),
+    ids.includes('MORTGAGE30US') ? fetchFreddieMacMortgage(fromStr, 5_000)    : Promise.resolve<Pts>([]),
     // WorldBank: last-resort for GDP/GDPC1 if FRED + DBnomics both fail
-    needsWBkd ? fetchWorldBankGDP('NY.GDP.MKTP.KD', fromStr, 6_000) : Promise.resolve<Pts>([]),
-    needsWBcd ? fetchWorldBankGDP('NY.GDP.MKTP.CD', fromStr, 6_000) : Promise.resolve<Pts>([]),
+    needsWBkd ? fetchWorldBankGDP('NY.GDP.MKTP.KD', fromStr, 5_000) : Promise.resolve<Pts>([]),
+    needsWBcd ? fetchWorldBankGDP('NY.GDP.MKTP.CD', fromStr, 5_000) : Promise.resolve<Pts>([]),
   ]);
 
   const fredMap = new Map(fredResults.map(r => [r.id, r.pts]));

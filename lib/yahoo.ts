@@ -585,38 +585,122 @@ export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]>
   return fetchQuotesV8Fallback(symbols);
 }
 
-// PE-focused batch quote: v8/chart doesn't carry trailingPE/forwardPE so only
-// v7 is usable here. Yahoo v7 supports ~100-200 symbols per batch.
+// PE-focused batch quote. v8/chart doesn't carry trailingPE/forwardPE so only
+// v7 (batch quote) and v10 quoteSummary are usable here.
 //
-// Strategy: split into chunks of 100, run ALL chunks in parallel (not sequential).
-// 500 symbols → 5 parallel requests → completes in ~5-8s vs 160s sequential.
-// If no-auth returns insufficient PE coverage, retry with crumb auth in parallel.
+// Strategy:
+//   1. v7 no-auth in parallel chunks of 50 (Yahoo v7 starts truncating >75
+//      symbols/batch on the unauthenticated query2 endpoint).
+//   2. If PE coverage is poor, v7 with crumb auth in parallel (same chunks).
+//   3. As a last resort, fill in missing PE per-symbol via quoteSummary
+//      summaryDetail (concurrency 25) — slow but always carries PE.
 export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[]> {
   if (symbols.length === 0) return [];
 
-  const CHUNK = 100;
+  const CHUNK = 50;
   const chunks: string[][] = [];
   for (let i = 0; i < symbols.length; i += CHUNK) {
     chunks.push(symbols.slice(i, i + CHUNK));
   }
 
-  // 1. Try v7 no-auth in parallel — all chunks simultaneously
+  // 1. v7 no-auth — all chunks parallel
   const noAuthResults = await Promise.all(chunks.map(c => fetchQuotesV7NoAuth(c)));
-  const noAuthOut = noAuthResults.flat();
-  const noAuthPE = noAuthOut.filter(q => q.trailingPE != null && q.trailingPE > 0).length;
-  console.log(`[yahoo-pe] v7-noauth: ${noAuthOut.length} quotes, ${noAuthPE} with PE`);
+  let merged = noAuthResults.flat();
+  const noAuthPE = merged.filter(q => q.trailingPE != null && q.trailingPE > 0).length;
+  console.log(`[yahoo-pe] v7-noauth: ${merged.length}/${symbols.length} quotes, ${noAuthPE} with PE`);
 
-  if (noAuthPE >= 50) return noAuthOut;
+  // If we already have good coverage, return immediately
+  if (noAuthPE >= symbols.length * 0.5) return merged;
 
-  // 2. Try v7 crumb auth in parallel — same chunk structure
+  // 2. v7 with crumb auth — same chunks parallel. Merge with no-auth, preferring
+  // whichever entry has PE.
   console.warn('[yahoo-pe] v7-noauth PE coverage low; trying crumb auth');
   const crumbResults = await Promise.all(chunks.map(c => fetchQuotesV7(c)));
   const crumbOut = crumbResults.flat();
   const crumbPE = crumbOut.filter(q => q.trailingPE != null && q.trailingPE > 0).length;
   console.log(`[yahoo-pe] v7-crumb: ${crumbOut.length} quotes, ${crumbPE} with PE`);
 
-  // Return whichever path gave more PE data
-  return crumbPE >= noAuthPE ? crumbOut : noAuthOut;
+  // Merge: per-symbol prefer whichever has PE
+  const bySymbol = new Map<string, YahooQuote>();
+  for (const q of merged) bySymbol.set(q.symbol.toUpperCase(), q);
+  for (const q of crumbOut) {
+    const key = q.symbol.toUpperCase();
+    const existing = bySymbol.get(key);
+    if (!existing) { bySymbol.set(key, q); continue; }
+    const existingPE = existing.trailingPE;
+    const newPE = q.trailingPE;
+    if ((newPE != null && newPE > 0) && !(existingPE != null && existingPE > 0)) {
+      bySymbol.set(key, q);
+    }
+  }
+  merged = Array.from(bySymbol.values());
+  const mergedPE = merged.filter(q => q.trailingPE != null && q.trailingPE > 0).length;
+  console.log(`[yahoo-pe] after merge: ${merged.length} quotes, ${mergedPE} with PE`);
+
+  // 3. Per-symbol quoteSummary for any symbol still missing PE.
+  // Cap at 200 symbols (top of S&P 500 by market cap) to stay under timeout.
+  const missing = symbols.filter(sym => {
+    const q = bySymbol.get(sym.toUpperCase());
+    return !q || q.trailingPE == null || q.trailingPE <= 0;
+  });
+  if (missing.length > 0) {
+    const target = missing.slice(0, 200);
+    console.warn(`[yahoo-pe] backfilling PE for ${target.length}/${missing.length} symbols via quoteSummary`);
+    const CONCURRENCY = 25;
+    for (let i = 0; i < target.length; i += CONCURRENCY) {
+      const batch = target.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(batch.map(async sym => {
+        const qsData = await fetchQuoteSummary(sym, 'summaryDetail,price', 4_000).catch(() => null);
+        if (!qsData) return null;
+        const sd = qsData.summaryDetail as Record<string, { raw?: number }> | undefined;
+        const pr = qsData.price as Record<string, { raw?: number } | string | number> | undefined;
+        const price = (pr?.regularMarketPrice as { raw?: number })?.raw ?? 0;
+        const prevClose = (pr?.regularMarketPreviousClose as { raw?: number })?.raw ?? 0;
+        const trailingPE = sd?.trailingPE?.raw ?? null;
+        const forwardPE  = sd?.forwardPE?.raw  ?? null;
+        const marketCapRaw = (pr?.marketCap as { raw?: number })?.raw ?? sd?.marketCap?.raw ?? null;
+        return {
+          sym,
+          q: {
+            symbol: sym,
+            name: (pr?.shortName as string) ?? (pr?.longName as string) ?? sym,
+            price,
+            previousClose: prevClose,
+            change: price - prevClose,
+            changePercent: prevClose > 0 ? ((price - prevClose) / prevClose) * 100 : 0,
+            currency: (pr?.currency as string) ?? 'USD',
+            high52w: null,
+            low52w: null,
+            fiftyTwoWeekChangePercent: null,
+            ytdChangePercent: null,
+            trailingPE,
+            forwardPE,
+            marketCap: typeof marketCapRaw === 'number' ? marketCapRaw : null,
+            volume: null,
+          } satisfies YahooQuote,
+        };
+      }));
+      for (const r of results) {
+        if (!r) continue;
+        const key = r.sym.toUpperCase();
+        const existing = bySymbol.get(key);
+        if (!existing) { bySymbol.set(key, r.q); continue; }
+        // Patch in PE/marketCap, keep existing price if quoteSummary gave 0
+        bySymbol.set(key, {
+          ...existing,
+          trailingPE: r.q.trailingPE ?? existing.trailingPE,
+          forwardPE:  r.q.forwardPE  ?? existing.forwardPE,
+          marketCap:  r.q.marketCap  ?? existing.marketCap,
+          price:      existing.price > 0 ? existing.price : r.q.price,
+        });
+      }
+    }
+    merged = Array.from(bySymbol.values());
+    const finalPE = merged.filter(q => q.trailingPE != null && q.trailingPE > 0).length;
+    console.log(`[yahoo-pe] after quoteSummary backfill: ${finalPE} with PE`);
+  }
+
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
