@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff } from 'lucide-react';
+import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff, Download, Upload } from 'lucide-react';
 import { MACRO_INDICATORS } from '@/lib/config';
 import {
   loadSourcesConfig, saveSourcesConfig, generateId, notifySourcesChanged,
@@ -126,6 +126,38 @@ export function SourcesSection() {
       ? hidden.filter(h => h !== id)
       : [...hidden, id];
     persist({ ...config, hidden: next });
+  };
+
+  // ── Export / Import config ────────────────────────────────────────────────
+  // localStorage is domain-scoped: each Vercel preview URL gets its own storage.
+  // Export/import lets users back up and restore their custom indicators.
+
+  const handleExport = () => {
+    const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'macro-sources.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target?.result as string) as Partial<SourcesConfig>;
+        persist({
+          overrides: (typeof parsed.overrides === 'object' && parsed.overrides !== null) ? parsed.overrides as Record<string,string> : {},
+          custom: Array.isArray(parsed.custom) ? parsed.custom : [],
+          hidden: Array.isArray(parsed.hidden) ? parsed.hidden : [],
+        });
+      } catch { /* invalid file, ignore */ }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // reset input so same file can be re-imported
   };
 
   // ── Add custom indicator ──────────────────────────────────────────────────
@@ -257,12 +289,22 @@ export function SourcesSection() {
               CSV files, JSON APIs, and HTML tables automatically.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button onClick={checkAll} disabled={checkingAll}
               className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border text-gray-300 hover:text-white hover:border-gray-500 transition flex items-center gap-1.5 disabled:opacity-50">
               {checkingAll ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-              Check all sources
+              Check all
             </button>
+            <button onClick={handleExport}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border text-gray-300 hover:text-white hover:border-gray-500 transition flex items-center gap-1.5"
+              title="Download your custom sources as JSON — use Import to restore after a URL change">
+              <Download size={12} /> Export
+            </button>
+            <label className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border text-gray-300 hover:text-white hover:border-gray-500 transition flex items-center gap-1.5 cursor-pointer"
+              title="Restore a previously exported sources config">
+              <Upload size={12} /> Import
+              <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+            </label>
             <button onClick={() => setShowAdd(v => !v)}
               className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-accent text-white hover:bg-accent/80 transition flex items-center gap-1.5">
               <Plus size={12} /> Add indicator

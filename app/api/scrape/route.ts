@@ -90,22 +90,26 @@ function parseNum(s: string): number | null {
 
 function extractFromScripts(html: string, fromDate?: string): DP[] {
   let best: DP[] = [];
-  const scriptRx = /<script(?:\s[^>]*)?>(?!([\s\S]*?\bsrc\b))([\s\S]*?)<\/script>/gi;
+  // Capture script opening-tag attributes and body separately.
+  // sm[1] = attributes (used to detect external scripts via src=)
+  // sm[2] = inline script body
+  const scriptRx = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
   let sm: RegExpExecArray | null;
   while ((sm = scriptRx.exec(html)) !== null) {
-    const code = sm[2] ?? '';
-    if (!code || code.length < 40) continue;
-    // Match [timestamp, value] pairs — timestamp 9-13 digits, value any number
-    // Handles ms (13 digits, Highcharts) and seconds (10 digits)
+    const attrs = sm[1] ?? '';
+    const code  = sm[2] ?? '';
+    // Skip external scripts (src= attribute) and trivially short bodies
+    if (/\bsrc\s*=/i.test(attrs) || code.length < 40) continue;
+    // Match [unix_timestamp, numeric_value] pairs.
+    // 9-13 digit timestamps cover Unix seconds (1973+) and milliseconds (Highcharts).
     const pairRx = /\[\s*(\d{9,13})\s*,\s*([\-\d.]+)\s*\]/g;
     const pts: DP[] = [];
     let pm: RegExpExecArray | null;
     while ((pm = pairRx.exec(code)) !== null) {
-      const ts = parseInt(pm[1]);
+      const ts  = parseInt(pm[1]);
       const val = parseFloat(pm[2]);
       if (!isFinite(val)) continue;
-      // Auto-detect ms vs seconds: if < 10^10 treat as seconds
-      const tsMs = ts < 1e10 ? ts * 1000 : ts;
+      const tsMs = ts < 1e10 ? ts * 1000 : ts; // auto-detect seconds vs ms
       const year = new Date(tsMs).getFullYear();
       if (year < 1950 || year > 2100) continue;
       const date = new Date(tsMs).toISOString().slice(0, 10);
@@ -114,7 +118,7 @@ function extractFromScripts(html: string, fromDate?: string): DP[] {
     }
     if (pts.length >= 5 && pts.length > best.length) best = pts;
   }
-  // Deduplicate by date (keep last occurrence)
+  // Deduplicate by date (keep last occurrence per date)
   const deduped = new Map<string, number>();
   for (const pt of best) deduped.set(pt.date, pt.value);
   return Array.from(deduped.entries())
@@ -168,6 +172,108 @@ function extractFromHtml(html: string, fromDate?: string): DP[] {
 }
 
 // ─── Fetchers ─────────────────────────────────────────────────────────────
+
+// FRED public CSV endpoint — works from Node.js even when blocked on Edge.
+async function tryFREDCsv(seriesId: string, fromDate?: string): Promise<DP[]> {
+  const params = new URLSearchParams({ id: seriesId });
+  if (fromDate) params.set('cosd', fromDate);
+  const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?${params}`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 9_000);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': UA, Accept: 'text/csv,text/plain,*/*', Referer: 'https://fred.stlouisfed.org/' },
+    });
+    if (!res.ok) return [];
+    const csv = await res.text();
+    if (!csv || csv.length < 20) return [];
+    const pts: DP[] = [];
+    for (const line of csv.trim().split('\n').slice(1)) {
+      const [d, v] = line.split(',');
+      if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d.trim())) continue;
+      if (fromDate && d.trim() < fromDate) continue;
+      const num = parseFloat((v ?? '').trim());
+      if (isFinite(num)) pts.push({ date: d.trim(), value: num });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    return pts;
+  } catch { return []; } finally { clearTimeout(t); }
+}
+
+// FRED legacy tab-separated text endpoint.
+async function tryFREDTxt(seriesId: string, fromDate?: string): Promise<DP[]> {
+  const url = `https://fred.stlouisfed.org/data/${encodeURIComponent(seriesId)}.txt`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 9_000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': UA, Accept: 'text/plain,*/*' } });
+    if (!res.ok) return [];
+    const txt = await res.text();
+    const pts: DP[] = [];
+    for (const line of txt.split('\n')) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 2 || !/^\d{4}-\d{2}-\d{2}$/.test(parts[0])) continue;
+      if (fromDate && parts[0] < fromDate) continue;
+      const num = parseFloat(parts[1]);
+      if (isFinite(num)) pts.push({ date: parts[0], value: num });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    return pts;
+  } catch { return []; } finally { clearTimeout(t); }
+}
+
+// World Bank — fallback for GDP (NY.GDP.MKTP.CD, billions current USD)
+//                       and GDPC1 (NY.GDP.MKTP.KD, billions constant 2015 USD).
+async function tryWorldBank(indicator: string, fromDate?: string): Promise<DP[]> {
+  const url = `https://api.worldbank.org/v2/country/US/indicator/${indicator}?format=json&mrv=60&per_page=60`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 9_000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': UA, Accept: 'application/json' } });
+    if (!res.ok) return [];
+    const json = await res.json() as [unknown, Array<{ date?: string; value?: number | null }>];
+    const rows = Array.isArray(json) && Array.isArray(json[1]) ? json[1] : [];
+    const pts: DP[] = [];
+    for (const r of rows) {
+      if (!r.date || r.value == null || !isFinite(r.value)) continue;
+      pts.push({ date: `${r.date}-07-01`, value: r.value / 1e9 }); // USD → B$
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    return pts;
+  } catch { return []; } finally { clearTimeout(t); }
+}
+
+// OECD MEI — fallback for INDPRO (US Industrial Production Index).
+async function tryOECDIndPro(fromDate?: string): Promise<DP[]> {
+  const url = 'https://stats.oecd.org/SDMX-JSON/data/MEI_BTE6/USA.PRMNTO01.IDX2015.M/all?format=json';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 9_000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': UA, Accept: 'application/json' } });
+    if (!res.ok) return [];
+    const json = await res.json() as {
+      dataSets?: Array<{ observations?: Record<string, [number, ...unknown[]]> }>;
+      structure?: { dimensions?: { observation?: Array<{ id: string; values: Array<{ id: string }> }> } };
+    };
+    const obs = json?.dataSets?.[0]?.observations ?? {};
+    const timeDim = (json?.structure?.dimensions?.observation ?? []).find(d => d.id === 'TIME_PERIOD');
+    if (!timeDim?.values?.length) return [];
+    const periods = timeDim.values;
+    const pts: DP[] = [];
+    for (const [key, vals] of Object.entries(obs)) {
+      const tIdx = parseInt(key.split(':').at(-1) ?? '-1', 10);
+      if (tIdx < 0 || tIdx >= periods.length) continue;
+      const raw = periods[tIdx].id;
+      const dateStr = /^\d{4}-\d{2}$/.test(raw) ? `${raw}-01` : raw;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || (fromDate && dateStr < fromDate)) continue;
+      const v = vals[0];
+      if (typeof v === 'number' && isFinite(v)) pts.push({ date: dateStr, value: v });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    return pts;
+  } catch { return []; } finally { clearTimeout(t); }
+}
 
 async function fetchDBnomics(seriesId: string, fromDate?: string): Promise<{ data: DP[]; msg: string }> {
   const enc = encodeURIComponent(seriesId);
@@ -333,7 +439,31 @@ export async function GET(req: NextRequest) {
   const ysym = yahooSym(url);
 
   if (fid) {
-    const { data, msg } = await fetchDBnomics(fid, fromDate);
+    // Try FRED CSV, FRED TXT, and DBnomics in parallel (Node.js runtime — not subject to Edge IP blocks)
+    const [csv, txt, dbn] = await Promise.all([
+      tryFREDCsv(fid, fromDate),
+      tryFREDTxt(fid, fromDate),
+      fetchDBnomics(fid, fromDate),
+    ]);
+    let data = csv.length ? csv : txt.length ? txt : dbn.data;
+    const src  = csv.length ? 'FRED CSV' : txt.length ? 'FRED TXT' : dbn.data.length ? 'DBnomics' : '';
+    let msg  = data.length ? `${src} ${fid} · ${data.length} pts` : '';
+
+    // Specific fallbacks for series with known alternative public APIs
+    if (!data.length) {
+      if (fid === 'GDP') {
+        data = await tryWorldBank('NY.GDP.MKTP.CD', fromDate);
+        if (data.length) msg = `World Bank (GDP current USD) · ${data.length} pts`;
+      } else if (fid === 'GDPC1') {
+        data = await tryWorldBank('NY.GDP.MKTP.KD', fromDate);
+        if (data.length) msg = `World Bank (Real GDP 2015 USD) · ${data.length} pts`;
+      } else if (fid === 'INDPRO') {
+        data = await tryOECDIndPro(fromDate);
+        if (data.length) msg = `OECD (Industrial Production) · ${data.length} pts`;
+      }
+    }
+
+    if (!msg) msg = dbn.msg || `FRED ${fid}: all sources failed`;
     result = { success: data.length > 0, data, message: msg, sourceType: 'fred' };
   } else if (ysym) {
     const { data, msg } = await fetchYahoo(ysym, fromDate);
