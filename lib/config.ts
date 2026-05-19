@@ -1,29 +1,35 @@
 import { AssetConfig } from './types';
 
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$';
+export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money';
 
 export interface MacroIndicator {
   id: string;
   name: string;
-  category: 'Rates' | 'Employment' | 'Inflation' | 'Growth';
+  category: MacroCategory;
   unit: MacroUnit;
 }
 
 export const MACRO_INDICATORS: MacroIndicator[] = [
-  { id: 'DFF',          name: 'Fed Funds Rate',          category: 'Rates',      unit: '%'   },
-  { id: 'DGS10',        name: 'US 10Y Yield',            category: 'Rates',      unit: '%'   },
-  { id: 'DGS2',         name: 'US 2Y Yield',             category: 'Rates',      unit: '%'   },
-  { id: 'T10Y2Y',       name: 'Yield Curve 10Y–2Y',      category: 'Rates',      unit: '%'   },
-  { id: 'MORTGAGE30US', name: '30Y Mortgage Rate',       category: 'Rates',      unit: '%'   },
-  { id: 'ECBDFR',       name: 'ECB Deposit Rate',        category: 'Rates',      unit: '%'   },
-  { id: 'UNRATE',       name: 'US Unemployment',         category: 'Employment', unit: '%'   },
-  { id: 'PAYEMS',       name: 'Nonfarm Payrolls',        category: 'Employment', unit: 'K'   },
-  { id: 'ICSA',         name: 'Initial Jobless Claims',  category: 'Employment', unit: 'K'   },
-  { id: 'CPIAUCSL',     name: 'CPI (All Items)',         category: 'Inflation',  unit: 'idx' },
-  { id: 'CPILFESL',     name: 'Core CPI',                category: 'Inflation',  unit: 'idx' },
-  { id: 'T10YIE',       name: '10Y Breakeven Inflation', category: 'Inflation',  unit: '%'   },
-  { id: 'GDPC1',        name: 'Real GDP',                category: 'Growth',     unit: 'B$'  },
-  { id: 'INDPRO',       name: 'Industrial Production',   category: 'Growth',     unit: 'idx' },
+  // Rates
+  { id: 'DFF',       name: 'USA Interest Rate',     category: 'Rates',       unit: '%'   },
+  { id: 'ECBDFR',    name: 'EU Interest Rate',      category: 'Rates',       unit: '%'   },
+  { id: 'DGS10',     name: 'US 10Y Yield',          category: 'Rates',       unit: '%'   },
+  { id: 'DGS2',      name: 'US 2Y Yield',           category: 'Rates',       unit: '%'   },
+  // Inflation
+  { id: 'CPIAUCSL',  name: 'CPI (All Items)',       category: 'Inflation',   unit: 'idx' },
+  { id: 'CPILFESL',  name: 'Core CPI',              category: 'Inflation',   unit: 'idx' },
+  // Growth
+  { id: 'GDP',       name: 'Nominal GDP',           category: 'Growth',      unit: 'B$'  },
+  { id: 'GDPC1',     name: 'Real GDP',              category: 'Growth',      unit: 'B$'  },
+  { id: 'INDPRO',    name: 'Industrial Production', category: 'Growth',      unit: 'idx' },
+  // Employment
+  { id: 'UNRATE',    name: 'US Unemployment',       category: 'Employment',  unit: '%'   },
+  { id: 'PAYEMS',    name: 'Nonfarm Payrolls',      category: 'Employment',  unit: 'K'   },
+  // Real Estate
+  { id: 'HOUST',     name: 'Housing Starts',        category: 'Real Estate', unit: 'K'   },
+  // Money
+  { id: 'M2SL',      name: 'M2 Money Stock',        category: 'Money',       unit: 'B$'  },
 ];
 
 export const INDEXES: AssetConfig[] = [

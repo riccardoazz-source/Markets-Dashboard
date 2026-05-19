@@ -10,8 +10,8 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
-type Category = 'All' | 'Rates' | 'Employment' | 'Inflation' | 'Growth';
-const CATEGORIES: Category[] = ['All', 'Rates', 'Employment', 'Inflation', 'Growth'];
+type Category = 'All' | 'Rates' | 'Inflation' | 'Growth' | 'Employment' | 'Real Estate' | 'Money';
+const CATEGORIES: Category[] = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money'];
 const TF_OPTIONS: Timeframe[] = ['1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface MacroLatest {
@@ -134,7 +134,7 @@ export function MacroSection() {
               <RefreshCw size={9} />{lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
-          <span className="text-gray-700 ml-1">Source: FRED</span>
+          <span className="text-gray-700 ml-1">Sources: FRED · BLS · NY Fed · ECB</span>
         </div>
       </div>
 
@@ -195,7 +195,7 @@ export function MacroSection() {
             <div>
               <h3 className="text-base font-bold text-white">{selectedIndicator.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                FRED: {selected} · {selectedIndicator.category} · Unit: {selectedIndicator.unit}
+                Series: {selected} · {selectedIndicator.category} · Unit: {selectedIndicator.unit}
               </p>
             </div>
             <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300 shrink-0">
@@ -248,7 +248,7 @@ export function MacroSection() {
           )}
 
           <p className="text-[10px] text-gray-700">
-            Data: Federal Reserve Bank of St. Louis (FRED) · Not financial advice
+            Data: Federal Reserve (FRED), BLS, NY Fed, ECB, DBnomics · Not financial advice
           </p>
         </div>
       )}

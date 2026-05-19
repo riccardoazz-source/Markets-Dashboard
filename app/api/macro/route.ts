@@ -472,13 +472,15 @@ async function fetchUSTreasuryReal(
   return parseTreasuryCsv(csv, col, fromDate);
 }
 
-// ---------- World Bank API (Real GDP = GDPC1 fallback, annual) ----------
+// ---------- World Bank API (GDP fallback, annual) ----------
+// indicator = NY.GDP.MKTP.KD (constant 2015 USD, ≈ Real GDP / GDPC1)
+//           = NY.GDP.MKTP.CD (current USD,        ≈ Nominal GDP / GDP)
 async function fetchWorldBankGDP(
+  indicator: 'NY.GDP.MKTP.KD' | 'NY.GDP.MKTP.CD',
   fromDate?: string,
   timeoutMs = 5_000,
 ): Promise<{ date: string; value: number }[]> {
-  // NY.GDP.MKTP.KD = GDP constant 2015 USD; convert to billions for GDPC1 scale
-  const url = 'https://api.worldbank.org/v2/country/US/indicator/NY.GDP.MKTP.KD' +
+  const url = `https://api.worldbank.org/v2/country/US/indicator/${indicator}` +
     '?format=json&mrv=60&per_page=60';
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -487,7 +489,7 @@ async function fetchWorldBankGDP(
       signal: ctrl.signal, next: { revalidate: 86400 }, // daily — annual data
       headers: { 'User-Agent': UA, 'Accept': 'application/json' },
     });
-    if (!res.ok) { console.warn(`[worldbank] GDP HTTP ${res.status}`); return []; }
+    if (!res.ok) { console.warn(`[worldbank] ${indicator} HTTP ${res.status}`); return []; }
     const json = await res.json() as [unknown, Array<{ date?: string; value?: number | null }>];
     const rows = Array.isArray(json) ? json[1] : [];
     const pts: { date: string; value: number }[] = [];
@@ -498,10 +500,10 @@ async function fetchWorldBankGDP(
       pts.push({ date: dateStr, value: r.value / 1e9 }); // USD → billions
     }
     pts.sort((a, b) => a.date.localeCompare(b.date));
-    console.log(`[worldbank] GDP: ${pts.length} annual pts`);
+    console.log(`[worldbank] ${indicator}: ${pts.length} annual pts`);
     return pts;
   } catch (e) {
-    console.error('[worldbank] GDP failed:', (e as Error).message);
+    console.error(`[worldbank] ${indicator} failed:`, (e as Error).message);
     return [];
   } finally {
     clearTimeout(t);
@@ -700,8 +702,16 @@ async function fetchBLS(
   fromDate?: string,
   timeoutMs = 8_000,
 ): Promise<{ date: string; value: number }[]> {
-  const fromYear = fromDate ? fromDate.slice(0, 4) : String(new Date().getFullYear() - 5);
-  const toYear   = String(new Date().getFullYear());
+  const currentYear = new Date().getFullYear();
+  const requestedFromYear = fromDate ? parseInt(fromDate.slice(0, 4), 10) : currentYear - 5;
+  // BLS hard limit per request: 10 years (free) / 20 years (registered key).
+  // Asking for >limit returns an error → empty payload → cards/charts blank.
+  // For longer ranges (e.g. MAX = 1900), cap here; DBnomics provides the
+  // older history via its FRED mirror.
+  const maxSpan = process.env.BLS_API_KEY ? 19 : 9;
+  const fromYearNum = Math.max(requestedFromYear, currentYear - maxSpan);
+  const fromYear = String(fromYearNum);
+  const toYear   = String(currentYear);
   const key = process.env.BLS_API_KEY ? `&registrationkey=${process.env.BLS_API_KEY}` : '';
   const url = `https://api.bls.gov/publicAPI/v2/timeseries/data/${blsId}?startyear=${fromYear}&endyear=${toYear}${key}`;
   const ctrl = new AbortController();
@@ -754,7 +764,7 @@ async function fetchMacroSeries(
   // T10Y2Y: computed as DGS10 − DGS2
   if (fredId === 'T10Y2Y') {
     const [fredSpread, d10, d2] = await Promise.all([
-      fetchFRED('T10Y2Y', fromDate, 2_000),
+      fetchFRED('T10Y2Y', fromDate, 8_000),
       fetchMacroSeries('DGS10', fromDate),
       fetchMacroSeries('DGS2',  fromDate),
     ]);
@@ -769,8 +779,8 @@ async function fetchMacroSeries(
   // Treasury publishes both curves as free CSV; no FRED key needed.
   if (fredId === 'T10YIE') {
     const [fredT10yie, dbn, d10, dfii10] = await Promise.all([
-      fetchFRED('T10YIE', fromDate, 2_000),
-      fetchDBnomicsFRED('T10YIE', fromDate, 5_000),
+      fetchFRED('T10YIE', fromDate, 8_000),
+      fetchDBnomicsFRED('T10YIE', fromDate, 8_000),
       fetchUSTreasury('DGS10',  fromDate, 6_000),
       fetchUSTreasuryReal('DFII10', fromDate, 6_000),
     ]);
@@ -788,12 +798,12 @@ async function fetchMacroSeries(
     return [];
   }
 
-  // GDPC1: Real GDP. Primary = FRED/DBnomics (quarterly). Fallback = World Bank (annual).
+  // GDPC1: Real GDP. Primary = FRED/DBnomics (quarterly). Fallback = World Bank (annual, constant USD).
   if (fredId === 'GDPC1') {
     const [fredGdp, dbn, wb] = await Promise.all([
-      fetchFRED('GDPC1', fromDate, 2_000),
-      fetchDBnomicsFRED('GDPC1', fromDate, 5_000),
-      fetchWorldBankGDP(fromDate, 5_000),
+      fetchFRED('GDPC1', fromDate, 8_000),
+      fetchDBnomicsFRED('GDPC1', fromDate, 8_000),
+      fetchWorldBankGDP('NY.GDP.MKTP.KD', fromDate, 6_000),
     ]);
     if (fredGdp.length > 0) return fredGdp;
     if (dbn.length > 0) return dbn;
@@ -801,11 +811,24 @@ async function fetchMacroSeries(
     return [];
   }
 
+  // GDP: Nominal GDP. Primary = FRED/DBnomics (quarterly). Fallback = World Bank (annual, current USD).
+  if (fredId === 'GDP') {
+    const [fredGdp, dbn, wb] = await Promise.all([
+      fetchFRED('GDP', fromDate, 8_000),
+      fetchDBnomicsFRED('GDP', fromDate, 8_000),
+      fetchWorldBankGDP('NY.GDP.MKTP.CD', fromDate, 6_000),
+    ]);
+    if (fredGdp.length > 0) return fredGdp;
+    if (dbn.length > 0) return dbn;
+    if (wb.length > 0) { console.log(`[macro] GDP from World Bank (${wb.length} annual pts)`); return wb; }
+    return [];
+  }
+
   // INDPRO: Industrial Production. Primary = FRED/DBnomics. Fallback = OECD MEI.
   if (fredId === 'INDPRO') {
     const [fredInd, dbn, oecd] = await Promise.all([
-      fetchFRED('INDPRO', fromDate, 2_000),
-      fetchDBnomicsFRED('INDPRO', fromDate, 5_000),
+      fetchFRED('INDPRO', fromDate, 8_000),
+      fetchDBnomicsFRED('INDPRO', fromDate, 8_000),
       fetchOECDIndPro(fromDate, 6_000),
     ]);
     if (fredInd.length > 0) return fredInd;
@@ -817,8 +840,8 @@ async function fetchMacroSeries(
   // MORTGAGE30US: Primary = FRED/DBnomics. Fallback = Freddie Mac PMMS CSV.
   if (fredId === 'MORTGAGE30US') {
     const [fredM, dbn, fm] = await Promise.all([
-      fetchFRED('MORTGAGE30US', fromDate, 2_000),
-      fetchDBnomicsFRED('MORTGAGE30US', fromDate, 5_000),
+      fetchFRED('MORTGAGE30US', fromDate, 8_000),
+      fetchDBnomicsFRED('MORTGAGE30US', fromDate, 8_000),
       fetchFreddieMacMortgage(fromDate, 6_000),
     ]);
     if (fredM.length > 0) return fredM;
@@ -830,16 +853,18 @@ async function fetchMacroSeries(
   const yahooSym = YAHOO_YIELD_MAP[fredId];
   const blsSym   = BLS_MAP[fredId];
 
-  // All remaining sources in parallel.
+  // All remaining sources in parallel. Timeouts bumped from list-mode defaults
+  // (2-5s) to 8s so MAX timeframe requests have time to download full-history
+  // CSVs (CPI has ~950 monthly rows back to 1947).
   const [fred, dbnomics, treasury, yahoo, nyFed, yahooDff, ecb, bls] = await Promise.all([
-    fetchFRED(fredId, fromDate, 2_000),
-    fetchDBnomicsFRED(fredId, fromDate, 5_000),
+    fetchFRED(fredId, fromDate, 8_000),
+    fetchDBnomicsFRED(fredId, fromDate, 8_000),
     TREASURY_COL[fredId] ? fetchUSTreasury(fredId, fromDate, 6_000) : Promise.resolve<Pts>([]),
     yahooSym             ? fetchYahooYield(yahooSym, fromDate)      : Promise.resolve<Pts>([]),
     fredId === 'DFF'     ? fetchNYFedEffr(fromDate, 6_000)          : Promise.resolve<Pts>([]),
     fredId === 'DFF'     ? fetchYahooYield('^IRX', fromDate)        : Promise.resolve<Pts>([]),
     fredId === 'ECBDFR'  ? fetchECBRate(fromDate, 6_000)            : Promise.resolve<Pts>([]),
-    blsSym               ? fetchBLS(blsSym, fromDate, 6_000)        : Promise.resolve<Pts>([]),
+    blsSym               ? fetchBLS(blsSym, fromDate, 8_000)        : Promise.resolve<Pts>([]),
   ]);
 
   if (fred.length)     { console.log(`[macro] ${fredId} FRED (${fred.length})`);       return fred; }
