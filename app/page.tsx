@@ -10,6 +10,7 @@ import { SectorsSection } from '@/components/sections/SectorsSection';
 import { CompareSection } from '@/components/sections/CompareSection';
 import { MacroSection } from '@/components/sections/MacroSection';
 import { StockSection } from '@/components/sections/StockSection';
+import { GeneralSection } from '@/components/sections/GeneralSection';
 import { SourcesSection } from '@/components/sections/SourcesSection';
 
 const SECTION_LABELS: Record<Section, string> = {
@@ -21,6 +22,7 @@ const SECTION_LABELS: Record<Section, string> = {
   macro:       'Macro Indicators',
   stock:       'Stock Lookup',
   compare:     'Asset Comparison',
+  general:     'General Overview',
   sources:     'Data Sources',
 };
 
@@ -33,6 +35,7 @@ const SECTION_DESCRIPTIONS: Record<Section, string> = {
   macro:       'Key macroeconomic indicators from the Federal Reserve (FRED)',
   stock:       'Search any stock by ticker or ISIN — price, total return with dividends, CAGR & IRR',
   compare:     'Normalized performance, dividend-adjusted CAGR, IRR and correlation between any combination of assets',
+  general:     'S&P 500 P/E heatmap and sector value chains with live constituents',
   sources:     'Reference table of every data source feeding this dashboard',
 };
 
@@ -56,6 +59,7 @@ export default function Home() {
         {section === 'macro'       && <MacroSection />}
         {section === 'stock'       && <StockSection />}
         {section === 'compare'     && <CompareSection />}
+        {section === 'general'     && <GeneralSection />}
         {section === 'sources'     && <SourcesSection />}
       </main>
 
