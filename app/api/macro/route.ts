@@ -678,6 +678,48 @@ const BLS_MAP: Record<string, string> = {
   'CPILFESL': 'CUUR0000SA0L1E', // CPI Less Food & Energy
 };
 
+// ---------- Hardcoded FOMC Fed Funds Target Rate (DFEDTARU) fallback ----------
+// Used when FRED (usually blocked on Vercel) and DBnomics both fail.
+// Upper bound of the target range — this is what countryeconomy.com / FRED show.
+// Update after each FOMC meeting: https://www.federalreserve.gov/monetarypolicy/openmarket.htm
+const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
+  { date: '2022-03-16', value: 0.50 },
+  { date: '2022-05-04', value: 1.00 },
+  { date: '2022-06-15', value: 1.75 },
+  { date: '2022-07-27', value: 2.50 },
+  { date: '2022-09-21', value: 3.25 },
+  { date: '2022-11-02', value: 4.00 },
+  { date: '2022-12-14', value: 4.50 },
+  { date: '2023-02-01', value: 4.75 },
+  { date: '2023-03-22', value: 5.00 },
+  { date: '2023-05-03', value: 5.25 },
+  { date: '2023-07-26', value: 5.50 },
+  { date: '2024-09-18', value: 5.00 },
+  { date: '2024-11-07', value: 4.75 },
+  { date: '2024-12-18', value: 4.50 },
+  { date: '2025-03-19', value: 4.50 },
+  { date: '2025-05-07', value: 4.25 },
+  { date: '2025-06-18', value: 4.00 },
+  { date: '2025-07-30', value: 3.75 },
+  { date: '2025-09-17', value: 3.50 },
+  { date: '2025-10-29', value: 3.50 },
+  { date: '2025-12-10', value: 3.50 },
+  { date: '2026-01-28', value: 3.50 },
+  { date: '2026-03-18', value: 3.50 },
+  { date: '2026-05-06', value: 3.50 },
+];
+
+function getFOMCFallback(fromDate?: string): { date: string; value: number }[] {
+  const pts = fromDate
+    ? FOMC_TARGET_UPPER.filter(p => p.date >= fromDate)
+    : FOMC_TARGET_UPPER;
+  // Always ensure we return at least the last known rate even if it's before fromDate
+  if (pts.length === 0 && FOMC_TARGET_UPPER.length > 0) {
+    return [FOMC_TARGET_UPPER[FOMC_TARGET_UPPER.length - 1]];
+  }
+  return pts;
+}
+
 type BlsRow = { year: string; period: string; value: string };
 type BlsSeries = { seriesID: string; data: BlsRow[] };
 
@@ -853,6 +895,20 @@ async function fetchMacroSeries(
   const yahooSym = YAHOO_YIELD_MAP[fredId];
   const blsSym   = BLS_MAP[fredId];
 
+  // DFEDTARU: pure FRED step-function series. DBnomics is primary. Hardcoded
+  // table is always available as last resort.
+  if (fredId === 'DFEDTARU') {
+    const [fred, dbn] = await Promise.all([
+      fetchFRED('DFEDTARU', fromDate, 8_000),
+      fetchDBnomicsFRED('DFEDTARU', fromDate, 8_000),
+    ]);
+    if (fred.length)  { console.log(`[macro] DFEDTARU FRED (${fred.length})`);    return fred; }
+    if (dbn.length)   { console.log(`[macro] DFEDTARU DBnomics (${dbn.length})`); return dbn; }
+    const fb = getFOMCFallback(fromDate);
+    console.log(`[macro] DFEDTARU hardcoded fallback (${fb.length})`);
+    return fb;
+  }
+
   // All remaining sources in parallel. Timeouts bumped from list-mode defaults
   // (2-5s) to 8s so MAX timeframe requests have time to download full-history
   // CSVs (CPI has ~950 monthly rows back to 1947).
@@ -913,9 +969,10 @@ export async function GET(req: NextRequest) {
   const cached = getCached(key, TTL);
   if (cached) return NextResponse.json(cached, { headers: CACHE_HEADERS });
 
-  // Fetch last ~6 months so we always have latest + previous observation
+  // Fetch last 2 years so step-function series (rates, quarterly GDP) always
+  // have at least one data point regardless of update frequency.
   const from = new Date();
-  from.setMonth(from.getMonth() - 6);
+  from.setFullYear(from.getFullYear() - 2);
   const fromStr = from.toISOString().split('T')[0];
 
   // ── Parallel fetch: FRED + all fallback sources start simultaneously ──
@@ -980,6 +1037,7 @@ export async function GET(req: NextRequest) {
     let pts = fredMap.get(id) ?? [];
     if (!pts.length) pts = dbnMap.get(id) ?? [];
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
+    if (!pts.length && id === 'DFEDTARU')     pts = getFOMCFallback(fromStr);
     if (!pts.length && id === 'ECBDFR')       pts = ecbPts;
     if (!pts.length && id === 'DGS2')         pts = tDgs2.length  ? tDgs2  : yahooIrx;
     if (!pts.length && id === 'DGS10')        pts = tDgs10.length ? tDgs10 : yahooTnx;

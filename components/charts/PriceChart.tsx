@@ -25,10 +25,9 @@ function formatDate(dateStr: string, data: HistoricalPoint[]) {
     const first = parseISO(data[0].date);
     const last = parseISO(data[data.length - 1].date);
     const yearSpan = (last.getTime() - first.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
-    if (yearSpan < 0.3)  return format(d, 'MMM d');        // < ~3 months
-    if (yearSpan < 1.5)  return format(d, "MMM ''yy");      // < ~1.5 years
-    if (yearSpan < 4)    return format(d, "MMM ''yy");      // 1.5 – 4 years
-    return format(d, 'yyyy');                                // 5Y, 10Y → just year
+    if (yearSpan < 0.3)  return format(d, 'MMM d');
+    if (yearSpan < 4)    return format(d, "MMM ''yy");
+    return format(d, 'yyyy');
   } catch {
     return dateStr;
   }
@@ -49,15 +48,26 @@ export function PriceChart({
   const isStep = interpolationType === 'stepAfter';
   const first = data[0].close;
   const last = data[data.length - 1].close;
-  // For step-function series (rates) use accent color: red/green based on the
-  // full history is misleading (a 40-year rate starting at 8% and now at 4%
-  // would always be red even during the 2022-24 hike cycle).
   const chartColor = isStep ? '#6366f1' : (last >= first ? '#10b981' : '#ef4444');
   const resolvedColor = color === 'auto' ? chartColor : color;
 
   const decimals = isCurrency
     ? (last < 1 ? 4 : last < 10 ? 4 : 2)
     : last < 10 ? 2 : 0;
+
+  // Compute explicit numeric domain so the y-axis never pins to 0 when data is
+  // well above it (e.g. interest rates 3-5%, CPI 300, GDP 25000).
+  // AreaChart's default 'auto' lower bound anchors to 0 for positive data,
+  // making variation invisible — this replaces that with a tight-range domain.
+  const closes = data.map(d => d.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
+  const rawMin = closes.length > 0 ? Math.min(...closes) : 0;
+  const rawMax = closes.length > 0 ? Math.max(...closes) : 1;
+  const range = rawMax - rawMin;
+  // Padding: 8% of range, at least 2% of the max value (handles flat/constant series)
+  const pad = Math.max(range * 0.08, Math.abs(rawMax) * 0.02, 0.001);
+  // Don't show negative space for strictly non-negative data
+  const yMin = rawMin >= 0 ? Math.max(0, rawMin - pad) : rawMin - pad;
+  const yMax = rawMax + pad;
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -84,13 +94,12 @@ export function PriceChart({
           width={60}
           tickFormatter={v => {
             const n = v as number;
+            if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
             if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
             return n.toFixed(decimals);
           }}
-          domain={[
-            (dataMin: number) => dataMin >= 0 ? Math.max(0, dataMin * 0.92) : dataMin * 1.08,
-            'auto',
-          ]}
+          domain={[yMin, yMax]}
+          allowDataOverflow={false}
         />
         <Tooltip
           contentStyle={{
@@ -100,7 +109,7 @@ export function PriceChart({
             color: '#e2e8f0',
             fontSize: 12,
           }}
-          formatter={(value: number) => [value.toFixed(decimals), 'Price']}
+          formatter={(value: number) => [value.toFixed(decimals), '']}
           labelFormatter={label => {
             try { return format(parseISO(label as string), 'MMM d, yyyy'); }
             catch { return label as string; }
@@ -122,6 +131,7 @@ export function PriceChart({
           fill={isStep ? 'none' : `url(#grad-${resolvedColor.replace('#', '')})`}
           dot={false}
           activeDot={{ r: 4, fill: resolvedColor }}
+          baseValue={yMin}
         />
       </AreaChart>
     </ResponsiveContainer>

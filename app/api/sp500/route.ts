@@ -4,6 +4,7 @@ import { fetchYahooQuotesPE } from '@/lib/yahoo';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30; // seconds — Yahoo PE batch can take 5-10s for 500 symbols
 
 interface Sp500Quote extends Sp500Constituent {
   price: number | null;
