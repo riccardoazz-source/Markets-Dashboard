@@ -385,7 +385,8 @@ function DividendsBarChart({ dividends, currency }: { dividends: DividendEvent[]
           tickFormatter={d => { try { return format(parseISO(d as string), "MMM ''yy"); } catch { return d as string; } }}
           tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
         <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
-          tickFormatter={v => (v as number).toFixed(2)} />
+          tickFormatter={v => (v as number).toFixed(2)}
+          domain={[(dataMin: number) => dataMin * 0.85, (dataMax: number) => dataMax * 1.1]} />
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
           itemStyle={{ color: '#e2e8f0' }}
@@ -404,27 +405,26 @@ function FinancialsBarChart({ data, currency }: { data: FinancialPoint[]; curren
   const rows = data.map(d => ({
     period: d.date.slice(0, 7),
     revenue: d.revenue ?? null,
-    costOfRevenue: d.costOfRevenue ?? null,
     netIncome: d.netIncome ?? null,
   }));
   return (
     <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={rows} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+      <BarChart data={rows} margin={{ top: 4, right: 16, left: 0, bottom: 0 }} barCategoryGap="30%">
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
         <XAxis dataKey="period" tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={30} />
         <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
-          tickFormatter={v => formatBig(v as number)} />
+          tickFormatter={v => formatBig(v as number)}
+          domain={[0, (dataMax: number) => dataMax * 1.05]} />
         <Tooltip
           contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
           itemStyle={{ color: '#e2e8f0' }}
           labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
           formatter={(value: number, name: string) => [
             `${formatBig(value)} ${currency}`,
-            name === 'revenue' ? 'Revenue' : name === 'costOfRevenue' ? 'Cost of revenue' : 'Net income',
+            name === 'revenue' ? 'Revenue' : 'Net income',
           ]}
         />
         <Bar dataKey="revenue" fill="#60a5fa" radius={[2, 2, 0, 0]} name="revenue" />
-        <Bar dataKey="costOfRevenue" fill="#475569" radius={[2, 2, 0, 0]} name="costOfRevenue" />
         <Bar dataKey="netIncome" fill="#a78bfa" radius={[2, 2, 0, 0]} name="netIncome" />
       </BarChart>
     </ResponsiveContainer>
