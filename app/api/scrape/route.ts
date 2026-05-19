@@ -83,6 +83,45 @@ function parseNum(s: string): number | null {
   return isFinite(v) ? v : null;
 }
 
+// ─── Script-embedded chart data extractor ─────────────────────────────────
+// Many "JS-rendered" pages embed their chart data directly in <script> tags
+// as JavaScript arrays — no browser execution needed, just HTML parsing.
+// Handles Highcharts [[timestamp_ms, value], ...] and similar patterns.
+
+function extractFromScripts(html: string, fromDate?: string): DP[] {
+  let best: DP[] = [];
+  const scriptRx = /<script(?:\s[^>]*)?>(?!([\s\S]*?\bsrc\b))([\s\S]*?)<\/script>/gi;
+  let sm: RegExpExecArray | null;
+  while ((sm = scriptRx.exec(html)) !== null) {
+    const code = sm[2] ?? '';
+    if (!code || code.length < 40) continue;
+    // Match [timestamp, value] pairs — timestamp 9-13 digits, value any number
+    // Handles ms (13 digits, Highcharts) and seconds (10 digits)
+    const pairRx = /\[\s*(\d{9,13})\s*,\s*([\-\d.]+)\s*\]/g;
+    const pts: DP[] = [];
+    let pm: RegExpExecArray | null;
+    while ((pm = pairRx.exec(code)) !== null) {
+      const ts = parseInt(pm[1]);
+      const val = parseFloat(pm[2]);
+      if (!isFinite(val)) continue;
+      // Auto-detect ms vs seconds: if < 10^10 treat as seconds
+      const tsMs = ts < 1e10 ? ts * 1000 : ts;
+      const year = new Date(tsMs).getFullYear();
+      if (year < 1950 || year > 2100) continue;
+      const date = new Date(tsMs).toISOString().slice(0, 10);
+      if (fromDate && date < fromDate) continue;
+      pts.push({ date, value: val });
+    }
+    if (pts.length >= 5 && pts.length > best.length) best = pts;
+  }
+  // Deduplicate by date (keep last occurrence)
+  const deduped = new Map<string, number>();
+  for (const pt of best) deduped.set(pt.date, pt.value);
+  return Array.from(deduped.entries())
+    .map(([date, value]) => ({ date, value }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
 // ─── HTML table extractor ─────────────────────────────────────────────────
 
 function extractFromHtml(html: string, fromDate?: string): DP[] {
@@ -255,11 +294,17 @@ async function fetchGeneric(url: string, fromDate?: string): Promise<{ data: DP[
       if (data.length > 1) return { data, msg: `CSV · ${data.length} pts`, type: 'csv' };
     }
 
-    // HTML table
-    if (ct.includes('html') || text.includes('<table')) {
-      const data = extractFromHtml(text, fromDate);
-      if (data.length) return { data, msg: `HTML table · ${data.length} rows`, type: 'html' };
-      return { data: [], msg: 'No parseable table found on page', type: 'html' };
+    // HTML: try table first, then script-embedded chart data
+    if (ct.includes('html') || text.includes('<table') || text.includes('<script')) {
+      if (text.includes('<table')) {
+        const tableData = extractFromHtml(text, fromDate);
+        if (tableData.length >= 3) return { data: tableData, msg: `HTML table · ${tableData.length} rows`, type: 'html' };
+      }
+      if (text.includes('<script')) {
+        const scriptData = extractFromScripts(text, fromDate);
+        if (scriptData.length >= 5) return { data: scriptData, msg: `Chart data · ${scriptData.length} pts`, type: 'script' };
+      }
+      return { data: [], msg: 'No parseable data found on page', type: 'html' };
     }
 
     return { data: [], msg: `Unsupported content type: ${ct}`, type: 'unknown' };

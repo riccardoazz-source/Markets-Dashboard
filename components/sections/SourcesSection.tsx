@@ -140,15 +140,26 @@ export function SourcesSection() {
 
   // ── Live status check ─────────────────────────────────────────────────────
 
-  // isBuiltinNoOverride = built-in indicator without a custom URL override.
-  // For these we check via /api/macro (they have native multi-source pipelines).
-  // For overridden built-ins and custom indicators we check via /api/scrape.
-  const checkOne = useCallback(async (id: string, url: string, isBuiltinNoOverride: boolean) => {
+  // sourceType distinguishes how to check each indicator:
+  // - 'fred' built-ins → /api/scrape (Node.js, reaches DBnomics reliably)
+  // - all other built-ins → /api/macro (Edge, handles ECB/BLS/Treasury/Yahoo natively)
+  // - overridden/custom → /api/scrape with the effective URL
+  const checkOne = useCallback(async (id: string, url: string, isBuiltinNoOverride: boolean, sourceType?: string) => {
     setStatuses(s => ({ ...s, [id]: { status: 'loading', message: '', pts: 0 } }));
     const from18 = new Date(); from18.setMonth(from18.getMonth() - 18);
     const fromStr = from18.toISOString().slice(0, 10);
     try {
-      if (isBuiltinNoOverride) {
+      if (isBuiltinNoOverride && sourceType === 'fred') {
+        // FRED indicators fail from Edge (DBnomics unreachable) — use Node.js scrape route
+        // url = m.source.url = "https://fred.stlouisfed.org/series/ID", scrape detects FRED ID
+        const res = await fetch(`/api/scrape?url=${encodeURIComponent(url)}&from=${fromStr}`);
+        const json = await res.json() as { success: boolean; data: unknown[]; message: string };
+        setStatuses(s => ({
+          ...s,
+          [id]: { status: json.success ? 'ok' : 'error', message: json.message, pts: json.data?.length ?? 0 },
+        }));
+      } else if (isBuiltinNoOverride) {
+        // ECB, BLS, Treasury, FOMC, Yahoo: use /api/macro native pipeline
         const res = await fetch(`/api/macro?mode=history&id=${id}&from=${fromStr}`);
         const json = await res.json() as unknown[];
         const pts = Array.isArray(json) ? json.length : 0;
@@ -157,6 +168,7 @@ export function SourcesSection() {
           [id]: { status: pts > 0 ? 'ok' : 'error', message: pts > 0 ? '' : 'No data from pipeline', pts },
         }));
       } else {
+        // Overridden/custom URL: use universal scraper
         const res = await fetch(`/api/scrape?url=${encodeURIComponent(url)}&from=${fromStr}`);
         const json = await res.json() as { success: boolean; data: unknown[]; message: string };
         setStatuses(s => ({
@@ -173,7 +185,7 @@ export function SourcesSection() {
     if (!mounted) return;
     setCheckingAll(true);
     await Promise.all(allIndicators.map(ind =>
-      checkOne(ind.id, ind.effectiveUrl, ind.isBuiltin && !ind.isOverridden)
+      checkOne(ind.id, ind.effectiveUrl, ind.isBuiltin && !ind.isOverridden, ind.sourceType)
     ));
     setCheckingAll(false);
   };
@@ -377,7 +389,7 @@ export function SourcesSection() {
                             <Edit2 size={12} />
                           </button>
                         )}
-                        <button onClick={() => checkOne(ind.id, ind.effectiveUrl, ind.isBuiltin && !ind.isOverridden)}
+                        <button onClick={() => checkOne(ind.id, ind.effectiveUrl, ind.isBuiltin && !ind.isOverridden, ind.sourceType)}
                           title="Test this source" className="p-1 text-gray-500 hover:text-sky-400 transition">
                           <CheckCircle2 size={12} />
                         </button>
