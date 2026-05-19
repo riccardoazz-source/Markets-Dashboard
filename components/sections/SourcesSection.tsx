@@ -1,6 +1,7 @@
 'use client';
 
 import { ExternalLink } from 'lucide-react';
+import { MACRO_INDICATORS } from '@/lib/config';
 
 interface SourceRow {
   feature: string;
@@ -115,6 +116,47 @@ export function SourcesSection() {
                   <td className="px-3 py-2 text-gray-400">{s.refresh}</td>
                   <td className="px-3 py-2">
                     <a href={s.homepage} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-accent hover:underline">
+                      open <ExternalLink size={10} />
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Macro indicator sources — auto-generated from lib/config.ts */}
+      <div className="rounded-xl border border-border bg-bg-card overflow-hidden">
+        <div className="px-4 py-3 bg-bg-input border-b border-border">
+          <h3 className="text-sm font-semibold text-gray-100">Macro Indicators</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Each indicator&rsquo;s primary source. Add new indicators in{' '}
+            <code className="font-mono text-accent">lib/config.ts</code> — no API code changes needed.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-bg-input text-gray-400 uppercase tracking-wider text-[10px]">
+              <tr>
+                <th className="text-left px-3 py-2 font-semibold">Indicator</th>
+                <th className="text-left px-3 py-2 font-semibold">Category</th>
+                <th className="text-left px-3 py-2 font-semibold">Provider</th>
+                <th className="text-left px-3 py-2 font-semibold">Type</th>
+                <th className="text-left px-3 py-2 font-semibold">Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              {MACRO_INDICATORS.map(ind => (
+                <tr key={ind.id}
+                  className="border-t border-border align-top hover:bg-bg-hover/30 transition-colors">
+                  <td className="px-3 py-2 text-gray-100 font-medium">{ind.name}</td>
+                  <td className="px-3 py-2 text-gray-400">{ind.category}</td>
+                  <td className="px-3 py-2 text-gray-300">{ind.source.label}</td>
+                  <td className="px-3 py-2 font-mono text-[11px] text-gray-400">{ind.source.type}</td>
+                  <td className="px-3 py-2">
+                    <a href={ind.source.url} target="_blank" rel="noopener noreferrer"
                       className="inline-flex items-center gap-1 text-accent hover:underline">
                       open <ExternalLink size={10} />
                     </a>

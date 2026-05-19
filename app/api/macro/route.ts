@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { MACRO_INDICATORS } from '@/lib/config';
+
+// Source map: look up MacroSource by indicator id for dispatch in fetchMacroSeries.
+const indicatorSourceMap = new Map(
+  MACRO_INDICATORS.map(m => [m.id, m.source]),
+);
 
 // Edge runtime: near-zero cold start + same network that works for Yahoo Finance
 // in /api/historical and /api/crypto. Node.js was tried to get different IPs for
@@ -324,6 +330,37 @@ async function fetchYahooYield(
   }
   console.warn(`[yahoo-yield] ${yahooSym} all hosts failed`);
   return [];
+}
+
+// ---------- Generic Yahoo Finance historical price fetcher ----------
+// Used by yahoo_price and yahoo_ratio source types in MACRO_INDICATORS.
+// Wraps fetchYahooYield with an explicit fromDate filter so the returned
+// series starts exactly at fromDate regardless of which range bucket was used.
+async function fetchYahooHistorical(
+  symbol: string,
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  const pts = await fetchYahooYield(symbol, fromDate);
+  return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+}
+
+async function fetchYahooRatio(
+  numerator: string,
+  denominator: string,
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  const [numPts, denPts] = await Promise.all([
+    fetchYahooHistorical(numerator, fromDate),
+    fetchYahooHistorical(denominator, fromDate),
+  ]);
+  if (!numPts.length || !denPts.length) return [];
+  const denMap = new Map(denPts.map(p => [p.date, p.value]));
+  const result = numPts
+    .filter(p => denMap.has(p.date) && denMap.get(p.date)! > 0)
+    .map(p => ({ date: p.date, value: p.value / denMap.get(p.date)! }));
+  result.sort((a, b) => a.date.localeCompare(b.date));
+  console.log(`[yahoo-ratio] ${numerator}/${denominator}: ${result.length} pts`);
+  return result;
 }
 
 // ---------- NY Fed EFFR (Effective Federal Funds Rate, no key) ----------
@@ -857,6 +894,17 @@ async function fetchMacroSeries(
 ): Promise<{ date: string; value: number }[]> {
   type Pts = { date: string; value: number }[];
 
+  // Dispatch indicators that declare a non-FRED source type in config.
+  // This makes adding new yahoo_price / yahoo_ratio indicators require only
+  // a new entry in lib/config.ts — no route changes needed.
+  const src = indicatorSourceMap.get(fredId);
+  if (src?.type === 'yahoo_ratio' && src.numerator && src.denominator) {
+    return fetchYahooRatio(src.numerator, src.denominator, fromDate);
+  }
+  if (src?.type === 'yahoo_price' && src.symbol) {
+    return fetchYahooHistorical(src.symbol, fromDate);
+  }
+
   // T10Y2Y: computed as DGS10 − DGS2
   if (fredId === 'T10Y2Y') {
     const [fredSpread, d10, d2] = await Promise.all([
@@ -1033,41 +1081,58 @@ export async function GET(req: NextRequest) {
   // ── Parallel fetch: FRED + all fallback sources start simultaneously ──
   // FRED is blocked on most Vercel IPs; 2s timeout lets it fail fast instead
   // of burning 12s (two endpoints × 6s each) before fallbacks even start.
-  const blsFredIds = ids.filter(id => BLS_MAP[id]);
-  const needsT2    = ids.some(id => id === 'DGS2'  || id === 'T10Y2Y');
-  const needsT10   = ids.some(id => id === 'DGS10' || id === 'T10Y2Y');
+
+  // Indicators with non-FRED source types (yahoo_ratio, yahoo_price) are
+  // fetched via fetchMacroSeries in a separate shard of the same Promise.all.
+  const customSrcIds = ids.filter(id => {
+    const s = indicatorSourceMap.get(id);
+    return s?.type === 'yahoo_ratio' || s?.type === 'yahoo_price';
+  });
+  const standardIds = ids.filter(id => !customSrcIds.includes(id));
+
+  const blsFredIds = standardIds.filter(id => BLS_MAP[id]);
+  const needsT2    = standardIds.some(id => id === 'DGS2'  || id === 'T10Y2Y');
+  const needsT10   = standardIds.some(id => id === 'DGS10' || id === 'T10Y2Y');
 
   type Pts = { date: string; value: number }[];
 
-  const needsYTnx = ids.includes('DGS10') || ids.includes('T10Y2Y');
-  const needsYIrx = ids.includes('DGS2')  || ids.includes('T10Y2Y');
+  const needsYTnx = standardIds.includes('DGS10') || standardIds.includes('T10Y2Y');
+  const needsYIrx = standardIds.includes('DGS2')  || standardIds.includes('T10Y2Y');
 
-  const needsWBkd = ids.includes('GDPC1');
-  const needsWBcd = ids.includes('GDP');
+  const needsWBkd = standardIds.includes('GDPC1');
+  const needsWBcd = standardIds.includes('GDP');
 
-  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD] = await Promise.all([
-    Promise.all(ids.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
+  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD, customSrcBatch] = await Promise.all([
+    Promise.all(standardIds.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
     // DBnomics 6s — primary fallback for GDPC1/INDPRO/HOUST/M2SL/ECBDFR.
     // Lowered from 8s: most responses come back in <2s; longer waits just
     // delay the response without adding signal.
-    Promise.all(ids.map(id => fetchDBnomicsFRED(id, fromStr, 6_000).then(pts => ({ id, pts })))),
+    Promise.all(standardIds.map(id => fetchDBnomicsFRED(id, fromStr, 6_000).then(pts => ({ id, pts })))),
     // BLS: parallel GET requests, each cached 4h by Next.js edge data cache
     blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr) : Promise.resolve(new Map<string, Pts>()),
     needsT2  ? fetchUSTreasury('DGS2',  fromStr, 4_000, true) : Promise.resolve<Pts>([]),
     needsT10 ? fetchUSTreasury('DGS10', fromStr, 4_000, true) : Promise.resolve<Pts>([]),
-    ids.includes('ECBDFR')       ? fetchECBRate(fromStr, 5_000)               : Promise.resolve<Pts>([]),
-    needsYTnx                    ? fetchYahooYield('^TNX', fromStr)            : Promise.resolve<Pts>([]),
-    needsYIrx                    ? fetchYahooYield('^IRX', fromStr)            : Promise.resolve<Pts>([]),
-    ids.includes('INDPRO')       ? fetchOECDIndPro(fromStr, 5_000)            : Promise.resolve<Pts>([]),
-    ids.includes('MORTGAGE30US') ? fetchFreddieMacMortgage(fromStr, 5_000)    : Promise.resolve<Pts>([]),
+    standardIds.includes('ECBDFR')       ? fetchECBRate(fromStr, 5_000)               : Promise.resolve<Pts>([]),
+    needsYTnx                            ? fetchYahooYield('^TNX', fromStr)            : Promise.resolve<Pts>([]),
+    needsYIrx                            ? fetchYahooYield('^IRX', fromStr)            : Promise.resolve<Pts>([]),
+    standardIds.includes('INDPRO')       ? fetchOECDIndPro(fromStr, 5_000)            : Promise.resolve<Pts>([]),
+    standardIds.includes('MORTGAGE30US') ? fetchFreddieMacMortgage(fromStr, 5_000)    : Promise.resolve<Pts>([]),
     // WorldBank: last-resort for GDP/GDPC1 if FRED + DBnomics both fail
     needsWBkd ? fetchWorldBankGDP('NY.GDP.MKTP.KD', fromStr, 5_000) : Promise.resolve<Pts>([]),
     needsWBcd ? fetchWorldBankGDP('NY.GDP.MKTP.CD', fromStr, 5_000) : Promise.resolve<Pts>([]),
+    // Custom source indicators (yahoo_ratio, yahoo_price) — fetched in parallel
+    customSrcIds.length > 0
+      ? Promise.all(customSrcIds.map(async id => ({
+          id,
+          pts: await fetchMacroSeries(id, fromStr),
+        })))
+      : Promise.resolve([] as { id: string; pts: Pts }[]),
   ]);
 
-  const fredMap = new Map(fredResults.map(r => [r.id, r.pts]));
-  const dbnMap  = new Map(dbnomicsResults.map(r => [r.id, r.pts]));
-  const needFallback = ids.filter(id =>
+  const fredMap      = new Map(fredResults.map(r => [r.id, r.pts]));
+  const dbnMap       = new Map(dbnomicsResults.map(r => [r.id, r.pts]));
+  const customSrcMap = new Map(customSrcBatch.map(r => [r.id, r.pts]));
+  const needFallback = standardIds.filter(id =>
     (fredMap.get(id) ?? []).length === 0 && (dbnMap.get(id) ?? []).length === 0,
   );
 
@@ -1102,6 +1167,7 @@ export async function GET(req: NextRequest) {
     if (!pts.length && id === 'GDPC1')        pts = wbKD;
     if (!pts.length && id === 'GDP')          pts = wbCD;
     if (!pts.length && id === 'MORTGAGE30US') pts = fmMortgage;
+    if (!pts.length) pts = customSrcMap.get(id) ?? [];
     if (!pts.length) return { id, latest: null, prev: null };
     return {
       id,

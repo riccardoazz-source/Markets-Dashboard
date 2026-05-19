@@ -10,8 +10,8 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
-type Category = 'All' | 'Rates' | 'Inflation' | 'Growth' | 'Employment' | 'Real Estate' | 'Money';
-const CATEGORIES: Category[] = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money'];
+type Category = 'All' | 'Rates' | 'Inflation' | 'Growth' | 'Employment' | 'Real Estate' | 'Money' | 'Commodities';
+const CATEGORIES: Category[] = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities'];
 const TF_OPTIONS: Timeframe[] = ['1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface MacroLatest {

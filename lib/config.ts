@@ -1,35 +1,90 @@
 import { AssetConfig } from './types';
 
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$';
-export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money';
+export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities';
+
+// ---------- Source metadata ----------
+// Each MacroIndicator declares its primary data source.
+// The API route dispatches fetches based on `source.type`; adding a new
+// indicator that uses an existing type requires only a new entry here, no
+// changes to the route code.
+export type MacroSourceType =
+  | 'fred'         // FRED / DBnomics mirror (series id == indicator id unless overridden)
+  | 'ecb'          // ECB Data Portal (ECBDFR deposit facility rate)
+  | 'bls'          // Bureau of Labor Statistics
+  | 'treasury'     // US Treasury yield-curve CSV
+  | 'fomc'         // Federal Reserve FOMC rate decisions (hardcoded table + FRED fallback)
+  | 'yahoo_price'  // Yahoo Finance price series — symbol required
+  | 'yahoo_ratio'; // Yahoo Finance: price(numerator) / price(denominator)
+
+export interface MacroSource {
+  type: MacroSourceType;
+  label: string;        // Human-readable provider name shown in Sources tab
+  url: string;          // Deep-link to the indicator's page at the source
+  symbol?: string;      // yahoo_price only
+  numerator?: string;   // yahoo_ratio only: top symbol
+  denominator?: string; // yahoo_ratio only: bottom symbol
+}
 
 export interface MacroIndicator {
   id: string;
   name: string;
   category: MacroCategory;
   unit: MacroUnit;
+  source: MacroSource;
 }
 
 export const MACRO_INDICATORS: MacroIndicator[] = [
   // Rates
-  { id: 'DFEDTARU',  name: 'USA Interest Rate',     category: 'Rates',       unit: '%'   },
-  { id: 'ECBDFR',    name: 'EU Interest Rate',      category: 'Rates',       unit: '%'   },
-  { id: 'DGS10',     name: 'US 10Y Yield',          category: 'Rates',       unit: '%'   },
-  { id: 'DGS2',      name: 'US 2Y Yield',           category: 'Rates',       unit: '%'   },
+  { id: 'DFEDTARU', name: 'USA Interest Rate',     category: 'Rates',       unit: '%',
+    source: { type: 'fomc',    label: 'Federal Reserve',
+              url: 'https://www.federalreserve.gov/monetarypolicy/openmarket.htm' } },
+  { id: 'ECBDFR',   name: 'EU Interest Rate',      category: 'Rates',       unit: '%',
+    source: { type: 'ecb',     label: 'ECB Data Portal',
+              url: 'https://data.ecb.europa.eu/data/datasets/FM/FM.B.U2.EUR.4F.KR.DFR.LEV' } },
+  { id: 'DGS10',    name: 'US 10Y Yield',          category: 'Rates',       unit: '%',
+    source: { type: 'treasury',label: 'US Treasury',
+              url: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' } },
+  { id: 'DGS2',     name: 'US 2Y Yield',           category: 'Rates',       unit: '%',
+    source: { type: 'treasury',label: 'US Treasury',
+              url: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' } },
   // Inflation
-  { id: 'CPIAUCSL',  name: 'CPI (All Items)',       category: 'Inflation',   unit: 'idx' },
-  { id: 'CPILFESL',  name: 'Core CPI',              category: 'Inflation',   unit: 'idx' },
+  { id: 'CPIAUCSL', name: 'CPI (All Items)',        category: 'Inflation',   unit: 'idx',
+    source: { type: 'bls',     label: 'BLS',
+              url: 'https://www.bls.gov/cpi/' } },
+  { id: 'CPILFESL', name: 'Core CPI',               category: 'Inflation',   unit: 'idx',
+    source: { type: 'bls',     label: 'BLS',
+              url: 'https://www.bls.gov/cpi/' } },
   // Growth
-  { id: 'GDP',       name: 'Nominal GDP',           category: 'Growth',      unit: 'B$'  },
-  { id: 'GDPC1',     name: 'Real GDP',              category: 'Growth',      unit: 'B$'  },
-  { id: 'INDPRO',    name: 'Industrial Production', category: 'Growth',      unit: 'idx' },
+  { id: 'GDP',      name: 'Nominal GDP',            category: 'Growth',      unit: 'B$',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/GDP' } },
+  { id: 'GDPC1',    name: 'Real GDP',               category: 'Growth',      unit: 'B$',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/GDPC1' } },
+  { id: 'INDPRO',   name: 'Industrial Production',  category: 'Growth',      unit: 'idx',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/INDPRO' } },
   // Employment
-  { id: 'UNRATE',    name: 'US Unemployment',       category: 'Employment',  unit: '%'   },
-  { id: 'PAYEMS',    name: 'Nonfarm Payrolls',      category: 'Employment',  unit: 'K'   },
+  { id: 'UNRATE',   name: 'US Unemployment',        category: 'Employment',  unit: '%',
+    source: { type: 'bls',     label: 'BLS',
+              url: 'https://www.bls.gov/cps/' } },
+  { id: 'PAYEMS',   name: 'Nonfarm Payrolls',       category: 'Employment',  unit: 'K',
+    source: { type: 'bls',     label: 'BLS CES',
+              url: 'https://www.bls.gov/ces/' } },
   // Real Estate
-  { id: 'HOUST',     name: 'Housing Starts',        category: 'Real Estate', unit: 'K'   },
+  { id: 'HOUST',    name: 'Housing Starts',         category: 'Real Estate', unit: 'K',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/HOUST' } },
   // Money
-  { id: 'M2SL',      name: 'M2 Money Stock',        category: 'Money',       unit: 'B$'  },
+  { id: 'M2SL',     name: 'M2 Money Stock',         category: 'Money',       unit: 'B$',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/M2SL' } },
+  // Commodities — computed from Yahoo Finance prices; no FRED key needed
+  { id: 'GOLD_SILVER', name: 'Gold/Silver Ratio',   category: 'Commodities', unit: 'idx',
+    source: { type: 'yahoo_ratio', label: 'Yahoo Finance',
+              url: 'https://finance.yahoo.com/commodities',
+              numerator: 'GC=F', denominator: 'SI=F' } },
 ];
 
 export const INDEXES: AssetConfig[] = [
