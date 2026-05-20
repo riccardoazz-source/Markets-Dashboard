@@ -34,13 +34,25 @@ const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
+// FRED API key. The official API (api.stlouisfed.org) — unlike the public
+// website — does NOT block cloud/Vercel IPs, so this is the reliable path.
+// Prefer the FRED_API_KEY env var; the constant below is a fallback so the
+// deployed app works without Vercel dashboard configuration.
+// SECURITY NOTE: this key is committed to the repo. If the repo is public,
+// prefer setting FRED_API_KEY as a Vercel environment variable instead and
+// rotate this key at https://fredaccount.stlouisfed.org/apikeys
+const FRED_API_KEY_FALLBACK = 'f3c277afe140cbee307e1b716840f5a9';
+function getFredApiKey(): string {
+  return process.env.FRED_API_KEY || FRED_API_KEY_FALLBACK;
+}
+
 // ---------- FRED API (preferred when FRED_API_KEY is set) ----------
 async function fetchFREDApi(
   seriesId: string,
   fromDate?: string,
   timeoutMs = 6_000,
 ): Promise<{ date: string; value: number }[]> {
-  const apiKey = process.env.FRED_API_KEY;
+  const apiKey = getFredApiKey();
   if (!apiKey) return [];
   const params = new URLSearchParams({
     series_id: seriesId,
@@ -180,8 +192,8 @@ async function fetchFRED(
   fromDate?: string,
   timeoutMs = 6_000,
 ): Promise<{ date: string; value: number }[]> {
-  // 1. JSON API (requires FRED_API_KEY env var — most reliable)
-  if (process.env.FRED_API_KEY) {
+  // 1. JSON API (FRED_API_KEY env var or hardcoded fallback — most reliable)
+  if (getFredApiKey()) {
     const api = await fetchFREDApi(seriesId, fromDate, timeoutMs);
     if (api.length > 0) return api;
   }
@@ -874,13 +886,14 @@ async function fetchBLS(
 async function fetchBLSBatch(
   fredIds: string[],
   fromDate?: string,
+  timeoutMs = 8_000,
 ): Promise<Map<string, { date: string; value: number }[]>> {
   const result = new Map<string, { date: string; value: number }[]>();
   await Promise.all(
     fredIds.map(async id => {
       const blsId = BLS_MAP[id];
       if (!blsId) return;
-      const pts = await fetchBLS(blsId, fromDate);
+      const pts = await fetchBLS(blsId, fromDate, timeoutMs);
       result.set(blsId, pts);
     })
   );
@@ -1103,23 +1116,23 @@ export async function GET(req: NextRequest) {
   const needsWBcd = standardIds.includes('GDP');
 
   const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD, customSrcBatch] = await Promise.all([
-    Promise.all(standardIds.map(id => fetchFRED(id, fromStr, 2_000).then(pts => ({ id, pts })))),
-    // DBnomics 6s — primary fallback for GDPC1/INDPRO/HOUST/M2SL/ECBDFR.
-    // Lowered from 8s: most responses come back in <2s; longer waits just
-    // delay the response without adding signal.
-    Promise.all(standardIds.map(id => fetchDBnomicsFRED(id, fromStr, 6_000).then(pts => ({ id, pts })))),
+    // FRED API (key) is the reliable primary — 4s gives it room even on a
+    // latency spike; it normally returns in well under 1s.
+    Promise.all(standardIds.map(id => fetchFRED(id, fromStr, 4_000).then(pts => ({ id, pts })))),
+    // DBnomics 3s — secondary fallback only (FRED API covers FRED series).
+    Promise.all(standardIds.map(id => fetchDBnomicsFRED(id, fromStr, 3_000).then(pts => ({ id, pts })))),
     // BLS: parallel GET requests, each cached 4h by Next.js edge data cache
-    blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr) : Promise.resolve(new Map<string, Pts>()),
+    blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr, 6_000) : Promise.resolve(new Map<string, Pts>()),
     needsT2  ? fetchUSTreasury('DGS2',  fromStr, 4_000, true) : Promise.resolve<Pts>([]),
     needsT10 ? fetchUSTreasury('DGS10', fromStr, 4_000, true) : Promise.resolve<Pts>([]),
-    standardIds.includes('ECBDFR')       ? fetchECBRate(fromStr, 5_000)               : Promise.resolve<Pts>([]),
+    standardIds.includes('ECBDFR')       ? fetchECBRate(fromStr, 4_000)               : Promise.resolve<Pts>([]),
     needsYTnx                            ? fetchYahooYield('^TNX', fromStr)            : Promise.resolve<Pts>([]),
     needsYIrx                            ? fetchYahooYield('^IRX', fromStr)            : Promise.resolve<Pts>([]),
-    standardIds.includes('INDPRO')       ? fetchOECDIndPro(fromStr, 5_000)            : Promise.resolve<Pts>([]),
-    standardIds.includes('MORTGAGE30US') ? fetchFreddieMacMortgage(fromStr, 5_000)    : Promise.resolve<Pts>([]),
+    standardIds.includes('INDPRO')       ? fetchOECDIndPro(fromStr, 3_000)            : Promise.resolve<Pts>([]),
+    standardIds.includes('MORTGAGE30US') ? fetchFreddieMacMortgage(fromStr, 3_000)    : Promise.resolve<Pts>([]),
     // WorldBank: last-resort for GDP/GDPC1 if FRED + DBnomics both fail
-    needsWBkd ? fetchWorldBankGDP('NY.GDP.MKTP.KD', fromStr, 5_000) : Promise.resolve<Pts>([]),
-    needsWBcd ? fetchWorldBankGDP('NY.GDP.MKTP.CD', fromStr, 5_000) : Promise.resolve<Pts>([]),
+    needsWBkd ? fetchWorldBankGDP('NY.GDP.MKTP.KD', fromStr, 4_000) : Promise.resolve<Pts>([]),
+    needsWBcd ? fetchWorldBankGDP('NY.GDP.MKTP.CD', fromStr, 4_000) : Promise.resolve<Pts>([]),
     // Custom source indicators (yahoo_ratio, yahoo_price) — fetched in parallel
     customSrcIds.length > 0
       ? Promise.all(customSrcIds.map(async id => ({
