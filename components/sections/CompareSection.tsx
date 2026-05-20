@@ -43,7 +43,7 @@ const PRESETS = [
   { label: 'Tech Sectors', symbols: ['XLK', 'SOXX', 'AIQ', 'CIBR'] },
 ];
 
-const TF_OPTIONS: Timeframe[] = ['1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
+const TF_OPTIONS: Timeframe[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface StockApiResp {
   symbol: string; meta: unknown;
@@ -103,7 +103,7 @@ export function CompareSection() {
       let dividends: { date: string; amount: number }[] = [];
 
       if (config?.type === 'crypto') {
-        const daysMap: Record<string, number> = { '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
+        const daysMap: Record<string, number> = { '1D': 3, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
         const days = daysMap[tf] ?? 365;
         const coinId = symbol.replace('-USD', '').toLowerCase();
         const coinMap: Record<string, string> = {

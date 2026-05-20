@@ -1,5 +1,5 @@
 import { Timeframe, HistoricalPoint, CAGRData } from './types';
-import { format, subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
+import { format, subDays, subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
 
 export function formatPrice(price: number, currency = 'USD', compact = false): string {
   if (compact && price >= 1_000_000_000) {
@@ -40,6 +40,9 @@ export function getTimeframeStart(timeframe: Timeframe): string {
   const now = new Date();
   let date: Date;
   switch (timeframe) {
+    // No intraday data source — 1D shows the last few daily points,
+    // a 4-day window so weekends still leave at least one trading day.
+    case '1D': date = subDays(now, 4); break;
     case '1W': date = subWeeks(now, 1); break;
     case '1M': date = subMonths(now, 1); break;
     case '3M': date = subMonths(now, 3); break;
@@ -57,6 +60,7 @@ export function getTimeframeStart(timeframe: Timeframe): string {
 
 export function getIntervalForTimeframe(timeframe: Timeframe): string {
   switch (timeframe) {
+    case '1D':
     case '1W':
     case '1M': return '1d';
     case '3M':
@@ -461,7 +465,7 @@ export function correlationMatrix(
 
 export function timeframeLabel(tf: Timeframe): string {
   const labels: Record<Timeframe, string> = {
-    '1W': '1 Week', '1M': '1 Month', '3M': '3 Months',
+    '1D': '1 Day', '1W': '1 Week', '1M': '1 Month', '3M': '3 Months',
     '6M': '6 Months', 'YTD': 'Year to Date', '1Y': '1 Year',
     '3Y': '3 Years', '5Y': '5 Years', '10Y': '10 Years', 'MAX': 'Max',
   };

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { format, subMonths, subYears, subWeeks, startOfYear } from 'date-fns';
+import { format, subDays, subMonths, subYears, subWeeks, startOfYear } from 'date-fns';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -17,6 +17,7 @@ function setCached(key: string, data: unknown) {
 function getStartDate(timeframe: string): string {
   const now = new Date();
   switch (timeframe) {
+    case '1D':  return format(subDays(now, 4), 'yyyy-MM-dd');
     case '1W':  return format(subWeeks(now, 1), 'yyyy-MM-dd');
     case '1M':  return format(subMonths(now, 1), 'yyyy-MM-dd');
     case '3M':  return format(subMonths(now, 3), 'yyyy-MM-dd');

@@ -17,7 +17,7 @@ interface CurrencyRate {
 
 interface HistPoint { date: string; close: number }
 
-const TF_OPTIONS: Timeframe[] = ['1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
+const TF_OPTIONS: Timeframe[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 function decimals(rate: number | null) {
   if (!rate) return 4;
