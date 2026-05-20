@@ -379,11 +379,12 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
   const closes = (quotes?.[0]?.close as (number | null)[] | undefined) ?? [];
   const validCloses = closes.filter((c): c is number => c != null && c > 0);
 
-  let prev = 0;
-  if (validCloses.length >= 2) {
-    prev = validCloses[validCloses.length - 2];
-  } else {
-    prev = Number(m.previousClose) || Number(m.chartPreviousClose) || 0;
+  // Prefer meta.regularMarketPreviousClose (v8/chart always has it right)
+  let prev = Number(m.regularMarketPreviousClose) || 0;
+  if (prev <= 0) {
+    prev = validCloses.length >= 2
+      ? validCloses[validCloses.length - 2]
+      : Number(m.previousClose) || Number(m.chartPreviousClose) || 0;
   }
   if (prev <= 0) return null;
 
@@ -457,13 +458,14 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
     const closes = (quotes?.[0]?.close as (number | null)[] | undefined) ?? [];
     const validCloses = closes.filter((c): c is number => c != null && c > 0);
 
-    // Daily %: previous trading day's close = second-to-last valid close
-    // (last close == today, which equals regularMarketPrice during/after trading)
-    let prev = 0;
-    if (validCloses.length >= 2) {
-      prev = validCloses[validCloses.length - 2];
-    } else {
-      prev = Number(m.previousClose) || Number(m.chartPreviousClose) || 0;
+    // v8/chart meta carries regularMarketPreviousClose = yesterday's official close.
+    // This is more reliable than validCloses[length-2], which is off-by-one when
+    // today's intraday bar is already present in the daily series.
+    let prev = Number(m.regularMarketPreviousClose) || 0;
+    if (prev <= 0) {
+      prev = validCloses.length >= 2
+        ? validCloses[validCloses.length - 2]
+        : Number(m.previousClose) || Number(m.chartPreviousClose) || 0;
     }
     const changePercent = prev > 0 ? ((price - prev) / prev) * 100 : 0;
     const change = prev > 0 ? price - prev : 0;
