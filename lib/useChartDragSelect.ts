@@ -65,28 +65,27 @@ export function useChartDragSelect() {
   };
 }
 
-/** Value of `key` at-or-after `date` (left edge) — first matching row. */
+/** Value of `key` at-or-after `date` (left edge) — first non-null value at or after date. */
 export function valueAtOrAfter(
   data: ReadonlyArray<{ date: string }>, date: string, key: string,
 ): number | null {
   for (const row of data) {
-    if (row.date >= date) {
-      const v = (row as Record<string, unknown>)[key];
-      return typeof v === 'number' && isFinite(v) ? v : null;
-    }
+    if (row.date < date) continue;
+    const v = (row as Record<string, unknown>)[key];
+    if (typeof v === 'number' && isFinite(v)) return v;
   }
   return null;
 }
 
-/** Value of `key` at-or-before `date` (right edge) — last matching row. */
+/** Value of `key` at-or-before `date` (right edge) — last non-null value at or before date. */
 export function valueAtOrBefore(
   data: ReadonlyArray<{ date: string }>, date: string, key: string,
 ): number | null {
-  for (let i = data.length - 1; i >= 0; i--) {
-    if (data[i].date <= date) {
-      const v = (data[i] as Record<string, unknown>)[key];
-      return typeof v === 'number' && isFinite(v) ? v : null;
-    }
+  let result: number | null = null;
+  for (const row of data) {
+    if (row.date > date) break;
+    const v = (row as Record<string, unknown>)[key];
+    if (typeof v === 'number' && isFinite(v)) result = v;
   }
-  return null;
+  return result;
 }

@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff, Download, Upload, Link2, FlaskConical } from 'lucide-react';
-import { MACRO_INDICATORS } from '@/lib/config';
+import { MACRO_INDICATORS, ALL_COMPARABLE_ASSETS } from '@/lib/config';
 import { useGistData, AnalysisEntry, todayStr, makeId } from '@/lib/gist';
+import { AssetSearchInput } from '@/components/ui/AssetSearchInput';
 import {
   loadSourcesConfig, saveSourcesConfig, generateId, notifySourcesChanged,
   saveToHash, loadFromHash,
@@ -565,26 +566,35 @@ export function SourcesSection() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Analysis table — save observations linking two macro indicators
+// Analysis table — save observations linking two assets/indicators
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BLANK_ANALYSIS = { var1: '', var2: '', result: '' };
+const BLANK_ANALYSIS = { var1: '', var1Name: '', var2: '', var2Name: '', result: '' };
+
+function getVarDisplayName(symbol: string, savedName?: string): string {
+  if (savedName) return savedName;
+  const preset = ALL_COMPARABLE_ASSETS.find(a => a.symbol === symbol);
+  if (preset) return preset.name;
+  const macro = MACRO_INDICATORS.find(m => m.id === symbol);
+  if (macro) return macro.name;
+  return symbol;
+}
 
 function AnalysisTable() {
   const { data, update } = useGistData();
   const analyses: AnalysisEntry[] = data.analyses ?? [];
-  const [form, setForm] = useState<{ var1: string; var2: string; result: string }>(BLANK_ANALYSIS);
+  const [form, setForm] = useState(BLANK_ANALYSIS);
   const [editId, setEditId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState(BLANK_ANALYSIS);
-
-  const indicatorOptions = MACRO_INDICATORS.map(m => ({ value: m.id, label: `${m.name} (${m.id})` }));
 
   const saveNew = async () => {
     if (!form.var1 || !form.result.trim()) return;
     const entry: AnalysisEntry = {
       id: makeId(),
       var1: form.var1,
+      var1Name: form.var1Name || undefined,
       var2: form.var2,
+      var2Name: form.var2Name || undefined,
       result: form.result.trim(),
       date: todayStr(),
     };
@@ -598,13 +608,15 @@ function AnalysisTable() {
 
   const startEdit = (a: AnalysisEntry) => {
     setEditId(a.id);
-    setEditForm({ var1: a.var1, var2: a.var2, result: a.result });
+    setEditForm({ var1: a.var1, var1Name: a.var1Name ?? '', var2: a.var2, var2Name: a.var2Name ?? '', result: a.result });
   };
 
   const commitEdit = async () => {
     if (!editId) return;
     const updated = analyses.map(a =>
-      a.id === editId ? { ...a, ...editForm, result: editForm.result.trim(), date: todayStr() } : a
+      a.id === editId
+        ? { ...a, var1: editForm.var1, var1Name: editForm.var1Name || undefined, var2: editForm.var2, var2Name: editForm.var2Name || undefined, result: editForm.result.trim(), date: todayStr() }
+        : a
     );
     await update({ analyses: updated });
     setEditId(null);
@@ -617,7 +629,7 @@ function AnalysisTable() {
         <div>
           <h3 className="text-sm font-semibold text-gray-100">Analysis Notes</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            Save your observations linking two indicators. Synced to GitHub Gist.
+            Save observations linking two assets or indicators. Search any preset, macro, or stock. Synced to GitHub Gist.
           </p>
         </div>
       </div>
@@ -627,29 +639,21 @@ function AnalysisTable() {
         <div className="flex flex-wrap gap-2 items-end">
           <div className="flex flex-col gap-1">
             <label className="text-[10px] text-gray-500 uppercase tracking-wider">Variable 1 *</label>
-            <select
+            <AssetSearchInput
               value={form.var1}
-              onChange={e => setForm(v => ({ ...v, var1: e.target.value }))}
-              className="bg-bg border border-border rounded-md px-2 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-accent w-52"
-            >
-              <option value="">— select indicator —</option>
-              {indicatorOptions.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+              displayName={form.var1Name}
+              onChange={(sym, name) => setForm(v => ({ ...v, var1: sym, var1Name: name }))}
+              placeholder="Search asset or indicator…"
+            />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-[10px] text-gray-500 uppercase tracking-wider">Variable 2</label>
-            <select
+            <AssetSearchInput
               value={form.var2}
-              onChange={e => setForm(v => ({ ...v, var2: e.target.value }))}
-              className="bg-bg border border-border rounded-md px-2 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-accent w-52"
-            >
-              <option value="">— none —</option>
-              {indicatorOptions.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+              displayName={form.var2Name}
+              onChange={(sym, name) => setForm(v => ({ ...v, var2: sym, var2Name: name }))}
+              placeholder="Search (optional)…"
+            />
           </div>
           <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
             <label className="text-[10px] text-gray-500 uppercase tracking-wider">Observation / Result *</label>
@@ -690,41 +694,37 @@ function AnalysisTable() {
             <tbody>
               {[...analyses].reverse().map(a => {
                 const isEditing = editId === a.id;
-                const ind1 = MACRO_INDICATORS.find(m => m.id === a.var1);
-                const ind2 = a.var2 ? MACRO_INDICATORS.find(m => m.id === a.var2) : null;
+                const name1 = getVarDisplayName(a.var1, a.var1Name);
+                const name2 = a.var2 ? getVarDisplayName(a.var2, a.var2Name) : '';
                 return (
                   <tr key={a.id} className="border-t border-border align-top hover:bg-bg-hover/20">
                     <td className="px-3 py-2 text-gray-500 tabular-nums whitespace-nowrap">{a.date}</td>
                     <td className="px-3 py-2">
                       {isEditing ? (
-                        <select
+                        <AssetSearchInput
                           value={editForm.var1}
-                          onChange={e => setEditForm(v => ({ ...v, var1: e.target.value }))}
-                          className="bg-bg border border-accent rounded px-1.5 py-1 text-[11px] text-gray-100 focus:outline-none w-44"
-                        >
-                          <option value="">—</option>
-                          {indicatorOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
+                          displayName={editForm.var1Name}
+                          onChange={(sym, name) => setEditForm(v => ({ ...v, var1: sym, var1Name: name }))}
+                          placeholder="Search…"
+                        />
                       ) : (
                         <div>
-                          <p className="font-medium text-gray-100">{ind1?.name ?? a.var1}</p>
+                          <p className="font-medium text-gray-100">{name1}</p>
                           <p className="text-[10px] text-gray-600 font-mono">{a.var1}</p>
                         </div>
                       )}
                     </td>
                     <td className="px-3 py-2">
                       {isEditing ? (
-                        <select
+                        <AssetSearchInput
                           value={editForm.var2}
-                          onChange={e => setEditForm(v => ({ ...v, var2: e.target.value }))}
-                          className="bg-bg border border-accent rounded px-1.5 py-1 text-[11px] text-gray-100 focus:outline-none w-44"
-                        >
-                          <option value="">— none —</option>
-                          {indicatorOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                        </select>
+                          displayName={editForm.var2Name}
+                          onChange={(sym, name) => setEditForm(v => ({ ...v, var2: sym, var2Name: name }))}
+                          placeholder="Search (optional)…"
+                        />
                       ) : a.var2 ? (
                         <div>
-                          <p className="font-medium text-gray-100">{ind2?.name ?? a.var2}</p>
+                          <p className="font-medium text-gray-100">{name2}</p>
                           <p className="text-[10px] text-gray-600 font-mono">{a.var2}</p>
                         </div>
                       ) : (

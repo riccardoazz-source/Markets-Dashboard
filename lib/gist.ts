@@ -9,7 +9,9 @@ export interface NoteEntry {
 export interface AnalysisEntry {
   id: string;
   var1: string;
+  var1Name?: string;
   var2: string;
+  var2Name?: string;
   result: string;
   date: string;
 }
