@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff, Download, Upload } from 'lucide-react';
+import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff, Download, Upload, Link2 } from 'lucide-react';
 import { MACRO_INDICATORS } from '@/lib/config';
 import {
   loadSourcesConfig, saveSourcesConfig, generateId, notifySourcesChanged,
+  saveToHash, loadFromHash,
   type SourcesConfig, type CustomSource,
 } from '@/lib/userSources';
 import clsx from 'clsx';
@@ -71,10 +72,22 @@ export function SourcesSection() {
   const [newInd, setNewInd] = useState<Omit<CustomSource, 'id'>>(BLANK_CUSTOM);
   const [checkingAll, setCheckingAll] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    setConfig(loadSourcesConfig());
+    // Hash takes priority: lets users share/bookmark a URL that contains their full config.
+    // Falls back to localStorage for backward compat.
+    const fromHash = loadFromHash();
+    const cfg = fromHash ?? loadSourcesConfig();
+    setConfig(cfg);
+    if (fromHash) {
+      // Sync hash config to localStorage so it's available without the hash
+      saveSourcesConfig(fromHash);
+    } else {
+      // Encode current localStorage config into the URL hash for future bookmarking
+      saveToHash(cfg);
+    }
   }, []);
 
   // ── Save helpers ──────────────────────────────────────────────────────────
@@ -82,6 +95,7 @@ export function SourcesSection() {
   const persist = useCallback((next: SourcesConfig) => {
     setConfig(next);
     saveSourcesConfig(next);
+    saveToHash(next);
     notifySourcesChanged();
   }, []);
 
@@ -296,6 +310,18 @@ export function SourcesSection() {
               {checkingAll ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
               Check all
             </button>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(window.location.href).then(() => {
+                  setLinkCopied(true);
+                  setTimeout(() => setLinkCopied(false), 2500);
+                });
+              }}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border text-gray-300 hover:text-white hover:border-gray-500 transition flex items-center gap-1.5"
+              title="Copy a URL that contains your config — bookmark or save it to restore after any deployment">
+              {linkCopied ? <Check size={12} className="text-emerald-400" /> : <Link2 size={12} />}
+              {linkCopied ? 'Copied!' : 'Copy link'}
+            </button>
             <button onClick={handleExport}
               className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border text-gray-300 hover:text-white hover:border-gray-500 transition flex items-center gap-1.5"
               title="Download your custom sources as JSON — use Import to restore after a URL change">
@@ -473,6 +499,24 @@ export function SourcesSection() {
           (finance.yahoo.com/quote/SYMBOL), any CSV/JSON endpoint, and HTML pages with data tables.
           Changes take effect immediately — Macro tab auto-refreshes.
         </div>
+
+        {mounted && (config.custom.length > 0 || Object.keys(config.overrides).length > 0) && (
+          <div className="px-4 py-2 border-t border-border bg-amber-950/20 text-[10px] text-amber-400/80 flex items-center gap-1.5">
+            <Link2 size={11} className="shrink-0" />
+            Your config is encoded in the current URL.{' '}
+            <button
+              className="underline hover:text-amber-300 transition"
+              onClick={() => {
+                navigator.clipboard.writeText(window.location.href).then(() => {
+                  setLinkCopied(true);
+                  setTimeout(() => setLinkCopied(false), 2500);
+                });
+              }}>
+              {linkCopied ? 'Copied!' : 'Bookmark or copy this link'}
+            </button>
+            {' '}to preserve custom indicators across Vercel deployments.
+          </div>
+        )}
       </div>
 
       {/* ── Calculation conventions ─────────────────────────────────────── */}

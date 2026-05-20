@@ -437,7 +437,7 @@ async function fetchGeneric(url: string, fromDate?: string): Promise<{ data: DP[
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
-      headers: { ...BROWSER_HEADERS, Referer: new URL(url).origin + '/' },
+      headers: { ...BROWSER_HEADERS, Referer: (() => { try { return new URL(url).origin + '/'; } catch { return url; } })() },
     });
     if (!res.ok) return { data: [], msg: `HTTP ${res.status} from ${url}`, type: 'error' };
     const ct = res.headers.get('content-type') ?? '';
@@ -512,10 +512,12 @@ async function fetchGeneric(url: string, fromDate?: string): Promise<{ data: DP[
 // ─── GET handler ──────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  const url = req.nextUrl.searchParams.get('url');
-  if (!url) {
+  const rawUrl = req.nextUrl.searchParams.get('url');
+  if (!rawUrl) {
     return NextResponse.json({ success: false, data: [], message: 'Missing url', sourceType: 'error' });
   }
+  // Auto-add https:// so bare domains like "bullionbypost.co.uk" are valid URLs
+  const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
   const fromDate = req.nextUrl.searchParams.get('from') ?? undefined;
   const ck = `${url}|${fromDate ?? ''}`;
 

@@ -58,3 +58,33 @@ export function notifySourcesChanged(): void {
     window.dispatchEvent(new CustomEvent('mkt-sources-changed'));
   }
 }
+
+// Encode config into the URL hash so it survives Vercel preview URL changes.
+// Hash fragments are never sent to the server, so any length is fine.
+// Bookmarking the URL is enough to persist config across deploys and devices.
+
+export function saveToHash(cfg: SourcesConfig): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify(cfg));
+    const b64 = btoa(String.fromCharCode(...bytes));
+    window.history.replaceState(null, '', `#cfg=${b64}`);
+  } catch {}
+}
+
+export function loadFromHash(): SourcesConfig | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const m = window.location.hash.match(/[#&]?cfg=([A-Za-z0-9+/=]+)/);
+    if (!m) return null;
+    const bytes = Uint8Array.from(atob(m[1]), c => c.charCodeAt(0));
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<SourcesConfig>;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      overrides: (typeof parsed.overrides === 'object' && parsed.overrides !== null)
+        ? (parsed.overrides as Record<string, string>) : {},
+      custom: Array.isArray(parsed.custom) ? parsed.custom : [],
+      hidden: Array.isArray(parsed.hidden) ? parsed.hidden : [],
+    };
+  } catch { return null; }
+}
