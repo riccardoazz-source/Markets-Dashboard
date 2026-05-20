@@ -1,7 +1,7 @@
 import { AssetConfig } from './types';
 
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$';
-export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities';
+export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Sentiment';
 
 // ---------- Source metadata ----------
 // Each MacroIndicator declares its primary data source.
@@ -80,11 +80,30 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'M2SL',     name: 'M2 Money Stock',         category: 'Money',       unit: 'B$',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/M2SL' } },
+  // Bank credit quality — quarterly FRED series
+  { id: 'DRCLACBS', name: 'Consumer Loan Delinquency', category: 'Money',    unit: '%',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/DRCLACBS' } },
+  { id: 'DRALACBN', name: 'All Loans Delinquency',  category: 'Money',       unit: '%',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/DRALACBN' } },
+  { id: 'DRCRELEXFACBS', name: 'CRE Loan Delinquency', category: 'Money',    unit: '%',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/DRCRELEXFACBS' } },
+  // Discontinued quarterly Z.1 Financial Accounts series — latest point may be old
+  { id: 'BOGZ1FA673065500Q', name: 'Financial Accounts Flow (Z.1)', category: 'Money', unit: 'idx',
+    source: { type: 'fred',    label: 'FRED (discontinued)',
+              url: 'https://fred.stlouisfed.org/series/BOGZ1FA673065500Q' } },
   // Commodities — computed from Yahoo Finance prices; no FRED key needed
   { id: 'GOLD_SILVER', name: 'Gold/Silver Ratio',   category: 'Commodities', unit: 'idx',
     source: { type: 'yahoo_ratio', label: 'Yahoo Finance',
               url: 'https://finance.yahoo.com/commodities',
               numerator: 'GC=F', denominator: 'SI=F' } },
+  // Sentiment — CBOE Volatility Index via Yahoo Finance
+  { id: 'VIX',      name: 'VIX Volatility Index',    category: 'Sentiment',   unit: 'idx',
+    source: { type: 'yahoo_price', label: 'Yahoo Finance',
+              url: 'https://finance.yahoo.com/quote/%5EVIX',
+              symbol: '^VIX' } },
 ];
 
 export const INDEXES: AssetConfig[] = [

@@ -46,6 +46,14 @@ function getFredApiKey(): string {
   return process.env.FRED_API_KEY || FRED_API_KEY_FALLBACK;
 }
 
+// Discontinued / low-frequency (quarterly, annual) FRED series whose most recent
+// observation can be far older than the standard 18-month list-mode window.
+// For these, fetch the full history so the card still shows the last available
+// value, and charts show the complete series regardless of the timeframe picked.
+const WIDE_WINDOW_FRED = new Set([
+  'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q',
+]);
+
 // ---------- FRED API (preferred when FRED_API_KEY is set) ----------
 async function fetchFREDApi(
   seriesId: string,
@@ -1058,7 +1066,9 @@ export async function GET(req: NextRequest) {
     const cached = getCached(key, TTL);
     if (cached) return NextResponse.json(cached, { headers: CACHE_HEADERS });
     try {
-      const pts = await fetchMacroSeries(id, from);
+      // Discontinued/quarterly series: ignore the timeframe filter so the chart
+      // still shows their (older) full history instead of an empty range.
+      const pts = await fetchMacroSeries(id, WIDE_WINDOW_FRED.has(id) ? undefined : from);
       const data = pts.map(p => ({ date: p.date, close: p.value }));
       if (data.length > 0) {
         cache.set(key, { data, ts: Date.now() });
@@ -1118,9 +1128,13 @@ export async function GET(req: NextRequest) {
   const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD, customSrcBatch] = await Promise.all([
     // FRED API (key) is the reliable primary — 4s gives it room even on a
     // latency spike; it normally returns in well under 1s.
-    Promise.all(standardIds.map(id => fetchFRED(id, fromStr, 4_000).then(pts => ({ id, pts })))),
+    // Discontinued/quarterly series get the full history (undefined fromDate)
+    // so their last available value is captured even if it predates the window.
+    Promise.all(standardIds.map(id =>
+      fetchFRED(id, WIDE_WINDOW_FRED.has(id) ? undefined : fromStr, 4_000).then(pts => ({ id, pts })))),
     // DBnomics 3s — secondary fallback only (FRED API covers FRED series).
-    Promise.all(standardIds.map(id => fetchDBnomicsFRED(id, fromStr, 3_000).then(pts => ({ id, pts })))),
+    Promise.all(standardIds.map(id =>
+      fetchDBnomicsFRED(id, WIDE_WINDOW_FRED.has(id) ? undefined : fromStr, 3_000).then(pts => ({ id, pts })))),
     // BLS: parallel GET requests, each cached 4h by Next.js edge data cache
     blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr, 6_000) : Promise.resolve(new Map<string, Pts>()),
     needsT2  ? fetchUSTreasury('DGS2',  fromStr, 4_000, true) : Promise.resolve<Pts>([]),
