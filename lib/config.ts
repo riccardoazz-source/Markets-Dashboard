@@ -77,10 +77,17 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'HOUST',    name: 'Housing Starts',         category: 'Real Estate', unit: 'K',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/HOUST' } },
+  { id: 'MORTGAGE30US', name: '30Y Mortgage Rate',  category: 'Real Estate', unit: '%',
+    source: { type: 'fred',    label: 'FRED / Freddie Mac',
+              url: 'https://fred.stlouisfed.org/series/MORTGAGE30US' } },
   // Money
   { id: 'M2SL',     name: 'M2 Money Stock',         category: 'Money',       unit: 'B$',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/M2SL' } },
+  // WALCL is reported in millions on FRED; the computed handler divides by 1000 → billions.
+  { id: 'WALCL',    name: 'Fed Balance Sheet',       category: 'Money',       unit: 'B$',
+    source: { type: 'computed', label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/WALCL' } },
   // Bank credit quality — quarterly FRED series
   { id: 'DRCLACBS', name: 'Consumer Loan Delinquency', category: 'Money',    unit: '%',
     source: { type: 'fred',    label: 'FRED',
@@ -108,7 +115,7 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
               url: 'https://finance.yahoo.com/quote/%5EVIX',
               symbol: '^VIX' } },
   // Crypto — computed server-side; bitbo.io charts are the visual reference
-  { id: 'BTC_HALVING', name: 'Bitcoin Block Reward', category: 'Crypto',      unit: 'idx',
+  { id: 'BTC_HALVING', name: 'Bitcoin Halvings',      category: 'Crypto',      unit: 'idx',
     source: { type: 'computed', label: 'Bitcoin halving schedule',
               url: 'https://charts.bitbo.io/halving-progress/' } },
   { id: 'BTC_RSI',  name: 'Bitcoin Monthly RSI',     category: 'Crypto',      unit: 'idx',

@@ -384,29 +384,17 @@ async function fetchYahooRatio(
 }
 
 // ---------- Bitcoin halving schedule (BTC_HALVING) ----------
-// The block subsidy halves every 210,000 blocks. Past halving dates are
-// historical facts, so this series is deterministic and never needs a fetch.
-// Two points per halving (the day before + the halving day) make the chart
-// render as a clean step instead of a misleading diagonal.
-const BTC_HALVINGS: { date: string; reward: number }[] = [
-  { date: '2009-01-03', reward: 50 },
-  { date: '2012-11-28', reward: 25 },
-  { date: '2016-07-09', reward: 12.5 },
-  { date: '2020-05-11', reward: 6.25 },
-  { date: '2024-04-20', reward: 3.125 },
+// One data point per halving event; value = ordinal (1, 2, 3, 4).
+// Historical facts — no external fetch needed.
+const BTC_HALVING_DATES: string[] = [
+  '2012-11-28', // 1st: 50 → 25 BTC
+  '2016-07-09', // 2nd: 25 → 12.5 BTC
+  '2020-05-11', // 3rd: 12.5 → 6.25 BTC
+  '2024-04-20', // 4th: 6.25 → 3.125 BTC
 ];
 
 function getBitcoinHalvings(fromDate?: string): { date: string; value: number }[] {
-  const pts: { date: string; value: number }[] = [];
-  for (let i = 0; i < BTC_HALVINGS.length; i++) {
-    const h = BTC_HALVINGS[i];
-    if (i > 0) {
-      const dayBefore = new Date(new Date(h.date).getTime() - 86_400_000)
-        .toISOString().slice(0, 10);
-      pts.push({ date: dayBefore, value: BTC_HALVINGS[i - 1].reward });
-    }
-    pts.push({ date: h.date, value: h.reward });
-  }
+  const pts = BTC_HALVING_DATES.map((date, i) => ({ date, value: i + 1 }));
   return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
 }
 
@@ -993,6 +981,15 @@ async function fetchMacroSeries(
   if (src?.type === 'computed') {
     if (fredId === 'BTC_HALVING') return getBitcoinHalvings(fromDate);
     if (fredId === 'BTC_RSI')     return fetchBitcoinMonthlyRSI(fromDate);
+    // WALCL: Fed total assets in millions on FRED → divide by 1000 for billions.
+    if (fredId === 'WALCL') {
+      const [fred, dbn] = await Promise.all([
+        fetchFRED('WALCL', fromDate, 8_000),
+        fetchDBnomicsFRED('WALCL', fromDate, 8_000),
+      ]);
+      const pts = fred.length ? fred : dbn;
+      return pts.map(p => ({ date: p.date, value: p.value / 1000 }));
+    }
     return [];
   }
 
