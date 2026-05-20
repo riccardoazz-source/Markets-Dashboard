@@ -20,6 +20,20 @@ const CACHE_HEADERS = { 'Cache-Control': 'public, s-maxage=1800, stale-while-rev
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
+// Resolve as soon as any promise returns a non-empty array; fall back to [] if all fail.
+function raceSuccess(promises: Array<Promise<DP[]>>): Promise<DP[]> {
+  return new Promise(resolve => {
+    let remaining = promises.length;
+    if (!remaining) { resolve([]); return; }
+    for (const p of promises) {
+      p.then(arr => {
+        if (arr.length > 0) resolve(arr);
+        else if (--remaining === 0) resolve([]);
+      }).catch(() => { if (--remaining === 0) resolve([]); });
+    }
+  });
+}
+
 function getCached(key: string, ttl: number) {
   const e = cache.get(key);
   return e && Date.now() - e.ts < ttl ? e.data : null;
@@ -30,7 +44,7 @@ async function tryFREDCsv(id: string, fromDate?: string): Promise<DP[]> {
   const p = new URLSearchParams({ id });
   if (fromDate) p.set('cosd', fromDate);
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8_000);
+  const t = setTimeout(() => ctrl.abort(), 4_000);
   try {
     const res = await fetch(`https://fred.stlouisfed.org/graph/fredgraph.csv?${p}`, {
       signal: ctrl.signal,
@@ -56,7 +70,7 @@ async function tryFREDCsv(id: string, fromDate?: string): Promise<DP[]> {
 // ─── FRED legacy TXT (tab-separated, public) ──────────────────────────────
 async function tryFREDTxt(id: string, fromDate?: string): Promise<DP[]> {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8_000);
+  const t = setTimeout(() => ctrl.abort(), 4_000);
   try {
     const res = await fetch(`https://fred.stlouisfed.org/data/${encodeURIComponent(id)}.txt`, {
       signal: ctrl.signal,
@@ -91,34 +105,39 @@ function normalizePeriod(p: string): string | null {
 
 async function tryDBnomics(id: string, fromDate?: string): Promise<DP[]> {
   const enc = encodeURIComponent(id);
-  for (const url of [
+  const urls = [
     `https://api.db.nomics.world/v22/series/FRED/${enc}/${enc}?observations=1`,
     `https://api.db.nomics.world/v22/series/FRED/${enc}?observations=1`,
-  ]) {
+  ];
+
+  function fetchOneDBn(url: string): Promise<DP[]> {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8_000);
-    try {
-      const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json', 'User-Agent': UA } });
-      if (!res.ok) continue;
-      const json = await res.json() as {
-        series?: { docs?: Array<{ period?: string[]; value?: (number | string | null)[] }> }
-      };
-      const doc = json?.series?.docs?.[0];
-      if (!doc?.period?.length) continue;
-      const pts: DP[] = [];
-      for (let i = 0; i < doc.period!.length; i++) {
-        const date = normalizePeriod(doc.period![i]);
-        if (!date) continue;
-        if (fromDate && date < fromDate) continue;
-        const raw = doc.value?.[i];
-        const num = typeof raw === 'number' ? raw : raw == null ? NaN : parseFloat(String(raw));
-        if (isFinite(num)) pts.push({ date, value: num });
-      }
-      pts.sort((a, b) => a.date.localeCompare(b.date));
-      if (pts.length) return pts;
-    } catch { /* next url */ } finally { clearTimeout(t); }
+    const t = setTimeout(() => ctrl.abort(), 7_000);
+    return fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json', 'User-Agent': UA } })
+      .then(async res => {
+        if (!res.ok) return [];
+        const json = await res.json() as {
+          series?: { docs?: Array<{ period?: string[]; value?: (number | string | null)[] }> }
+        };
+        const doc = json?.series?.docs?.[0];
+        if (!doc?.period?.length) return [];
+        const pts: DP[] = [];
+        for (let i = 0; i < doc.period!.length; i++) {
+          const date = normalizePeriod(doc.period![i]);
+          if (!date) continue;
+          if (fromDate && date < fromDate) continue;
+          const raw = doc.value?.[i];
+          const num = typeof raw === 'number' ? raw : raw == null ? NaN : parseFloat(String(raw));
+          if (isFinite(num)) pts.push({ date, value: num });
+        }
+        pts.sort((a, b) => a.date.localeCompare(b.date));
+        return pts;
+      })
+      .catch(() => [])
+      .finally(() => clearTimeout(t));
   }
-  return [];
+
+  return raceSuccess(urls.map(fetchOneDBn));
 }
 
 // ─── World Bank (GDP fallback) ─────────────────────────────────────────────
@@ -178,19 +197,17 @@ async function tryOECDIndPro(fromDate?: string): Promise<DP[]> {
 
 // ─── Master fetcher ────────────────────────────────────────────────────────
 async function fetchFredSeries(id: string, fromDate?: string): Promise<DP[]> {
-  // Run all FRED sources in parallel — first non-empty result wins
-  const [csv, txt, dbn] = await Promise.all([
-    tryFREDCsv(id, fromDate),
-    tryFREDTxt(id, fromDate),
-    tryDBnomics(id, fromDate),
+  // Race all FRED sources — resolve as soon as any returns data (don't wait for slow timeouts)
+  const result = await raceSuccess([
+    tryFREDCsv(id, fromDate),    // 4s timeout — fast fail if blocked from cloud IP
+    tryFREDTxt(id, fromDate),    // 4s timeout — fast fail if blocked
+    tryDBnomics(id, fromDate),   // 7s timeout across both DBnomics URLs in parallel
   ]);
-  if (csv.length) return csv;
-  if (txt.length) return txt;
-  if (dbn.length) return dbn;
+  if (result.length) return result;
 
   // Series-specific fallbacks when all FRED sources fail
-  if (id === 'GDP')   return tryWorldBank('NY.GDP.MKTP.CD');
-  if (id === 'GDPC1') return tryWorldBank('NY.GDP.MKTP.KD');
+  if (id === 'GDP')    return tryWorldBank('NY.GDP.MKTP.CD');
+  if (id === 'GDPC1')  return tryWorldBank('NY.GDP.MKTP.KD');
   if (id === 'INDPRO') return tryOECDIndPro(fromDate);
   return [];
 }

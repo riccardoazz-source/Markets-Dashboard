@@ -29,6 +29,31 @@ const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
+const BROWSER_HEADERS = {
+  'User-Agent': UA,
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Cache-Control': 'no-cache',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+};
+
+// Resolve as soon as any promise returns a non-empty array; fall back to [] if all fail.
+function raceSuccess(promises: Array<Promise<DP[]>>): Promise<DP[]> {
+  return new Promise(resolve => {
+    let remaining = promises.length;
+    if (!remaining) { resolve([]); return; }
+    for (const p of promises) {
+      p.then(arr => {
+        if (arr.length > 0) resolve(arr);
+        else if (--remaining === 0) resolve([]);
+      }).catch(() => { if (--remaining === 0) resolve([]); });
+    }
+  });
+}
+
 // ─── URL pattern helpers ───────────────────────────────────────────────────
 
 function fredId(url: string): string | null {
@@ -48,25 +73,61 @@ const MON: Record<string, string> = {
   jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12',
 };
 
+function expandYear(yy: string): string {
+  const n = parseInt(yy, 10);
+  return (n >= 70 ? 1900 + n : 2000 + n).toString();
+}
+
 function normalizeDate(s: string): string | null {
-  s = s.trim();
+  s = s.trim().replace(/ /g, ' '); // strip non-breaking spaces
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  if (/^\d{4}-\d{2}$/.test(s))        return `${s}-01`;
-  // MM/DD/YYYY
-  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2,'0')}-${mdy[2].padStart(2,'0')}`;
-  // DD.MM.YYYY
-  const dmy = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
+  if (/^\d{4}-\d{2}$/.test(s)) return `${s}-01`;
+  if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) return s.replace(/\//g, '-');
+
+  // XX/XX/YYYY — if first number > 12 it must be day (DD/MM/YYYY), else US (MM/DD/YYYY)
+  const slash4 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash4) {
+    const a = parseInt(slash4[1]);
+    if (a > 12) return `${slash4[3]}-${slash4[2].padStart(2,'0')}-${slash4[1].padStart(2,'0')}`;
+    return `${slash4[3]}-${slash4[1].padStart(2,'0')}-${slash4[2].padStart(2,'0')}`;
+  }
+
+  // XX/XX/YY (2-digit year) — same DD/MM disambiguation
+  const slash2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (slash2) {
+    const a = parseInt(slash2[1]);
+    const year = expandYear(slash2[3]);
+    if (a > 12) return `${year}-${slash2[2].padStart(2,'0')}-${slash2[1].padStart(2,'0')}`;
+    return `${year}-${slash2[1].padStart(2,'0')}-${slash2[2].padStart(2,'0')}`;
+  }
+
+  // DD.MM.YYYY or DD-MM-YYYY
+  const dmy4 = s.match(/^(\d{1,2})[.\-](\d{1,2})[.\-](\d{4})$/);
+  if (dmy4) return `${dmy4[3]}-${dmy4[2].padStart(2,'0')}-${dmy4[1].padStart(2,'0')}`;
+
+  // "January 15, 2024" / "Jan 15, 2024" / "Jan 15 2024"
+  const mdy2 = s.match(/^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (mdy2) { const m = MON[mdy2[1].toLowerCase().slice(0,3)]; if (m) return `${mdy2[3]}-${m}-${mdy2[2].padStart(2,'0')}`; }
+
+  // "15 January 2024" / "15 Jan 2024"
+  const dmy2 = s.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$/);
+  if (dmy2) { const m = MON[dmy2[2].toLowerCase().slice(0,3)]; if (m) return `${dmy2[3]}-${m}-${dmy2[1].padStart(2,'0')}`; }
+
   // "Jan 2024" / "January 2024"
   const my = s.match(/^([A-Za-z]{3,9})\s+(\d{4})$/);
   if (my) { const m = MON[my[1].toLowerCase().slice(0,3)]; if (m) return `${my[2]}-${m}-01`; }
+
   // Q1 2024 / 2024-Q1 / 2024Q1
   const qy = s.match(/(?:^Q([1-4])\s+(\d{4})$|^(\d{4})-?Q([1-4])$)/i);
   if (qy) {
     const q = parseInt(qy[1] ?? qy[4]); const y = qy[2] ?? qy[3];
     return `${y}-${((q-1)*3+1).toString().padStart(2,'0')}-01`;
   }
+
+  // H1/H2 YYYY (semi-annual)
+  const hy = s.match(/^(\d{4})-?H([12])$/i);
+  if (hy) return `${hy[1]}-${hy[2] === '1' ? '01' : '07'}-01`;
+
   if (/^\d{4}$/.test(s)) return `${s}-07-01`; // annual → mid-year
   return null;
 }
@@ -88,36 +149,57 @@ function parseNum(s: string): number | null {
 // as JavaScript arrays — no browser execution needed, just HTML parsing.
 // Handles Highcharts [[timestamp_ms, value], ...] and similar patterns.
 
+function tsToDate(ts: number): string | null {
+  const tsMs = ts < 1e10 ? ts * 1000 : ts;
+  const year = new Date(tsMs).getFullYear();
+  if (year < 1950 || year > 2100) return null;
+  return new Date(tsMs).toISOString().slice(0, 10);
+}
+
 function extractFromScripts(html: string, fromDate?: string): DP[] {
   let best: DP[] = [];
-  // Capture script opening-tag attributes and body separately.
-  // sm[1] = attributes (used to detect external scripts via src=)
-  // sm[2] = inline script body
+
   const scriptRx = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
   let sm: RegExpExecArray | null;
+
   while ((sm = scriptRx.exec(html)) !== null) {
     const attrs = sm[1] ?? '';
     const code  = sm[2] ?? '';
-    // Skip external scripts (src= attribute) and trivially short bodies
     if (/\bsrc\s*=/i.test(attrs) || code.length < 40) continue;
-    // Match [unix_timestamp, numeric_value] pairs.
-    // 9-13 digit timestamps cover Unix seconds (1973+) and milliseconds (Highcharts).
-    const pairRx = /\[\s*(\d{9,13})\s*,\s*([\-\d.]+)\s*\]/g;
+
     const pts: DP[] = [];
-    let pm: RegExpExecArray | null;
-    while ((pm = pairRx.exec(code)) !== null) {
-      const ts  = parseInt(pm[1]);
-      const val = parseFloat(pm[2]);
-      if (!isFinite(val)) continue;
-      const tsMs = ts < 1e10 ? ts * 1000 : ts; // auto-detect seconds vs ms
-      const year = new Date(tsMs).getFullYear();
-      if (year < 1950 || year > 2100) continue;
-      const date = new Date(tsMs).toISOString().slice(0, 10);
-      if (fromDate && date < fromDate) continue;
-      pts.push({ date, value: val });
+
+    // Pattern 1: [timestamp, value] — Highcharts/ApexCharts array format
+    const arrRx = /\[\s*(\d{9,13})\s*,\s*([\-\d.]+)\s*\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = arrRx.exec(code)) !== null) {
+      const date = tsToDate(parseInt(m[1]));
+      if (!date) continue;
+      const val = parseFloat(m[2]);
+      if (isFinite(val) && !(fromDate && date < fromDate)) pts.push({ date, value: val });
     }
+
+    // Pattern 2: {x: timestamp, y: value} — Highcharts/ApexCharts object format
+    const objRx = /\{\s*["']?x["']?\s*:\s*(\d{9,13})\s*,[^}]{0,80}["']?y["']?\s*:\s*([\-\d.]+)/g;
+    while ((m = objRx.exec(code)) !== null) {
+      const date = tsToDate(parseInt(m[1]));
+      if (!date) continue;
+      const val = parseFloat(m[2]);
+      if (isFinite(val) && !(fromDate && date < fromDate)) pts.push({ date, value: val });
+    }
+
+    // Pattern 3: {timestamp: ts, value: v} or {date: ts, price: v} etc.
+    const objRx2 = /\{\s*["']?(?:timestamp|t|time)["']?\s*:\s*(\d{9,13})\s*,[^}]{0,80}["']?(?:value|v|price|close|last)["']?\s*:\s*([\-\d.]+)/g;
+    while ((m = objRx2.exec(code)) !== null) {
+      const date = tsToDate(parseInt(m[1]));
+      if (!date) continue;
+      const val = parseFloat(m[2]);
+      if (isFinite(val) && !(fromDate && date < fromDate)) pts.push({ date, value: val });
+    }
+
     if (pts.length >= 5 && pts.length > best.length) best = pts;
   }
+
   // Deduplicate by date (keep last occurrence per date)
   const deduped = new Map<string, number>();
   for (const pt of best) deduped.set(pt.date, pt.value);
@@ -179,7 +261,7 @@ async function tryFREDCsv(seriesId: string, fromDate?: string): Promise<DP[]> {
   if (fromDate) params.set('cosd', fromDate);
   const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?${params}`;
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 9_000);
+  const t = setTimeout(() => ctrl.abort(), 4_000);
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
@@ -205,7 +287,7 @@ async function tryFREDCsv(seriesId: string, fromDate?: string): Promise<DP[]> {
 async function tryFREDTxt(seriesId: string, fromDate?: string): Promise<DP[]> {
   const url = `https://fred.stlouisfed.org/data/${encodeURIComponent(seriesId)}.txt`;
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 9_000);
+  const t = setTimeout(() => ctrl.abort(), 4_000);
   try {
     const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': UA, Accept: 'text/plain,*/*' } });
     if (!res.ok) return [];
@@ -277,33 +359,41 @@ async function tryOECDIndPro(fromDate?: string): Promise<DP[]> {
 
 async function fetchDBnomics(seriesId: string, fromDate?: string): Promise<{ data: DP[]; msg: string }> {
   const enc = encodeURIComponent(seriesId);
-  for (const url of [
+  const urls = [
     `https://api.db.nomics.world/v22/series/FRED/${enc}/${enc}?observations=1`,
     `https://api.db.nomics.world/v22/series/FRED/${enc}?observations=1`,
-  ]) {
+  ];
+
+  function fetchOneDBn(url: string): Promise<DP[]> {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8_000);
-    try {
-      const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
-      if (!res.ok) continue;
-      const json = await res.json() as {
-        series?: { docs?: Array<{ period?: string[]; value?: (number|string|null)[] }> }
-      };
-      const doc = json?.series?.docs?.[0];
-      if (!doc?.period?.length) continue;
-      const data: DP[] = [];
-      for (let i = 0; i < doc.period!.length; i++) {
-        const d = normalizeDate(doc.period![i]); if (!d) continue;
-        if (fromDate && d < fromDate) continue;
-        const v = doc.value?.[i];
-        const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(String(v));
-        if (isFinite(num)) data.push({ date: d, value: num });
-      }
-      data.sort((a,b)=>a.date.localeCompare(b.date));
-      if (data.length) return { data, msg: `FRED ${seriesId} via DBnomics · ${data.length} pts` };
-    } catch { /* try next */ } finally { clearTimeout(t); }
+    const t = setTimeout(() => ctrl.abort(), 7_000);
+    return fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json', 'User-Agent': UA } })
+      .then(async res => {
+        if (!res.ok) return [];
+        const json = await res.json() as {
+          series?: { docs?: Array<{ period?: string[]; value?: (number|string|null)[] }> }
+        };
+        const doc = json?.series?.docs?.[0];
+        if (!doc?.period?.length) return [];
+        const data: DP[] = [];
+        for (let i = 0; i < doc.period!.length; i++) {
+          const d = normalizeDate(doc.period![i]); if (!d) continue;
+          if (fromDate && d < fromDate) continue;
+          const v = doc.value?.[i];
+          const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(String(v));
+          if (isFinite(num)) data.push({ date: d, value: num });
+        }
+        data.sort((a,b)=>a.date.localeCompare(b.date));
+        return data;
+      })
+      .catch(() => [])
+      .finally(() => clearTimeout(t));
   }
-  return { data: [], msg: `FRED ${seriesId}: not found in DBnomics` };
+
+  const data = await raceSuccess(urls.map(fetchOneDBn));
+  return data.length
+    ? { data, msg: `FRED ${seriesId} via DBnomics · ${data.length} pts` }
+    : { data: [], msg: `FRED ${seriesId}: not found in DBnomics` };
 }
 
 async function fetchYahoo(symbol: string, fromDate?: string): Promise<{ data: DP[]; msg: string }> {
@@ -347,7 +437,7 @@ async function fetchGeneric(url: string, fromDate?: string): Promise<{ data: DP[
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
-      headers: { 'User-Agent': UA, Accept: 'text/html,application/json,text/csv,*/*' },
+      headers: { ...BROWSER_HEADERS, Referer: new URL(url).origin + '/' },
     });
     if (!res.ok) return { data: [], msg: `HTTP ${res.status} from ${url}`, type: 'error' };
     const ct = res.headers.get('content-type') ?? '';
@@ -439,15 +529,14 @@ export async function GET(req: NextRequest) {
   const ysym = yahooSym(url);
 
   if (fid) {
-    // Try FRED CSV, FRED TXT, and DBnomics in parallel (Node.js runtime — not subject to Edge IP blocks)
-    const [csv, txt, dbn] = await Promise.all([
+    // Race FRED CSV (4s), TXT (4s), DBnomics (7s) — resolve on first non-empty result
+    const dbnPromise = fetchDBnomics(fid, fromDate);
+    let data = await raceSuccess([
       tryFREDCsv(fid, fromDate),
       tryFREDTxt(fid, fromDate),
-      fetchDBnomics(fid, fromDate),
+      dbnPromise.then(r => r.data),
     ]);
-    let data = csv.length ? csv : txt.length ? txt : dbn.data;
-    const src  = csv.length ? 'FRED CSV' : txt.length ? 'FRED TXT' : dbn.data.length ? 'DBnomics' : '';
-    let msg  = data.length ? `${src} ${fid} · ${data.length} pts` : '';
+    let msg = data.length ? `FRED ${fid} · ${data.length} pts` : '';
 
     // Specific fallbacks for series with known alternative public APIs
     if (!data.length) {
@@ -463,7 +552,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    if (!msg) msg = dbn.msg || `FRED ${fid}: all sources failed`;
+    if (!msg) msg = `FRED ${fid}: all sources failed`;
     result = { success: data.length > 0, data, message: msg, sourceType: 'fred' };
   } else if (ysym) {
     const { data, msg } = await fetchYahoo(ysym, fromDate);
