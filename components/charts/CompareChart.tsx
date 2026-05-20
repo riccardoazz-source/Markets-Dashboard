@@ -2,10 +2,11 @@
 
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, Legend,
+  CartesianGrid, Tooltip, Legend, ReferenceArea,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
 import { format, parseISO } from 'date-fns';
+import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 
 interface Props {
   assets: CompareAsset[];
@@ -26,7 +27,13 @@ function formatDate(dateStr: string, allDates: string[]) {
   } catch { return dateStr; }
 }
 
+function fmtDate(d: string) {
+  try { return format(parseISO(d), 'MMM d, yyyy'); } catch { return d; }
+}
+
 export function CompareChart({ assets, height = 340, logScale = false }: Props) {
+  const { handlers, range, area, clear } = useChartDragSelect();
+
   if (!assets.length) return null;
 
   // Build union of all dates across price and TR series, then cap at ~500 points.
@@ -107,10 +114,46 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
     }
   });
 
+  // Per-asset change over the drag-selected period
+  const selStats = range
+    ? assets.map(a => {
+        const rows = chartData as { date: string; [k: string]: unknown }[];
+        const lv = valueAtOrAfter(rows, range.left, a.symbol);
+        const rv = valueAtOrBefore(rows, range.right, a.symbol);
+        const pct = lv != null && rv != null && lv !== 0 ? (rv - lv) / Math.abs(lv) * 100 : null;
+        return { symbol: a.symbol, name: a.name, color: a.color, pct };
+      })
+    : null;
+
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={chartData} margin={{ top: 4, right: 24, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+    <div className="relative select-none">
+      {range && selStats && (
+        <div className="mb-2 bg-bg-input rounded-lg px-3 py-2 text-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-gray-400">{fmtDate(range.left)} → {fmtDate(range.right)}</span>
+            <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px]">✕ clear</button>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {selStats.map(s => (
+              <span key={s.symbol} className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-sm inline-block" style={{ backgroundColor: s.color }} />
+                <span className="text-gray-400">{s.name}</span>
+                <span className={`font-bold tabular-nums ${s.pct == null ? 'text-gray-600' : s.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {s.pct == null ? '—' : `${s.pct >= 0 ? '+' : ''}${s.pct.toFixed(2)}%`}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height={height}>
+        <LineChart
+          data={chartData}
+          margin={{ top: 4, right: 24, left: 0, bottom: 0 }}
+          {...handlers}
+          style={{ cursor: 'crosshair' }}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
         <XAxis
           dataKey="date"
           tickFormatter={d => formatDate(d as string, allDates)}
@@ -162,7 +205,22 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
             stroke={a.color} strokeWidth={1.5} strokeDasharray="6 3"
             dot={false} activeDot={{ r: 3 }} connectNulls />
         ))}
+        {area && (
+          <ReferenceArea
+            x1={area.left}
+            x2={area.right}
+            fill="#6366f1"
+            fillOpacity={0.15}
+            stroke="#6366f1"
+            strokeOpacity={0.4}
+            strokeWidth={1}
+          />
+        )}
       </LineChart>
     </ResponsiveContainer>
+      {!range && (
+        <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to compare a period</p>
+      )}
+    </div>
   );
 }

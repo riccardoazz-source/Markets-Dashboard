@@ -168,15 +168,21 @@ export async function GET(req: NextRequest) {
   // ---- Historical data + dividends + meta for one symbol ----
   const symbol = req.nextUrl.searchParams.get('symbol');
   const timeframe = req.nextUrl.searchParams.get('timeframe') ?? '5Y';
+  const fromParam = req.nextUrl.searchParams.get('from');
+  const toParam   = req.nextUrl.searchParams.get('to');
   if (!symbol) return NextResponse.json({ error: 'No symbol' }, { status: 400 });
 
-  const key = `stk:${symbol}:${timeframe}`;
+  const isCustom = !!(fromParam && toParam);
+  const key = isCustom ? `stk:${symbol}:${fromParam}:${toParam}` : `stk:${symbol}:${timeframe}`;
   const cached = getCached(key, FRESH);
   if (cached) return NextResponse.json(cached);
 
-  const from = getStartDate(timeframe);
-  const to = new Date();
-  const interval = getInterval(timeframe);
+  const from = isCustom ? new Date(fromParam!) : getStartDate(timeframe);
+  const to   = isCustom ? new Date(toParam!) : new Date();
+  const spanDays = (to.getTime() - from.getTime()) / 86_400_000;
+  const interval: '1d' | '1wk' | '1mo' = isCustom
+    ? (spanDays <= 366 ? '1d' : spanDays <= 365 * 5 ? '1wk' : '1mo')
+    : getInterval(timeframe);
 
   try {
     const data = await fetchYahooData(symbol, from, to, interval, true);

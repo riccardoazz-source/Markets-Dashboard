@@ -8,9 +8,12 @@ import {
 } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ChartDataTable } from '@/components/ui/ChartDataTable';
+import { ChartNotes } from '@/components/ui/ChartNotes';
+import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell,
+  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceArea,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
@@ -199,6 +202,7 @@ function DualChart({
   eps?: EarningsPoint[];          // when present, overlay quarterly EPS bars on right axis
   financials?: FinancialPoint[];  // when present, overlay revenue/profit bars on right axis
 }) {
+  const { handlers, range, area, clear } = useChartDragSelect();
   if (!prices.length) return null;
   const hasDivs = totalReturn !== prices && totalReturn.length > 0 &&
     Math.abs((totalReturn[totalReturn.length - 1]?.close ?? 0) - (prices[prices.length - 1]?.close ?? 0)) > 0.0001;
@@ -292,12 +296,39 @@ function DualChart({
   const decimals = 2;
   const isUp = (prices[prices.length - 1]?.close ?? 0) >= (prices[0]?.close ?? 0);
 
+  // Drag-selection price change
+  let selStats: { leftVal: number; rightVal: number; pct: number } | null = null;
+  if (range) {
+    const lv = valueAtOrAfter(prices, range.left, 'close');
+    const rv = valueAtOrBefore(prices, range.right, 'close');
+    if (lv != null && rv != null && lv !== 0) {
+      selStats = { leftVal: lv, rightVal: rv, pct: (rv - lv) / Math.abs(lv) * 100 };
+    }
+  }
+  const fmtD = (d: string) => { try { return format(parseISO(d), 'MMM d, yyyy'); } catch { return d; } };
+
   return (
-    <ResponsiveContainer width="100%" height={260}>
-      {/* key forces a fresh ComposedChart mount when the overlay changes — Recharts'
-          internal layout doesn't always recompute when YAxis components are added/removed. */}
-      <ComposedChart key={`chart-${showEps ? 'eps' : ''}${showFin ? 'fin' : ''}${showPe ? 'pe' : ''}`}
-        data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+    <div className="relative select-none">
+      {range && selStats && (
+        <div className="flex items-center justify-between mb-2 bg-bg-input rounded-lg px-3 py-1.5 text-xs flex-wrap gap-2">
+          <span className="text-gray-400">{fmtD(range.left)} → {fmtD(range.right)}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-gray-500 tabular-nums">
+              {formatPrice(selStats.leftVal, currency)} → {formatPrice(selStats.rightVal, currency)}
+            </span>
+            <span className={`font-bold tabular-nums ${selStats.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {selStats.pct >= 0 ? '+' : ''}{selStats.pct.toFixed(2)}%
+            </span>
+            <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px] ml-1">✕</button>
+          </div>
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height={260}>
+        {/* key forces a fresh ComposedChart mount when the overlay changes — Recharts'
+            internal layout doesn't always recompute when YAxis components are added/removed. */}
+        <ComposedChart key={`chart-${showEps ? 'eps' : ''}${showFin ? 'fin' : ''}${showPe ? 'pe' : ''}`}
+          data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+          {...handlers} style={{ cursor: 'crosshair' }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
         <XAxis dataKey="date" tickFormatter={d => formatXDate(d as string, prices)}
           tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={50} />
@@ -369,8 +400,24 @@ function DualChart({
           <Line yAxisId="pe" type="monotone" dataKey="pe" stroke="#a3e635"
             strokeWidth={1.5} strokeDasharray="3 3" dot={false} connectNulls name="pe" />
         )}
-      </ComposedChart>
-    </ResponsiveContainer>
+        {area && (
+          <ReferenceArea
+            yAxisId="price"
+            x1={area.left}
+            x2={area.right}
+            fill="#6366f1"
+            fillOpacity={0.15}
+            stroke="#6366f1"
+            strokeOpacity={0.4}
+            strokeWidth={1}
+          />
+        )}
+        </ComposedChart>
+      </ResponsiveContainer>
+      {!range && (
+        <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to measure a period</p>
+      )}
+    </div>
   );
 }
 
@@ -476,6 +523,7 @@ export function StockSection() {
   const [overlay, setOverlay] = useState<Overlay>('none');
   const [loading, setLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -502,18 +550,22 @@ export function StockSection() {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  const fetchAsset = useCallback(async (sym: string, tf: Timeframe) => {
+  const fetchAsset = useCallback(async (
+    sym: string, tf: Timeframe, override?: { from: string; to: string }
+  ) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/stock?symbol=${encodeURIComponent(sym)}&timeframe=${tf}`);
+      const base = `/api/stock?symbol=${encodeURIComponent(sym)}&timeframe=${tf}`;
+      const url = override ? `${base}&from=${override.from}&to=${override.to}` : base;
+      const res = await fetch(url);
       setData(await res.json() as StockData);
     } catch { setData(null); }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
-    if (selected) fetchAsset(selected.symbol, timeframe);
-  }, [selected, timeframe, fetchAsset]);
+    if (selected) fetchAsset(selected.symbol, timeframe, customRange ?? undefined);
+  }, [selected, timeframe, customRange, fetchAsset]);
 
   // Earnings — fetched once per symbol (cheap; doesn't depend on timeframe)
   useEffect(() => {
@@ -615,7 +667,13 @@ export function StockSection() {
                 {data?.meta?.currency ? ` · ${data.meta.currency}` : ''}
               </p>
             </div>
-            <TimeframeSelector value={timeframe} onChange={setTimeframe} options={TF_OPTIONS} />
+            <TimeframeSelector
+              value={timeframe}
+              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+              options={TF_OPTIONS}
+              isCustom={!!customRange}
+              onCustomRange={(from, to) => setCustomRange({ from, to })}
+            />
           </div>
 
           {/* Legend for dual lines + overlay toggles (EPS / Financials) */}
@@ -778,6 +836,11 @@ export function StockSection() {
               No data found. Try a different ticker.
             </div>
           )}
+
+          {!loading && prices.length > 0 && (
+            <ChartDataTable data={prices} unit={currency} />
+          )}
+          {selected && <ChartNotes chartId={`stock:${selected.symbol}`} />}
 
           {/* Dividends chart (bar) */}
           {!loading && dividends.length > 0 && (

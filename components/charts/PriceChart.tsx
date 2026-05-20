@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, ReferenceLine, ReferenceArea,
 } from 'recharts';
 import { HistoricalPoint } from '@/lib/types';
 import { format, parseISO } from 'date-fns';
+import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 
 interface Props {
   data: HistoricalPoint[];
@@ -39,31 +39,12 @@ function fmtDate(d: string) {
   try { return format(parseISO(d), 'MMM d, yyyy'); } catch { return d; }
 }
 
-interface SelectionState {
-  left: string;
-  right: string;
-  leftVal: number;
-  rightVal: number;
-  pct: number;
-}
-
 export function PriceChart({
   data, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
   enableDragSelect = true,
 }: Props) {
-  const [dragStart, setDragStart] = useState<string | null>(null);
-  const [dragEnd, setDragEnd] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [selection, setSelection] = useState<SelectionState | null>(null);
-  const dragStartRef = useRef<string | null>(null);
-
-  const clearSelection = () => {
-    setDragStart(null);
-    setDragEnd(null);
-    setIsDragging(false);
-    setSelection(null);
-  };
+  const { handlers, range, area, clear } = useChartDragSelect();
 
   if (!data || data.length === 0 || !data[0]) {
     return (
@@ -86,68 +67,34 @@ export function PriceChart({
   const closes = data.map(d => d.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
   const rawMin = closes.length > 0 ? Math.min(...closes) : 0;
   const rawMax = closes.length > 0 ? Math.max(...closes) : 1;
-  const range = rawMax - rawMin;
-  const pad = Math.max(range * 0.08, Math.abs(rawMax) * 0.02, 0.001);
+  const dataRange = rawMax - rawMin;
+  const pad = Math.max(dataRange * 0.08, Math.abs(rawMax) * 0.02, 0.001);
   const yMin = rawMin >= 0 ? Math.max(0, rawMin - pad) : rawMin - pad;
   const yMax = rawMax + pad;
 
-  // Drag handlers — work even when the mouse moves fast
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleMouseDown = useCallback((e: any) => {
-    if (!enableDragSelect || !e?.activeLabel) return;
-    dragStartRef.current = e.activeLabel as string;
-    setDragStart(e.activeLabel as string);
-    setDragEnd(null);
-    setIsDragging(true);
-    setSelection(null);
-  }, [enableDragSelect]);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleMouseMove = useCallback((e: any) => {
-    if (!enableDragSelect || !isDragging || !e?.activeLabel) return;
-    setDragEnd(e.activeLabel as string);
-  }, [enableDragSelect, isDragging]);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const handleMouseUp = useCallback((e: any) => {
-    if (!enableDragSelect || !isDragging) return;
-    setIsDragging(false);
-    const start = dragStartRef.current;
-    const end = (e?.activeLabel as string) ?? dragEnd;
-    if (!start || !end || start === end) {
-      clearSelection();
-      return;
+  // Selection stats
+  let selStats: { leftVal: number; rightVal: number; pct: number } | null = null;
+  if (range) {
+    const lv = valueAtOrAfter(data, range.left, 'close');
+    const rv = valueAtOrBefore(data, range.right, 'close');
+    if (lv != null && rv != null && lv !== 0) {
+      selStats = { leftVal: lv, rightVal: rv, pct: (rv - lv) / Math.abs(lv) * 100 };
     }
-    const [l, r] = start < end ? [start, end] : [end, start];
-    const lPt = data.find(d => d.date >= l);
-    const rPt = [...data].reverse().find(d => d.date <= r);
-    if (!lPt || !rPt || lPt === rPt) { clearSelection(); return; }
-    const pct = (rPt.close - lPt.close) / lPt.close * 100;
-    setDragStart(l);
-    setDragEnd(r);
-    setSelection({ left: l, right: r, leftVal: lPt.close, rightVal: rPt.close, pct });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enableDragSelect, isDragging, dragEnd, data]);
-
-  const selLeft  = dragStart && dragEnd ? (dragStart < dragEnd ? dragStart : dragEnd) : dragStart;
-  const selRight = dragStart && dragEnd ? (dragStart < dragEnd ? dragEnd : dragStart) : undefined;
+  }
 
   return (
     <div className="relative select-none">
-      {/* Selection info banner */}
-      {selection && (
-        <div className="flex items-center justify-between mb-2 bg-bg-input rounded-lg px-3 py-1.5 text-xs">
-          <span className="text-gray-400">
-            {fmtDate(selection.left)} → {fmtDate(selection.right)}
-          </span>
+      {range && selStats && (
+        <div className="flex items-center justify-between mb-2 bg-bg-input rounded-lg px-3 py-1.5 text-xs flex-wrap gap-2">
+          <span className="text-gray-400">{fmtDate(range.left)} → {fmtDate(range.right)}</span>
           <div className="flex items-center gap-3">
             <span className="text-gray-500 tabular-nums">
-              {selection.leftVal.toFixed(decimals)} → {selection.rightVal.toFixed(decimals)}
+              {selStats.leftVal.toFixed(decimals)} → {selStats.rightVal.toFixed(decimals)}
             </span>
-            <span className={`font-bold tabular-nums ${selection.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {selection.pct >= 0 ? '+' : ''}{selection.pct.toFixed(2)}%
+            <span className={`font-bold tabular-nums ${selStats.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {selStats.pct >= 0 ? '+' : ''}{selStats.pct.toFixed(2)}%
             </span>
-            <button onClick={clearSelection} className="text-gray-600 hover:text-gray-300 text-[10px] ml-1">✕</button>
+            <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px] ml-1">✕</button>
           </div>
         </div>
       )}
@@ -156,9 +103,7 @@ export function PriceChart({
         <AreaChart
           data={data}
           margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
+          {...(enableDragSelect ? handlers : {})}
           style={{ cursor: enableDragSelect ? 'crosshair' : 'default' }}
         >
           <defs>
@@ -222,11 +167,10 @@ export function PriceChart({
             activeDot={{ r: 4, fill: resolvedColor }}
             baseValue={yMin}
           />
-          {/* Drag-select highlight */}
-          {enableDragSelect && selLeft && selRight && (
+          {enableDragSelect && area && (
             <ReferenceArea
-              x1={selLeft}
-              x2={selRight}
+              x1={area.left}
+              x2={area.right}
               fill="#6366f1"
               fillOpacity={0.15}
               stroke="#6366f1"
@@ -237,8 +181,8 @@ export function PriceChart({
         </AreaChart>
       </ResponsiveContainer>
 
-      {enableDragSelect && data.length > 1 && !selection && (
-        <p className="text-[10px] text-gray-700 text-right mt-0.5">Click & drag to measure a period</p>
+      {enableDragSelect && data.length > 1 && !range && (
+        <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to measure a period</p>
       )}
     </div>
   );
