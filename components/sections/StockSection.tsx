@@ -529,6 +529,7 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { data: gistData } = useGistData();
   const [watchlistQuotes, setWatchlistQuotes] = useState<Record<string, QuoteData>>({});
+  const [watchlistCategory, setWatchlistCategory] = useState('Watchlist');
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -597,18 +598,29 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
     }
   }, [jumpTo]);
 
-  // Derive watchlist symbols from notes with category="Watchlist"
+  // All unique categories used across stock notes (for the category selector)
+  const noteCategories = useMemo(() => {
+    const notes = gistData.notes ?? {};
+    const cats = new Set<string>();
+    for (const [chartId, noteList] of Object.entries(notes)) {
+      if (!chartId.startsWith('stock:')) continue;
+      noteList.forEach(n => { if (n.category) cats.add(n.category); });
+    }
+    return Array.from(cats).sort();
+  }, [gistData]);
+
+  // Derive watchlist symbols from notes matching the selected category
   const watchlistSymbols = useMemo(() => {
     const notes = gistData.notes ?? {};
     const syms: string[] = [];
     for (const [chartId, noteList] of Object.entries(notes)) {
       if (!chartId.startsWith('stock:')) continue;
-      if (noteList.some(n => n.category?.toLowerCase() === 'watchlist')) {
+      if (noteList.some(n => n.category?.toLowerCase() === watchlistCategory.toLowerCase())) {
         syms.push(chartId.slice('stock:'.length));
       }
     }
     return syms;
-  }, [gistData]);
+  }, [gistData, watchlistCategory]);
 
   useEffect(() => {
     if (!watchlistSymbols.length) { setWatchlistQuotes({}); return; }
@@ -685,48 +697,79 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
       </div>
 
       {/* Watchlist grid */}
-      {watchlistSymbols.length > 0 && (
+      {(watchlistSymbols.length > 0 || noteCategories.length > 0) && (
         <div className="space-y-2">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-            ★ Watchlist
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {watchlistSymbols.map(sym => {
-              const q = watchlistQuotes[sym];
-              const change = q?.changePercent ?? null;
-              const isSelected = selected?.symbol === sym;
-              return (
-                <button
-                  key={sym}
-                  onClick={() => {
-                    const name = q?.name ?? sym;
-                    setSelected({ symbol: sym, name, exchange: '', type: 'EQUITY' });
-                    setQuery(`${sym} — ${name}`);
-                  }}
-                  className={clsx(
-                    'rounded-xl border p-3 text-left transition-colors',
-                    isSelected
-                      ? 'border-accent/60 bg-accent/10'
-                      : 'border-border bg-bg-card hover:border-accent/40',
-                  )}
-                >
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-xs font-bold text-gray-100 font-mono">{sym}</span>
-                    {change != null && (
-                      <span className={clsx('text-[10px] font-bold tabular-nums', change >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                        {change >= 0 ? '+' : ''}{change.toFixed(2)}%
-                      </span>
-                    )}
-                  </div>
-                  {q?.name && <p className="text-[10px] text-gray-500 truncate mb-1">{q.name}</p>}
-                  {q?.price != null && (
-                    <p className="text-sm font-bold text-white">{formatPrice(q.price, q.currency ?? 'USD')}</p>
-                  )}
-                  {!q && <p className="text-[10px] text-gray-600 animate-pulse">Loading…</p>}
-                </button>
-              );
-            })}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+              ★ {watchlistCategory}
+            </h3>
+            {noteCategories.length > 1 && (
+              <div className="flex gap-1 flex-wrap">
+                {noteCategories.map(cat => (
+                  <button key={cat} onClick={() => setWatchlistCategory(cat)}
+                    className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
+                      watchlistCategory === cat
+                        ? 'border-amber-400/60 text-amber-300 bg-amber-400/10'
+                        : 'border-border text-gray-500 hover:text-gray-300')}>
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
+          {watchlistSymbols.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              {watchlistSymbols.map(sym => {
+                const q = watchlistQuotes[sym];
+                const change = q?.changePercent ?? null;
+                const ytd = q?.ytdChangePercent ?? null;
+                const isSelected = selected?.symbol === sym;
+                return (
+                  <button
+                    key={sym}
+                    onClick={() => {
+                      const name = q?.name ?? sym;
+                      setSelected({ symbol: sym, name, exchange: '', type: 'EQUITY' });
+                      setQuery(`${sym} — ${name}`);
+                    }}
+                    className={clsx(
+                      'rounded-xl border p-3 text-left transition-colors',
+                      isSelected
+                        ? 'border-accent/60 bg-accent/10'
+                        : 'border-border bg-bg-card hover:border-accent/40',
+                    )}
+                  >
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs font-bold text-gray-100 font-mono">{sym}</span>
+                      {change != null && (
+                        <span className={clsx('text-[10px] font-bold tabular-nums', change >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                          {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                        </span>
+                      )}
+                    </div>
+                    {q?.name && <p className="text-[10px] text-gray-500 truncate mb-1">{q.name}</p>}
+                    {q?.price != null && (
+                      <p className="text-sm font-bold text-white">{formatPrice(q.price, q.currency ?? 'USD')}</p>
+                    )}
+                    {ytd != null && (
+                      <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-border/40">
+                        <span className="text-[9px] text-gray-600 uppercase tracking-wide">YTD</span>
+                        <span className={clsx('text-[10px] font-semibold tabular-nums', ytd >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                          {ytd >= 0 ? '+' : ''}{ytd.toFixed(2)}%
+                        </span>
+                      </div>
+                    )}
+                    {!q && <p className="text-[10px] text-gray-600 animate-pulse">Loading…</p>}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-[11px] text-gray-600 italic">
+              Nessun titolo con categoria &ldquo;{watchlistCategory}&rdquo;. Aggiungi una nota con questa categoria a un titolo.
+            </p>
+          )}
         </div>
       )}
 
