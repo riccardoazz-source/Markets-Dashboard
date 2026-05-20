@@ -84,14 +84,13 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
   });
 
   // ── Dual Y-axis grouping ───────────────────────────────────────────────────
-  // When assets have very different value ranges (ratio > 8x), split them:
-  // lower-valued assets on the left axis, higher-valued on the right axis.
+  // When assets span very different value ranges, a single axis squashes the
+  // smaller-valued lines flat. Split them: the cluster of lower-valued assets
+  // gets the left axis, the higher-valued cluster gets the right axis.
   const { axisMap, hasRightAxis } = (() => {
-    if (assets.length < 2) {
-      const m: Record<string, 'left' | 'right'> = {};
-      assets.forEach(a => { m[a.symbol] = 'left'; });
-      return { axisMap: m, hasRightAxis: false };
-    }
+    const map: Record<string, 'left' | 'right'> = {};
+    assets.forEach(a => { map[a.symbol] = 'left'; });
+    if (assets.length < 2) return { axisMap: map, hasRightAxis: false };
 
     const assetMaxVals = assets.map(a => {
       let max = 0;
@@ -102,25 +101,23 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
       return { symbol: a.symbol, max };
     }).filter(x => x.max > 0);
 
-    const map: Record<string, 'left' | 'right'> = {};
-    assets.forEach(a => { map[a.symbol] = 'left'; });
-
     if (assetMaxVals.length < 2) return { axisMap: map, hasRightAxis: false };
 
     const sorted = [...assetMaxVals].sort((a, b) => a.max - b.max);
-    const minMax = sorted[0].max;
-    const maxMax = sorted[sorted.length - 1].max;
+    const overallRatio = sorted[sorted.length - 1].max / sorted[0].max;
 
-    if (maxMax / minMax <= 8) return { axisMap: map, hasRightAxis: false };
+    // Assets within ~2.5x of each other read fine on a single axis
+    if (overallRatio < 2.5) return { axisMap: map, hasRightAxis: false };
 
-    // Split at geometric mean so each group has a similar internal range
-    const threshold = Math.sqrt(minMax * maxMax);
-    assetMaxVals.forEach(({ symbol, max }) => {
-      map[symbol] = max > threshold ? 'right' : 'left';
-    });
-
-    const hasRight = Object.values(map).some(v => v === 'right');
-    return { axisMap: map, hasRightAxis: hasRight };
+    // Split at the largest multiplicative gap between consecutive assets, so
+    // each axis holds a tight cluster and every line stays vertically spread.
+    let gapIdx = 1, gapRatio = 0;
+    for (let i = 1; i < sorted.length; i++) {
+      const r = sorted[i].max / sorted[i - 1].max;
+      if (r > gapRatio) { gapRatio = r; gapIdx = i; }
+    }
+    for (let i = gapIdx; i < sorted.length; i++) map[sorted[i].symbol] = 'right';
+    return { axisMap: map, hasRightAxis: true };
   })();
 
   const leftAssets  = assets.filter(a => (axisMap[a.symbol] ?? 'left') === 'left');
