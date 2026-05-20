@@ -4,6 +4,7 @@ export interface NoteEntry {
   id: string;
   text: string;
   date: string; // YYYY-MM-DD
+  category?: string;
 }
 
 export interface AnalysisEntry {

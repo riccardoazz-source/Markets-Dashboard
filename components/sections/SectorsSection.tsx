@@ -32,7 +32,7 @@ const SORT_OPTIONS = [
   { value: 'ytdReturn',     label: 'YTD' },
 ];
 
-export function SectorsSection() {
+export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
   const [live, setLive] = useState<Record<string, SectorLiveData>>({});
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('changePercent');
@@ -97,6 +97,10 @@ export function SectorsSection() {
   useEffect(() => {
     if (selected) fetchHistorical(selected, timeframe, customRange ?? undefined);
   }, [selected, timeframe, customRange, fetchHistorical]);
+
+  useEffect(() => {
+    if (jumpTo) setSelected(jumpTo);
+  }, [jumpTo]);
 
   // Merge static config with live data — always renders 20 sectors
   const merged = SECTORS.map(s => ({

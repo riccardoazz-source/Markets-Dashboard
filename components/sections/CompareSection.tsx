@@ -13,6 +13,7 @@ import { CompareChart } from '@/components/charts/CompareChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { X, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChartNotes } from '@/components/ui/ChartNotes';
 
 class ChartErrorBoundary extends Component<
   { children: ReactNode },
@@ -56,7 +57,7 @@ interface SearchHit { symbol: string; name: string; exchange: string; type: stri
 // ── per-symbol name cache so custom stocks keep their name after fetching ──
 const nameCacheRef: Record<string, string> = {};
 
-export function CompareSection() {
+export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['^GSPC', '^NDX', 'GC=F']);
   const [assets, setAssets] = useState<CompareAsset[]>([]);
@@ -221,6 +222,13 @@ export function CompareSection() {
   }, [selectedSymbols, timeframe, fetchAsset]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    if (jumpTo?.startsWith('compare:')) {
+      const syms = jumpTo.slice('compare:'.length).split(',').filter(Boolean);
+      if (syms.length > 0) setSelectedSymbols(syms);
+    }
+  }, [jumpTo]);
 
   const addSymbol = (symbol: string, name?: string) => {
     if (selectedSymbols.includes(symbol) || selectedSymbols.length >= 8) return;
@@ -480,6 +488,13 @@ export function CompareSection() {
         <div className="flex items-center justify-center h-48 text-gray-500 text-sm">
           Select assets to compare
         </div>
+      )}
+
+      {selectedSymbols.length > 0 && (
+        <ChartNotes
+          chartId={`compare:${[...selectedSymbols].sort().join(',')}`}
+          defaultCategory="Compare"
+        />
       )}
     </div>
   );

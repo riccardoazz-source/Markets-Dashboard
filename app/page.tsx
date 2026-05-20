@@ -13,7 +13,7 @@ import { StockSection } from '@/components/sections/StockSection';
 import { GeneralSection } from '@/components/sections/GeneralSection';
 import { SourcesSection } from '@/components/sections/SourcesSection';
 import { SectionNotesPanel } from '@/components/ui/SectionNotesPanel';
-import { isNotesSection } from '@/lib/sectionNotes';
+import { isNotesSection, type NotesSection } from '@/lib/sectionNotes';
 
 const SECTION_LABELS: Record<Section, string> = {
   indexes:     'Global Market Indexes',
@@ -43,10 +43,21 @@ const SECTION_DESCRIPTIONS: Record<Section, string> = {
 
 export default function Home() {
   const [section, setSection] = useState<Section>('indexes');
+  const [jumpTarget, setJumpTarget] = useState<string | null>(null);
+
+  const handleSectionSelect = (s: Section) => {
+    setSection(s);
+    setJumpTarget(null);
+  };
+
+  const handleNavigate = (targetSection: NotesSection, chartId: string) => {
+    setSection(targetSection as Section);
+    setJumpTarget(chartId);
+  };
 
   return (
     <>
-      <Navbar active={section} onSelect={setSection} />
+      <Navbar active={section} onSelect={handleSectionSelect} />
       <main className="max-w-screen-2xl mx-auto px-3 sm:px-4 py-3 sm:py-5 pb-20 sm:pb-5">
         <div className="mb-3 sm:mb-5 flex items-start justify-between gap-3">
           <div>
@@ -54,18 +65,22 @@ export default function Home() {
             <p className="text-xs sm:text-sm text-gray-500 mt-0.5 hidden sm:block">{SECTION_DESCRIPTIONS[section]}</p>
           </div>
           {isNotesSection(section) && (
-            <SectionNotesPanel section={section} sectionLabel={SECTION_LABELS[section]} />
+            <SectionNotesPanel
+              section={section}
+              sectionLabel={SECTION_LABELS[section]}
+              onNavigate={handleNavigate}
+            />
           )}
         </div>
 
-        {section === 'indexes'     && <IndexesSection />}
-        {section === 'currencies'  && <CurrenciesSection />}
-        {section === 'crypto'      && <CryptoCommoditiesSection />}
-        {section === 'commodities' && <CommoditiesSection />}
-        {section === 'sectors'     && <SectorsSection />}
-        {section === 'macro'       && <MacroSection />}
-        {section === 'stock'       && <StockSection />}
-        {section === 'compare'     && <CompareSection />}
+        {section === 'indexes'     && <IndexesSection jumpTo={jumpTarget} />}
+        {section === 'currencies'  && <CurrenciesSection jumpTo={jumpTarget} />}
+        {section === 'crypto'      && <CryptoCommoditiesSection jumpTo={jumpTarget} />}
+        {section === 'commodities' && <CommoditiesSection jumpTo={jumpTarget} />}
+        {section === 'sectors'     && <SectorsSection jumpTo={jumpTarget} />}
+        {section === 'macro'       && <MacroSection jumpTo={jumpTarget} />}
+        {section === 'stock'       && <StockSection jumpTo={jumpTarget} />}
+        {section === 'compare'     && <CompareSection jumpTo={jumpTarget} />}
         {section === 'general'     && <GeneralSection />}
         {section === 'sources'     && <SourcesSection />}
       </main>

@@ -19,7 +19,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ytdChangePercent',  label: 'YTD' },
 ];
 
-export function CryptoCommoditiesSection() {
+export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
   const [cryptoData, setCryptoData] = useState<CryptoData[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>('change24hPercent');
@@ -83,6 +83,10 @@ export function CryptoCommoditiesSection() {
   useEffect(() => {
     if (selected) fetchHistorical(selected, timeframe, customRange ?? undefined);
   }, [selected, timeframe, customRange, fetchHistorical]);
+
+  useEffect(() => {
+    if (jumpTo?.startsWith('crypto:')) setSelected(jumpTo.slice('crypto:'.length));
+  }, [jumpTo]);
 
   const sorted = [...cryptoData].sort((a, b) => {
     const av = a[sortBy] ?? -Infinity;

@@ -5,10 +5,10 @@ import {
 /** Sections that support per-asset chart notes. */
 export type NotesSection =
   | 'indexes' | 'currencies' | 'crypto'
-  | 'commodities' | 'sectors' | 'macro' | 'stock';
+  | 'commodities' | 'sectors' | 'macro' | 'stock' | 'compare';
 
 export const NOTE_SECTIONS: NotesSection[] = [
-  'indexes', 'currencies', 'crypto', 'commodities', 'sectors', 'macro', 'stock',
+  'indexes', 'currencies', 'crypto', 'commodities', 'sectors', 'macro', 'stock', 'compare',
 ];
 
 export function isNotesSection(s: string): s is NotesSection {
@@ -41,5 +41,17 @@ export function resolveNoteName(section: NotesSection, chartId: string): string 
       if (!chartId.startsWith('stock:')) return null;
       return chartId.slice('stock:'.length);
     }
+    case 'compare': {
+      if (!chartId.startsWith('compare:')) return null;
+      // Show the list of symbols as a short summary
+      const symbols = chartId.slice('compare:'.length).split(',');
+      return symbols.slice(0, 3).join(' · ') + (symbols.length > 3 ? ` +${symbols.length - 3}` : '');
+    }
   }
+}
+
+/** Parse a compare chartId back into the symbol list. */
+export function parseCompareChartId(chartId: string): string[] | null {
+  if (!chartId.startsWith('compare:')) return null;
+  return chartId.slice('compare:'.length).split(',').filter(Boolean);
 }

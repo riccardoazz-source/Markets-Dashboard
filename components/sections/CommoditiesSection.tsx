@@ -19,7 +19,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ytdChangePercent',   label: 'YTD' },
 ];
 
-export function CommoditiesSection() {
+export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>('changePercent');
@@ -69,6 +69,10 @@ export function CommoditiesSection() {
   useEffect(() => {
     if (selected) fetchHistorical(selected, timeframe, customRange ?? undefined);
   }, [selected, timeframe, customRange, fetchHistorical]);
+
+  useEffect(() => {
+    if (jumpTo) setSelected(jumpTo);
+  }, [jumpTo]);
 
   const sorted = [...COMMODITIES].sort((a, b) => {
     const qa = quotes[a.symbol];

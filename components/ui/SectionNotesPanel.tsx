@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { BookOpen, X, Edit2, Trash2, Check } from 'lucide-react';
+import { BookOpen, X, Edit2, Trash2, Check, ChevronDown, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
 import { useGistData, NoteEntry, todayStr } from '@/lib/gist';
 import { resolveNoteName, type NotesSection } from '@/lib/sectionNotes';
@@ -9,6 +9,7 @@ import { resolveNoteName, type NotesSection } from '@/lib/sectionNotes';
 interface Props {
   section: NotesSection;
   sectionLabel: string;
+  onNavigate?: (section: NotesSection, chartId: string) => void;
 }
 
 interface FlatNote extends NoteEntry {
@@ -16,15 +17,16 @@ interface FlatNote extends NoteEntry {
   assetName: string;
 }
 
-export function SectionNotesPanel({ section, sectionLabel }: Props) {
+export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) {
   const { data, update } = useGistData();
   const [open, setOpen] = useState(false);
   const [editKey, setEditKey] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [filterCat, setFilterCat] = useState<string | null>(null);
+  const [collapsedCats, setCollapsedCats] = useState<Set<string>>(new Set());
 
   const allNotes = data.notes ?? {};
 
-  // Gather every note whose chartId belongs to this section
   const flatNotes: FlatNote[] = useMemo(() => {
     const out: FlatNote[] = [];
     for (const [chartId, notes] of Object.entries(allNotes)) {
@@ -32,12 +34,35 @@ export function SectionNotesPanel({ section, sectionLabel }: Props) {
       if (!assetName) continue;
       for (const n of notes) out.push({ ...n, chartId, assetName });
     }
-    // Newest first; tie-break by asset name for stable grouping
     return out.sort((a, b) =>
       b.date.localeCompare(a.date) || a.assetName.localeCompare(b.assetName));
   }, [allNotes, section]);
 
   const total = flatNotes.length;
+
+  const allCategories = useMemo(() => {
+    const cats = new Set<string>();
+    for (const n of flatNotes) cats.add(n.category ?? '');
+    return Array.from(cats).sort((a, b) => {
+      if (!a) return 1; // empty/uncategorized goes last
+      if (!b) return -1;
+      return a.localeCompare(b);
+    });
+  }, [flatNotes]);
+
+  const filteredNotes = filterCat === null
+    ? flatNotes
+    : flatNotes.filter(n => (n.category ?? '') === filterCat);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, FlatNote[]>();
+    for (const n of filteredNotes) {
+      const cat = n.category ?? '';
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat)!.push(n);
+    }
+    return map;
+  }, [filteredNotes]);
 
   const deleteNote = async (chartId: string, id: string) => {
     const updated = (allNotes[chartId] ?? []).filter(n => n.id !== id);
@@ -56,6 +81,21 @@ export function SectionNotesPanel({ section, sectionLabel }: Props) {
       n.id === id ? { ...n, text, date: todayStr() } : n);
     await update({ notes: { [chartId]: updated } });
     setEditKey(null);
+  };
+
+  const toggleCat = (cat: string) => {
+    setCollapsedCats(prev => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  };
+
+  const handleNavigate = (n: FlatNote) => {
+    if (!onNavigate) return;
+    onNavigate(section, n.chartId);
+    setOpen(false);
   };
 
   return (
@@ -101,47 +141,122 @@ export function SectionNotesPanel({ section, sectionLabel }: Props) {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-          {flatNotes.length === 0 ? (
+        {/* Category filter chips */}
+        {allCategories.length > 1 && (
+          <div className="px-4 py-2 border-b border-border bg-bg-input/50 flex flex-wrap gap-1.5 shrink-0">
+            <button
+              onClick={() => setFilterCat(null)}
+              className={clsx('px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors border',
+                filterCat === null
+                  ? 'bg-accent text-white border-accent'
+                  : 'border-border text-gray-500 hover:text-gray-300')}
+            >
+              All
+            </button>
+            {allCategories.map(cat => (
+              <button
+                key={cat || '__none__'}
+                onClick={() => setFilterCat(prev => prev === cat ? null : cat)}
+                className={clsx('px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors border',
+                  filterCat === cat
+                    ? 'bg-accent text-white border-accent'
+                    : 'border-border text-gray-500 hover:text-gray-300')}
+              >
+                {cat || 'Uncategorized'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          {filteredNotes.length === 0 ? (
             <p className="text-xs text-gray-600 italic mt-2">
-              No notes in this section yet. Open any asset and add notes below its chart.
+              {total === 0
+                ? 'No notes in this section yet. Open any asset and add notes below its chart.'
+                : 'No notes match the selected filter.'}
             </p>
           ) : (
-            flatNotes.map(note => {
-              const key = `${note.chartId}:${note.id}`;
-              const isEditing = editKey === key;
+            Array.from(grouped.entries()).map(([cat, notes]) => {
+              const isCollapsed = collapsedCats.has(cat);
+              const catLabel = cat || 'Uncategorized';
+              const hasMultiCats = grouped.size > 1;
               return (
-                <div key={key} className="bg-bg-input rounded-lg px-3 py-2.5 group">
-                  {isEditing ? (
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-semibold text-accent">{note.assetName}</p>
-                      <textarea
-                        value={editText}
-                        onChange={e => setEditText(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitEdit(note.chartId, note.id);
-                          if (e.key === 'Escape') setEditKey(null);
-                        }}
-                        className="w-full bg-bg border border-accent rounded px-2 py-1 text-xs text-gray-100 focus:outline-none resize-none min-h-[64px]"
-                        autoFocus
-                      />
-                      <div className="flex gap-1 justify-end">
-                        <button onClick={() => commitEdit(note.chartId, note.id)} className="p-1 text-emerald-400 hover:text-emerald-300"><Check size={14} /></button>
-                        <button onClick={() => setEditKey(null)} className="p-1 text-gray-500 hover:text-gray-300"><X size={14} /></button>
-                      </div>
+                <div key={cat || '__none__'}>
+                  {hasMultiCats && (
+                    <button
+                      onClick={() => toggleCat(cat)}
+                      className="flex items-center gap-1.5 w-full text-left mb-1.5 group/cat"
+                    >
+                      {isCollapsed
+                        ? <ChevronRight size={12} className="text-gray-500 shrink-0" />
+                        : <ChevronDown size={12} className="text-gray-500 shrink-0" />}
+                      <span className={clsx('text-[10px] font-bold uppercase tracking-wider',
+                        cat ? 'text-accent/80' : 'text-gray-500')}>
+                        {catLabel}
+                      </span>
+                      <span className="text-[10px] text-gray-600">({notes.length})</span>
+                    </button>
+                  )}
+
+                  {!isCollapsed && (
+                    <div className={clsx('space-y-2', hasMultiCats && 'pl-4')}>
+                      {notes.map(note => {
+                        const key = `${note.chartId}:${note.id}`;
+                        const isEditing = editKey === key;
+                        return (
+                          <div key={key} className="bg-bg-input rounded-lg px-3 py-2.5 group">
+                            {isEditing ? (
+                              <div className="space-y-2">
+                                <p className="text-[11px] font-semibold text-accent">{note.assetName}</p>
+                                <textarea
+                                  value={editText}
+                                  onChange={e => setEditText(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitEdit(note.chartId, note.id);
+                                    if (e.key === 'Escape') setEditKey(null);
+                                  }}
+                                  className="w-full bg-bg border border-accent rounded px-2 py-1 text-xs text-gray-100 focus:outline-none resize-none min-h-[64px]"
+                                  autoFocus
+                                />
+                                <div className="flex gap-1 justify-end">
+                                  <button onClick={() => commitEdit(note.chartId, note.id)} className="p-1 text-emerald-400 hover:text-emerald-300"><Check size={14} /></button>
+                                  <button onClick={() => setEditKey(null)} className="p-1 text-gray-500 hover:text-gray-300"><X size={14} /></button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <button
+                                    onClick={() => handleNavigate(note)}
+                                    className={clsx(
+                                      'text-[11px] font-semibold text-accent truncate text-left transition-colors',
+                                      onNavigate
+                                        ? 'hover:text-accent/70 hover:underline underline-offset-2 cursor-pointer'
+                                        : 'cursor-default pointer-events-none',
+                                    )}
+                                  >
+                                    {note.assetName}
+                                  </button>
+                                  <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => startEdit(note)} className="p-1 text-gray-500 hover:text-gray-300"><Edit2 size={11} /></button>
+                                    <button onClick={() => deleteNote(note.chartId, note.id)} className="p-1 text-gray-500 hover:text-red-400"><Trash2 size={11} /></button>
+                                  </div>
+                                </div>
+                                <p className="text-xs text-gray-200 leading-relaxed whitespace-pre-wrap break-words">{note.text}</p>
+                                <div className="flex items-center gap-2 mt-1.5">
+                                  <p className="text-[10px] text-gray-600">{note.date}</p>
+                                  {note.category && (
+                                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent/15 text-accent/80">
+                                      {note.category}
+                                    </span>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  ) : (
-                    <>
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-[11px] font-semibold text-accent truncate">{note.assetName}</span>
-                        <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => startEdit(note)} className="p-1 text-gray-500 hover:text-gray-300"><Edit2 size={11} /></button>
-                          <button onClick={() => deleteNote(note.chartId, note.id)} className="p-1 text-gray-500 hover:text-red-400"><Trash2 size={11} /></button>
-                        </div>
-                      </div>
-                      <p className="text-xs text-gray-200 leading-relaxed whitespace-pre-wrap break-words">{note.text}</p>
-                      <p className="text-[10px] text-gray-600 mt-1.5">{note.date}</p>
-                    </>
                   )}
                 </div>
               );

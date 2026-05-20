@@ -26,7 +26,7 @@ function decimals(rate: number | null) {
   return rate > 100 ? 2 : rate > 10 ? 3 : 4;
 }
 
-export function CurrenciesSection() {
+export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
   const [rates, setRates] = useState<CurrencyRate[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ from: string; to: string } | null>(null);
@@ -77,6 +77,13 @@ export function CurrenciesSection() {
   useEffect(() => {
     if (selected) fetchHistorical(selected.from, selected.to, timeframe, customRange ?? undefined);
   }, [selected, timeframe, customRange, fetchHistorical]);
+
+  useEffect(() => {
+    if (jumpTo && jumpTo.includes('/')) {
+      const [from, to] = jumpTo.split('/');
+      if (from && to) setSelected({ from, to });
+    }
+  }, [jumpTo]);
 
   const selectedRate = rates.find(r => r.from === selected?.from && r.to === selected?.to);
   const dec = decimals(selectedRate?.rate ?? null);

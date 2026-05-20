@@ -69,7 +69,7 @@ function formatShortDate(dateStr: string): string {
   } catch { return dateStr; }
 }
 
-export function MacroSection() {
+export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
   const [mounted, setMounted] = useState(false);
   const [sourcesConfig, setSourcesConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [] });
   const [category, setCategory] = useState('All');
@@ -205,6 +205,10 @@ export function MacroSection() {
   useEffect(() => {
     if (selected) fetchHistory(selected, timeframe, customRange ?? undefined);
   }, [selected, timeframe, customRange, fetchHistory]);
+
+  useEffect(() => {
+    if (jumpTo) setSelected(jumpTo);
+  }, [jumpTo]);
 
   const filtered = allIndicators.filter(
     ind => category === 'All' || ind.category === category

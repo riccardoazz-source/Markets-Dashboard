@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { HistoricalPoint, Timeframe } from '@/lib/types';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { HistoricalPoint, Timeframe, QuoteData } from '@/lib/types';
 import {
   calculateCAGR, formatPercent, formatPrice, colorForPercent,
   buildTotalReturnSeries, computeAssetIRR, DividendEvent,
@@ -11,6 +11,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
+import { useGistData } from '@/lib/gist';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceArea,
@@ -511,7 +512,7 @@ function EarningsBarChart({ quarterly, currency }: { quarterly: EarningsPoint[];
   );
 }
 
-export function StockSection() {
+export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -526,6 +527,8 @@ export function StockSection() {
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { data: gistData } = useGistData();
+  const [watchlistQuotes, setWatchlistQuotes] = useState<Record<string, QuoteData>>({});
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -585,6 +588,40 @@ export function StockSection() {
       .catch(() => { if (!cancelled) { setEarnings(null); setEarningsLoading(false); } });
     return () => { cancelled = true; };
   }, [selected]);
+
+  useEffect(() => {
+    if (jumpTo?.startsWith('stock:')) {
+      const sym = jumpTo.slice('stock:'.length);
+      setSelected({ symbol: sym, name: sym, exchange: '', type: 'EQUITY' });
+      setQuery(sym);
+    }
+  }, [jumpTo]);
+
+  // Derive watchlist symbols from notes with category="Watchlist"
+  const watchlistSymbols = useMemo(() => {
+    const notes = gistData.notes ?? {};
+    const syms: string[] = [];
+    for (const [chartId, noteList] of Object.entries(notes)) {
+      if (!chartId.startsWith('stock:')) continue;
+      if (noteList.some(n => n.category?.toLowerCase() === 'watchlist')) {
+        syms.push(chartId.slice('stock:'.length));
+      }
+    }
+    return syms;
+  }, [gistData]);
+
+  useEffect(() => {
+    if (!watchlistSymbols.length) { setWatchlistQuotes({}); return; }
+    const sym = watchlistSymbols.join(',');
+    fetch(`/api/quotes?symbols=${encodeURIComponent(sym)}`)
+      .then(r => r.json())
+      .then((d: QuoteData[]) => {
+        const map: Record<string, QuoteData> = {};
+        if (Array.isArray(d)) d.forEach(q => { map[q.symbol] = q; });
+        setWatchlistQuotes(map);
+      })
+      .catch(() => {});
+  }, [watchlistSymbols]);
 
   const pickHit = (h: SearchHit) => {
     setSelected(h);
@@ -647,7 +684,53 @@ export function StockSection() {
         )}
       </div>
 
-      {!selected && (
+      {/* Watchlist grid */}
+      {watchlistSymbols.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+            ★ Watchlist
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {watchlistSymbols.map(sym => {
+              const q = watchlistQuotes[sym];
+              const change = q?.changePercent ?? null;
+              const isSelected = selected?.symbol === sym;
+              return (
+                <button
+                  key={sym}
+                  onClick={() => {
+                    const name = q?.name ?? sym;
+                    setSelected({ symbol: sym, name, exchange: '', type: 'EQUITY' });
+                    setQuery(`${sym} — ${name}`);
+                  }}
+                  className={clsx(
+                    'rounded-xl border p-3 text-left transition-colors',
+                    isSelected
+                      ? 'border-accent/60 bg-accent/10'
+                      : 'border-border bg-bg-card hover:border-accent/40',
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-xs font-bold text-gray-100 font-mono">{sym}</span>
+                    {change != null && (
+                      <span className={clsx('text-[10px] font-bold tabular-nums', change >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                        {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+                  {q?.name && <p className="text-[10px] text-gray-500 truncate mb-1">{q.name}</p>}
+                  {q?.price != null && (
+                    <p className="text-sm font-bold text-white">{formatPrice(q.price, q.currency ?? 'USD')}</p>
+                  )}
+                  {!q && <p className="text-[10px] text-gray-600 animate-pulse">Loading…</p>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!selected && watchlistSymbols.length === 0 && (
         <div className="rounded-xl border border-border bg-bg-card p-6 text-center text-sm text-gray-500">
           Search a stock by ticker (e.g. <span className="text-gray-300 font-mono">AAPL</span>,{' '}
           <span className="text-gray-300 font-mono">KO</span>,{' '}
@@ -840,7 +923,7 @@ export function StockSection() {
           {!loading && prices.length > 0 && (
             <ChartDataTable data={prices} unit={currency} />
           )}
-          {selected && <ChartNotes chartId={`stock:${selected.symbol}`} />}
+          {selected && <ChartNotes chartId={`stock:${selected.symbol}`} defaultCategory="Watchlist" />}
 
           {/* Dividends chart (bar) */}
           {!loading && dividends.length > 0 && (

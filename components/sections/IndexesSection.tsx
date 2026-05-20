@@ -21,7 +21,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ytdChangePercent',  label: 'YTD' },
 ];
 
-export function IndexesSection() {
+export function IndexesSection({ jumpTo }: { jumpTo?: string | null }) {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState('All');
@@ -72,6 +72,10 @@ export function IndexesSection() {
   useEffect(() => {
     if (selected) fetchHistorical(selected, timeframe, customRange ?? undefined);
   }, [selected, timeframe, customRange, fetchHistorical]);
+
+  useEffect(() => {
+    if (jumpTo) setSelected(jumpTo);
+  }, [jumpTo]);
 
   const filtered = INDEXES.filter(
     i => selectedRegion === 'All' || i.region === selectedRegion
