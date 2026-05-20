@@ -2,7 +2,7 @@
 
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, Legend, ReferenceArea,
+  CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
 import { format, parseISO } from 'date-fns';
@@ -12,6 +12,7 @@ interface Props {
   assets: CompareAsset[];
   height?: number;
   logScale?: boolean;
+  percentMode?: boolean;
 }
 
 function formatDate(dateStr: string, allDates: string[]) {
@@ -36,6 +37,13 @@ const tickFmt = (v: number) => {
   if (n >= 10000) return `${Math.round(n / 1000)}k`;
   if (n >= 1000) return n % 1000 === 0 ? `${n / 1000}k` : `${(n / 1000).toFixed(1)}k`;
   return Number.isInteger(n) ? `${n}` : n.toFixed(1);
+};
+
+const pctTickFmt = (v: number) => {
+  const n = v as number;
+  const sign = n > 0 ? '+' : '';
+  if (Math.abs(n) >= 1000) return `${sign}${Math.round(n / 100) / 10}k%`;
+  return `${sign}${n.toFixed(0)}%`;
 };
 
 type AxisGroup = 'left' | 'right' | 'right2';
@@ -76,7 +84,7 @@ function axisProps(group: CompareAsset[], logScale: boolean): object {
   };
 }
 
-export function CompareChart({ assets, height = 340, logScale = false }: Props) {
+export function CompareChart({ assets, height = 340, logScale = false, percentMode = false }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
   if (!assets.length) return null;
@@ -104,25 +112,28 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
     const point: Record<string, unknown> = { date };
     assets.forEach((a, idx) => {
       const v = assetMaps[idx].prices.get(date) ?? null;
-      point[a.symbol] = v != null && v > 0 && isFinite(v) ? v : null;
+      // In % change mode values can be 0 (start) or negative (loss from start)
+      point[a.symbol] = v != null && isFinite(v) && (percentMode || v > 0) ? v : null;
       if (assetMaps[idx].tr) {
         const tv = assetMaps[idx].tr!.get(date) ?? null;
-        point[`${a.symbol}_tr`] = tv != null && tv > 0 && isFinite(tv) ? tv : null;
+        point[`${a.symbol}_tr`] = tv != null && isFinite(tv) && (percentMode || tv > 0) ? tv : null;
       }
     });
     return point;
   });
 
   // ── Y-axis grouping ───────────────────────────────────────────────────────
-  // Assets are split across up to 3 Y axes so each one is readable on its own
-  // scale. Grouping is by absolute price level (latest raw close), which does
-  // NOT change with the selected timeframe — so the axis layout is identical
-  // for 1D, 1Y, MAX and everything in between (no axes appearing only on some
-  // periods). 2 assets → left + right; 3+ → left + right + right2, split at the
-  // two largest multiplicative gaps in price level.
+  // In % change mode (Google Finance style): single shared axis — all series
+  // start at 0% so they are directly comparable on the same scale.
+  // In absolute price mode: up to 3 Y axes, grouped by price magnitude so
+  // each asset is readable on its own scale regardless of timeframe.
   const { axisMap, hasRightAxis, hasRight2Axis } = (() => {
     const map: Record<string, AxisGroup> = {};
     assets.forEach(a => { map[a.symbol] = 'left'; });
+
+    // Percent mode → single axis
+    if (percentMode) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
+
     if (assets.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
     const levels = assets.map(a => {
@@ -182,12 +193,20 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
         const rows = chartData as { date: string; [k: string]: unknown }[];
         const lv = valueAtOrAfter(rows, range.left, a.symbol);
         const rv = valueAtOrBefore(rows, range.right, a.symbol);
-        const pct = lv != null && rv != null && lv !== 0 ? (rv - lv) / Math.abs(lv) * 100 : null;
+        let pct: number | null = null;
+        if (lv != null && rv != null) {
+          if (percentMode) {
+            // lv/rv are % change from common start → convert to actual sub-period return
+            pct = ((1 + rv / 100) / (1 + lv / 100) - 1) * 100;
+          } else {
+            pct = lv !== 0 ? (rv - lv) / Math.abs(lv) * 100 : null;
+          }
+        }
         return { symbol: a.symbol, name: a.name, color: a.color, pct };
       })
     : null;
 
-  const rightMargin = hasRight2Axis ? 140 : hasRightAxis ? 68 : 24;
+  const rightMargin = hasRight2Axis ? 140 : hasRightAxis ? 68 : percentMode ? 16 : 24;
 
   return (
     <div className="relative select-none">
@@ -211,7 +230,7 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
         </div>
       )}
 
-      {(hasRightAxis || hasRight2Axis) && (
+      {!percentMode && (hasRightAxis || hasRight2Axis) && (
         <div className="mb-1 text-[10px] text-gray-600 flex flex-wrap gap-3">
           <span className="flex items-center gap-1">
             <span className="text-gray-500">L:</span>
@@ -263,10 +282,10 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
           />
           <YAxis
             yAxisId="left"
-            {...leftAxisProps}
+            {...(percentMode ? { domain: ['auto', 'auto'] } : leftAxisProps)}
             tick={{ fill: '#6b7280', fontSize: 11 }}
-            axisLine={false} tickLine={false} width={60}
-            tickFormatter={tickFmt}
+            axisLine={false} tickLine={false} width={percentMode ? 52 : 60}
+            tickFormatter={percentMode ? pctTickFmt : tickFmt}
           />
           {hasRightAxis && rightAxisProps && (
             <YAxis
@@ -292,7 +311,12 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
             contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
             formatter={(value: number, name: string) => {
               const item = legendItems.find(l => l.key === name);
-              return [`${value?.toFixed(2)}`, item?.name ?? name];
+              const label = item?.name ?? name;
+              if (percentMode) {
+                const v = value as number;
+                return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, label];
+              }
+              return [`${value?.toFixed(2)}`, label];
             }}
             labelFormatter={label => {
               try { return format(parseISO(label as string), 'MMM d, yyyy'); }
@@ -310,6 +334,9 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
               );
             }}
           />
+          {percentMode && (
+            <ReferenceLine yAxisId="left" y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1} />
+          )}
           {assets.map(a => (
             <Line key={a.symbol}
               yAxisId={axisMap[a.symbol] ?? 'left'}

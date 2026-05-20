@@ -110,12 +110,20 @@ export function calculateCAGR(
 
 export function normalizeData(data: HistoricalPoint[]): HistoricalPoint[] {
   if (!data || data.length === 0) return [];
-  // Use the first positive finite value as the base to avoid Infinity/NaN
-  // when the opening price is 0 or invalid (e.g. CoinGecko placeholder rows).
   const basePoint = data.find(d => d.close > 0 && isFinite(d.close));
   if (!basePoint) return data.slice();
   const base = basePoint.close;
   return data.map(d => ({ ...d, close: (d.close / base) * 100 }));
+}
+
+// Google Finance-style: every series starts at exactly 0%,
+// values represent % change from the first data point.
+export function pctChangeFromStart(data: HistoricalPoint[]): HistoricalPoint[] {
+  if (!data || data.length === 0) return [];
+  const basePoint = data.find(d => d.close > 0 && isFinite(d.close));
+  if (!basePoint) return data.slice();
+  const base = basePoint.close;
+  return data.map(d => ({ ...d, close: (d.close / base - 1) * 100 }));
 }
 
 export function averageRate(data: { date: string; rate: number }[]): number {

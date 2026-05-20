@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode
 import { ALL_COMPARABLE_ASSETS } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
-  normalizeData, calculateCAGR, formatPercent, colorForPercent,
+  pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
   CHART_COLORS, getTimeframeStart, buildTotalReturnSeries, computeAssetIRR,
   correlationMatrix, dedupStepSeries, extendToToday, CorrAlignedRow,
 } from '@/lib/utils';
@@ -180,10 +180,10 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       const cagrTR = totalReturnData ? calculateCAGR(totalReturnData, tf) : undefined;
       const irr = dividends.length > 0 ? computeAssetIRR(data, dividends) : undefined;
 
-      // For chart: normalized price series; and optional normalized TR series
-      const displayData = normalized ? normalizeData(data) : data;
+      // For chart: % change from start (Google Finance style) or absolute
+      const displayData = normalized ? pctChangeFromStart(data) : data;
       const displayTrData = totalReturnData
-        ? (normalized ? normalizeData(totalReturnData) : totalReturnData)
+        ? (normalized ? pctChangeFromStart(totalReturnData) : totalReturnData)
         : undefined;
 
       return {
@@ -286,9 +286,9 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         const displayRaw = a.type === 'macro'
           ? extendToToday(dedupStepSeries(rawFiltered))
           : rawFiltered;
-        const displayData = normalized ? normalizeData(displayRaw) : displayRaw;
+        const displayData = normalized ? pctChangeFromStart(displayRaw) : displayRaw;
         const displayTrData = trFiltered
-          ? (normalized ? normalizeData(trFiltered) : trFiltered)
+          ? (normalized ? pctChangeFromStart(trFiltered) : trFiltered)
           : undefined;
 
         // Recompute PRICE-ONLY Return/CAGR on the trimmed (commonStart→today)
@@ -348,9 +348,9 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
             <button onClick={() => setNormalized(n => !n)}
               className={clsx('px-3 py-1 text-xs font-medium rounded-full transition-all border',
                 normalized ? 'border-accent text-accent bg-accent/10' : 'border-border text-gray-400 hover:text-gray-200')}>
-              {normalized ? 'Normalized (Base 100)' : 'Absolute price'}
+              {normalized ? '% Change' : 'Absolute price'}
             </button>
-            {normalized && (
+            {!normalized && (
               <button onClick={() => setLogScale(s => !s)}
                 title="Logarithmic scale: useful when assets have very different magnitudes (e.g. BTC vs gold)"
                 className={clsx('px-3 py-1 text-xs font-medium rounded-full transition-all border',
@@ -422,7 +422,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         )}
       </div>
 
-      {logScale && normalized && (
+      {logScale && !normalized && (
         <p className="text-[10px] text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-3 py-1.5">
           Logarithmic scale active — equal percentage moves take equal vertical space. Ideal when one asset has returns many times larger than others (e.g. BTC vs gold).
         </p>
@@ -437,7 +437,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       ) : displayAssets.length > 0 ? (
         <ChartErrorBoundary>
           <div className="rounded-xl border border-border bg-bg-card p-4">
-            <CompareChart assets={displayAssets} height={360} logScale={normalized && logScale} />
+            <CompareChart assets={displayAssets} height={360} logScale={!normalized && logScale} percentMode={normalized} />
           </div>
 
           {/* Stats cards — use displayAssets so numbers are computed on the
