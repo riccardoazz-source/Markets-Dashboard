@@ -11,7 +11,7 @@ import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
-const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Sentiment'];
+const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Sentiment', 'Crypto'];
 const TF_OPTIONS: Timeframe[] = ['1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface MacroLatest {

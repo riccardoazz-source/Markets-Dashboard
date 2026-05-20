@@ -46,12 +46,12 @@ function getFredApiKey(): string {
   return process.env.FRED_API_KEY || FRED_API_KEY_FALLBACK;
 }
 
-// Discontinued / low-frequency (quarterly, annual) FRED series whose most recent
-// observation can be far older than the standard 18-month list-mode window.
+// Discontinued / low-frequency series (quarterly, annual, event-based) whose most
+// recent observation can be far older than the standard 18-month list-mode window.
 // For these, fetch the full history so the card still shows the last available
 // value, and charts show the complete series regardless of the timeframe picked.
-const WIDE_WINDOW_FRED = new Set([
-  'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q',
+const WIDE_WINDOW_SERIES = new Set([
+  'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING',
 ]);
 
 // ---------- FRED API (preferred when FRED_API_KEY is set) ----------
@@ -381,6 +381,71 @@ async function fetchYahooRatio(
   result.sort((a, b) => a.date.localeCompare(b.date));
   console.log(`[yahoo-ratio] ${numerator}/${denominator}: ${result.length} pts`);
   return result;
+}
+
+// ---------- Bitcoin halving schedule (BTC_HALVING) ----------
+// The block subsidy halves every 210,000 blocks. Past halving dates are
+// historical facts, so this series is deterministic and never needs a fetch.
+// Two points per halving (the day before + the halving day) make the chart
+// render as a clean step instead of a misleading diagonal.
+const BTC_HALVINGS: { date: string; reward: number }[] = [
+  { date: '2009-01-03', reward: 50 },
+  { date: '2012-11-28', reward: 25 },
+  { date: '2016-07-09', reward: 12.5 },
+  { date: '2020-05-11', reward: 6.25 },
+  { date: '2024-04-20', reward: 3.125 },
+];
+
+function getBitcoinHalvings(fromDate?: string): { date: string; value: number }[] {
+  const pts: { date: string; value: number }[] = [];
+  for (let i = 0; i < BTC_HALVINGS.length; i++) {
+    const h = BTC_HALVINGS[i];
+    if (i > 0) {
+      const dayBefore = new Date(new Date(h.date).getTime() - 86_400_000)
+        .toISOString().slice(0, 10);
+      pts.push({ date: dayBefore, value: BTC_HALVINGS[i - 1].reward });
+    }
+    pts.push({ date: h.date, value: h.reward });
+  }
+  return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+}
+
+// ---------- Bitcoin monthly RSI (BTC_RSI) ----------
+// bitbo.io blocks server-side requests, and RSI(14) is a standard formula, so
+// it is computed directly from Yahoo's monthly BTC-USD closes (Wilder smoothing).
+function computeRSI(
+  closes: { date: string; value: number }[],
+  period = 14,
+): { date: string; value: number }[] {
+  if (closes.length < period + 1) return [];
+  let avgGain = 0, avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
+    const ch = closes[i].value - closes[i - 1].value;
+    if (ch >= 0) avgGain += ch; else avgLoss -= ch;
+  }
+  avgGain /= period; avgLoss /= period;
+  const rsi = () => avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  const out = [{ date: closes[period].date, value: rsi() }];
+  for (let i = period + 1; i < closes.length; i++) {
+    const ch = closes[i].value - closes[i - 1].value;
+    avgGain = (avgGain * (period - 1) + (ch > 0 ? ch : 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + (ch < 0 ? -ch : 0)) / period;
+    out.push({ date: closes[i].date, value: rsi() });
+  }
+  return out;
+}
+
+async function fetchBitcoinMonthlyRSI(
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  // Pass a very old date so fetchYahooYield selects range=max, interval=1mo —
+  // RSI's 14-month lookback needs the full monthly history regardless of fromDate.
+  const monthly = await fetchYahooYield('BTC-USD', '2010-01-01');
+  if (monthly.length < 20) { console.warn('[btc-rsi] insufficient BTC history'); return []; }
+  const rsi = computeRSI(monthly, 14);
+  const out = fromDate ? rsi.filter(p => p.date >= fromDate) : rsi;
+  console.log(`[btc-rsi] ${out.length} pts`);
+  return out;
 }
 
 // ---------- NY Fed EFFR (Effective Federal Funds Rate, no key) ----------
@@ -925,6 +990,11 @@ async function fetchMacroSeries(
   if (src?.type === 'yahoo_price' && src.symbol) {
     return fetchYahooHistorical(src.symbol, fromDate);
   }
+  if (src?.type === 'computed') {
+    if (fredId === 'BTC_HALVING') return getBitcoinHalvings(fromDate);
+    if (fredId === 'BTC_RSI')     return fetchBitcoinMonthlyRSI(fromDate);
+    return [];
+  }
 
   // T10Y2Y: computed as DGS10 − DGS2
   if (fredId === 'T10Y2Y') {
@@ -1068,7 +1138,7 @@ export async function GET(req: NextRequest) {
     try {
       // Discontinued/quarterly series: ignore the timeframe filter so the chart
       // still shows their (older) full history instead of an empty range.
-      const pts = await fetchMacroSeries(id, WIDE_WINDOW_FRED.has(id) ? undefined : from);
+      const pts = await fetchMacroSeries(id, WIDE_WINDOW_SERIES.has(id) ? undefined : from);
       const data = pts.map(p => ({ date: p.date, close: p.value }));
       if (data.length > 0) {
         cache.set(key, { data, ts: Date.now() });
@@ -1105,11 +1175,11 @@ export async function GET(req: NextRequest) {
   // FRED is blocked on most Vercel IPs; 2s timeout lets it fail fast instead
   // of burning 12s (two endpoints × 6s each) before fallbacks even start.
 
-  // Indicators with non-FRED source types (yahoo_ratio, yahoo_price) are
-  // fetched via fetchMacroSeries in a separate shard of the same Promise.all.
+  // Indicators with non-FRED source types (yahoo_ratio, yahoo_price, computed)
+  // are fetched via fetchMacroSeries in a separate shard of the same Promise.all.
   const customSrcIds = ids.filter(id => {
     const s = indicatorSourceMap.get(id);
-    return s?.type === 'yahoo_ratio' || s?.type === 'yahoo_price';
+    return s?.type === 'yahoo_ratio' || s?.type === 'yahoo_price' || s?.type === 'computed';
   });
   const standardIds = ids.filter(id => !customSrcIds.includes(id));
 
@@ -1131,10 +1201,10 @@ export async function GET(req: NextRequest) {
     // Discontinued/quarterly series get the full history (undefined fromDate)
     // so their last available value is captured even if it predates the window.
     Promise.all(standardIds.map(id =>
-      fetchFRED(id, WIDE_WINDOW_FRED.has(id) ? undefined : fromStr, 4_000).then(pts => ({ id, pts })))),
+      fetchFRED(id, WIDE_WINDOW_SERIES.has(id) ? undefined : fromStr, 4_000).then(pts => ({ id, pts })))),
     // DBnomics 3s — secondary fallback only (FRED API covers FRED series).
     Promise.all(standardIds.map(id =>
-      fetchDBnomicsFRED(id, WIDE_WINDOW_FRED.has(id) ? undefined : fromStr, 3_000).then(pts => ({ id, pts })))),
+      fetchDBnomicsFRED(id, WIDE_WINDOW_SERIES.has(id) ? undefined : fromStr, 3_000).then(pts => ({ id, pts })))),
     // BLS: parallel GET requests, each cached 4h by Next.js edge data cache
     blsFredIds.length ? fetchBLSBatch(blsFredIds, fromStr, 6_000) : Promise.resolve(new Map<string, Pts>()),
     needsT2  ? fetchUSTreasury('DGS2',  fromStr, 4_000, true) : Promise.resolve<Pts>([]),
@@ -1147,11 +1217,12 @@ export async function GET(req: NextRequest) {
     // WorldBank: last-resort for GDP/GDPC1 if FRED + DBnomics both fail
     needsWBkd ? fetchWorldBankGDP('NY.GDP.MKTP.KD', fromStr, 4_000) : Promise.resolve<Pts>([]),
     needsWBcd ? fetchWorldBankGDP('NY.GDP.MKTP.CD', fromStr, 4_000) : Promise.resolve<Pts>([]),
-    // Custom source indicators (yahoo_ratio, yahoo_price) — fetched in parallel
+    // Custom source indicators (yahoo_ratio, yahoo_price, computed) — in parallel.
+    // Event-based series (BTC_HALVING) get full history so their card isn't blank.
     customSrcIds.length > 0
       ? Promise.all(customSrcIds.map(async id => ({
           id,
-          pts: await fetchMacroSeries(id, fromStr),
+          pts: await fetchMacroSeries(id, WIDE_WINDOW_SERIES.has(id) ? undefined : fromStr),
         })))
       : Promise.resolve([] as { id: string; pts: Pts }[]),
   ]);

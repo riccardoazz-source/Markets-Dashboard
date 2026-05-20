@@ -1,7 +1,7 @@
 import { AssetConfig } from './types';
 
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$';
-export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Sentiment';
+export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Sentiment' | 'Crypto';
 
 // ---------- Source metadata ----------
 // Each MacroIndicator declares its primary data source.
@@ -15,7 +15,8 @@ export type MacroSourceType =
   | 'treasury'     // US Treasury yield-curve CSV
   | 'fomc'         // Federal Reserve FOMC rate decisions (hardcoded table + FRED fallback)
   | 'yahoo_price'  // Yahoo Finance price series — symbol required
-  | 'yahoo_ratio'; // Yahoo Finance: price(numerator) / price(denominator)
+  | 'yahoo_ratio'  // Yahoo Finance: price(numerator) / price(denominator)
+  | 'computed';    // computed server-side in the API route (Bitcoin halving, RSI)
 
 export interface MacroSource {
   type: MacroSourceType;
@@ -90,8 +91,10 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'DRCRELEXFACBS', name: 'CRE Loan Delinquency', category: 'Money',    unit: '%',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/DRCRELEXFACBS' } },
-  // Discontinued quarterly Z.1 Financial Accounts series — latest point may be old
-  { id: 'BOGZ1FA673065500Q', name: 'Financial Accounts Flow (Z.1)', category: 'Money', unit: 'idx',
+  // Discontinued quarterly Z.1 Financial Accounts series — latest point may be old.
+  // Full FRED title: "Issuers of Asset-Backed Securities; Commercial Mortgages,
+  // Including REIT Securitized Commercial Mortgages; Asset, Transactions".
+  { id: 'BOGZ1FA673065500Q', name: 'ABS Issuers: Commercial Mortgages', category: 'Money', unit: 'idx',
     source: { type: 'fred',    label: 'FRED (discontinued)',
               url: 'https://fred.stlouisfed.org/series/BOGZ1FA673065500Q' } },
   // Commodities — computed from Yahoo Finance prices; no FRED key needed
@@ -104,6 +107,13 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'yahoo_price', label: 'Yahoo Finance',
               url: 'https://finance.yahoo.com/quote/%5EVIX',
               symbol: '^VIX' } },
+  // Crypto — computed server-side; bitbo.io charts are the visual reference
+  { id: 'BTC_HALVING', name: 'Bitcoin Block Reward', category: 'Crypto',      unit: 'idx',
+    source: { type: 'computed', label: 'Bitcoin halving schedule',
+              url: 'https://charts.bitbo.io/halving-progress/' } },
+  { id: 'BTC_RSI',  name: 'Bitcoin Monthly RSI',     category: 'Crypto',      unit: 'idx',
+    source: { type: 'computed', label: 'Computed from BTC-USD (Yahoo)',
+              url: 'https://charts.bitbo.io/monthly-rsi/' } },
 ];
 
 export const INDEXES: AssetConfig[] = [
