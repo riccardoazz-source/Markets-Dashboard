@@ -384,7 +384,9 @@ async function fetchYahooRatio(
 }
 
 // ---------- Bitcoin halving schedule (BTC_HALVING) ----------
-// One data point per halving event; value = ordinal (1, 2, 3, 4).
+// Halvings are events, not a continuous metric. Modelled as a 0/1 dummy:
+// value = 1 on the halving date, 0 on the surrounding days, so the chart
+// renders a clean impulse spike per halving instead of a misleading line.
 // Historical facts — no external fetch needed.
 const BTC_HALVING_DATES: string[] = [
   '2012-11-28', // 1st: 50 → 25 BTC
@@ -394,7 +396,15 @@ const BTC_HALVING_DATES: string[] = [
 ];
 
 function getBitcoinHalvings(fromDate?: string): { date: string; value: number }[] {
-  const pts = BTC_HALVING_DATES.map((date, i) => ({ date, value: i + 1 }));
+  const pts: { date: string; value: number }[] = [];
+  for (const date of BTC_HALVING_DATES) {
+    const t = new Date(date).getTime();
+    const dayBefore = new Date(t - 86_400_000).toISOString().slice(0, 10);
+    const dayAfter  = new Date(t + 86_400_000).toISOString().slice(0, 10);
+    pts.push({ date: dayBefore, value: 0 });
+    pts.push({ date, value: 1 });
+    pts.push({ date: dayAfter, value: 0 });
+  }
   return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
 }
 
