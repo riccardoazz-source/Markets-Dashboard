@@ -12,7 +12,6 @@ interface Props {
   assets: CompareAsset[];
   height?: number;
   logScale?: boolean;
-  normalized?: boolean;
 }
 
 function formatDate(dateStr: string, allDates: string[]) {
@@ -57,64 +56,27 @@ function groupRange(group: CompareAsset[]): { lo: number; hi: number } {
   return { lo, hi };
 }
 
-// Axis that scales to its own data range, with a little padding.
-function naturalDomain(group: CompareAsset[], logScale: boolean): object {
+// Each Y axis scales independently to the data drawn on it. Lines on the same
+// axis are comparable to each other; lines on different axes are each readable
+// on their own scale (that is the point of having several axes).
+function axisProps(group: CompareAsset[], logScale: boolean): object {
+  if (!logScale) return { domain: ['auto', 'auto'] as [string, string] };
   const { lo, hi } = groupRange(group);
   if (!isFinite(lo) || !isFinite(hi) || lo <= 0 || hi <= lo) {
     return { domain: ['auto', 'auto'] as [string, string] };
   }
-  if (logScale) {
-    const dLo = Math.max(lo * 0.9, 0.1);
-    const dHi = hi * 1.1;
-    const ticks = LOG_TICKS.filter(c => c >= dLo && c <= dHi);
-    return {
-      scale: 'log' as const,
-      domain: [dLo, dHi] as [number, number],
-      allowDataOverflow: false,
-      ticks: ticks.length >= 2 ? ticks : undefined,
-    };
-  }
-  const pad = (hi - lo) * 0.08;
-  return { domain: [Math.max(lo - pad, 0), hi + pad] as [number, number] };
+  const dLo = Math.max(lo * 0.9, 0.1);
+  const dHi = hi * 1.1;
+  const ticks = LOG_TICKS.filter(c => c >= dLo && c <= dHi);
+  return {
+    scale: 'log' as const,
+    domain: [dLo, dHi] as [number, number],
+    allowDataOverflow: false,
+    ticks: ticks.length >= 2 ? ticks : undefined,
+  };
 }
 
-// Secondary axis: scales to its own data but shifts the domain so `alignValue`
-// sits at the same visual fraction `f` as the primary (left) axis — keeping the
-// normalized base-100 start point at one shared height across every axis.
-function alignedDomain(group: CompareAsset[], logScale: boolean, alignValue: number, f: number): object {
-  const { lo, hi } = groupRange(group);
-  if (!isFinite(lo) || !isFinite(hi) || lo <= 0 || hi <= lo || f <= 0 || f >= 1) {
-    return naturalDomain(group, logScale);
-  }
-  if (logScale) {
-    const lLo = Math.log(Math.max(lo * 0.9, 0.1));
-    const lHi = Math.log(hi * 1.1);
-    const lVal = Math.log(alignValue);
-    // Smallest log-span that contains [lLo,lHi] with alignValue at fraction f.
-    const span = Math.max((lVal - lLo) / f, (lHi - lVal) / (1 - f), 1e-6);
-    const dLo = Math.exp(lVal - f * span);
-    const dHi = Math.exp(lVal + (1 - f) * span);
-    if (!isFinite(dLo) || !isFinite(dHi) || dHi <= dLo) return naturalDomain(group, logScale);
-    const ticks = LOG_TICKS.filter(c => c >= dLo && c <= dHi);
-    return {
-      scale: 'log' as const,
-      domain: [dLo, dHi] as [number, number],
-      allowDataOverflow: false,
-      ticks: ticks.length >= 2 ? ticks : undefined,
-    };
-  }
-  const pad = (hi - lo) * 0.08;
-  const loData = Math.max(lo - pad, 0);
-  const hiData = hi + pad;
-  // Smallest span that contains [loData,hiData] with alignValue at fraction f.
-  const span = Math.max((alignValue - loData) / f, (hiData - alignValue) / (1 - f), 1e-6);
-  const dLo = alignValue - f * span;
-  const dHi = alignValue + (1 - f) * span;
-  if (dLo <= 0 || !isFinite(dLo) || !isFinite(dHi) || dHi <= dLo) return naturalDomain(group, logScale);
-  return { domain: [dLo, dHi] as [number, number] };
-}
-
-export function CompareChart({ assets, height = 340, logScale = false, normalized = false }: Props) {
+export function CompareChart({ assets, height = 340, logScale = false }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
   if (!assets.length) return null;
@@ -201,32 +163,11 @@ export function CompareChart({ assets, height = 340, logScale = false, normalize
   const rightAssets  = hasRightAxis  ? assets.filter(a => axisMap[a.symbol] === 'right')  : [];
   const right2Assets = hasRight2Axis ? assets.filter(a => axisMap[a.symbol] === 'right2') : [];
 
-  // The left axis scales to its own data. When the series are normalized
-  // (base-100), secondary axes place 100 at the same visual height as the left
-  // axis so every line still starts from one shared point.
-  const leftAxisProps = naturalDomain(hasRightAxis ? leftAssets : assets, logScale);
-
-  const alignFraction = (() => {
-    if (!normalized) return undefined;
-    const d = (leftAxisProps as { domain?: [number, number] }).domain;
-    if (!d || typeof d[0] !== 'number' || typeof d[1] !== 'number') return undefined;
-    const [lo, hi] = d;
-    if (lo <= 0 || hi <= lo) return undefined;
-    return logScale
-      ? (Math.log(100) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))
-      : (100 - lo) / (hi - lo);
-  })();
-
-  const rightAxisProps = hasRightAxis
-    ? (alignFraction != null
-        ? alignedDomain(rightAssets, logScale, 100, alignFraction)
-        : naturalDomain(rightAssets, logScale))
-    : null;
-  const right2AxisProps = hasRight2Axis
-    ? (alignFraction != null
-        ? alignedDomain(right2Assets, logScale, 100, alignFraction)
-        : naturalDomain(right2Assets, logScale))
-    : null;
+  // Every axis scales independently to the data drawn on it, so each asset is
+  // readable on its own scale regardless of how differently the others moved.
+  const leftAxisProps   = axisProps(hasRightAxis ? leftAssets : assets, logScale);
+  const rightAxisProps  = hasRightAxis  ? axisProps(rightAssets,  logScale) : null;
+  const right2AxisProps = hasRight2Axis ? axisProps(right2Assets, logScale) : null;
 
   const legendItems: { key: string; name: string; color: string; dashed: boolean }[] = [];
   assets.forEach(a => {

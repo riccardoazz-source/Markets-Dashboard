@@ -437,7 +437,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       ) : displayAssets.length > 0 ? (
         <ChartErrorBoundary>
           <div className="rounded-xl border border-border bg-bg-card p-4">
-            <CompareChart assets={displayAssets} height={360} logScale={normalized && logScale} normalized={normalized} />
+            <CompareChart assets={displayAssets} height={360} logScale={normalized && logScale} />
           </div>
 
           {/* Stats cards — use displayAssets so numbers are computed on the
