@@ -12,6 +12,7 @@ interface Props {
   assets: CompareAsset[];
   height?: number;
   logScale?: boolean;
+  normalized?: boolean;
 }
 
 function formatDate(dateStr: string, allDates: string[]) {
@@ -105,7 +106,7 @@ function getAlignedAxisProps(
   };
 }
 
-export function CompareChart({ assets, height = 340, logScale = false }: Props) {
+export function CompareChart({ assets, height = 340, logScale = false, normalized = false }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
   if (!assets.length) return null;
@@ -142,13 +143,15 @@ export function CompareChart({ assets, height = 340, logScale = false }: Props) 
     return point;
   });
 
-  // ── Up-to-3 Y-axis grouping ───────────────────────────────────────────────
-  // Gap-split: sort assets by max value, find the top-2 multiplicative gaps
-  // (ratio ≥ 2.5x). Each gap creates a new axis group.
+  // ── Y-axis grouping ───────────────────────────────────────────────────────
+  // Normalized (base-100) mode always uses a single shared axis: that is the
+  // whole point of normalizing, and it keeps the chart identical across every
+  // timeframe. Absolute-price mode may split into up to 3 axes via gap-split:
+  // sort assets by max value, find the top-2 multiplicative gaps (ratio ≥ 2.5x).
   const { axisMap, hasRightAxis, hasRight2Axis } = (() => {
     const map: Record<string, AxisGroup> = {};
     assets.forEach(a => { map[a.symbol] = 'left'; });
-    if (assets.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
+    if (assets.length < 2 || normalized) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
     const assetMaxVals = assets.map(a => {
       let max = 0;

@@ -63,9 +63,9 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [assets, setAssets] = useState<CompareAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [normalized, setNormalized] = useState(true);
-  // Log scale on by default: when normalized, assets with very different growth
-  // rates (e.g. an index vs a macro series) flatten badly on a linear axis.
-  const [logScale, setLogScale] = useState(true);
+  // Linear scale by default. Log is an opt-in toggle for when one asset has
+  // returns many times larger than the others (e.g. an index vs a macro series).
+  const [logScale, setLogScale] = useState(false);
   // Dual search: local config + remote Yahoo search
   const [search, setSearch] = useState('');
   const [remoteHits, setRemoteHits] = useState<SearchHit[]>([]);
@@ -437,7 +437,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       ) : displayAssets.length > 0 ? (
         <ChartErrorBoundary>
           <div className="rounded-xl border border-border bg-bg-card p-4">
-            <CompareChart assets={displayAssets} height={360} logScale={normalized && logScale} />
+            <CompareChart assets={displayAssets} height={360} logScale={normalized && logScale} normalized={normalized} />
           </div>
 
           {/* Stats cards — use displayAssets so numbers are computed on the
