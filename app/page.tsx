@@ -22,7 +22,7 @@ const SECTION_LABELS: Record<Section, string> = {
   commodities: 'Commodities',
   sectors:     'Sector Heat Rankings',
   macro:       'Macro Indicators',
-  stock:       'Stock Lookup',
+  stock:       'Stocks',
   compare:     'Asset Comparison',
   general:     'General Overview',
   sources:     'Data Sources',

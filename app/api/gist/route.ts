@@ -2,23 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'edge';
 
-const GIST_ID    = process.env.GITHUB_GIST_ID;
-const GIST_TOKEN = process.env.GITHUB_GIST_TOKEN;
-const FILE_NAME  = 'markets-data.json';
+const FILE_NAME = 'markets-data.json';
 
-function gistHeaders() {
+function gistEnv() {
   return {
-    Authorization: `Bearer ${GIST_TOKEN}`,
+    id: process.env.GITHUB_GIST_ID,
+    token: process.env.GITHUB_GIST_TOKEN,
+  };
+}
+
+function gistHeaders(token: string) {
+  return {
+    Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
   };
 }
 
 async function readGist(): Promise<Record<string, unknown>> {
-  if (!GIST_ID || !GIST_TOKEN) return {};
+  const { id, token } = gistEnv();
+  if (!id || !token) return {};
   try {
-    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-      headers: gistHeaders(),
+    const res = await fetch(`https://api.github.com/gists/${id}`, {
+      headers: gistHeaders(token),
       cache: 'no-store',
     });
     if (!res.ok) return {};
@@ -30,11 +36,12 @@ async function readGist(): Promise<Record<string, unknown>> {
 }
 
 async function writeGist(data: Record<string, unknown>): Promise<boolean> {
-  if (!GIST_ID || !GIST_TOKEN) return false;
+  const { id, token } = gistEnv();
+  if (!id || !token) return false;
   try {
-    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+    const res = await fetch(`https://api.github.com/gists/${id}`, {
       method: 'PATCH',
-      headers: { ...gistHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...gistHeaders(token), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         files: { [FILE_NAME]: { content: JSON.stringify(data, null, 2) } },
       }),
@@ -67,14 +74,22 @@ function deepMerge(
 }
 
 export async function GET() {
+  const { id, token } = gistEnv();
+  const cloud = !!(id && token);
   const data = await readGist();
-  return NextResponse.json(data);
+  return NextResponse.json({ cloud, data });
 }
 
 export async function POST(req: NextRequest) {
+  const { id, token } = gistEnv();
+  const cloud = !!(id && token);
   const update = await req.json() as Record<string, unknown>;
+  if (!cloud) {
+    // No cloud storage configured — nothing to persist server-side.
+    return NextResponse.json({ ok: false, cloud: false });
+  }
   const existing = await readGist();
   const merged = deepMerge(existing, update);
   const ok = await writeGist(merged);
-  return NextResponse.json({ ok, data: merged });
+  return NextResponse.json({ ok, cloud: true });
 }

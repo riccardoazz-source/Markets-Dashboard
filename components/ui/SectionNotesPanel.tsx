@@ -3,8 +3,9 @@
 import { useState, useMemo } from 'react';
 import { BookOpen, X, Edit2, Trash2, Check, ChevronDown, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
-import { useGistData, NoteEntry, todayStr } from '@/lib/gist';
+import { useGistData, useSyncStatus, NoteEntry, todayStr } from '@/lib/gist';
 import { resolveNoteName, type NotesSection } from '@/lib/sectionNotes';
+import { SyncBadge } from '@/components/ui/SyncBadge';
 
 interface Props {
   section: NotesSection;
@@ -19,6 +20,7 @@ interface FlatNote extends NoteEntry {
 
 export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) {
   const { data, update } = useGistData();
+  const syncStatus = useSyncStatus();
   const [open, setOpen] = useState(false);
   const [editKey, setEditKey] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
@@ -131,14 +133,17 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
         )}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-input shrink-0">
-          <div className="flex items-center gap-2">
-            <BookOpen size={16} className="text-accent" />
-            <h3 className="text-sm font-semibold text-gray-100">{sectionLabel} — Notes</h3>
-            <span className="text-[10px] text-gray-500">({total})</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <BookOpen size={16} className="text-accent shrink-0" />
+            <h3 className="text-sm font-semibold text-gray-100 truncate">{sectionLabel} — Notes</h3>
+            <span className="text-[10px] text-gray-500 shrink-0">({total})</span>
           </div>
-          <button onClick={() => setOpen(false)} className="p-1 text-gray-500 hover:text-gray-200">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <SyncBadge />
+            <button onClick={() => setOpen(false)} className="p-1 text-gray-500 hover:text-gray-200">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Category filter chips */}
@@ -169,6 +174,23 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
         )}
 
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          {syncStatus === 'local-only' && (
+            <div className="bg-amber-400/10 border border-amber-400/30 rounded-lg px-3 py-2 text-[11px] text-amber-300/90">
+              <p className="font-semibold mb-0.5">Notes are stored only on this device</p>
+              <p className="text-amber-300/70">
+                They won&apos;t appear if you switch device or browser. To sync everywhere,
+                set <code className="text-amber-200">GITHUB_GIST_ID</code> and{' '}
+                <code className="text-amber-200">GITHUB_GIST_TOKEN</code> in your Vercel
+                project settings.
+              </p>
+            </div>
+          )}
+          {syncStatus === 'error' && (
+            <div className="bg-red-400/10 border border-red-400/30 rounded-lg px-3 py-2 text-[11px] text-red-300/90">
+              Couldn&apos;t reach cloud storage. Notes are saved on this device and will
+              sync automatically once the connection is restored.
+            </div>
+          )}
           {filteredNotes.length === 0 ? (
             <p className="text-xs text-gray-600 italic mt-2">
               {total === 0

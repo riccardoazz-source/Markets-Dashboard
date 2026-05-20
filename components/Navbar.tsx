@@ -15,7 +15,7 @@ const SECTIONS: { id: Section; label: string; short: string; Icon: LucideIcon }[
   { id: 'commodities', label: 'Commodities', short: 'Cmdty', Icon: Gem        },
   { id: 'sectors',     label: 'Sectors',     short: 'Sec',   Icon: Grid2X2    },
   { id: 'macro',       label: 'Macro',       short: 'Macro', Icon: Activity   },
-  { id: 'stock',       label: 'Stock',       short: 'Stock', Icon: Briefcase  },
+  { id: 'stock',       label: 'Stocks',      short: 'Stocks',Icon: Briefcase  },
   { id: 'compare',     label: 'Compare',     short: 'vs.',   Icon: GitCompare },
   { id: 'general',     label: 'General',     short: 'Gen',   Icon: LayoutGrid },
   { id: 'sources',     label: 'Sources',     short: 'Src',   Icon: BookOpen   },
