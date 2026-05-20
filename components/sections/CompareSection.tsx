@@ -62,7 +62,9 @@ export function CompareSection() {
   const [assets, setAssets] = useState<CompareAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [normalized, setNormalized] = useState(true);
-  const [logScale, setLogScale] = useState(false);
+  // Log scale on by default: when normalized, assets with very different growth
+  // rates (e.g. an index vs a macro series) flatten badly on a linear axis.
+  const [logScale, setLogScale] = useState(true);
   // Dual search: local config + remote Yahoo search
   const [search, setSearch] = useState('');
   const [remoteHits, setRemoteHits] = useState<SearchHit[]>([]);
@@ -163,12 +165,15 @@ export function CompareSection() {
         if (!data.length) return null;
       }
 
-      // Total-return series: prefer adjPrices (Yahoo adjclose — handles splits + dividends).
-      // Fall back to manual dividend reinvestment when adjPrices not available.
+      // Total-return series only when the asset actually pays dividends.
+      // Raw indexes (^GSPC, ^NDX…) and macro series have no distributions, so
+      // their TR line would just duplicate the price line — skip it entirely.
+      // When dividends exist, prefer adjPrices (Yahoo adjclose handles splits +
+      // dividends), falling back to manual reinvestment.
       const totalReturnData: HistoricalPoint[] | undefined =
-        adjData.length > 0 ? adjData
-        : dividends.length > 0 ? buildTotalReturnSeries(data, dividends)
-        : undefined;
+        dividends.length > 0
+          ? (adjData.length > 0 ? adjData : buildTotalReturnSeries(data, dividends))
+          : undefined;
 
       const cagr = calculateCAGR(data, tf);
       const cagrTR = totalReturnData ? calculateCAGR(totalReturnData, tf) : undefined;
@@ -424,7 +429,7 @@ export function CompareSection() {
       ) : displayAssets.length > 0 ? (
         <ChartErrorBoundary>
           <div className="rounded-xl border border-border bg-bg-card p-4">
-            <CompareChart assets={displayAssets} height={360} logScale={logScale} />
+            <CompareChart assets={displayAssets} height={360} logScale={normalized && logScale} />
           </div>
 
           {/* Stats cards — use displayAssets so numbers are computed on the
