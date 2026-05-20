@@ -26,8 +26,7 @@ interface UnifiedIndicator {
   category: string;
   unit: MacroUnit;
   isBuiltin: boolean;
-  fetchUrl: string | null;  // null → /api/macro or /api/fred; string → /api/scrape
-  isFredType: boolean;      // true → route to /api/fred (Node.js), false → /api/macro (Edge)
+  fetchUrl: string | null;  // null → /api/macro (full FRED fallback chain); string → /api/scrape
 }
 
 function formatMacroValue(value: number, unit: MacroUnit): string {
@@ -98,11 +97,10 @@ export function MacroSection() {
           id: m.id, name: m.name, category: m.category, unit: m.unit,
           isBuiltin: true,
           fetchUrl: mounted ? (sourcesConfig.overrides[m.id] ?? null) : null,
-          isFredType: m.source.type === 'fred',
         })),
       ...(mounted ? sourcesConfig.custom.map(c => ({
         id: c.id, name: c.name, category: c.category, unit: c.unit as MacroUnit,
-        isBuiltin: false, fetchUrl: c.url, isFredType: false,
+        isBuiltin: false, fetchUrl: c.url,
       })) : []),
     ];
   }, [mounted, sourcesConfig]);
@@ -115,10 +113,10 @@ export function MacroSection() {
   }, [sourcesConfig.custom]);
 
   const fetchData = useCallback(async () => {
-    // Split into three groups: Edge macro, Node.js FRED, custom scrape URLs
-    const macroBuiltins = allIndicators.filter(ind => ind.isBuiltin && !ind.fetchUrl && !ind.isFredType);
-    const fredBuiltins  = allIndicators.filter(ind => ind.isBuiltin && !ind.fetchUrl && ind.isFredType);
-    const scrapeList    = allIndicators.filter(ind => !!ind.fetchUrl);
+    // Two groups: built-in indicators via /api/macro (full FRED fallback chain),
+    // custom/overridden URLs via /api/scrape. Both groups fetched in parallel.
+    const builtins   = allIndicators.filter(ind => ind.isBuiltin && !ind.fetchUrl);
+    const scrapeList = allIndicators.filter(ind => !!ind.fetchUrl);
 
     const dataUpdates: Record<string, MacroLatest> = {};
     const okUpdates: Record<string, boolean> = {};
@@ -128,26 +126,15 @@ export function MacroSection() {
     const fromStr = from18.toISOString().slice(0, 10);
 
     await Promise.allSettled([
-      // Edge macro route (non-FRED built-ins)
+      // Built-in indicators — /api/macro has the complete source + fallback chain
       (async () => {
-        if (!macroBuiltins.length) return;
+        if (!builtins.length) return;
         try {
-          const ids = macroBuiltins.map(ind => ind.id).join(',');
+          const ids = builtins.map(ind => ind.id).join(',');
           const res = await fetch(`/api/macro?mode=list&ids=${ids}`);
           const json = await res.json() as MacroLatest[];
           json.forEach(d => { dataUpdates[d.id] = d; okUpdates[d.id] = d.latest !== null; });
         } catch (e) { console.error('[macro] list error', e); }
-      })(),
-
-      // Node.js FRED route (runs in parallel — no sequential wait)
-      (async () => {
-        if (!fredBuiltins.length) return;
-        try {
-          const ids = fredBuiltins.map(ind => ind.id).join(',');
-          const res = await fetch(`/api/fred?mode=list&ids=${ids}`);
-          const json = await res.json() as MacroLatest[];
-          json.forEach(d => { dataUpdates[d.id] = d; okUpdates[d.id] = d.latest !== null; });
-        } catch (e) { console.error('[fred] list error', e); }
       })(),
 
       // Custom / overridden URLs via scrape route
@@ -195,13 +182,8 @@ export function MacroSection() {
         const res = await fetch(`/api/scrape?url=${encodeURIComponent(ind.fetchUrl)}&from=${from}`);
         const json = await res.json();
         setHistorical(json.success && Array.isArray(json.data) ? scrapeToHist(json.data) : []);
-      } else if (ind?.isFredType) {
-        // FRED indicator → dedicated Node.js route
-        const res = await fetch(`/api/fred?mode=history&id=${id}&from=${from}`);
-        const json = await res.json() as HistoricalPoint[];
-        setHistorical(Array.isArray(json) ? json : []);
       } else {
-        // Other built-in → Edge macro route
+        // Built-in indicator → macro route (full FRED fallback chain)
         const res = await fetch(`/api/macro?mode=history&id=${id}&from=${from}`);
         const json = await res.json() as HistoricalPoint[];
         setHistorical(Array.isArray(json) ? json : []);

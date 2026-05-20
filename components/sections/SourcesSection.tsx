@@ -32,8 +32,9 @@ function StatusBadge({ info }: { info?: StatusInfo }) {
     );
   }
   return (
-    <span className="flex items-center gap-1 text-red-400 text-[11px]" title={info.message}>
-      <XCircle size={13} /> Error
+    <span className="flex items-start gap-1 text-red-400 text-[11px] max-w-[220px]" title={info.message}>
+      <XCircle size={13} className="shrink-0 mt-px" />
+      <span className="leading-tight">{info.message || 'Error'}</span>
     </span>
   );
 }
