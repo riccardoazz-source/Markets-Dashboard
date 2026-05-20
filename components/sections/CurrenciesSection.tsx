@@ -5,6 +5,8 @@ import { CURRENCY_PAIRS } from '@/lib/config';
 import { Timeframe } from '@/lib/types';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
+import { ChartDataTable } from '@/components/ui/ChartDataTable';
+import { ChartNotes } from '@/components/ui/ChartNotes';
 import { LoadingSpinner, LoadingGrid } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { ArrowRight, RefreshCw } from 'lucide-react';
@@ -33,6 +35,7 @@ export function CurrenciesSection() {
   const [average, setAverage] = useState<number | null>(null);
   const [histLoading, setHistLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
 
   const fetchRates = useCallback(async () => {
     try {
@@ -48,11 +51,14 @@ export function CurrenciesSection() {
     }
   }, [selected]);
 
-  const fetchHistorical = useCallback(async (from: string, to: string, tf: Timeframe) => {
+  const fetchHistorical = useCallback(async (
+    from: string, to: string, tf: Timeframe, override?: { from: string; to: string }
+  ) => {
     setHistLoading(true);
     try {
-      const res = await fetch(`/api/currencies?mode=historical&from=${from}&to=${to}&timeframe=${tf}`);
-      const data = await res.json() as { points: { date: string; rate: number }[]; average: number };
+      const base = `/api/currencies?mode=historical&from=${from}&to=${to}&timeframe=${tf}`;
+      const url = override ? `${base}&fromDate=${override.from}&toDate=${override.to}` : base;
+      const data = await fetch(url).then(r => r.json()) as { points: { date: string; rate: number }[]; average: number };
       setHistorical(data.points?.map(p => ({ date: p.date, close: p.rate })) ?? []);
       setAverage(data.average ?? null);
     } catch (e) {
@@ -69,8 +75,8 @@ export function CurrenciesSection() {
   }, [fetchRates]);
 
   useEffect(() => {
-    if (selected) fetchHistorical(selected.from, selected.to, timeframe);
-  }, [selected, timeframe, fetchHistorical]);
+    if (selected) fetchHistorical(selected.from, selected.to, timeframe, customRange ?? undefined);
+  }, [selected, timeframe, customRange, fetchHistorical]);
 
   const selectedRate = rates.find(r => r.from === selected?.from && r.to === selected?.to);
   const dec = decimals(selectedRate?.rate ?? null);
@@ -137,7 +143,13 @@ export function CurrenciesSection() {
                 </span>
               )}
             </div>
-            <TimeframeSelector value={timeframe} onChange={setTimeframe} options={TF_OPTIONS} />
+            <TimeframeSelector
+              value={timeframe}
+              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+              options={TF_OPTIONS}
+              isCustom={!!customRange}
+              onCustomRange={(from, to) => setCustomRange({ from, to })}
+            />
           </div>
 
           {average != null && (
@@ -186,6 +198,8 @@ export function CurrenciesSection() {
               isCurrency={true}
             />
           )}
+          {historical.length > 0 && <ChartDataTable data={historical} unit={`${selected?.from}/${selected?.to}`} />}
+          {selected && <ChartNotes chartId={`${selected.from}/${selected.to}`} />}
         </div>
       )}
     </div>

@@ -6,6 +6,8 @@ import { QuoteData, HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
 import { formatPrice, formatPercent, colorForPercent, calculateCAGR } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
+import { ChartDataTable } from '@/components/ui/ChartDataTable';
+import { ChartNotes } from '@/components/ui/ChartNotes';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
@@ -30,6 +32,7 @@ export function IndexesSection() {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [cagrData, setCAGRData] = useState<CAGRData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
 
   const fetchQuotes = useCallback(async () => {
     const symbols = INDEXES.map(i => i.symbol).join(',');
@@ -44,11 +47,15 @@ export function IndexesSection() {
     finally { setLoading(false); }
   }, []);
 
-  const fetchHistorical = useCallback(async (symbol: string, tf: Timeframe) => {
+  const fetchHistorical = useCallback(async (
+    symbol: string, tf: Timeframe, override?: { from: string; to: string }
+  ) => {
     setHistLoading(true);
     try {
-      const res = await fetch(`/api/historical?symbol=${symbol}&timeframe=${tf}`);
-      const raw = await res.json() as HistoricalPoint[];
+      const url = override
+        ? `/api/historical?symbol=${symbol}&timeframe=${tf}&from=${override.from}&to=${override.to}`
+        : `/api/historical?symbol=${symbol}&timeframe=${tf}`;
+      const raw = await fetch(url).then(r => r.json()) as HistoricalPoint[];
       const data = Array.isArray(raw) ? raw : [];
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
@@ -63,8 +70,8 @@ export function IndexesSection() {
   }, [fetchQuotes]);
 
   useEffect(() => {
-    if (selected) fetchHistorical(selected, timeframe);
-  }, [selected, timeframe, fetchHistorical]);
+    if (selected) fetchHistorical(selected, timeframe, customRange ?? undefined);
+  }, [selected, timeframe, customRange, fetchHistorical]);
 
   const filtered = INDEXES.filter(
     i => selectedRegion === 'All' || i.region === selectedRegion
@@ -179,7 +186,12 @@ export function IndexesSection() {
             </button>
           </div>
           <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-            <TimeframeSelector value={timeframe} onChange={setTimeframe} />
+            <TimeframeSelector
+              value={timeframe}
+              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+              isCustom={!!customRange}
+              onCustomRange={(from, to) => setCustomRange({ from, to })}
+            />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
@@ -211,6 +223,8 @@ export function IndexesSection() {
               {cagrData.startDate} → {cagrData.endDate} · {formatPrice(cagrData.startPrice)} → {formatPrice(cagrData.endPrice)}
             </p>
           )}
+          {historical.length > 0 && <ChartDataTable data={historical} />}
+          {selected && <ChartNotes chartId={selected} />}
         </div>
       )}
     </div>

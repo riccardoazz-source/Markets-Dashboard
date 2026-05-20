@@ -78,13 +78,18 @@ export async function GET(req: NextRequest) {
   }
 
   if (mode === 'historical') {
-    const key = `hist:${from}:${to}:${timeframe}`;
+    const fromDateParam = req.nextUrl.searchParams.get('fromDate');
+    const toDateParam   = req.nextUrl.searchParams.get('toDate');
+    const isCustom = !!(fromDateParam && toDateParam);
+    const key = isCustom
+      ? `hist:${from}:${to}:${fromDateParam}:${toDateParam}`
+      : `hist:${from}:${to}:${timeframe}`;
     const cached = getCached(key);
     if (cached) return NextResponse.json(cached);
 
     try {
-      const startDate = getStartDate(timeframe);
-      const endDate = format(new Date(), 'yyyy-MM-dd');
+      const startDate = isCustom ? fromDateParam! : getStartDate(timeframe);
+      const endDate   = isCustom ? toDateParam!   : format(new Date(), 'yyyy-MM-dd');
 
       let actualFrom = from;
       let actualTo = to;

@@ -6,6 +6,8 @@ import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
+import { ChartDataTable } from '@/components/ui/ChartDataTable';
+import { ChartNotes } from '@/components/ui/ChartNotes';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
@@ -79,6 +81,7 @@ export function MacroSection() {
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -169,22 +172,22 @@ export function MacroSection() {
     setLoading(false);
   }, [allIndicators]);
 
-  const fetchHistory = useCallback(async (id: string, tf: Timeframe) => {
+  const fetchHistory = useCallback(async (
+    id: string, tf: Timeframe, override?: { from: string; to: string }
+  ) => {
     setHistLoading(true);
     const ind = allIndicators.find(i => i.id === id);
-    // /api/scrape returns {date, value}[]; /api/macro returns {date, close}[] (HistoricalPoint)
-    const scrapeToHist = (data: { date: string; value: number }[]): HistoricalPoint[] =>
-      data.map(p => ({ date: p.date, close: p.value }));
+    const scrapeToHist = (d: { date: string; value: number }[]): HistoricalPoint[] =>
+      d.map(p => ({ date: p.date, close: p.value }));
     try {
-      const from = getTimeframeStart(tf);
+      const from = override?.from ?? getTimeframeStart(tf);
+      const toParam = override?.to ? `&to=${override.to}` : '';
       if (ind?.fetchUrl) {
-        // Custom URL → scrape route
         const res = await fetch(`/api/scrape?url=${encodeURIComponent(ind.fetchUrl)}&from=${from}`);
         const json = await res.json();
         setHistorical(json.success && Array.isArray(json.data) ? scrapeToHist(json.data) : []);
       } else {
-        // Built-in indicator → macro route (full FRED fallback chain)
-        const res = await fetch(`/api/macro?mode=history&id=${id}&from=${from}`);
+        const res = await fetch(`/api/macro?mode=history&id=${id}&from=${from}${toParam}`);
         const json = await res.json() as HistoricalPoint[];
         setHistorical(Array.isArray(json) ? json : []);
       }
@@ -200,8 +203,8 @@ export function MacroSection() {
   }, [mounted, fetchData]);
 
   useEffect(() => {
-    if (selected) fetchHistory(selected, timeframe);
-  }, [selected, timeframe, fetchHistory]);
+    if (selected) fetchHistory(selected, timeframe, customRange ?? undefined);
+  }, [selected, timeframe, customRange, fetchHistory]);
 
   const filtered = allIndicators.filter(
     ind => category === 'All' || ind.category === category
@@ -315,7 +318,13 @@ export function MacroSection() {
           </div>
 
           <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-            <TimeframeSelector value={timeframe} onChange={setTimeframe} options={TF_OPTIONS} />
+            <TimeframeSelector
+              value={timeframe}
+              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+              options={TF_OPTIONS}
+              isCustom={!!customRange}
+              onCustomRange={(from, to) => setCustomRange({ from, to })}
+            />
           </div>
 
           {/* Stats row */}
@@ -357,6 +366,11 @@ export function MacroSection() {
               No historical data
             </div>
           )}
+
+          {historical.length > 0 && (
+            <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
+          )}
+          {selected && <ChartNotes chartId={selected} />}
 
           <p className="text-[10px] text-gray-700">
             Data: Federal Reserve (FRED), BLS, NY Fed, ECB, DBnomics · Not financial advice

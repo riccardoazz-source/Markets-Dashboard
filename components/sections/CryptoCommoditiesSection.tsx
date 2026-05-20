@@ -6,6 +6,8 @@ import { HistoricalPoint, Timeframe, CAGRData, CryptoData } from '@/lib/types';
 import { formatPrice, formatPercent, formatMarketCap, colorForPercent, calculateCAGR } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
+import { ChartDataTable } from '@/components/ui/ChartDataTable';
+import { ChartNotes } from '@/components/ui/ChartNotes';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
@@ -27,6 +29,7 @@ export function CryptoCommoditiesSection() {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [cagrData, setCAGRData] = useState<CAGRData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
 
   const fetchCrypto = useCallback(async () => {
     try {
@@ -38,15 +41,20 @@ export function CryptoCommoditiesSection() {
     finally { setLoading(false); }
   }, []);
 
-  const fetchHistorical = useCallback(async (id: string, tf: Timeframe) => {
+  const fetchHistorical = useCallback(async (id: string, tf: Timeframe, override?: { from: string; to: string }) => {
     setHistLoading(true);
     try {
       const coin = CRYPTO_IDS.find(c => c.id === id);
       const daysMap: Record<string, number> = { '1D': 3, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
-      const days = daysMap[tf] ?? 365;
+      let days = daysMap[tf] ?? 365;
+      if (override) {
+        const ms = new Date(override.to).getTime() - new Date(override.from).getTime();
+        days = Math.ceil(ms / 86_400_000) + 1;
+      }
       const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
       const raw = await res.json() as HistoricalPoint[];
       let data = Array.isArray(raw) ? raw : [];
+      if (override) data = data.filter(p => p.date >= override.from && p.date <= override.to);
 
       // Yahoo Finance fallback when CoinGecko is rate-limited (common for >1Y ranges)
       if (!data.length) {
@@ -73,8 +81,8 @@ export function CryptoCommoditiesSection() {
   }, [fetchCrypto]);
 
   useEffect(() => {
-    if (selected) fetchHistorical(selected, timeframe);
-  }, [selected, timeframe, fetchHistorical]);
+    if (selected) fetchHistorical(selected, timeframe, customRange ?? undefined);
+  }, [selected, timeframe, customRange, fetchHistorical]);
 
   const sorted = [...cryptoData].sort((a, b) => {
     const av = a[sortBy] ?? -Infinity;
@@ -156,7 +164,12 @@ export function CryptoCommoditiesSection() {
             </button>
           </div>
           <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-            <TimeframeSelector value={timeframe} onChange={setTimeframe} />
+            <TimeframeSelector
+              value={timeframe}
+              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+              isCustom={!!customRange}
+              onCustomRange={(from, to) => setCustomRange({ from, to })}
+            />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
@@ -180,6 +193,8 @@ export function CryptoCommoditiesSection() {
           ) : (
             <PriceChart data={historical} color="auto" height={200} />
           )}
+          {historical.length > 0 && <ChartDataTable data={historical} />}
+          {selected && <ChartNotes chartId={`crypto:${selected}`} />}
         </div>
       )}
     </div>

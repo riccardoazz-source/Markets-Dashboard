@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff, Download, Upload, Link2 } from 'lucide-react';
+import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff, Download, Upload, Link2, FlaskConical } from 'lucide-react';
 import { MACRO_INDICATORS } from '@/lib/config';
+import { useGistData, AnalysisEntry, todayStr, makeId } from '@/lib/gist';
 import {
   loadSourcesConfig, saveSourcesConfig, generateId, notifySourcesChanged,
   saveToHash, loadFromHash,
@@ -553,9 +554,218 @@ export function SourcesSection() {
         </ul>
       </div>
 
+      {/* ── Analysis Notes ─────────────────────────────────────────────── */}
+      <AnalysisTable />
+
       <p className="text-[10px] text-gray-700">
         All data is fetched from public endpoints. Not financial advice.
       </p>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Analysis table — save observations linking two macro indicators
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BLANK_ANALYSIS = { var1: '', var2: '', result: '' };
+
+function AnalysisTable() {
+  const { data, update } = useGistData();
+  const analyses: AnalysisEntry[] = data.analyses ?? [];
+  const [form, setForm] = useState<{ var1: string; var2: string; result: string }>(BLANK_ANALYSIS);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState(BLANK_ANALYSIS);
+
+  const indicatorOptions = MACRO_INDICATORS.map(m => ({ value: m.id, label: `${m.name} (${m.id})` }));
+
+  const saveNew = async () => {
+    if (!form.var1 || !form.result.trim()) return;
+    const entry: AnalysisEntry = {
+      id: makeId(),
+      var1: form.var1,
+      var2: form.var2,
+      result: form.result.trim(),
+      date: todayStr(),
+    };
+    await update({ analyses: [...analyses, entry] });
+    setForm(BLANK_ANALYSIS);
+  };
+
+  const deleteEntry = async (id: string) => {
+    await update({ analyses: analyses.filter(a => a.id !== id) });
+  };
+
+  const startEdit = (a: AnalysisEntry) => {
+    setEditId(a.id);
+    setEditForm({ var1: a.var1, var2: a.var2, result: a.result });
+  };
+
+  const commitEdit = async () => {
+    if (!editId) return;
+    const updated = analyses.map(a =>
+      a.id === editId ? { ...a, ...editForm, result: editForm.result.trim(), date: todayStr() } : a
+    );
+    await update({ analyses: updated });
+    setEditId(null);
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-bg-card overflow-hidden">
+      <div className="px-4 py-3 bg-bg-input border-b border-border flex items-center gap-2">
+        <FlaskConical size={14} className="text-accent shrink-0" />
+        <div>
+          <h3 className="text-sm font-semibold text-gray-100">Analysis Notes</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Save your observations linking two indicators. Synced to GitHub Gist.
+          </p>
+        </div>
+      </div>
+
+      {/* New entry form */}
+      <div className="px-4 py-3 border-b border-border space-y-2">
+        <div className="flex flex-wrap gap-2 items-end">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-gray-500 uppercase tracking-wider">Variable 1 *</label>
+            <select
+              value={form.var1}
+              onChange={e => setForm(v => ({ ...v, var1: e.target.value }))}
+              className="bg-bg border border-border rounded-md px-2 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-accent w-52"
+            >
+              <option value="">— select indicator —</option>
+              {indicatorOptions.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-gray-500 uppercase tracking-wider">Variable 2</label>
+            <select
+              value={form.var2}
+              onChange={e => setForm(v => ({ ...v, var2: e.target.value }))}
+              className="bg-bg border border-border rounded-md px-2 py-1.5 text-xs text-gray-100 focus:outline-none focus:border-accent w-52"
+            >
+              <option value="">— none —</option>
+              {indicatorOptions.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
+            <label className="text-[10px] text-gray-500 uppercase tracking-wider">Observation / Result *</label>
+            <input
+              value={form.result}
+              onChange={e => setForm(v => ({ ...v, result: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter') saveNew(); }}
+              placeholder="e.g. Strong negative correlation when rates rise above 5%"
+              className="bg-bg border border-border rounded-md px-2 py-1.5 text-xs text-gray-100 w-full focus:outline-none focus:border-accent"
+            />
+          </div>
+          <button
+            onClick={saveNew}
+            disabled={!form.var1 || !form.result.trim()}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-accent text-white disabled:opacity-40 hover:bg-accent/80 transition shrink-0"
+          >
+            <Plus size={12} /> Save
+          </button>
+        </div>
+        <p className="text-[10px] text-gray-600">Date is set automatically to today when saved or edited.</p>
+      </div>
+
+      {/* Saved entries */}
+      {analyses.length === 0 ? (
+        <div className="px-4 py-4 text-xs text-gray-600 italic">No analyses saved yet.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-bg-input text-gray-400 uppercase tracking-wider text-[10px]">
+              <tr>
+                <th className="text-left px-3 py-2 font-semibold">Date</th>
+                <th className="text-left px-3 py-2 font-semibold">Variable 1</th>
+                <th className="text-left px-3 py-2 font-semibold">Variable 2</th>
+                <th className="text-left px-3 py-2 font-semibold min-w-[200px]">Observation</th>
+                <th className="text-left px-3 py-2 font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...analyses].reverse().map(a => {
+                const isEditing = editId === a.id;
+                const ind1 = MACRO_INDICATORS.find(m => m.id === a.var1);
+                const ind2 = a.var2 ? MACRO_INDICATORS.find(m => m.id === a.var2) : null;
+                return (
+                  <tr key={a.id} className="border-t border-border align-top hover:bg-bg-hover/20">
+                    <td className="px-3 py-2 text-gray-500 tabular-nums whitespace-nowrap">{a.date}</td>
+                    <td className="px-3 py-2">
+                      {isEditing ? (
+                        <select
+                          value={editForm.var1}
+                          onChange={e => setEditForm(v => ({ ...v, var1: e.target.value }))}
+                          className="bg-bg border border-accent rounded px-1.5 py-1 text-[11px] text-gray-100 focus:outline-none w-44"
+                        >
+                          <option value="">—</option>
+                          {indicatorOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      ) : (
+                        <div>
+                          <p className="font-medium text-gray-100">{ind1?.name ?? a.var1}</p>
+                          <p className="text-[10px] text-gray-600 font-mono">{a.var1}</p>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {isEditing ? (
+                        <select
+                          value={editForm.var2}
+                          onChange={e => setEditForm(v => ({ ...v, var2: e.target.value }))}
+                          className="bg-bg border border-accent rounded px-1.5 py-1 text-[11px] text-gray-100 focus:outline-none w-44"
+                        >
+                          <option value="">— none —</option>
+                          {indicatorOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      ) : a.var2 ? (
+                        <div>
+                          <p className="font-medium text-gray-100">{ind2?.name ?? a.var2}</p>
+                          <p className="text-[10px] text-gray-600 font-mono">{a.var2}</p>
+                        </div>
+                      ) : (
+                        <span className="text-gray-600">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 min-w-[200px]">
+                      {isEditing ? (
+                        <input
+                          value={editForm.result}
+                          onChange={e => setEditForm(v => ({ ...v, result: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditId(null); }}
+                          className="bg-bg border border-accent rounded px-2 py-1 text-[11px] text-gray-100 focus:outline-none w-full"
+                          autoFocus
+                        />
+                      ) : (
+                        <p className="text-gray-200 leading-relaxed">{a.result}</p>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div className="flex items-center gap-1">
+                        {isEditing ? (
+                          <>
+                            <button onClick={commitEdit} className="p-1 text-emerald-400 hover:text-emerald-300"><Check size={13} /></button>
+                            <button onClick={() => setEditId(null)} className="p-1 text-gray-500 hover:text-gray-300"><X size={13} /></button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => startEdit(a)} className="p-1 text-gray-500 hover:text-gray-300"><Edit2 size={12} /></button>
+                            <button onClick={() => deleteEntry(a.id)} className="p-1 text-gray-500 hover:text-red-400"><Trash2 size={12} /></button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
