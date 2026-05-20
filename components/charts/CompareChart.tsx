@@ -41,34 +41,10 @@ const tickFmt = (v: number) => {
 
 type AxisGroup = 'left' | 'right' | 'right2';
 
-// Compute axis props with optional alignment of a reference value to the same
-// visual fraction as the primary (left) axis. When all series are normalized to
-// start at 100, alignValue=100 with alignFraction derived from the left axis
-// ensures 100 sits at the same vertical position on every axis.
-function getAlignedAxisProps(
-  group: CompareAsset[],
-  logScale: boolean,
-  alignValue?: number,
-  alignFraction?: number,
-): object {
-  if (!logScale) {
-    if (alignValue == null || alignFraction == null || alignFraction <= 0 || alignFraction >= 1) {
-      return { domain: ['auto', 'auto'] as [string, string] };
-    }
-    // Linear alignment: lo = (hi * alignFraction - alignValue) / (alignFraction - 1)
-    let hi = -Infinity;
-    group.forEach(a => {
-      [...a.data, ...(a.trData ?? [])].forEach(d => {
-        if (d.close > 0 && isFinite(d.close)) hi = Math.max(hi, d.close);
-      });
-    });
-    if (!isFinite(hi) || hi <= alignValue) return { domain: ['auto', 'auto'] as [string, string] };
-    const safeHi = hi * 1.10;
-    const lo = (safeHi * alignFraction - alignValue) / (alignFraction - 1);
-    return { domain: [Math.max(lo * 0.95, 0), safeHi] as [number, number] };
-  }
+const LOG_TICKS = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
 
-  // Log scale
+// Min/max of every value plotted for a group of assets (price + optional TR).
+function groupRange(group: CompareAsset[]): { lo: number; hi: number } {
   let lo = Infinity, hi = -Infinity;
   group.forEach(a => {
     [...a.data, ...(a.trData ?? [])].forEach(d => {
@@ -78,32 +54,64 @@ function getAlignedAxisProps(
       }
     });
   });
-  const safeLo = isFinite(lo) && lo > 0 ? Math.max(lo * 0.85, 0.1) : 1;
-  const safeHi = isFinite(hi) && hi > 0 ? hi * 1.15 : 1000;
+  return { lo, hi };
+}
 
-  let finalLo = safeLo;
-
-  // Align the reference value to the same log-fraction as the left axis
-  if (alignValue != null && alignFraction != null && alignFraction > 0 && alignFraction < 1) {
-    const logHi = Math.log(safeHi);
-    const logVal = Math.log(alignValue);
-    // alignFraction = (logVal - logLo) / (logHi - logLo)
-    // → logLo = (logVal - alignFraction * logHi) / (1 - alignFraction)
-    const logLo = (logVal - alignFraction * logHi) / (1 - alignFraction);
-    const candidate = Math.exp(logLo);
-    if (isFinite(candidate) && candidate > 0 && candidate < alignValue) {
-      finalLo = candidate;
-    }
+// Axis that scales to its own data range, with a little padding.
+function naturalDomain(group: CompareAsset[], logScale: boolean): object {
+  const { lo, hi } = groupRange(group);
+  if (!isFinite(lo) || !isFinite(hi) || lo <= 0 || hi <= lo) {
+    return { domain: ['auto', 'auto'] as [string, string] };
   }
+  if (logScale) {
+    const dLo = Math.max(lo * 0.9, 0.1);
+    const dHi = hi * 1.1;
+    const ticks = LOG_TICKS.filter(c => c >= dLo && c <= dHi);
+    return {
+      scale: 'log' as const,
+      domain: [dLo, dHi] as [number, number],
+      allowDataOverflow: false,
+      ticks: ticks.length >= 2 ? ticks : undefined,
+    };
+  }
+  const pad = (hi - lo) * 0.08;
+  return { domain: [Math.max(lo - pad, 0), hi + pad] as [number, number] };
+}
 
-  const candidates = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
-  const filtered = candidates.filter(c => c >= finalLo && c <= safeHi);
-  return {
-    scale: 'log' as const,
-    domain: [finalLo, safeHi] as [number, number],
-    allowDataOverflow: false,
-    ticks: filtered.length >= 2 ? filtered : undefined,
-  };
+// Secondary axis: scales to its own data but shifts the domain so `alignValue`
+// sits at the same visual fraction `f` as the primary (left) axis — keeping the
+// normalized base-100 start point at one shared height across every axis.
+function alignedDomain(group: CompareAsset[], logScale: boolean, alignValue: number, f: number): object {
+  const { lo, hi } = groupRange(group);
+  if (!isFinite(lo) || !isFinite(hi) || lo <= 0 || hi <= lo || f <= 0 || f >= 1) {
+    return naturalDomain(group, logScale);
+  }
+  if (logScale) {
+    const lLo = Math.log(Math.max(lo * 0.9, 0.1));
+    const lHi = Math.log(hi * 1.1);
+    const lVal = Math.log(alignValue);
+    // Smallest log-span that contains [lLo,lHi] with alignValue at fraction f.
+    const span = Math.max((lVal - lLo) / f, (lHi - lVal) / (1 - f), 1e-6);
+    const dLo = Math.exp(lVal - f * span);
+    const dHi = Math.exp(lVal + (1 - f) * span);
+    if (!isFinite(dLo) || !isFinite(dHi) || dHi <= dLo) return naturalDomain(group, logScale);
+    const ticks = LOG_TICKS.filter(c => c >= dLo && c <= dHi);
+    return {
+      scale: 'log' as const,
+      domain: [dLo, dHi] as [number, number],
+      allowDataOverflow: false,
+      ticks: ticks.length >= 2 ? ticks : undefined,
+    };
+  }
+  const pad = (hi - lo) * 0.08;
+  const loData = Math.max(lo - pad, 0);
+  const hiData = hi + pad;
+  // Smallest span that contains [loData,hiData] with alignValue at fraction f.
+  const span = Math.max((alignValue - loData) / f, (hiData - alignValue) / (1 - f), 1e-6);
+  const dLo = alignValue - f * span;
+  const dHi = alignValue + (1 - f) * span;
+  if (dLo <= 0 || !isFinite(dLo) || !isFinite(dHi) || dHi <= dLo) return naturalDomain(group, logScale);
+  return { domain: [dLo, dHi] as [number, number] };
 }
 
 export function CompareChart({ assets, height = 340, logScale = false, normalized = false }: Props) {
@@ -144,53 +152,46 @@ export function CompareChart({ assets, height = 340, logScale = false, normalize
   });
 
   // ── Y-axis grouping ───────────────────────────────────────────────────────
-  // Normalized (base-100) mode always uses a single shared axis: that is the
-  // whole point of normalizing, and it keeps the chart identical across every
-  // timeframe. Absolute-price mode may split into up to 3 axes via gap-split:
-  // sort assets by max value, find the top-2 multiplicative gaps (ratio ≥ 2.5x).
+  // Assets are split across up to 3 Y axes so each one is readable on its own
+  // scale. Grouping is by absolute price level (latest raw close), which does
+  // NOT change with the selected timeframe — so the axis layout is identical
+  // for 1D, 1Y, MAX and everything in between (no axes appearing only on some
+  // periods). 2 assets → left + right; 3+ → left + right + right2, split at the
+  // two largest multiplicative gaps in price level.
   const { axisMap, hasRightAxis, hasRight2Axis } = (() => {
     const map: Record<string, AxisGroup> = {};
     assets.forEach(a => { map[a.symbol] = 'left'; });
-    if (assets.length < 2 || normalized) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
+    if (assets.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
-    const assetMaxVals = assets.map(a => {
-      let max = 0;
-      for (const row of chartData) {
-        const v = (row as Record<string, unknown>)[a.symbol];
-        if (typeof v === 'number' && isFinite(v) && v > max) max = v;
+    const levels = assets.map(a => {
+      const series = a.rawData ?? a.data;
+      let level = 0;
+      for (let i = series.length - 1; i >= 0; i--) {
+        const c = series[i]?.close;
+        if (typeof c === 'number' && isFinite(c) && c > 0) { level = c; break; }
       }
-      return { symbol: a.symbol, max };
-    }).filter(x => x.max > 0);
+      return { symbol: a.symbol, level };
+    }).filter(x => x.level > 0);
 
-    if (assetMaxVals.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
+    if (levels.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
-    const sorted = [...assetMaxVals].sort((a, b) => a.max - b.max);
-    const overallRatio = sorted[sorted.length - 1].max / sorted[0].max;
-    if (overallRatio < 2.5) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
+    const sorted = [...levels].sort((a, b) => a.level - b.level);
 
-    // Compute all consecutive multiplicative gaps
-    const gaps: { idx: number; ratio: number }[] = [];
-    for (let i = 1; i < sorted.length; i++) {
-      gaps.push({ idx: i, ratio: sorted[i].max / sorted[i - 1].max });
-    }
-    // Sort gaps by ratio descending, pick up to 2 with ratio >= 2.5
-    const bigGaps = gaps
-      .filter(g => g.ratio >= 2.5)
-      .sort((a, b) => b.ratio - a.ratio)
-      .slice(0, 2)
-      .map(g => g.idx)
-      .sort((a, b) => a - b); // sort by position ascending
-
-    if (bigGaps.length === 0) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
-
-    if (bigGaps.length === 1) {
-      // One split: below gap → left, above → right
-      for (let i = bigGaps[0]; i < sorted.length; i++) map[sorted[i].symbol] = 'right';
+    if (sorted.length === 2) {
+      map[sorted[1].symbol] = 'right';
       return { axisMap: map, hasRightAxis: true, hasRight2Axis: false };
     }
 
-    // Two splits: group 0 → left, group 1 → right, group 2 → right2
-    const [split1, split2] = bigGaps;
+    const gaps: { idx: number; ratio: number }[] = [];
+    for (let i = 1; i < sorted.length; i++) {
+      gaps.push({ idx: i, ratio: sorted[i].level / sorted[i - 1].level });
+    }
+    const [split1, split2] = gaps
+      .sort((a, b) => b.ratio - a.ratio)
+      .slice(0, 2)
+      .map(g => g.idx)
+      .sort((a, b) => a - b);
+
     for (let i = split1; i < split2; i++) map[sorted[i].symbol] = 'right';
     for (let i = split2; i < sorted.length; i++) map[sorted[i].symbol] = 'right2';
     return { axisMap: map, hasRightAxis: true, hasRight2Axis: true };
@@ -200,24 +201,32 @@ export function CompareChart({ assets, height = 340, logScale = false, normalize
   const rightAssets  = hasRightAxis  ? assets.filter(a => axisMap[a.symbol] === 'right')  : [];
   const right2Assets = hasRight2Axis ? assets.filter(a => axisMap[a.symbol] === 'right2') : [];
 
-  // Compute left axis props first, then derive alignment fraction for secondary axes
-  const leftAxisProps = getAlignedAxisProps(hasRightAxis ? leftAssets : assets, logScale);
+  // The left axis scales to its own data. When the series are normalized
+  // (base-100), secondary axes place 100 at the same visual height as the left
+  // axis so every line still starts from one shared point.
+  const leftAxisProps = naturalDomain(hasRightAxis ? leftAssets : assets, logScale);
 
-  // When normalized (all start at 100), compute fraction where 100 sits on left axis
-  // so we can align it on right/right2 axes too.
   const alignFraction = (() => {
-    const props = leftAxisProps as { domain?: [number, number]; scale?: string };
-    if (!props.domain || !Array.isArray(props.domain)) return undefined;
-    const [lo, hi] = props.domain;
-    if (typeof lo !== 'number' || typeof hi !== 'number' || lo <= 0 || hi <= lo) return undefined;
-    if (logScale) {
-      return (Math.log(100) - Math.log(lo)) / (Math.log(hi) - Math.log(lo));
-    }
-    return (100 - lo) / (hi - lo);
+    if (!normalized) return undefined;
+    const d = (leftAxisProps as { domain?: [number, number] }).domain;
+    if (!d || typeof d[0] !== 'number' || typeof d[1] !== 'number') return undefined;
+    const [lo, hi] = d;
+    if (lo <= 0 || hi <= lo) return undefined;
+    return logScale
+      ? (Math.log(100) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))
+      : (100 - lo) / (hi - lo);
   })();
 
-  const rightAxisProps  = hasRightAxis  ? getAlignedAxisProps(rightAssets,  logScale, 100, alignFraction) : null;
-  const right2AxisProps = hasRight2Axis ? getAlignedAxisProps(right2Assets, logScale, 100, alignFraction) : null;
+  const rightAxisProps = hasRightAxis
+    ? (alignFraction != null
+        ? alignedDomain(rightAssets, logScale, 100, alignFraction)
+        : naturalDomain(rightAssets, logScale))
+    : null;
+  const right2AxisProps = hasRight2Axis
+    ? (alignFraction != null
+        ? alignedDomain(right2Assets, logScale, 100, alignFraction)
+        : naturalDomain(right2Assets, logScale))
+    : null;
 
   const legendItems: { key: string; name: string; color: string; dashed: boolean }[] = [];
   assets.forEach(a => {
