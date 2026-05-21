@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { MACRO_INDICATORS, MacroUnit, BTC_HALVING_DATES } from '@/lib/config';
+import { MACRO_INDICATORS, MacroUnit } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
+import { HalvingChart } from '@/components/charts/HalvingChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -332,7 +333,7 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
           </div>
 
           {/* Stats row */}
-          {data[selected]?.latest && (
+          {data[selected]?.latest && selected !== 'BTC_HALVING' && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <Stat label="Latest" value={formatMacroValue(data[selected].latest!.value, selectedIndicator.unit)} />
               {data[selected].prev && (
@@ -352,33 +353,7 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
           )}
 
           {selected === 'BTC_HALVING' ? (
-            <div className="rounded-lg border border-border bg-bg-input overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-[10px] text-gray-500 uppercase tracking-wider">
-                    <th className="px-4 py-2 text-left">Date</th>
-                    <th className="px-4 py-2 text-left">Block Reward Change</th>
-                    <th className="px-4 py-2 text-right">New Reward</th>
-                    <th className="px-4 py-2 text-right">Daily Issuance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { date: '2012-11-28', from: 50,   to: 25,    n: '1st' },
-                    { date: '2016-07-09', from: 25,   to: 12.5,  n: '2nd' },
-                    { date: '2020-05-11', from: 12.5, to: 6.25,  n: '3rd' },
-                    { date: '2024-04-20', from: 6.25, to: 3.125, n: '4th' },
-                  ].map(h => (
-                    <tr key={h.date} className="border-b border-border/50 last:border-0 hover:bg-bg-hover transition-colors">
-                      <td className="px-4 py-2.5 font-mono text-xs text-gray-300">{h.date}</td>
-                      <td className="px-4 py-2.5 text-gray-400 text-xs">{h.n} halving — {h.from} → {h.to} BTC</td>
-                      <td className="px-4 py-2.5 text-right font-bold text-accent tabular-nums">{h.to} BTC</td>
-                      <td className="px-4 py-2.5 text-right text-gray-300 tabular-nums text-xs">~{(h.to * 144).toFixed(0)} BTC/day</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <HalvingChart height={240} />
           ) : histLoading ? (
             <div className="flex items-center justify-center h-44">
               <LoadingSpinner size={28} />
@@ -392,7 +367,6 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
               height={220}
               isCurrency={false}
               interpolationType={selectedIndicator?.unit === '%' ? 'stepAfter' : 'monotone'}
-              halvingDates={BTC_HALVING_DATES}
             />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-600 text-sm">
@@ -400,7 +374,7 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
             </div>
           )}
 
-          {historical.length > 0 && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && (
             <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
           )}
           {selected && <ChartNotes chartId={selected} />}

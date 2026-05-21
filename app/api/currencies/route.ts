@@ -57,22 +57,42 @@ export async function GET(req: NextRequest) {
 
     try {
       const targets = ALL_CURRENCIES.filter(c => c !== 'USD').join(',');
-      const data = await fetchFrankfurter(`https://api.frankfurter.app/latest?from=USD&to=${targets}`);
-      const rates = data.rates as Record<string, number>;
+      // One time-series call (start of year → today) covers the latest rate,
+      // the previous trading day (daily change) and the YTD baseline.
+      const now = new Date();
+      const ytdStart = `${now.getFullYear()}-01-01`;
+      const today = format(now, 'yyyy-MM-dd');
+      const data = await fetchFrankfurter(
+        `https://api.frankfurter.app/${ytdStart}..${today}?from=USD&to=${targets}`,
+      );
+      const series = data.rates as Record<string, Record<string, number>>;
+      const dates = Object.keys(series).sort();
+      if (dates.length === 0) throw new Error('empty timeseries');
 
-      // usdRate(X) = units of X per 1 USD. Any cross rate A→B = usdRate(B)/usdRate(A).
-      const usdRate = (c: string): number | null => (c === 'USD' ? 1 : (rates[c] ?? null));
+      const latestDay = series[dates[dates.length - 1]];
+      const prevDay   = series[dates[dates.length - 2]] ?? latestDay;
+      const ytdDay    = series[dates[0]];
 
-      const pairs = CURRENCY_GROUPS.flatMap(g => {
-        const rBase = usdRate(g.base);
-        const rQuote = usdRate(g.quote);
-        const fwd = rBase && rQuote ? rQuote / rBase : null;
-        const rev = rBase && rQuote ? rBase / rQuote : null;
-        return [
-          { from: g.base, to: g.quote, rate: fwd },
-          { from: g.quote, to: g.base, rate: rev },
-        ];
-      });
+      // usdRate(X) = units of X per 1 USD. Cross rate A→B = usdRate(B)/usdRate(A).
+      const usdRate = (day: Record<string, number>, c: string): number | null =>
+        c === 'USD' ? 1 : (day?.[c] ?? null);
+      const cross = (day: Record<string, number>, f: string, t: string): number | null => {
+        const rf = usdRate(day, f), rt = usdRate(day, t);
+        return rf && rt ? rt / rf : null;
+      };
+      const pct = (cur: number | null, base: number | null): number | null =>
+        cur != null && base != null && base !== 0 ? (cur / base - 1) * 100 : null;
+
+      const pairs = CURRENCY_GROUPS.flatMap(g =>
+        [[g.base, g.quote], [g.quote, g.base]].map(([f, t]) => {
+          const rate = cross(latestDay, f, t);
+          return {
+            from: f, to: t, rate,
+            change1d: pct(rate, cross(prevDay, f, t)),
+            ytd:      pct(rate, cross(ytdDay, f, t)),
+          };
+        }),
+      );
 
       setCached(key, pairs);
       return NextResponse.json(pairs);

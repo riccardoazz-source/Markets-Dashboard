@@ -127,9 +127,20 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     return point;
   });
 
-  // Halving dates visible in the current date range
-  const visibleHalvingDates = halvingAsset
-    ? BTC_HALVING_DATES.filter(d => allDates.length === 0 || (d >= allDates[0] && d <= allDates[allDates.length - 1]))
+  // Halving dates visible in the current range, snapped to the nearest category
+  // value so the ReferenceLine actually renders on the (categorical) X axis.
+  const visibleHalvingDates = halvingAsset && allDates.length > 0
+    ? BTC_HALVING_DATES
+        .filter(d => d >= allDates[0] && d <= allDates[allDates.length - 1])
+        .map(d => {
+          const tt = parseISO(d).getTime();
+          let best = allDates[0], bestDiff = Infinity;
+          for (const a of allDates) {
+            const diff = Math.abs(parseISO(a).getTime() - tt);
+            if (diff < bestDiff) { bestDiff = diff; best = a; }
+          }
+          return best;
+        })
     : [];
 
   // ── Y-axis grouping ───────────────────────────────────────────────────────

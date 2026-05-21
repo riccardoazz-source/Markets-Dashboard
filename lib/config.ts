@@ -16,6 +16,7 @@ export type MacroSourceType =
   | 'fomc'         // Federal Reserve FOMC rate decisions (hardcoded table + FRED fallback)
   | 'yahoo_price'  // Yahoo Finance price series — symbol required
   | 'yahoo_ratio'  // Yahoo Finance: price(numerator) / price(denominator)
+  | 'multpl'       // multpl.com valuation tables — slug required
   | 'gurufocus'    // Gurufocus economic indicators — indicatorId required
   | 'computed';    // computed server-side in the API route (Bitcoin halving, RSI, miner revenue)
 
@@ -27,6 +28,7 @@ export interface MacroSource {
   numerator?: string;   // yahoo_ratio only: top symbol
   denominator?: string; // yahoo_ratio only: bottom symbol
   indicatorId?: number; // gurufocus only
+  slug?: string;        // multpl only: path slug at multpl.com
 }
 
 export interface MacroIndicator {
@@ -143,11 +145,32 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'A939RC0A052NBEA', name: 'Household Net Worth', category: 'Growth',    unit: 'B$',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/A939RC0A052NBEA' } },
-  // Market Value — valuation ratios from Gurufocus
+  // Market Value — valuation ratios. multpl.com is reliably scrapable;
+  // Gurufocus is Cloudflare-protected so its series are best-effort.
   { id: 'SP500_PE',         name: 'S&P 500 P/E Ratio',        category: 'Market Value', unit: 'idx',
-    source: { type: 'gurufocus', label: 'Gurufocus',
-              url: 'https://www.gurufocus.com/economic_indicators/57/sp-500-pe-ratio',
-              indicatorId: 57 } },
+    source: { type: 'multpl', label: 'multpl.com',
+              url: 'https://www.multpl.com/s-p-500-pe-ratio',
+              slug: 's-p-500-pe-ratio' } },
+  { id: 'SHILLER_CAPE',     name: 'S&P 500 Shiller CAPE',      category: 'Market Value', unit: 'idx',
+    source: { type: 'multpl', label: 'multpl.com',
+              url: 'https://www.multpl.com/shiller-pe',
+              slug: 'shiller-pe' } },
+  { id: 'SP500_EPS',        name: 'S&P 500 EPS (TTM)',         category: 'Market Value', unit: 'idx',
+    source: { type: 'multpl', label: 'multpl.com',
+              url: 'https://www.multpl.com/s-p-500-earnings',
+              slug: 's-p-500-earnings' } },
+  { id: 'SP500_PSALES',     name: 'S&P 500 Price/Sales',       category: 'Market Value', unit: 'idx',
+    source: { type: 'multpl', label: 'multpl.com',
+              url: 'https://www.multpl.com/s-p-500-price-to-sales',
+              slug: 's-p-500-price-to-sales' } },
+  { id: 'SP500_PBOOK',      name: 'S&P 500 Price/Book',        category: 'Market Value', unit: 'idx',
+    source: { type: 'multpl', label: 'multpl.com',
+              url: 'https://www.multpl.com/s-p-500-price-to-book',
+              slug: 's-p-500-price-to-book' } },
+  { id: 'SP500_EYIELD',     name: 'S&P 500 Earnings Yield',    category: 'Market Value', unit: '%',
+    source: { type: 'multpl', label: 'multpl.com',
+              url: 'https://www.multpl.com/s-p-500-earnings-yield',
+              slug: 's-p-500-earnings-yield' } },
   { id: 'BUFFETT_IND',      name: 'Buffett Indicator',         category: 'Market Value', unit: '%',
     source: { type: 'gurufocus', label: 'Gurufocus',
               url: 'https://www.gurufocus.com/economic_indicators/60/buffett-indicator',
@@ -156,22 +179,6 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'gurufocus', label: 'Gurufocus',
               url: 'https://www.gurufocus.com/economic_indicators/6778/nasdaq-100-pe-ratio',
               indicatorId: 6778 } },
-  { id: 'SP500_FWD_PE',     name: 'S&P 500 Forward P/E',       category: 'Market Value', unit: 'idx',
-    source: { type: 'gurufocus', label: 'Gurufocus',
-              url: 'https://www.gurufocus.com/economic_indicators/6061/sp-500-pe-ratio-with-forward-estimate',
-              indicatorId: 6061 } },
-  { id: 'SHILLER_CAPE',     name: 'S&P 500 Shiller CAPE',      category: 'Market Value', unit: 'idx',
-    source: { type: 'gurufocus', label: 'Gurufocus',
-              url: 'https://www.gurufocus.com/economic_indicators/56/sp-500-shiller-cape-ratio',
-              indicatorId: 56 } },
-  { id: 'SP500_EPS',        name: 'S&P 500 EPS',               category: 'Market Value', unit: 'idx',
-    source: { type: 'gurufocus', label: 'Gurufocus',
-              url: 'https://www.gurufocus.com/economic_indicators/58/sp-500-earnings-per-share',
-              indicatorId: 58 } },
-  { id: 'NDX100_EPS',       name: 'NASDAQ 100 EPS',            category: 'Market Value', unit: 'idx',
-    source: { type: 'gurufocus', label: 'Gurufocus',
-              url: 'https://www.gurufocus.com/economic_indicators/5870/nasdaq-100-earnings-per-share',
-              indicatorId: 5870 } },
 ];
 
 // Bitcoin halving dates (exported so UI components can render them as reference lines).
@@ -256,42 +263,52 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'XLU',   name: 'Utilities',               category: 'Utilities',  type: 'sector' },
 ];
 
-// Currency metadata — flag emoji + full name, keyed by ISO code.
-export const CURRENCY_META: Record<string, { name: string; flag: string }> = {
-  USD: { name: 'US Dollar',          flag: '🇺🇸' },
-  EUR: { name: 'Euro',               flag: '🇪🇺' },
-  GBP: { name: 'British Pound',      flag: '🇬🇧' },
-  JPY: { name: 'Japanese Yen',       flag: '🇯🇵' },
-  CHF: { name: 'Swiss Franc',        flag: '🇨🇭' },
-  AUD: { name: 'Australian Dollar',  flag: '🇦🇺' },
-  CAD: { name: 'Canadian Dollar',    flag: '🇨🇦' },
-  NZD: { name: 'New Zealand Dollar', flag: '🇳🇿' },
-  CNY: { name: 'Chinese Yuan',       flag: '🇨🇳' },
-  INR: { name: 'Indian Rupee',       flag: '🇮🇳' },
-  MXN: { name: 'Mexican Peso',       flag: '🇲🇽' },
-  BRL: { name: 'Brazilian Real',     flag: '🇧🇷' },
-  SEK: { name: 'Swedish Krona',      flag: '🇸🇪' },
+// Currency metadata — flag emoji + ISO-3166 country code + full name, keyed by
+// ISO currency code. `cc` is used to load a real flag image (emoji flags don't
+// render on Windows).
+export const CURRENCY_META: Record<string, { name: string; flag: string; cc: string }> = {
+  USD: { name: 'US Dollar',          flag: '🇺🇸', cc: 'us' },
+  EUR: { name: 'Euro',               flag: '🇪🇺', cc: 'eu' },
+  GBP: { name: 'British Pound',      flag: '🇬🇧', cc: 'gb' },
+  JPY: { name: 'Japanese Yen',       flag: '🇯🇵', cc: 'jp' },
+  CHF: { name: 'Swiss Franc',        flag: '🇨🇭', cc: 'ch' },
+  AUD: { name: 'Australian Dollar',  flag: '🇦🇺', cc: 'au' },
+  CAD: { name: 'Canadian Dollar',    flag: '🇨🇦', cc: 'ca' },
+  NZD: { name: 'New Zealand Dollar', flag: '🇳🇿', cc: 'nz' },
+  CNY: { name: 'Chinese Yuan',       flag: '🇨🇳', cc: 'cn' },
+  INR: { name: 'Indian Rupee',       flag: '🇮🇳', cc: 'in' },
+  MXN: { name: 'Mexican Peso',       flag: '🇲🇽', cc: 'mx' },
+  BRL: { name: 'Brazilian Real',     flag: '🇧🇷', cc: 'br' },
+  SEK: { name: 'Swedish Krona',      flag: '🇸🇪', cc: 'se' },
 };
 
 // Each group is shown as one card with BOTH directions (base→quote and the
-// inverse quote→base). Base/quote follow standard FX quoting convention.
+// inverse quote→base). Only USD- and EUR-based pairs are tracked — the base
+// currency is always USD or EUR so it leads in the card layout.
 export const CURRENCY_GROUPS: { base: string; quote: string }[] = [
   { base: 'EUR', quote: 'USD' },
-  { base: 'GBP', quote: 'USD' },
+  { base: 'USD', quote: 'GBP' },
   { base: 'USD', quote: 'JPY' },
   { base: 'USD', quote: 'CHF' },
-  { base: 'AUD', quote: 'USD' },
+  { base: 'USD', quote: 'CNY' },
   { base: 'USD', quote: 'CAD' },
-  { base: 'NZD', quote: 'USD' },
+  { base: 'USD', quote: 'AUD' },
+  { base: 'USD', quote: 'NZD' },
+  { base: 'USD', quote: 'MXN' },
+  { base: 'USD', quote: 'INR' },
+  { base: 'USD', quote: 'BRL' },
+  { base: 'USD', quote: 'SEK' },
   { base: 'EUR', quote: 'GBP' },
   { base: 'EUR', quote: 'JPY' },
   { base: 'EUR', quote: 'CHF' },
-  { base: 'GBP', quote: 'JPY' },
-  { base: 'USD', quote: 'CNY' },
-  { base: 'USD', quote: 'INR' },
-  { base: 'USD', quote: 'MXN' },
-  { base: 'USD', quote: 'BRL' },
-  { base: 'USD', quote: 'SEK' },
+  { base: 'EUR', quote: 'CNY' },
+  { base: 'EUR', quote: 'CAD' },
+  { base: 'EUR', quote: 'AUD' },
+  { base: 'EUR', quote: 'NZD' },
+  { base: 'EUR', quote: 'MXN' },
+  { base: 'EUR', quote: 'INR' },
+  { base: 'EUR', quote: 'BRL' },
+  { base: 'EUR', quote: 'SEK' },
 ];
 
 // Flat list of every pair direction (used by the Compare section and note

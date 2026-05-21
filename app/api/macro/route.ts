@@ -386,26 +386,18 @@ async function fetchYahooRatio(
 }
 
 // ---------- Bitcoin halving schedule (BTC_HALVING) ----------
-// Halvings are events, not a continuous metric. Modelled as a 0/1 dummy:
-// value = 1 on the halving date, 0 on the surrounding days, so the chart
-// renders a clean impulse spike per halving instead of a misleading line.
-// Historical facts — no external fetch needed.
-const BTC_HALVING_DATES: string[] = [
-  '2012-11-28', // 1st: 50 → 25 BTC
-  '2016-07-09', // 2nd: 25 → 12.5 BTC
-  '2020-05-11', // 3rd: 12.5 → 6.25 BTC
-  '2024-04-20', // 4th: 6.25 → 3.125 BTC
-];
-
+// Halvings are events, not a continuous metric. The series carries the current
+// block reward as a continuous monthly value so the chart has a stable X axis;
+// the UI draws vertical reference lines at the halving dates themselves.
 function getBitcoinHalvings(fromDate?: string): { date: string; value: number }[] {
   const pts: { date: string; value: number }[] = [];
-  for (const date of BTC_HALVING_DATES) {
-    const t = new Date(date).getTime();
-    const dayBefore = new Date(t - 86_400_000).toISOString().slice(0, 10);
-    const dayAfter  = new Date(t + 86_400_000).toISOString().slice(0, 10);
-    pts.push({ date: dayBefore, value: 0 });
-    pts.push({ date, value: 1 });
-    pts.push({ date: dayAfter, value: 0 });
+  const now = new Date();
+  let y = 2012, m = 1;
+  while (y < now.getFullYear() || (y === now.getFullYear() && m <= now.getMonth() + 1)) {
+    const dateStr = `${y}-${String(m).padStart(2, '0')}-01`;
+    pts.push({ date: dateStr, value: rewardAt(dateStr) });
+    m++;
+    if (m > 12) { m = 1; y++; }
   }
   return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
 }
@@ -543,13 +535,8 @@ async function fetchGurufocus(
     const html = await res.text();
 
     // Gurufocus embeds data as a JSON array: [["YYYY-MM-DD", value], ...]
-    // Try several patterns that have been observed across different indicator pages.
-    const patterns = [
-      /\[\s*\["(\d{4}-\d{2}-\d{2})",\s*[\d.]+\]/,   // presence-check pattern
-    ];
     // Broad extraction: find the first occurrence of [["YYYY-MM-DD", number], ...]
     const arrayMatch = html.match(/(\[\s*\["\d{4}-\d{2}-\d{2}",\s*[\d.e+\-]+\](?:\s*,\s*\["\d{4}-\d{2}-\d{2}",\s*[\d.e+\-]+\])*\s*\])/);
-    void patterns;
     if (arrayMatch) {
       try {
         const parsed = JSON.parse(arrayMatch[1]) as [string, number][];
@@ -592,10 +579,83 @@ async function fetchGurufocus(
       } catch { /* fall through */ }
     }
 
+    // Tertiary: HighCharts-style numeric timestamp pairs [[1234567890000, value], ...]
+    const tsMatch = html.match(/(\[\s*\[\d{10,13},\s*[\d.e+\-]+\](?:\s*,\s*\[\d{10,13},\s*[\d.e+\-]+\])*\s*\])/);
+    if (tsMatch) {
+      try {
+        const parsed = JSON.parse(tsMatch[1]) as [number, number][];
+        const pts: { date: string; value: number }[] = [];
+        for (const [ts, value] of parsed) {
+          const ms = ts < 1e12 ? ts * 1000 : ts; // seconds vs milliseconds
+          const date = new Date(ms).toISOString().slice(0, 10);
+          if (!isFinite(value)) continue;
+          if (fromDate && date < fromDate) continue;
+          pts.push({ date, value });
+        }
+        pts.sort((a, b) => a.date.localeCompare(b.date));
+        if (pts.length > 0) {
+          console.log(`[gurufocus] ${indicatorId}: ${pts.length} pts (timestamp pattern)`);
+          return pts;
+        }
+      } catch { /* fall through */ }
+    }
+
     console.warn(`[gurufocus] ${indicatorId}: no data pattern matched`);
     return [];
   } catch (e) {
     console.error(`[gurufocus] ${indicatorId} failed:`, (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- multpl.com valuation tables (no key, reliably scrapable) ----------
+// Each metric has a "by-month" HTML table of (Month D, YYYY → value) rows.
+const MULTPL_MONTHS: Record<string, string> = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+};
+
+async function fetchMultpl(
+  slug: string,
+  fromDate?: string,
+  timeoutMs = 9_000,
+): Promise<{ date: string; value: number }[]> {
+  const url = `https://www.multpl.com/${slug}/table/by-month`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      next: { revalidate: 86400 }, // monthly data — daily revalidate is plenty
+      headers: {
+        'User-Agent': UA,
+        'Accept': 'text/html,application/xhtml+xml,*/*;q=0.9',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.multpl.com/',
+      },
+    });
+    if (!res.ok) { console.warn(`[multpl] ${slug} HTTP ${res.status}`); return []; }
+    const html = await res.text();
+    // Rows: <td class="left">Mon D, YYYY</td> <td ...>value[ optional estimate]</td>
+    const rowRe = /<td[^>]*class="[^"]*\bleft\b[^"]*"[^>]*>\s*([A-Za-z]{3,})\s+(\d{1,2}),\s*(\d{4})\s*<\/td>\s*<td[^>]*>\s*(-?[\d,]+\.?\d*)/g;
+    const pts: { date: string; value: number }[] = [];
+    let mch: RegExpExecArray | null;
+    while ((mch = rowRe.exec(html)) !== null) {
+      const mon = MULTPL_MONTHS[mch[1].slice(0, 3).toLowerCase()];
+      if (!mon) continue;
+      const date = `${mch[3]}-${mon}-${mch[2].padStart(2, '0')}`;
+      const value = parseFloat(mch[4].replace(/,/g, ''));
+      if (!isFinite(value)) continue;
+      if (fromDate && date < fromDate) continue;
+      pts.push({ date, value });
+    }
+    pts.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[multpl] ${slug}: ${pts.length} pts`);
+    return pts;
+  } catch (e) {
+    console.error(`[multpl] ${slug} failed:`, (e as Error).message);
     return [];
   } finally {
     clearTimeout(t);
@@ -1147,6 +1207,9 @@ async function fetchMacroSeries(
   if (src?.type === 'gurufocus' && src.indicatorId) {
     return fetchGurufocus(src.indicatorId, fromDate);
   }
+  if (src?.type === 'multpl' && src.slug) {
+    return fetchMultpl(src.slug, fromDate);
+  }
   if (src?.type === 'computed') {
     if (fredId === 'BTC_HALVING')       return getBitcoinHalvings(fromDate);
     if (fredId === 'BTC_RSI')           return fetchBitcoinMonthlyRSI(fromDate);
@@ -1356,7 +1419,8 @@ export async function GET(req: NextRequest) {
   // are fetched via fetchMacroSeries in a separate shard of the same Promise.all.
   const customSrcIds = ids.filter(id => {
     const s = indicatorSourceMap.get(id);
-    return s?.type === 'yahoo_ratio' || s?.type === 'yahoo_price' || s?.type === 'computed' || s?.type === 'gurufocus';
+    return s?.type === 'yahoo_ratio' || s?.type === 'yahoo_price' || s?.type === 'computed'
+      || s?.type === 'gurufocus' || s?.type === 'multpl';
   });
   const standardIds = ids.filter(id => !customSrcIds.includes(id));
 
