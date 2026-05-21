@@ -4,6 +4,10 @@ import { useState, useMemo } from 'react';
 import { HistoricalPoint } from '@/lib/types';
 import { Calculator, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
+import {
+  computeSMA, computeEMA, computeRSI, computeMACD,
+  computeBollingerBands, computeFibLevels,
+} from '@/lib/indicators';
 
 export interface ActiveTools {
   avg: boolean;
@@ -59,8 +63,14 @@ function computeStats(closes: number[]) {
     if (dd > maxDrawdown) maxDrawdown = dd;
   }
 
-  return { avg, stdDev, sdUpper: avg + stdDev, sdLower: avg - stdDev, min, max, annualVol, maxDrawdown };
+  return { avg, stdDev, min, max, annualVol, maxDrawdown };
 }
+
+/** Last non-null value from an array. */
+const last = <T,>(arr: (T | null)[]): T | null => {
+  for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return arr[i];
+  return null;
+};
 
 export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props) {
   const [open, setOpen] = useState(false);
@@ -73,10 +83,38 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
   const stats = useMemo(() => computeStats(closes), [closes]);
   const n = closes.length;
 
+  // Pre-compute all indicator current values once per data change
+  const iv = useMemo(() => {
+    if (closes.length === 0) return null;
+    const sma50arr  = n >= 50  ? computeSMA(closes, 50)  : null;
+    const sma200arr = n >= 200 ? computeSMA(closes, 200) : null;
+    const sma50val  = sma50arr  ? last(sma50arr)  : null;
+    const sma200val = sma200arr ? last(sma200arr) : null;
+    const bbands    = n >= 20  ? computeBollingerBands(closes, 20, 2) : null;
+    const macdOut   = n >= 34  ? computeMACD(closes) : null;
+    return {
+      sma20:   n >= 20  ? last(computeSMA(closes, 20))  : null,
+      ema20:   n >= 20  ? last(computeEMA(closes, 20))  : null,
+      sma50:   sma50val,
+      sma200:  sma200val,
+      cross:   sma50val != null && sma200val != null
+                 ? (sma50val > sma200val ? 'golden' : 'death') as 'golden' | 'death'
+                 : null,
+      bbUpper: bbands ? last(bbands.upper) : null,
+      bbLower: bbands ? last(bbands.lower) : null,
+      rsi:     n >= 15  ? last(computeRSI(closes, 14))  : null,
+      macd:    macdOut  ? last(macdOut.macd)   : null,
+      signal:  macdOut  ? last(macdOut.signal) : null,
+      hist:    macdOut  ? last(macdOut.hist)   : null,
+      fibs:    n >= 2   ? computeFibLevels(closes) : null,
+    };
+  }, [closes, n]);
+
   const toggle = (key: keyof ActiveTools) =>
     onChange({ ...activeTools, [key]: !activeTools[key] });
 
   const activeCount = Object.values(activeTools).filter(Boolean).length;
+  const showResults = activeCount > 0 && stats != null && iv != null;
 
   return (
     <div className="border border-border rounded-xl overflow-hidden">
@@ -102,31 +140,114 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
             <p className="text-xs text-gray-600 italic">No data available.</p>
           ) : (
             <>
-              {/* All tools in a compact single flex-wrap row */}
+              {/* ── Compact chip toggles ────────────────────────────────── */}
               <div className="flex flex-wrap gap-1.5 items-center">
                 <ToolChip active={activeTools.avg}     onToggle={() => toggle('avg')}     label="Avg"      color="amber"  />
                 <ToolChip active={activeTools.stdDev}  onToggle={() => toggle('stdDev')}  label="Std Dev"  color="sky"    />
                 <ToolChip active={activeTools.minMax}  onToggle={() => toggle('minMax')}  label="Min/Max"  color="violet" />
-
                 <Divider />
-
                 <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={n < 20}  />
                 <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={n < 20}  />
                 <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={n < 50}  />
                 <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={n < 200} />
-
                 <Divider />
-
                 <ToolChip active={activeTools.bollinger} onToggle={() => toggle('bollinger')} label="Bollinger" color="teal"   disabled={n < 20} />
                 <ToolChip active={activeTools.fib}       onToggle={() => toggle('fib')}       label="Fibonacci" color="yellow" disabled={n < 2}  />
-
                 <Divider />
-
                 <ToolChip active={activeTools.rsi}  onToggle={() => toggle('rsi')}  label="RSI 14" color="indigo" disabled={n < 15} />
                 <ToolChip active={activeTools.macd} onToggle={() => toggle('macd')} label="MACD"   color="green"  disabled={n < 34} />
               </div>
 
-              {/* Statistics — collapsed by default */}
+              {/* ── Results strip — visible when any tool is active ──────── */}
+              {showResults && (
+                <div className="flex flex-wrap gap-x-4 gap-y-2 pt-1.5 border-t border-border/40">
+
+                  {activeTools.avg && (
+                    <Res label="Mean" value={stats.avg.toFixed(decimals)} color="text-amber-400" />
+                  )}
+                  {activeTools.stdDev && (
+                    <>
+                      <Res label="+1σ" value={(stats.avg + stats.stdDev).toFixed(decimals)} color="text-sky-400" />
+                      <Res label="−1σ" value={(stats.avg - stats.stdDev).toFixed(decimals)} color="text-sky-400" />
+                    </>
+                  )}
+                  {activeTools.minMax && (
+                    <>
+                      <Res label="High" value={stats.max.toFixed(decimals)} color="text-violet-400" />
+                      <Res label="Low"  value={stats.min.toFixed(decimals)} color="text-violet-400" />
+                    </>
+                  )}
+
+                  {activeTools.sma20 && iv.sma20 != null && (
+                    <Res label="SMA 20" value={iv.sma20.toFixed(decimals)} color="text-cyan-400" />
+                  )}
+                  {activeTools.ema20 && iv.ema20 != null && (
+                    <Res label="EMA 20" value={iv.ema20.toFixed(decimals)} color="text-rose-400" />
+                  )}
+                  {activeTools.sma50 && iv.sma50 != null && (
+                    <Res label="SMA 50" value={iv.sma50.toFixed(decimals)} color="text-orange-400" />
+                  )}
+                  {activeTools.sma200 && iv.sma200 != null && (
+                    <Res label="SMA 200" value={iv.sma200.toFixed(decimals)} color="text-purple-400" />
+                  )}
+
+                  {/* Golden / Death Cross badge */}
+                  {activeTools.sma50 && activeTools.sma200 && iv.cross && (
+                    <div className={clsx(
+                      'self-end px-2 py-0.5 rounded-full text-[10px] font-bold border',
+                      iv.cross === 'golden'
+                        ? 'bg-yellow-400/15 text-yellow-400 border-yellow-400/40'
+                        : 'bg-red-400/15 text-red-400 border-red-400/40',
+                    )}>
+                      {iv.cross === 'golden' ? '✦ Golden Cross' : '✦ Death Cross'}
+                    </div>
+                  )}
+
+                  {activeTools.bollinger && iv.bbUpper != null && iv.bbLower != null && (
+                    <>
+                      <Res label="BB ↑" value={iv.bbUpper.toFixed(decimals)} color="text-teal-400" />
+                      <Res label="BB ↓" value={iv.bbLower.toFixed(decimals)} color="text-teal-400" />
+                    </>
+                  )}
+
+                  {activeTools.fib && iv.fibs && iv.fibs.length > 0 && (
+                    <>
+                      {iv.fibs
+                        .filter(f => [0.236, 0.382, 0.5, 0.618, 0.786].includes(f.ratio))
+                        .map(f => (
+                          <Res
+                            key={f.ratio}
+                            label={`Fib ${(f.ratio * 100).toFixed(1)}%`}
+                            value={f.value.toFixed(decimals)}
+                            color="text-yellow-400"
+                          />
+                        ))}
+                    </>
+                  )}
+
+                  {activeTools.rsi && iv.rsi != null && (
+                    <Res
+                      label={iv.rsi > 70 ? 'RSI · Overbought' : iv.rsi < 30 ? 'RSI · Oversold' : 'RSI 14'}
+                      value={iv.rsi.toFixed(1)}
+                      color={iv.rsi > 70 ? 'text-red-400' : iv.rsi < 30 ? 'text-emerald-400' : 'text-indigo-400'}
+                    />
+                  )}
+
+                  {activeTools.macd && iv.macd != null && iv.signal != null && iv.hist != null && (
+                    <>
+                      <Res label="MACD"   value={iv.macd.toFixed(decimals)}   color="text-emerald-400" />
+                      <Res label="Signal" value={iv.signal.toFixed(decimals)} color="text-emerald-400" />
+                      <Res
+                        label="Histogram"
+                        value={(iv.hist >= 0 ? '+' : '') + iv.hist.toFixed(decimals)}
+                        color={iv.hist >= 0 ? 'text-emerald-400' : 'text-red-400'}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* ── Statistics — collapsed by default ───────────────────── */}
               <div>
                 <button
                   onClick={() => setStatsOpen(v => !v)}
@@ -203,6 +324,16 @@ function ToolChip({
     >
       {label}
     </button>
+  );
+}
+
+/** Result value shown below the chip row when a tool is active. */
+function Res({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] text-gray-600 whitespace-nowrap">{label}</p>
+      <p className={clsx('text-xs font-mono font-semibold tabular-nums', color)}>{value}</p>
+    </div>
   );
 }
 
