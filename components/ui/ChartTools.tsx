@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { HistoricalPoint } from '@/lib/types';
-import { Calculator, TrendingUp, Sigma, ArrowUpDown, Activity } from 'lucide-react';
+import { Calculator, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
 
 export interface ActiveTools {
@@ -64,6 +64,7 @@ function computeStats(closes: number[]) {
 
 export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props) {
   const [open, setOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
 
   const closes = useMemo(
     () => data.map(d => d.close).filter((c): c is number => typeof c === 'number' && isFinite(c)),
@@ -96,109 +97,59 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
       </button>
 
       {open && (
-        <div className="px-3 py-3 space-y-3 bg-bg-card">
+        <div className="px-3 py-2 space-y-2 bg-bg-card">
           {!stats ? (
             <p className="text-xs text-gray-600 italic">No data available.</p>
           ) : (
             <>
-              {/* ── Chart overlays ─────────────────────────────────────────── */}
-              <SectionLabel>Chart overlays</SectionLabel>
-              <div className="grid grid-cols-3 gap-2">
-                <ToolBtn
-                  active={activeTools.avg} onToggle={() => toggle('avg')}
-                  icon={<TrendingUp size={11} />} label="Average" color="amber"
-                  sub={activeTools.avg ? stats.avg.toFixed(decimals) : 'Mean line'}
-                />
-                <ToolBtn
-                  active={activeTools.stdDev} onToggle={() => toggle('stdDev')}
-                  icon={<Sigma size={11} />} label="Std Dev" color="sky"
-                  sub={activeTools.stdDev ? `±${stats.stdDev.toFixed(decimals)}` : 'Mean ± 1σ'}
-                />
-                <ToolBtn
-                  active={activeTools.minMax} onToggle={() => toggle('minMax')}
-                  icon={<ArrowUpDown size={11} />} label="Min / Max" color="violet"
-                  sub={activeTools.minMax
-                    ? `${stats.min.toFixed(decimals)} – ${stats.max.toFixed(decimals)}`
-                    : 'Period range'}
-                />
+              {/* All tools in a compact single flex-wrap row */}
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <ToolChip active={activeTools.avg}     onToggle={() => toggle('avg')}     label="Avg"      color="amber"  />
+                <ToolChip active={activeTools.stdDev}  onToggle={() => toggle('stdDev')}  label="Std Dev"  color="sky"    />
+                <ToolChip active={activeTools.minMax}  onToggle={() => toggle('minMax')}  label="Min/Max"  color="violet" />
+
+                <Divider />
+
+                <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={n < 20}  />
+                <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={n < 20}  />
+                <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={n < 50}  />
+                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={n < 200} />
+
+                <Divider />
+
+                <ToolChip active={activeTools.bollinger} onToggle={() => toggle('bollinger')} label="Bollinger" color="teal"   disabled={n < 20} />
+                <ToolChip active={activeTools.fib}       onToggle={() => toggle('fib')}       label="Fibonacci" color="yellow" disabled={n < 2}  />
+
+                <Divider />
+
+                <ToolChip active={activeTools.rsi}  onToggle={() => toggle('rsi')}  label="RSI 14" color="indigo" disabled={n < 15} />
+                <ToolChip active={activeTools.macd} onToggle={() => toggle('macd')} label="MACD"   color="green"  disabled={n < 34} />
               </div>
 
-              {/* ── Moving averages ────────────────────────────────────────── */}
-              <SectionLabel>Moving averages</SectionLabel>
-              <div className="grid grid-cols-2 gap-2">
-                <ToolBtn
-                  active={activeTools.sma20} onToggle={() => toggle('sma20')}
-                  icon={<Activity size={11} />} label="SMA 20" color="cyan"
-                  sub={n >= 20 ? 'Rolling 20-period avg' : `Need ≥20 pts (have ${n})`}
-                  disabled={n < 20}
-                />
-                <ToolBtn
-                  active={activeTools.ema20} onToggle={() => toggle('ema20')}
-                  icon={<Activity size={11} />} label="EMA 20" color="rose"
-                  sub={n >= 20 ? 'Exp.-weighted 20-period' : `Need ≥20 pts (have ${n})`}
-                  disabled={n < 20}
-                />
-                <ToolBtn
-                  active={activeTools.sma50} onToggle={() => toggle('sma50')}
-                  icon={<Activity size={11} />} label="SMA 50" color="orange"
-                  sub={n >= 50 ? 'Rolling 50-period avg' : `Need ≥50 pts (have ${n})`}
-                  disabled={n < 50}
-                />
-                <ToolBtn
-                  active={activeTools.sma200} onToggle={() => toggle('sma200')}
-                  icon={<Activity size={11} />} label="SMA 200" color="purple"
-                  sub={n >= 200 ? '+ SMA 50 = Golden Cross' : `Need ≥200 pts (have ${n})`}
-                  disabled={n < 200}
-                />
-              </div>
-
-              {/* ── Bands & levels ─────────────────────────────────────────── */}
-              <SectionLabel>Bands &amp; levels</SectionLabel>
-              <div className="grid grid-cols-2 gap-2">
-                <ToolBtn
-                  active={activeTools.bollinger} onToggle={() => toggle('bollinger')}
-                  icon={<Sigma size={11} />} label="Bollinger" color="teal"
-                  sub={n >= 20 ? 'SMA 20 ± 2σ band' : `Need ≥20 pts (have ${n})`}
-                  disabled={n < 20}
-                />
-                <ToolBtn
-                  active={activeTools.fib} onToggle={() => toggle('fib')}
-                  icon={<TrendingUp size={11} />} label="Fibonacci" color="yellow"
-                  sub={n >= 2 ? 'Retracement levels' : 'Need ≥2 pts'}
-                  disabled={n < 2}
-                />
-              </div>
-
-              {/* ── Oscillators ────────────────────────────────────────────── */}
-              <SectionLabel>Oscillators (sub-chart)</SectionLabel>
-              <div className="grid grid-cols-2 gap-2">
-                <ToolBtn
-                  active={activeTools.rsi} onToggle={() => toggle('rsi')}
-                  icon={<Activity size={11} />} label="RSI 14" color="indigo"
-                  sub={n >= 15 ? 'Overbought / Oversold' : `Need ≥15 pts (have ${n})`}
-                  disabled={n < 15}
-                />
-                <ToolBtn
-                  active={activeTools.macd} onToggle={() => toggle('macd')}
-                  icon={<Activity size={11} />} label="MACD" color="green"
-                  sub={n >= 34 ? '12, 26, 9 · Momentum' : `Need ≥34 pts (have ${n})`}
-                  disabled={n < 34}
-                />
-              </div>
-
-              {/* ── Statistics ─────────────────────────────────────────────── */}
-              <div className="border-t border-border/40 pt-2.5">
-                <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2 font-semibold">Statistics</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-2">
-                  <MiniStat label="Mean" value={stats.avg.toFixed(decimals)} />
-                  <MiniStat label="Std Dev (σ)" value={stats.stdDev.toFixed(decimals)} />
-                  <MiniStat label="Period Low" value={stats.min.toFixed(decimals)} />
-                  <MiniStat label="Period High" value={stats.max.toFixed(decimals)} />
-                  {stats.annualVol != null && (
-                    <MiniStat label="Ann. Volatility" value={`${stats.annualVol.toFixed(1)}%`} />
-                  )}
-                  <MiniStat label="Max Drawdown" value={`-${(stats.maxDrawdown * 100).toFixed(1)}%`} color="text-down-text" />
-                </div>
+              {/* Statistics — collapsed by default */}
+              <div>
+                <button
+                  onClick={() => setStatsOpen(v => !v)}
+                  className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+                >
+                  <ChevronDown
+                    size={10}
+                    className={clsx('transition-transform duration-150', statsOpen && 'rotate-180')}
+                  />
+                  Statistics
+                </button>
+                {statsOpen && (
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-x-4 gap-y-1.5 mt-1.5 pt-1.5 border-t border-border/30">
+                    <MiniStat label="Mean"     value={stats.avg.toFixed(decimals)} />
+                    <MiniStat label="Std Dev"  value={stats.stdDev.toFixed(decimals)} />
+                    <MiniStat label="Low"      value={stats.min.toFixed(decimals)} />
+                    <MiniStat label="High"     value={stats.max.toFixed(decimals)} />
+                    {stats.annualVol != null && (
+                      <MiniStat label="Ann. Vol" value={`${stats.annualVol.toFixed(1)}%`} />
+                    )}
+                    <MiniStat label="Max DD" value={`-${(stats.maxDrawdown * 100).toFixed(1)}%`} color="text-down-text" />
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -210,10 +161,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold -mb-1">{children}</p>
-  );
+function Divider() {
+  return <span className="w-px h-4 bg-border/50 mx-0.5 self-center shrink-0" />;
 }
 
 const COLOR_MAP = {
@@ -232,11 +181,11 @@ const COLOR_MAP = {
 
 type ColorKey = keyof typeof COLOR_MAP;
 
-function ToolBtn({
-  active, onToggle, icon, label, color, sub, disabled = false,
+function ToolChip({
+  active, onToggle, label, color, disabled = false,
 }: {
-  active: boolean; onToggle: () => void; icon: React.ReactNode;
-  label: string; color: ColorKey; sub: string; disabled?: boolean;
+  active: boolean; onToggle: () => void;
+  label: string; color: ColorKey; disabled?: boolean;
 }) {
   const c = COLOR_MAP[color];
   return (
@@ -244,20 +193,15 @@ function ToolBtn({
       onClick={disabled ? undefined : onToggle}
       disabled={disabled}
       className={clsx(
-        'flex flex-col gap-0.5 px-2.5 py-2 rounded-lg border transition-all text-left',
+        'px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-all whitespace-nowrap',
         disabled
-          ? 'border-border opacity-40 cursor-not-allowed'
+          ? 'border-border text-gray-700 opacity-40 cursor-not-allowed'
           : active
-            ? `${c.bg} ${c.border}`
-            : 'border-border hover:border-border-light',
+            ? `${c.bg} ${c.border} ${c.text}`
+            : 'border-border text-gray-500 hover:text-gray-300 hover:border-border-light',
       )}
     >
-      <span className={clsx('flex items-center gap-1 text-[11px] font-semibold',
-        disabled ? 'text-gray-600' : active ? c.text : 'text-gray-400')}>
-        {icon}{label}
-      </span>
-      <span className={clsx('text-[10px] font-mono break-all',
-        disabled ? 'text-gray-700' : active ? c.text : 'text-gray-600')}>{sub}</span>
+      {label}
     </button>
   );
 }
