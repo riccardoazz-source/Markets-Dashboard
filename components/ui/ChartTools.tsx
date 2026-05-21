@@ -9,15 +9,20 @@ export interface ActiveTools {
   avg: boolean;
   stdDev: boolean;
   minMax: boolean;
+  sma20: boolean;
   sma50: boolean;
   sma200: boolean;
+  ema20: boolean;
+  bollinger: boolean;
+  fib: boolean;
   rsi: boolean;
   macd: boolean;
 }
 
 export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
-  sma50: false, sma200: false, rsi: false, macd: false,
+  sma20: false, sma50: false, sma200: false, ema20: false,
+  bollinger: false, fib: false, rsi: false, macd: false,
 };
 
 interface Props {
@@ -118,8 +123,21 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                 />
               </div>
 
-              {/* Moving averages — Golden Cross needs both */}
+              {/* ── Moving averages ────────────────────────────────────────── */}
+              <SectionLabel>Moving averages</SectionLabel>
               <div className="grid grid-cols-2 gap-2">
+                <ToolBtn
+                  active={activeTools.sma20} onToggle={() => toggle('sma20')}
+                  icon={<Activity size={11} />} label="SMA 20" color="cyan"
+                  sub={n >= 20 ? 'Rolling 20-period avg' : `Need ≥20 pts (have ${n})`}
+                  disabled={n < 20}
+                />
+                <ToolBtn
+                  active={activeTools.ema20} onToggle={() => toggle('ema20')}
+                  icon={<Activity size={11} />} label="EMA 20" color="rose"
+                  sub={n >= 20 ? 'Exp.-weighted 20-period' : `Need ≥20 pts (have ${n})`}
+                  disabled={n < 20}
+                />
                 <ToolBtn
                   active={activeTools.sma50} onToggle={() => toggle('sma50')}
                   icon={<Activity size={11} />} label="SMA 50" color="orange"
@@ -131,6 +149,23 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                   icon={<Activity size={11} />} label="SMA 200" color="purple"
                   sub={n >= 200 ? '+ SMA 50 = Golden Cross' : `Need ≥200 pts (have ${n})`}
                   disabled={n < 200}
+                />
+              </div>
+
+              {/* ── Bands & levels ─────────────────────────────────────────── */}
+              <SectionLabel>Bands &amp; levels</SectionLabel>
+              <div className="grid grid-cols-2 gap-2">
+                <ToolBtn
+                  active={activeTools.bollinger} onToggle={() => toggle('bollinger')}
+                  icon={<Sigma size={11} />} label="Bollinger" color="teal"
+                  sub={n >= 20 ? 'SMA 20 ± 2σ band' : `Need ≥20 pts (have ${n})`}
+                  disabled={n < 20}
+                />
+                <ToolBtn
+                  active={activeTools.fib} onToggle={() => toggle('fib')}
+                  icon={<TrendingUp size={11} />} label="Fibonacci" color="yellow"
+                  sub={n >= 2 ? 'Retracement levels' : 'Need ≥2 pts'}
+                  disabled={n < 2}
                 />
               </div>
 
@@ -189,6 +224,10 @@ const COLOR_MAP = {
   purple: { border: 'border-purple-400/60', bg: 'bg-purple-400/10', text: 'text-purple-400' },
   indigo: { border: 'border-indigo-400/60', bg: 'bg-indigo-400/10', text: 'text-indigo-400' },
   green:  { border: 'border-emerald-400/60',bg: 'bg-emerald-400/10',text: 'text-emerald-400'},
+  cyan:   { border: 'border-cyan-400/60',   bg: 'bg-cyan-400/10',   text: 'text-cyan-400'   },
+  rose:   { border: 'border-rose-400/60',   bg: 'bg-rose-400/10',   text: 'text-rose-400'   },
+  teal:   { border: 'border-teal-400/60',   bg: 'bg-teal-400/10',   text: 'text-teal-400'   },
+  yellow: { border: 'border-yellow-400/60', bg: 'bg-yellow-400/10', text: 'text-yellow-400' },
 } as const;
 
 type ColorKey = keyof typeof COLOR_MAP;

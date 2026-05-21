@@ -55,6 +55,60 @@ export function computeRSI(closes: number[], period = 14): (number | null)[] {
   return result;
 }
 
+/**
+ * Bollinger Bands — middle = SMA(period), upper/lower = middle ± mult·σ.
+ * σ is the population standard deviation of the rolling window.
+ * Sliding sums of x and x² keep it O(n).
+ */
+export function computeBollingerBands(
+  closes: number[],
+  period = 20,
+  mult = 2,
+): { middle: (number | null)[]; upper: (number | null)[]; lower: (number | null)[] } {
+  const middle: (number | null)[] = [];
+  const upper: (number | null)[] = [];
+  const lower: (number | null)[] = [];
+  let sum = 0, sumSq = 0;
+  for (let i = 0; i < closes.length; i++) {
+    sum += closes[i];
+    sumSq += closes[i] * closes[i];
+    if (i >= period) {
+      sum -= closes[i - period];
+      sumSq -= closes[i - period] * closes[i - period];
+    }
+    if (i < period - 1) {
+      middle.push(null); upper.push(null); lower.push(null);
+    } else {
+      const mean = sum / period;
+      // Clamp tiny negatives from floating-point cancellation before sqrt.
+      const variance = Math.max(sumSq / period - mean * mean, 0);
+      const sd = Math.sqrt(variance);
+      middle.push(mean);
+      upper.push(mean + mult * sd);
+      lower.push(mean - mult * sd);
+    }
+  }
+  return { middle, upper, lower };
+}
+
+/** Standard Fibonacci retracement ratios. */
+export const FIB_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
+
+/**
+ * Fibonacci retracement levels for the period's high/low range.
+ * 0 % sits at the period high, 100 % at the period low.
+ */
+export function computeFibLevels(closes: number[]): { ratio: number; value: number }[] {
+  if (closes.length < 2) return [];
+  let high = closes[0], low = closes[0];
+  for (const c of closes) {
+    if (c > high) high = c;
+    if (c < low) low = c;
+  }
+  if (high === low) return [];
+  return FIB_RATIOS.map(r => ({ ratio: r, value: high - r * (high - low) }));
+}
+
 /** MACD (12, 26, 9). Returns three arrays of length = closes.length. */
 export function computeMACD(closes: number[]): {
   macd: (number | null)[];

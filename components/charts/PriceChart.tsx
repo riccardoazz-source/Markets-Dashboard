@@ -8,14 +8,21 @@ import {
 import { HistoricalPoint } from '@/lib/types';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
-import { computeSMA, computeRSI, computeMACD } from '@/lib/indicators';
+import {
+  computeSMA, computeEMA, computeRSI, computeMACD,
+  computeBollingerBands, computeFibLevels,
+} from '@/lib/indicators';
 
 interface ToolsOverlay {
   avg?: boolean;
   stdDev?: boolean;
   minMax?: boolean;
+  sma20?: boolean;
   sma50?: boolean;
   sma200?: boolean;
+  ema20?: boolean;
+  bollinger?: boolean;
+  fib?: boolean;
   rsi?: boolean;
   macd?: boolean;
 }
@@ -161,10 +168,6 @@ export function PriceChart({
   const closes = data.map(d => d.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
   const rawMin = closes.length > 0 ? Math.min(...closes) : 0;
   const rawMax = closes.length > 0 ? Math.max(...closes) : 1;
-  const dataRange = rawMax - rawMin;
-  const pad = Math.max(dataRange * 0.08, Math.abs(rawMax) * 0.02, 0.001);
-  const yMin = rawMin >= 0 ? Math.max(0, rawMin - pad) : rawMin - pad;
-  const yMax = rawMax + pad;
 
   // Tool overlay computations (level overlays on main chart)
   const toolAvg = closes.length > 0 ? closes.reduce((s, v) => s + v, 0) / closes.length : null;
@@ -173,14 +176,37 @@ export function PriceChart({
     : null;
   const toolStdDev = toolVariance != null ? Math.sqrt(toolVariance) : null;
 
-  // SMA series (extend data with sma50/sma200 columns)
+  // Moving-average / band / level series
+  const sma20Vals  = toolsOverlay?.sma20  ? computeSMA(closes, 20)  : null;
   const sma50Vals  = toolsOverlay?.sma50  ? computeSMA(closes, 50)  : null;
   const sma200Vals = toolsOverlay?.sma200 ? computeSMA(closes, 200) : null;
-  const chartData = (sma50Vals || sma200Vals)
+  const ema20Vals  = toolsOverlay?.ema20  ? computeEMA(closes, 20)  : null;
+  const bands      = toolsOverlay?.bollinger ? computeBollingerBands(closes, 20, 2) : null;
+  const fibLevels  = toolsOverlay?.fib ? computeFibLevels(closes) : null;
+
+  // Y-axis domain — closes drive it; Bollinger bands can extend past the close range.
+  let domMin = rawMin, domMax = rawMax;
+  if (bands) {
+    for (const v of bands.upper) if (v != null && v > domMax) domMax = v;
+    for (const v of bands.lower) if (v != null && v < domMin) domMin = v;
+  }
+  const dataRange = domMax - domMin;
+  const pad = Math.max(dataRange * 0.08, Math.abs(domMax) * 0.02, 0.001);
+  const yMin = domMin >= 0 ? Math.max(0, domMin - pad) : domMin - pad;
+  const yMax = domMax + pad;
+
+  // Extend data with overlay columns (SMA/EMA lines + Bollinger band range)
+  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || ema20Vals || bands;
+  const chartData = hasSeriesOverlay
     ? data.map((d, i) => ({
         ...d,
+        sma20:  sma20Vals?.[i]  ?? null,
         sma50:  sma50Vals?.[i]  ?? null,
         sma200: sma200Vals?.[i] ?? null,
+        ema20:  ema20Vals?.[i]  ?? null,
+        bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
+          ? [bands.lower[i] as number, bands.upper[i] as number]
+          : null,
       }))
     : data;
 
@@ -226,19 +252,38 @@ export function PriceChart({
         </div>
       )}
 
-      {/* SMA legend when active */}
-      {(toolsOverlay?.sma50 || toolsOverlay?.sma200) && (
-        <div className="flex items-center gap-4 mb-1 px-1 flex-wrap">
+      {/* Overlay legend when active */}
+      {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
+        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib) && (
+        <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
+          {toolsOverlay?.sma20 && (
+            <span className="flex items-center gap-1 text-[10px] text-cyan-400">
+              <span className="inline-block w-5 border-t-2 border-cyan-400" />SMA 20
+            </span>
+          )}
           {toolsOverlay?.sma50 && (
             <span className="flex items-center gap-1 text-[10px] text-orange-400">
-              <span className="inline-block w-5 border-t-2 border-orange-400" />
-              SMA 50
+              <span className="inline-block w-5 border-t-2 border-orange-400" />SMA 50
             </span>
           )}
           {toolsOverlay?.sma200 && (
             <span className="flex items-center gap-1 text-[10px] text-purple-400">
-              <span className="inline-block w-5 border-t-2 border-purple-400" />
-              SMA 200
+              <span className="inline-block w-5 border-t-2 border-purple-400" />SMA 200
+            </span>
+          )}
+          {toolsOverlay?.ema20 && (
+            <span className="flex items-center gap-1 text-[10px] text-rose-400">
+              <span className="inline-block w-5 border-t-2 border-rose-400" />EMA 20
+            </span>
+          )}
+          {toolsOverlay?.bollinger && (
+            <span className="flex items-center gap-1 text-[10px] text-teal-400">
+              <span className="inline-block w-5 h-2 bg-teal-400/20 border-y border-teal-400" />Bollinger 20·2σ
+            </span>
+          )}
+          {toolsOverlay?.fib && (
+            <span className="flex items-center gap-1 text-[10px] text-yellow-400">
+              <span className="inline-block w-5 border-t-2 border-dashed border-yellow-400" />Fibonacci
             </span>
           )}
           {toolsOverlay?.sma50 && toolsOverlay?.sma200 && (
@@ -292,8 +337,14 @@ export function PriceChart({
               fontSize: 12,
             }}
             formatter={(value: number, name: string) => {
+              if (name === 'sma20')  return [value != null ? value.toFixed(decimals) : '—', 'SMA 20'];
               if (name === 'sma50')  return [value != null ? value.toFixed(decimals) : '—', 'SMA 50'];
               if (name === 'sma200') return [value != null ? value.toFixed(decimals) : '—', 'SMA 200'];
+              if (name === 'ema20')  return [value != null ? value.toFixed(decimals) : '—', 'EMA 20'];
+              if (name === 'bbRange') {
+                const r = value as unknown as [number, number] | null;
+                return [r ? `${r[0].toFixed(decimals)} – ${r[1].toFixed(decimals)}` : '—', 'Bollinger'];
+              }
               return [value.toFixed(decimals), ''];
             }}
             labelFormatter={label => {
@@ -301,6 +352,24 @@ export function PriceChart({
               catch { return label as string; }
             }}
           />
+
+          {/* Bollinger band (drawn under the price line) */}
+          {toolsOverlay?.bollinger && (
+            <Area
+              type="monotone"
+              dataKey="bbRange"
+              stroke="#2dd4bf"
+              strokeWidth={1}
+              strokeOpacity={0.7}
+              fill="#14b8a6"
+              fillOpacity={0.08}
+              dot={false}
+              activeDot={false}
+              connectNulls={false}
+              isAnimationActive={false}
+              name="bbRange"
+            />
+          )}
 
           {/* Price area */}
           <Area
@@ -315,6 +384,11 @@ export function PriceChart({
             name="close"
           />
 
+          {/* SMA 20 */}
+          {toolsOverlay?.sma20 && (
+            <Line type="monotone" dataKey="sma20" stroke="#22d3ee" strokeWidth={1.5}
+              dot={false} activeDot={false} connectNulls={false} name="sma20" />
+          )}
           {/* SMA 50 */}
           {toolsOverlay?.sma50 && (
             <Line type="monotone" dataKey="sma50" stroke="#f97316" strokeWidth={1.5}
@@ -324,6 +398,11 @@ export function PriceChart({
           {toolsOverlay?.sma200 && (
             <Line type="monotone" dataKey="sma200" stroke="#a855f7" strokeWidth={1.5}
               dot={false} activeDot={false} connectNulls={false} name="sma200" />
+          )}
+          {/* EMA 20 */}
+          {toolsOverlay?.ema20 && (
+            <Line type="monotone" dataKey="ema20" stroke="#f472b6" strokeWidth={1.5}
+              dot={false} activeDot={false} connectNulls={false} name="ema20" />
           )}
 
           {/* Level overlays */}
@@ -339,23 +418,31 @@ export function PriceChart({
             <ReferenceLine y={toolAvg} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1.5}
               label={{ value: `Avg ${toolAvg.toFixed(decimals)}`, fill: '#f59e0b', fontSize: 9, position: 'right' }} />
           )}
-          {toolsOverlay?.stdDev && toolAvg != null && toolStdDev != null && (
-            <>
-              <ReferenceArea y1={toolAvg - toolStdDev} y2={toolAvg + toolStdDev} fill="#38bdf8" fillOpacity={0.05} />
-              <ReferenceLine y={toolAvg + toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
-                label={{ value: `+1σ ${(toolAvg + toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />
-              <ReferenceLine y={toolAvg - toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
-                label={{ value: `-1σ ${(toolAvg - toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />
-            </>
-          )}
-          {toolsOverlay?.minMax && (
-            <>
-              <ReferenceLine y={rawMax} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
-                label={{ value: `H ${rawMax.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />
-              <ReferenceLine y={rawMin} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
-                label={{ value: `L ${rawMin.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />
-            </>
-          )}
+          {/* Arrays (not Fragments) — Recharts only detects reference
+              components as direct children or flattened array entries. */}
+          {toolsOverlay?.stdDev && toolAvg != null && toolStdDev != null && [
+            <ReferenceArea key="sd-band" y1={toolAvg - toolStdDev} y2={toolAvg + toolStdDev}
+              fill="#38bdf8" fillOpacity={0.05} />,
+            <ReferenceLine key="sd-up" y={toolAvg + toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
+              label={{ value: `+1σ ${(toolAvg + toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />,
+            <ReferenceLine key="sd-dn" y={toolAvg - toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
+              label={{ value: `-1σ ${(toolAvg - toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />,
+          ]}
+          {toolsOverlay?.minMax && [
+            <ReferenceLine key="mm-h" y={rawMax} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
+              label={{ value: `H ${rawMax.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />,
+            <ReferenceLine key="mm-l" y={rawMin} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
+              label={{ value: `L ${rawMin.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />,
+          ]}
+          {/* Fibonacci retracement levels */}
+          {fibLevels && fibLevels.map(lvl => (
+            <ReferenceLine key={lvl.ratio} y={lvl.value} stroke="#eab308"
+              strokeDasharray="2 4" strokeWidth={1} strokeOpacity={0.75}
+              label={{
+                value: `${(lvl.ratio * 100).toFixed(1)}% · ${lvl.value.toFixed(decimals)}`,
+                fill: '#eab308', fontSize: 9, position: 'insideLeft',
+              }} />
+          ))}
 
           {/* Drag-select highlight */}
           {enableDragSelect && area && (

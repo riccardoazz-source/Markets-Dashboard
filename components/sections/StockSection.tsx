@@ -13,9 +13,12 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { useGistData } from '@/lib/gist';
-import { computeSMA, computeRSI, computeMACD } from '@/lib/indicators';
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis,
+  computeSMA, computeEMA, computeRSI, computeMACD,
+  computeBollingerBands, computeFibLevels,
+} from '@/lib/indicators';
+import {
+  ResponsiveContainer, LineChart, Line, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
@@ -200,8 +203,12 @@ interface DualChartToolsOverlay {
   avg?: boolean;
   stdDev?: boolean;
   minMax?: boolean;
+  sma20?: boolean;
   sma50?: boolean;
   sma200?: boolean;
+  ema20?: boolean;
+  bollinger?: boolean;
+  fib?: boolean;
 }
 
 function DualChart({
@@ -296,13 +303,28 @@ function DualChart({
   // Tool overlay computations (on price series)
   const toolCloses = prices.map(p => p.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
 
-  // SMA series for Golden Cross
+  // Moving-average / band / level overlays (all on the price axis)
+  const sma20Vals  = toolsOverlay?.sma20  ? computeSMA(toolCloses, 20)  : null;
   const sma50Vals  = toolsOverlay?.sma50  ? computeSMA(toolCloses, 50)  : null;
   const sma200Vals = toolsOverlay?.sma200 ? computeSMA(toolCloses, 200) : null;
-  const smaByDate  = new Map<string, { sma50: number | null; sma200: number | null }>();
-  if (sma50Vals || sma200Vals) {
+  const ema20Vals  = toolsOverlay?.ema20  ? computeEMA(toolCloses, 20)  : null;
+  const bands      = toolsOverlay?.bollinger ? computeBollingerBands(toolCloses, 20, 2) : null;
+  const fibLevels  = toolsOverlay?.fib ? computeFibLevels(toolCloses) : null;
+  const overlayByDate = new Map<string, {
+    sma20: number | null; sma50: number | null; sma200: number | null;
+    ema20: number | null; bbRange: [number, number] | null;
+  }>();
+  if (sma20Vals || sma50Vals || sma200Vals || ema20Vals || bands) {
     prices.forEach((p, i) => {
-      smaByDate.set(p.date, { sma50: sma50Vals?.[i] ?? null, sma200: sma200Vals?.[i] ?? null });
+      overlayByDate.set(p.date, {
+        sma20:  sma20Vals?.[i]  ?? null,
+        sma50:  sma50Vals?.[i]  ?? null,
+        sma200: sma200Vals?.[i] ?? null,
+        ema20:  ema20Vals?.[i]  ?? null,
+        bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
+          ? [bands.lower[i] as number, bands.upper[i] as number]
+          : null,
+      });
     });
   }
 
@@ -316,8 +338,11 @@ function DualChart({
     revIsAnnual: revIsAnnualMap.get(date) ?? false,
     profit: profMap.get(date) ?? null,
     pe: peMap.get(date) ?? null,
-    sma50:  smaByDate.get(date)?.sma50  ?? null,
-    sma200: smaByDate.get(date)?.sma200 ?? null,
+    sma20:  overlayByDate.get(date)?.sma20  ?? null,
+    sma50:  overlayByDate.get(date)?.sma50  ?? null,
+    sma200: overlayByDate.get(date)?.sma200 ?? null,
+    ema20:  overlayByDate.get(date)?.ema20  ?? null,
+    bbRange: overlayByDate.get(date)?.bbRange ?? null,
   }));
 
   const decimals = 2;
@@ -355,6 +380,44 @@ function DualChart({
             </span>
             <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px] ml-1">✕</button>
           </div>
+        </div>
+      )}
+      {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
+        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib) && (
+        <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
+          {toolsOverlay?.sma20 && (
+            <span className="flex items-center gap-1 text-[10px] text-cyan-400">
+              <span className="inline-block w-5 border-t-2 border-cyan-400" />SMA 20
+            </span>
+          )}
+          {toolsOverlay?.sma50 && (
+            <span className="flex items-center gap-1 text-[10px] text-orange-400">
+              <span className="inline-block w-5 border-t-2 border-orange-400" />SMA 50
+            </span>
+          )}
+          {toolsOverlay?.sma200 && (
+            <span className="flex items-center gap-1 text-[10px] text-purple-400">
+              <span className="inline-block w-5 border-t-2 border-purple-400" />SMA 200
+            </span>
+          )}
+          {toolsOverlay?.ema20 && (
+            <span className="flex items-center gap-1 text-[10px] text-rose-400">
+              <span className="inline-block w-5 border-t-2 border-rose-400" />EMA 20
+            </span>
+          )}
+          {toolsOverlay?.bollinger && (
+            <span className="flex items-center gap-1 text-[10px] text-teal-400">
+              <span className="inline-block w-5 h-2 bg-teal-400/20 border-y border-teal-400" />Bollinger 20·2σ
+            </span>
+          )}
+          {toolsOverlay?.fib && (
+            <span className="flex items-center gap-1 text-[10px] text-yellow-400">
+              <span className="inline-block w-5 border-t-2 border-dashed border-yellow-400" />Fibonacci
+            </span>
+          )}
+          {toolsOverlay?.sma50 && toolsOverlay?.sma200 && (
+            <span className="text-[9px] text-gray-600">Golden Cross when SMA 50 crosses SMA 200</span>
+          )}
         </div>
       )}
       <ResponsiveContainer width="100%" height={260}>
@@ -400,11 +463,25 @@ function DualChart({
             if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, props.payload?.epsIsAnnual ? 'EPS (annual)' : 'EPS (quarterly)'];
             if (name === 'revenue') return [`${formatBig(value)} ${currency}`, props.payload?.revIsAnnual ? 'Revenue (annual)' : 'Revenue (quarterly)'];
             if (name === 'pe') return [`${value.toFixed(1)}x`, 'P/E (TTM)'];
+            if (name === 'sma20')  return [value != null ? formatPrice(value, currency) : '—', 'SMA 20'];
+            if (name === 'sma50')  return [value != null ? formatPrice(value, currency) : '—', 'SMA 50'];
+            if (name === 'sma200') return [value != null ? formatPrice(value, currency) : '—', 'SMA 200'];
+            if (name === 'ema20')  return [value != null ? formatPrice(value, currency) : '—', 'EMA 20'];
+            if (name === 'bbRange') {
+              const r = value as unknown as [number, number] | null;
+              return [r ? `${formatPrice(r[0], currency)} – ${formatPrice(r[1], currency)}` : '—', 'Bollinger'];
+            }
             const label = name === 'price' ? 'Price' : 'Total Return (incl. div.)';
             return [formatPrice(value, currency), label];
           }}
           labelFormatter={label => { try { return format(parseISO(label as string), 'MMM d, yyyy'); } catch { return label as string; } }}
         />
+        {/* Bollinger band (drawn under the price line) */}
+        {toolsOverlay?.bollinger && (
+          <Area yAxisId="price" type="monotone" dataKey="bbRange" stroke="#2dd4bf"
+            strokeWidth={1} strokeOpacity={0.7} fill="#14b8a6" fillOpacity={0.08}
+            dot={false} activeDot={false} connectNulls={false} isAnimationActive={false} name="bbRange" />
+        )}
         <Line yAxisId="price" type="monotone" dataKey="price" stroke={isUp ? '#10b981' : '#ef4444'}
           strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls name="price" />
         {hasDivs && (
@@ -434,14 +511,22 @@ function DualChart({
           <Line yAxisId="pe" type="monotone" dataKey="pe" stroke="#a3e635"
             strokeWidth={1.5} strokeDasharray="3 3" dot={false} connectNulls name="pe" />
         )}
-        {/* SMA overlays for Golden Cross */}
+        {/* Moving-average overlays */}
+        {toolsOverlay?.sma20 && (
+          <Line yAxisId="price" type="monotone" dataKey="sma20" stroke="#22d3ee"
+            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="sma20" />
+        )}
         {toolsOverlay?.sma50 && (
           <Line yAxisId="price" type="monotone" dataKey="sma50" stroke="#f97316"
-            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="SMA 50" />
+            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="sma50" />
         )}
         {toolsOverlay?.sma200 && (
           <Line yAxisId="price" type="monotone" dataKey="sma200" stroke="#a855f7"
-            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="SMA 200" />
+            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="sma200" />
+        )}
+        {toolsOverlay?.ema20 && (
+          <Line yAxisId="price" type="monotone" dataKey="ema20" stroke="#f472b6"
+            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="ema20" />
         )}
         {area && (
           <ReferenceArea
@@ -459,23 +544,30 @@ function DualChart({
           <ReferenceLine yAxisId="price" y={toolAvg} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1.5}
             label={{ value: `Avg ${toolAvg.toFixed(decimals)}`, fill: '#f59e0b', fontSize: 9, position: 'right' }} />
         )}
-        {toolsOverlay?.stdDev && toolAvg != null && toolStdDev != null && (
-          <>
-            <ReferenceArea yAxisId="price" y1={toolAvg - toolStdDev} y2={toolAvg + toolStdDev} fill="#38bdf8" fillOpacity={0.05} />
-            <ReferenceLine yAxisId="price" y={toolAvg + toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
-              label={{ value: `+1σ ${(toolAvg + toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />
-            <ReferenceLine yAxisId="price" y={toolAvg - toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
-              label={{ value: `-1σ ${(toolAvg - toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />
-          </>
-        )}
-        {toolsOverlay?.minMax && toolMin != null && toolMax != null && (
-          <>
-            <ReferenceLine yAxisId="price" y={toolMax} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
-              label={{ value: `H ${toolMax.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />
-            <ReferenceLine yAxisId="price" y={toolMin} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
-              label={{ value: `L ${toolMin.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />
-          </>
-        )}
+        {/* Arrays (not Fragments) — Recharts only detects reference
+            components as direct children or flattened array entries. */}
+        {toolsOverlay?.stdDev && toolAvg != null && toolStdDev != null && [
+          <ReferenceArea key="sd-band" yAxisId="price" y1={toolAvg - toolStdDev} y2={toolAvg + toolStdDev}
+            fill="#38bdf8" fillOpacity={0.05} />,
+          <ReferenceLine key="sd-up" yAxisId="price" y={toolAvg + toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
+            label={{ value: `+1σ ${(toolAvg + toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />,
+          <ReferenceLine key="sd-dn" yAxisId="price" y={toolAvg - toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
+            label={{ value: `-1σ ${(toolAvg - toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />,
+        ]}
+        {toolsOverlay?.minMax && toolMin != null && toolMax != null && [
+          <ReferenceLine key="mm-h" yAxisId="price" y={toolMax} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
+            label={{ value: `H ${toolMax.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />,
+          <ReferenceLine key="mm-l" yAxisId="price" y={toolMin} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
+            label={{ value: `L ${toolMin.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />,
+        ]}
+        {fibLevels && fibLevels.map(lvl => (
+          <ReferenceLine key={lvl.ratio} yAxisId="price" y={lvl.value} stroke="#eab308"
+            strokeDasharray="2 4" strokeWidth={1} strokeOpacity={0.75}
+            label={{
+              value: `${(lvl.ratio * 100).toFixed(1)}% · ${lvl.value.toFixed(decimals)}`,
+              fill: '#eab308', fontSize: 9, position: 'insideLeft',
+            }} />
+        ))}
         </ComposedChart>
       </ResponsiveContainer>
       {!range && (
