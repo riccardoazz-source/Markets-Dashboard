@@ -16,8 +16,7 @@ export type MacroSourceType =
   | 'fomc'         // Federal Reserve FOMC rate decisions (hardcoded table + FRED fallback)
   | 'yahoo_price'  // Yahoo Finance price series — symbol required
   | 'yahoo_ratio'  // Yahoo Finance: price(numerator) / price(denominator)
-  | 'multpl'       // multpl.com valuation tables — slug required
-  | 'gurufocus'    // Gurufocus economic indicators — indicatorId required
+  | 'multpl'       // multpl.com valuation tables (via reader proxy) — slug required
   | 'computed';    // computed server-side in the API route (Bitcoin halving, RSI, miner revenue)
 
 export interface MacroSource {
@@ -27,7 +26,6 @@ export interface MacroSource {
   symbol?: string;      // yahoo_price only
   numerator?: string;   // yahoo_ratio only: top symbol
   denominator?: string; // yahoo_ratio only: bottom symbol
-  indicatorId?: number; // gurufocus only
   slug?: string;        // multpl only: path slug at multpl.com
 }
 
@@ -145,8 +143,8 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'A939RC0A052NBEA', name: 'Household Net Worth', category: 'Growth',    unit: 'B$',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/A939RC0A052NBEA' } },
-  // Market Value — valuation ratios. multpl.com is reliably scrapable;
-  // Gurufocus is Cloudflare-protected so its series are best-effort.
+  // Market Value — S&P 500 valuation ratios from multpl.com (fetched through a
+  // reader proxy because multpl blocks datacenter IPs directly).
   { id: 'SP500_PE',         name: 'S&P 500 P/E Ratio',        category: 'Market Value', unit: 'idx',
     source: { type: 'multpl', label: 'multpl.com',
               url: 'https://www.multpl.com/s-p-500-pe-ratio',
@@ -159,6 +157,10 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'multpl', label: 'multpl.com',
               url: 'https://www.multpl.com/s-p-500-earnings',
               slug: 's-p-500-earnings' } },
+  { id: 'SP500_EYIELD',     name: 'S&P 500 Earnings Yield',    category: 'Market Value', unit: '%',
+    source: { type: 'multpl', label: 'multpl.com',
+              url: 'https://www.multpl.com/s-p-500-earnings-yield',
+              slug: 's-p-500-earnings-yield' } },
   { id: 'SP500_PSALES',     name: 'S&P 500 Price/Sales',       category: 'Market Value', unit: 'idx',
     source: { type: 'multpl', label: 'multpl.com',
               url: 'https://www.multpl.com/s-p-500-price-to-sales',
@@ -167,18 +169,6 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'multpl', label: 'multpl.com',
               url: 'https://www.multpl.com/s-p-500-price-to-book',
               slug: 's-p-500-price-to-book' } },
-  { id: 'SP500_EYIELD',     name: 'S&P 500 Earnings Yield',    category: 'Market Value', unit: '%',
-    source: { type: 'multpl', label: 'multpl.com',
-              url: 'https://www.multpl.com/s-p-500-earnings-yield',
-              slug: 's-p-500-earnings-yield' } },
-  { id: 'BUFFETT_IND',      name: 'Buffett Indicator',         category: 'Market Value', unit: '%',
-    source: { type: 'gurufocus', label: 'Gurufocus',
-              url: 'https://www.gurufocus.com/economic_indicators/60/buffett-indicator',
-              indicatorId: 60 } },
-  { id: 'NDX100_PE',        name: 'NASDAQ 100 P/E Ratio',      category: 'Market Value', unit: 'idx',
-    source: { type: 'gurufocus', label: 'Gurufocus',
-              url: 'https://www.gurufocus.com/economic_indicators/6778/nasdaq-100-pe-ratio',
-              indicatorId: 6778 } },
 ];
 
 // Bitcoin halving dates (exported so UI components can render them as reference lines).

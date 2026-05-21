@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
 import { BTC_HALVING_DATES } from '@/lib/config';
+import { HalvingChart } from './HalvingChart';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 
@@ -93,6 +94,11 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   // BTC_HALVING is displayed as vertical reference lines, not as a data series.
   const halvingAsset = assets.find(a => a.symbol === 'BTC_HALVING');
   const nonHalvingAssets = assets.filter(a => a.symbol !== 'BTC_HALVING');
+
+  // Only the halving series selected → show the dedicated halving-line chart.
+  if (halvingAsset && nonHalvingAssets.length === 0) {
+    return <HalvingChart height={height} />;
+  }
 
   const MAX_CHART_POINTS = 500;
   const rawDates = Array.from(new Set(

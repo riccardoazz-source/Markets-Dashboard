@@ -53,7 +53,6 @@ function getFredApiKey(): string {
 const WIDE_WINDOW_SERIES = new Set([
   'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING',
   'GFDEGDQ188S', 'GFDEBTN', 'A939RC0A052NBEA',
-  'SP500_PE', 'BUFFETT_IND', 'NDX100_PE', 'SP500_FWD_PE', 'SHILLER_CAPE', 'SP500_EPS', 'NDX100_EPS',
 ]);
 
 // ---------- FRED API (preferred when FRED_API_KEY is set) ----------
@@ -509,149 +508,57 @@ async function getBitcoinMinerRevenue(
   return revenue;
 }
 
-// ---------- Gurufocus economic indicators ----------
-// Gurufocus embeds chart data in page HTML as a JSON array of [date, value] pairs
-// inside a <script> tag. Multiple regex patterns are tried in order.
-async function fetchGurufocus(
-  indicatorId: number,
-  fromDate?: string,
-  timeoutMs = 10_000,
-): Promise<{ date: string; value: number }[]> {
-  const pageUrl = `https://www.gurufocus.com/economic_indicators/${indicatorId}`;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(pageUrl, {
-      signal: ctrl.signal,
-      cache: 'no-store',
-      headers: {
-        'User-Agent': UA,
-        'Accept': 'text/html,application/xhtml+xml,*/*;q=0.9',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.gurufocus.com/',
-      },
-    });
-    if (!res.ok) { console.warn(`[gurufocus] ${indicatorId} HTTP ${res.status}`); return []; }
-    const html = await res.text();
-
-    // Gurufocus embeds data as a JSON array: [["YYYY-MM-DD", value], ...]
-    // Broad extraction: find the first occurrence of [["YYYY-MM-DD", number], ...]
-    const arrayMatch = html.match(/(\[\s*\["\d{4}-\d{2}-\d{2}",\s*[\d.e+\-]+\](?:\s*,\s*\["\d{4}-\d{2}-\d{2}",\s*[\d.e+\-]+\])*\s*\])/);
-    if (arrayMatch) {
-      try {
-        const parsed = JSON.parse(arrayMatch[1]) as [string, number][];
-        const pts: { date: string; value: number }[] = [];
-        for (const [date, value] of parsed) {
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-          if (!isFinite(value)) continue;
-          if (fromDate && date < fromDate) continue;
-          pts.push({ date, value });
-        }
-        pts.sort((a, b) => a.date.localeCompare(b.date));
-        if (pts.length > 0) {
-          console.log(`[gurufocus] ${indicatorId}: ${pts.length} pts (array pattern)`);
-          return pts;
-        }
-      } catch { /* fall through */ }
-    }
-
-    // Secondary: key-value JSON object {"dates":[...],"values":[...]}
-    const objMatch = html.match(/"dates"\s*:\s*(\[[^\]]+\])\s*,\s*"values"\s*:\s*(\[[^\]]+\])/);
-    if (objMatch) {
-      try {
-        const dates  = JSON.parse(objMatch[1]) as string[];
-        const values = JSON.parse(objMatch[2]) as number[];
-        const pts: { date: string; value: number }[] = [];
-        for (let i = 0; i < Math.min(dates.length, values.length); i++) {
-          const date = dates[i];
-          const value = values[i];
-          if (!/^\d{4}(-\d{2}(-\d{2})?)?$/.test(date)) continue;
-          const normDate = date.length === 4 ? `${date}-07-01` : date.length === 7 ? `${date}-01` : date;
-          if (!isFinite(value)) continue;
-          if (fromDate && normDate < fromDate) continue;
-          pts.push({ date: normDate, value });
-        }
-        pts.sort((a, b) => a.date.localeCompare(b.date));
-        if (pts.length > 0) {
-          console.log(`[gurufocus] ${indicatorId}: ${pts.length} pts (obj pattern)`);
-          return pts;
-        }
-      } catch { /* fall through */ }
-    }
-
-    // Tertiary: HighCharts-style numeric timestamp pairs [[1234567890000, value], ...]
-    const tsMatch = html.match(/(\[\s*\[\d{10,13},\s*[\d.e+\-]+\](?:\s*,\s*\[\d{10,13},\s*[\d.e+\-]+\])*\s*\])/);
-    if (tsMatch) {
-      try {
-        const parsed = JSON.parse(tsMatch[1]) as [number, number][];
-        const pts: { date: string; value: number }[] = [];
-        for (const [ts, value] of parsed) {
-          const ms = ts < 1e12 ? ts * 1000 : ts; // seconds vs milliseconds
-          const date = new Date(ms).toISOString().slice(0, 10);
-          if (!isFinite(value)) continue;
-          if (fromDate && date < fromDate) continue;
-          pts.push({ date, value });
-        }
-        pts.sort((a, b) => a.date.localeCompare(b.date));
-        if (pts.length > 0) {
-          console.log(`[gurufocus] ${indicatorId}: ${pts.length} pts (timestamp pattern)`);
-          return pts;
-        }
-      } catch { /* fall through */ }
-    }
-
-    console.warn(`[gurufocus] ${indicatorId}: no data pattern matched`);
-    return [];
-  } catch (e) {
-    console.error(`[gurufocus] ${indicatorId} failed:`, (e as Error).message);
-    return [];
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-// ---------- multpl.com valuation tables (no key, reliably scrapable) ----------
-// Each metric has a "by-month" HTML table of (Month D, YYYY → value) rows.
+// ---------- multpl.com valuation tables ----------
+// multpl.com blocks datacenter IPs (Vercel) on direct requests, so each
+// "by-month" table is fetched through the free r.jina.ai reader proxy, which
+// returns the page as plain text. Rows look like "Nov 1, 2025  28.86".
 const MULTPL_MONTHS: Record<string, string> = {
   jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
   jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
 };
 
+function parseMultplText(
+  text: string,
+  fromDate?: string,
+): { date: string; value: number }[] {
+  // "Mon D, YYYY" followed (after spaces / table pipes / $) by a number.
+  const re = /([A-Z][a-z]{2,})\s+(\d{1,2}),\s*(\d{4})[^\d\n-]{0,8}(-?[\d,]+\.?\d*)/g;
+  const seen = new Set<string>();
+  const pts: { date: string; value: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const mon = MULTPL_MONTHS[m[1].slice(0, 3).toLowerCase()];
+    if (!mon) continue;
+    const date = `${m[3]}-${mon}-${m[2].padStart(2, '0')}`;
+    if (seen.has(date)) continue;
+    const value = parseFloat(m[4].replace(/,/g, ''));
+    if (!isFinite(value)) continue;
+    if (fromDate && date < fromDate) continue;
+    seen.add(date);
+    pts.push({ date, value });
+  }
+  pts.sort((a, b) => a.date.localeCompare(b.date));
+  return pts;
+}
+
 async function fetchMultpl(
   slug: string,
   fromDate?: string,
-  timeoutMs = 9_000,
+  timeoutMs = 12_000,
 ): Promise<{ date: string; value: number }[]> {
-  const url = `https://www.multpl.com/${slug}/table/by-month`;
+  const target = `https://www.multpl.com/${slug}/table/by-month`;
+  const url = `https://r.jina.ai/${target}`;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
-      next: { revalidate: 86400 }, // monthly data — daily revalidate is plenty
-      headers: {
-        'User-Agent': UA,
-        'Accept': 'text/html,application/xhtml+xml,*/*;q=0.9',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.multpl.com/',
-      },
+      next: { revalidate: 21600 }, // monthly data — 6h cache keeps proxy load low
+      headers: { 'Accept': 'text/plain', 'X-Return-Format': 'text' },
     });
-    if (!res.ok) { console.warn(`[multpl] ${slug} HTTP ${res.status}`); return []; }
-    const html = await res.text();
-    // Rows: <td class="left">Mon D, YYYY</td> <td ...>value[ optional estimate]</td>
-    const rowRe = /<td[^>]*class="[^"]*\bleft\b[^"]*"[^>]*>\s*([A-Za-z]{3,})\s+(\d{1,2}),\s*(\d{4})\s*<\/td>\s*<td[^>]*>\s*(-?[\d,]+\.?\d*)/g;
-    const pts: { date: string; value: number }[] = [];
-    let mch: RegExpExecArray | null;
-    while ((mch = rowRe.exec(html)) !== null) {
-      const mon = MULTPL_MONTHS[mch[1].slice(0, 3).toLowerCase()];
-      if (!mon) continue;
-      const date = `${mch[3]}-${mon}-${mch[2].padStart(2, '0')}`;
-      const value = parseFloat(mch[4].replace(/,/g, ''));
-      if (!isFinite(value)) continue;
-      if (fromDate && date < fromDate) continue;
-      pts.push({ date, value });
-    }
-    pts.sort((a, b) => a.date.localeCompare(b.date));
+    if (!res.ok) { console.warn(`[multpl] ${slug} proxy HTTP ${res.status}`); return []; }
+    const text = await res.text();
+    const pts = parseMultplText(text, fromDate);
     console.log(`[multpl] ${slug}: ${pts.length} pts`);
     return pts;
   } catch (e) {
@@ -1204,9 +1111,6 @@ async function fetchMacroSeries(
   if (src?.type === 'yahoo_price' && src.symbol) {
     return fetchYahooHistorical(src.symbol, fromDate);
   }
-  if (src?.type === 'gurufocus' && src.indicatorId) {
-    return fetchGurufocus(src.indicatorId, fromDate);
-  }
   if (src?.type === 'multpl' && src.slug) {
     return fetchMultpl(src.slug, fromDate);
   }
@@ -1420,7 +1324,7 @@ export async function GET(req: NextRequest) {
   const customSrcIds = ids.filter(id => {
     const s = indicatorSourceMap.get(id);
     return s?.type === 'yahoo_ratio' || s?.type === 'yahoo_price' || s?.type === 'computed'
-      || s?.type === 'gurufocus' || s?.type === 'multpl';
+      || s?.type === 'multpl';
   });
   const standardIds = ids.filter(id => !customSrcIds.includes(id));
 
