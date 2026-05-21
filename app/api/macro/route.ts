@@ -550,17 +550,16 @@ async function fetchMultplOnce(
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    const headers: Record<string, string> = {
+      'Accept': 'text/plain',
+      'X-Return-Format': 'text',
+      'X-Timeout': '15',
+    };
+    if (process.env.JINA_API_KEY) headers['Authorization'] = `Bearer ${process.env.JINA_API_KEY}`;
     const res = await fetch(url, {
       signal: ctrl.signal,
-      next: { revalidate: 21600 }, // monthly data — 6h cache keeps proxy load low
-      headers: {
-        'Accept': 'text/plain',
-        'X-Return-Format': 'text',
-        // 'direct' = plain HTTP fetch on the proxy side (no headless browser).
-        // multpl's table pages are static HTML, so this is far faster and
-        // avoids timeouts on the long-history tables (P/E etc. go back to 1871).
-        'X-Engine': 'direct',
-      },
+      next: { revalidate: 21600 },
+      headers,
     });
     if (!res.ok) { console.warn(`[multpl] ${pagePath} proxy HTTP ${res.status}`); return []; }
     return parseMultplText(await res.text(), fromDate);
@@ -586,6 +585,110 @@ async function fetchMultpl(
   const yearly = await fetchMultplOnce(`${slug}/table/by-year`, fromDate, 8_000);
   console.log(`[multpl] ${slug}: ${yearly.length} pts (yearly fallback)`);
   return yearly;
+}
+
+// ---------- Robert Shiller / Yale S&P 500 data (PE, CAPE, EPS, Earnings Yield) ----------
+// Shiller publishes monthly S&P 500 price, earnings (annual EPS), and CAPE (PE10)
+// back to 1871. The datahub.io GitHub mirror is raw CSV — no API key, no IP blocks.
+// Date format in the CSV: "YYYY.MM"  (e.g. "2024.12")
+// Earnings column = annual trailing EPS for the S&P 500 composite.
+// PE10 column     = Shiller CAPE (10-year cyclically adjusted P/E).
+interface ShillerSeries {
+  pe:   { date: string; value: number }[];
+  cape: { date: string; value: number }[];
+  eps:  { date: string; value: number }[];
+  ey:   { date: string; value: number }[];
+}
+
+function parseShillerCSV(csv: string, fromDate?: string): ShillerSeries {
+  const pe: ShillerSeries['pe'] = [];
+  const cape: ShillerSeries['cape'] = [];
+  const eps: ShillerSeries['eps'] = [];
+  const ey: ShillerSeries['ey'] = [];
+
+  const lines = csv.trim().split('\n');
+  if (lines.length < 2) return { pe, cape, eps, ey };
+
+  const hdrs = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+  const dateIdx     = hdrs.indexOf('date');
+  const sp500Idx    = hdrs.indexOf('sp500');
+  const earningsIdx = hdrs.indexOf('earnings');
+  const pe10Idx     = hdrs.findIndex(h => h === 'pe10' || h === 'cape');
+
+  if (dateIdx === -1 || sp500Idx === -1) {
+    console.warn('[shiller] unexpected CSV headers:', lines[0].slice(0, 120));
+    return { pe, cape, eps, ey };
+  }
+
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(',').map(p => p.trim().replace(/"/g, ''));
+    if (parts.length <= Math.max(dateIdx, sp500Idx)) continue;
+
+    const rawDate = parts[dateIdx];
+    if (!rawDate) continue;
+
+    // "YYYY.MM" → "YYYY-MM-01"
+    let dateStr = '';
+    if (/^\d{4}\.\d{1,2}$/.test(rawDate)) {
+      const [y, m] = rawDate.split('.');
+      dateStr = `${y}-${m.padStart(2, '0')}-01`;
+    } else if (/^\d{4}-\d{2}$/.test(rawDate)) {
+      dateStr = `${rawDate}-01`;
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+      dateStr = rawDate;
+    } else {
+      continue;
+    }
+
+    if (fromDate && dateStr < fromDate) continue;
+
+    const sp500    = parseFloat(parts[sp500Idx]);
+    const earnings = earningsIdx !== -1 ? parseFloat(parts[earningsIdx]) : NaN;
+    const pe10Val  = pe10Idx !== -1 ? parseFloat(parts[pe10Idx]) : NaN;
+
+    if (!isFinite(sp500) || sp500 <= 0) continue;
+
+    // Trailing P/E = price / annual EPS
+    if (isFinite(earnings) && earnings > 0) {
+      const trailPE = sp500 / earnings;
+      if (isFinite(trailPE) && trailPE > 2 && trailPE < 500) {
+        pe.push({ date: dateStr, value: parseFloat(trailPE.toFixed(2)) });
+        eps.push({ date: dateStr, value: parseFloat(earnings.toFixed(2)) });
+        const eyVal = (earnings / sp500) * 100;
+        if (isFinite(eyVal)) ey.push({ date: dateStr, value: parseFloat(eyVal.toFixed(3)) });
+      }
+    }
+
+    if (isFinite(pe10Val) && pe10Val > 0) {
+      cape.push({ date: dateStr, value: parseFloat(pe10Val.toFixed(2)) });
+    }
+  }
+
+  return { pe, cape, eps, ey };
+}
+
+async function fetchShillerCSV(fromDate?: string, timeoutMs = 8_000): Promise<ShillerSeries> {
+  const empty: ShillerSeries = { pe: [], cape: [], eps: [], ey: [] };
+  // The datahub.io GitHub repo mirrors Shiller's IE dataset as CSV.
+  const url = 'https://raw.githubusercontent.com/datasets/s-and-p-500/main/data/data.csv';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      next: { revalidate: 3600 }, // hourly — data is monthly but we want it fresh
+      headers: { 'User-Agent': UA, 'Accept': 'text/csv,text/plain,*/*' },
+    });
+    if (!res.ok) { console.warn(`[shiller] CSV HTTP ${res.status}`); return empty; }
+    const result = parseShillerCSV(await res.text(), fromDate);
+    console.log(`[shiller] PE=${result.pe.length} CAPE=${result.cape.length} EPS=${result.eps.length} EY=${result.ey.length}`);
+    return result;
+  } catch (e) {
+    console.error('[shiller] fetch failed:', (e as Error).message);
+    return empty;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 // ---------- NY Fed EFFR (Effective Federal Funds Rate, no key) ----------
@@ -1131,6 +1234,25 @@ async function fetchMacroSeries(
     return fetchYahooHistorical(src.symbol, fromDate);
   }
   if (src?.type === 'multpl' && src.slug) {
+    // For PE / CAPE / EPS / Earnings Yield: run Jina proxy and Shiller GitHub CSV
+    // in parallel. Jina (fixed — no longer sends invalid X-Engine header) gets
+    // current data. Shiller CSV is always reliable but lags ~2 years. Prefer Jina
+    // when it succeeds; fall back to Shiller so the chart is never blank.
+    const isShillerSourced = fredId === 'SP500_PE' || fredId === 'SHILLER_CAPE' ||
+      fredId === 'SP500_EPS' || fredId === 'SP500_EYIELD';
+    if (isShillerSourced) {
+      const [jinaResult, shillerResult] = await Promise.all([
+        fetchMultpl(src.slug, fromDate),
+        fetchShillerCSV(fromDate),
+      ]);
+      if (jinaResult.length > 0) return jinaResult;
+      // Jina failed — serve Shiller historical data so the chart isn't blank
+      if (fredId === 'SP500_PE')     return shillerResult.pe;
+      if (fredId === 'SHILLER_CAPE') return shillerResult.cape;
+      if (fredId === 'SP500_EPS')    return shillerResult.eps;
+      return shillerResult.ey; // SP500_EYIELD
+    }
+    // P/S and P/B → Jina only (no Shiller fallback available for these)
     return fetchMultpl(src.slug, fromDate);
   }
   if (src?.type === 'computed') {

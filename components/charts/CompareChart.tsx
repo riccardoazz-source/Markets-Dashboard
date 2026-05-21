@@ -297,9 +297,13 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       )}
 
       {halvingAsset && visibleHalvingDates.length === 0 && (
-        <p className="mb-1 text-[10px] text-amber-400/80">
-          ⚡ No Bitcoin halving falls in this period — switch to a longer timeframe (5Y / 10Y / MAX) to see the halving lines.
-        </p>
+        <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3">
+          <p className="text-sm font-semibold text-amber-400">⚡ No Bitcoin halving in this time range</p>
+          <p className="mt-0.5 text-xs text-amber-300/80">
+            Past halvings: <strong className="text-amber-300">Nov 2012 · Jul 2016 · May 2020 · Apr 2024</strong>.
+            Switch to <strong className="text-amber-300">5Y, 10Y or MAX</strong> to see the halving lines overlaid on the chart.
+          </p>
+        </div>
       )}
 
       <ResponsiveContainer width="100%" height={height}>
