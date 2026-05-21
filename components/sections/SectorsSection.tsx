@@ -8,6 +8,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
+import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, Flame, RefreshCw, X } from 'lucide-react';
@@ -43,6 +44,7 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
   const [cagrData, setCAGRData] = useState<CAGRData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
 
   const fetchSectors = useCallback(async () => {
     try {
@@ -101,6 +103,8 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
   useEffect(() => {
     if (jumpTo) setSelected(jumpTo);
   }, [jumpTo]);
+
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
 
   // Merge static config with live data — always renders 20 sectors
   const merged = SECTORS.map(s => ({
@@ -237,8 +241,11 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
           </div>
           {histLoading
             ? <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
-            : <PriceChart data={historical} color="auto" height={200} />
+            : <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
           }
+          {historical.length > 0 && (
+            <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
+          )}
           {historical.length > 0 && <ChartDataTable data={historical} />}
           {selected && <ChartNotes chartId={selected} />}
         </div>

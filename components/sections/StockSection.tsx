@@ -10,11 +10,12 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
+import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { useGistData } from '@/lib/gist';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceArea,
+  CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
@@ -194,14 +195,21 @@ function formatXDate(dateStr: string, data: HistoricalPoint[]) {
   } catch { return dateStr; }
 }
 
+interface DualChartToolsOverlay {
+  avg?: boolean;
+  stdDev?: boolean;
+  minMax?: boolean;
+}
+
 function DualChart({
-  prices, totalReturn, currency, eps, financials,
+  prices, totalReturn, currency, eps, financials, toolsOverlay,
 }: {
   prices: HistoricalPoint[];
   totalReturn: HistoricalPoint[];
   currency: string;
-  eps?: EarningsPoint[];          // when present, overlay quarterly EPS bars on right axis
-  financials?: FinancialPoint[];  // when present, overlay revenue/profit bars on right axis
+  eps?: EarningsPoint[];
+  financials?: FinancialPoint[];
+  toolsOverlay?: DualChartToolsOverlay;
 }) {
   const { handlers, range, area, clear } = useChartDragSelect();
   if (!prices.length) return null;
@@ -296,6 +304,16 @@ function DualChart({
 
   const decimals = 2;
   const isUp = (prices[prices.length - 1]?.close ?? 0) >= (prices[0]?.close ?? 0);
+
+  // Tool overlay computations (on price series)
+  const toolCloses = prices.map(p => p.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
+  const toolAvg = toolCloses.length > 0 ? toolCloses.reduce((s, v) => s + v, 0) / toolCloses.length : null;
+  const toolVariance = toolAvg != null && toolCloses.length > 1
+    ? toolCloses.reduce((s, v) => s + (v - toolAvg) ** 2, 0) / toolCloses.length
+    : null;
+  const toolStdDev = toolVariance != null ? Math.sqrt(toolVariance) : null;
+  const toolMin = toolCloses.length > 0 ? Math.min(...toolCloses) : null;
+  const toolMax = toolCloses.length > 0 ? Math.max(...toolCloses) : null;
 
   // Drag-selection price change
   let selStats: { leftVal: number; rightVal: number; pct: number } | null = null;
@@ -413,6 +431,27 @@ function DualChart({
             strokeWidth={1}
           />
         )}
+        {toolsOverlay?.avg && toolAvg != null && (
+          <ReferenceLine yAxisId="price" y={toolAvg} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1.5}
+            label={{ value: `Avg ${toolAvg.toFixed(decimals)}`, fill: '#f59e0b', fontSize: 9, position: 'right' }} />
+        )}
+        {toolsOverlay?.stdDev && toolAvg != null && toolStdDev != null && (
+          <>
+            <ReferenceArea yAxisId="price" y1={toolAvg - toolStdDev} y2={toolAvg + toolStdDev} fill="#38bdf8" fillOpacity={0.05} />
+            <ReferenceLine yAxisId="price" y={toolAvg + toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
+              label={{ value: `+1σ ${(toolAvg + toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />
+            <ReferenceLine yAxisId="price" y={toolAvg - toolStdDev} stroke="#38bdf8" strokeDasharray="3 3" strokeWidth={1}
+              label={{ value: `-1σ ${(toolAvg - toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }} />
+          </>
+        )}
+        {toolsOverlay?.minMax && toolMin != null && toolMax != null && (
+          <>
+            <ReferenceLine yAxisId="price" y={toolMax} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
+              label={{ value: `H ${toolMax.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />
+            <ReferenceLine yAxisId="price" y={toolMin} stroke="#a78bfa" strokeDasharray="2 4" strokeWidth={1}
+              label={{ value: `L ${toolMin.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }} />
+          </>
+        )}
         </ComposedChart>
       </ResponsiveContainer>
       {!range && (
@@ -525,6 +564,7 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
   const [loading, setLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { data: gistData } = useGistData();
@@ -597,6 +637,8 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
       setQuery(sym);
     }
   }, [jumpTo]);
+
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
 
   // All unique categories used across stock notes (for the category selector)
   const noteCategories = useMemo(() => {
@@ -956,6 +998,7 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
               currency={currency}
               eps={overlay === 'eps' ? earnings?.quarterly : undefined}
               financials={overlay === 'financials' ? earnings?.financials : undefined}
+              toolsOverlay={activeTools}
             />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-500 text-sm">
@@ -963,6 +1006,9 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
             </div>
           )}
 
+          {!loading && prices.length > 0 && (
+            <ChartTools data={prices} activeTools={activeTools} onChange={setActiveTools} />
+          )}
           {!loading && prices.length > 0 && (
             <ChartDataTable data={prices} unit={currency} />
           )}

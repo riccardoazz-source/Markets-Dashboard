@@ -7,6 +7,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
+import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingSpinner, LoadingGrid } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { ArrowRight, RefreshCw } from 'lucide-react';
@@ -68,6 +69,7 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
   const [histLoading, setHistLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
 
   const fetchRates = useCallback(async () => {
     try {
@@ -116,6 +118,8 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
       if (from && to) setSelected({ from, to });
     }
   }, [jumpTo]);
+
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
 
   const selectedRate = rates.find(r => r.from === selected?.from && r.to === selected?.to);
   const dec = decimals(selectedRate?.rate ?? null);
@@ -289,10 +293,17 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
             <PriceChart
               data={historical}
               color="#6366f1"
-              showAverage={true}
-              averageValue={average ?? undefined}
               height={240}
               isCurrency={true}
+              toolsOverlay={activeTools}
+            />
+          )}
+          {historical.length > 0 && (
+            <ChartTools
+              data={historical}
+              activeTools={activeTools}
+              onChange={setActiveTools}
+              decimals={dec}
             />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} unit={`${selected?.from}/${selected?.to}`} />}

@@ -8,6 +8,12 @@ import { HistoricalPoint } from '@/lib/types';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 
+interface ToolsOverlay {
+  avg?: boolean;
+  stdDev?: boolean;
+  minMax?: boolean;
+}
+
 interface Props {
   data: HistoricalPoint[];
   color?: string;
@@ -18,6 +24,7 @@ interface Props {
   isCurrency?: boolean;
   interpolationType?: 'monotone' | 'stepAfter';
   enableDragSelect?: boolean;
+  toolsOverlay?: ToolsOverlay;
 }
 
 function formatDate(dateStr: string, data: HistoricalPoint[]) {
@@ -42,7 +49,7 @@ function fmtDate(d: string) {
 export function PriceChart({
   data, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
-  enableDragSelect = true,
+  enableDragSelect = true, toolsOverlay,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
@@ -71,6 +78,13 @@ export function PriceChart({
   const pad = Math.max(dataRange * 0.08, Math.abs(rawMax) * 0.02, 0.001);
   const yMin = rawMin >= 0 ? Math.max(0, rawMin - pad) : rawMin - pad;
   const yMax = rawMax + pad;
+
+  // Tool overlay computations
+  const toolAvg = closes.length > 0 ? closes.reduce((s, v) => s + v, 0) / closes.length : null;
+  const toolVariance = toolAvg != null && closes.length > 1
+    ? closes.reduce((s, v) => s + (v - toolAvg) ** 2, 0) / closes.length
+    : null;
+  const toolStdDev = toolVariance != null ? Math.sqrt(toolVariance) : null;
 
   // Selection stats
   let selStats: { leftVal: number; rightVal: number; pct: number } | null = null;
@@ -156,6 +170,57 @@ export function PriceChart({
               strokeDasharray="4 4"
               label={{ value: `Avg ${averageValue.toFixed(decimals)}`, fill: '#f59e0b', fontSize: 10, position: 'right' }}
             />
+          )}
+          {toolsOverlay?.avg && toolAvg != null && (
+            <ReferenceLine
+              y={toolAvg}
+              stroke="#f59e0b"
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              label={{ value: `Avg ${toolAvg.toFixed(decimals)}`, fill: '#f59e0b', fontSize: 9, position: 'right' }}
+            />
+          )}
+          {toolsOverlay?.stdDev && toolAvg != null && toolStdDev != null && (
+            <>
+              <ReferenceArea
+                y1={toolAvg - toolStdDev}
+                y2={toolAvg + toolStdDev}
+                fill="#38bdf8"
+                fillOpacity={0.05}
+              />
+              <ReferenceLine
+                y={toolAvg + toolStdDev}
+                stroke="#38bdf8"
+                strokeDasharray="3 3"
+                strokeWidth={1}
+                label={{ value: `+1σ ${(toolAvg + toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }}
+              />
+              <ReferenceLine
+                y={toolAvg - toolStdDev}
+                stroke="#38bdf8"
+                strokeDasharray="3 3"
+                strokeWidth={1}
+                label={{ value: `-1σ ${(toolAvg - toolStdDev).toFixed(decimals)}`, fill: '#38bdf8', fontSize: 9, position: 'right' }}
+              />
+            </>
+          )}
+          {toolsOverlay?.minMax && (
+            <>
+              <ReferenceLine
+                y={rawMax}
+                stroke="#a78bfa"
+                strokeDasharray="2 4"
+                strokeWidth={1}
+                label={{ value: `H ${rawMax.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }}
+              />
+              <ReferenceLine
+                y={rawMin}
+                stroke="#a78bfa"
+                strokeDasharray="2 4"
+                strokeWidth={1}
+                label={{ value: `L ${rawMin.toFixed(decimals)}`, fill: '#a78bfa', fontSize: 9, position: 'right' }}
+              />
+            </>
           )}
           <Area
             type={interpolationType}

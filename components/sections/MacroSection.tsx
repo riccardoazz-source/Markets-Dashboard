@@ -9,6 +9,7 @@ import { PriceChart } from '@/components/charts/PriceChart';
 import { HalvingChart } from '@/components/charts/HalvingChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
+import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
@@ -83,6 +84,7 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
   const [histLoading, setHistLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
 
   useEffect(() => {
     setMounted(true);
@@ -210,6 +212,8 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
   useEffect(() => {
     if (jumpTo) setSelected(jumpTo);
   }, [jumpTo]);
+
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
 
   const filtered = allIndicators.filter(
     ind => category === 'All' || ind.category === category
@@ -367,6 +371,7 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
               height={220}
               isCurrency={false}
               interpolationType={selectedIndicator?.unit === '%' ? 'stepAfter' : 'monotone'}
+              toolsOverlay={activeTools}
             />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-600 text-sm">
@@ -374,6 +379,9 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
             </div>
           )}
 
+          {historical.length > 0 && selected !== 'BTC_HALVING' && (
+            <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
+          )}
           {historical.length > 0 && selected !== 'BTC_HALVING' && (
             <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
           )}

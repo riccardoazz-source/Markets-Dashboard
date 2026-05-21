@@ -8,6 +8,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
+import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
@@ -33,6 +34,7 @@ export function IndexesSection({ jumpTo }: { jumpTo?: string | null }) {
   const [cagrData, setCAGRData] = useState<CAGRData | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
 
   const fetchQuotes = useCallback(async () => {
     const symbols = INDEXES.map(i => i.symbol).join(',');
@@ -76,6 +78,8 @@ export function IndexesSection({ jumpTo }: { jumpTo?: string | null }) {
   useEffect(() => {
     if (jumpTo) setSelected(jumpTo);
   }, [jumpTo]);
+
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
 
   const filtered = INDEXES.filter(
     i => selectedRegion === 'All' || i.region === selectedRegion
@@ -219,13 +223,16 @@ export function IndexesSection({ jumpTo }: { jumpTo?: string | null }) {
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : (
-            <PriceChart data={historical} color="auto" height={200} />
+            <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
           )}
 
           {cagrData && (
             <p className="text-[10px] text-gray-600">
               {cagrData.startDate} → {cagrData.endDate} · {formatPrice(cagrData.startPrice)} → {formatPrice(cagrData.endPrice)}
             </p>
+          )}
+          {historical.length > 0 && (
+            <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} />}
           {selected && <ChartNotes chartId={selected} />}
