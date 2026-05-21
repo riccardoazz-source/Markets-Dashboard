@@ -106,7 +106,7 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
 
   useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
 
-  // Merge static config with live data — always renders 20 sectors
+  // Merge static config with live data — always renders every sector
   const merged = SECTORS.map(s => ({
     symbol: s.symbol,
     name: s.name,
@@ -148,7 +148,7 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
           </div>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-gray-600 shrink-0">
-          <span>20 sectors · {sortLabel}</span>
+          <span>{SECTORS.length} sectors · {sortLabel}</span>
           {loading && <span className="text-accent animate-pulse">updating…</span>}
           {lastUpdate && !loading && (
             <span className="flex items-center gap-1">

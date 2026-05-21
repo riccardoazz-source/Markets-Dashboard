@@ -19,7 +19,7 @@ export async function GET() {
 
     if (quotes.length === 0) {
       if (entry && Date.now() - entry.ts < STALE) return NextResponse.json(entry.data);
-      // Return skeleton list so the UI always renders 20 sectors
+      // Return skeleton list so the UI always renders every sector
       return NextResponse.json(
         SECTORS.map((s, i) => ({
           symbol: s.symbol, name: s.name, category: s.category,

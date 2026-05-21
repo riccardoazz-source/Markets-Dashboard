@@ -239,6 +239,7 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'XLV',   name: 'Healthcare',              category: 'Health',     type: 'sector' },
   { symbol: 'XBI',   name: 'Biotech & Pharma',        category: 'Health',     type: 'sector' },
   { symbol: 'XLF',   name: 'Financials',              category: 'Finance',    type: 'sector' },
+  { symbol: 'BITQ',  name: 'Crypto & Digital Payments',category: 'Crypto',    type: 'sector' },
   { symbol: 'XLY',   name: 'Consumer Discr.',         category: 'Consumer',   type: 'sector' },
   { symbol: 'XLP',   name: 'Consumer Staples',        category: 'Consumer',   type: 'sector' },
   { symbol: 'XLE',   name: 'Energy & Utilities',      category: 'Energy',     type: 'sector' },
