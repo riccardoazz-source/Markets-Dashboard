@@ -200,18 +200,50 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'XLU',   name: 'Utilities',               category: 'Utilities',  type: 'sector' },
 ];
 
-export const CURRENCY_PAIRS = [
-  { from: 'USD', to: 'EUR', symbol: 'USDEUR=X' },
-  { from: 'EUR', to: 'USD', symbol: 'EURUSD=X' },
-  { from: 'GBP', to: 'USD', symbol: 'GBPUSD=X' },
-  { from: 'USD', to: 'JPY', symbol: 'USDJPY=X' },
-  { from: 'USD', to: 'CHF', symbol: 'USDCHF=X' },
-  { from: 'USD', to: 'CNY', symbol: 'USDCNY=X' },
-  { from: 'USD', to: 'INR', symbol: 'USDINR=X' },
-  { from: 'USD', to: 'CAD', symbol: 'USDCAD=X' },
-  { from: 'EUR', to: 'GBP', symbol: 'EURGBP=X' },
-  { from: 'EUR', to: 'JPY', symbol: 'EURJPY=X' },
+// Currency metadata — flag emoji + full name, keyed by ISO code.
+export const CURRENCY_META: Record<string, { name: string; flag: string }> = {
+  USD: { name: 'US Dollar',          flag: '🇺🇸' },
+  EUR: { name: 'Euro',               flag: '🇪🇺' },
+  GBP: { name: 'British Pound',      flag: '🇬🇧' },
+  JPY: { name: 'Japanese Yen',       flag: '🇯🇵' },
+  CHF: { name: 'Swiss Franc',        flag: '🇨🇭' },
+  AUD: { name: 'Australian Dollar',  flag: '🇦🇺' },
+  CAD: { name: 'Canadian Dollar',    flag: '🇨🇦' },
+  NZD: { name: 'New Zealand Dollar', flag: '🇳🇿' },
+  CNY: { name: 'Chinese Yuan',       flag: '🇨🇳' },
+  INR: { name: 'Indian Rupee',       flag: '🇮🇳' },
+  MXN: { name: 'Mexican Peso',       flag: '🇲🇽' },
+  BRL: { name: 'Brazilian Real',     flag: '🇧🇷' },
+  SEK: { name: 'Swedish Krona',      flag: '🇸🇪' },
+};
+
+// Each group is shown as one card with BOTH directions (base→quote and the
+// inverse quote→base). Base/quote follow standard FX quoting convention.
+export const CURRENCY_GROUPS: { base: string; quote: string }[] = [
+  { base: 'EUR', quote: 'USD' },
+  { base: 'GBP', quote: 'USD' },
+  { base: 'USD', quote: 'JPY' },
+  { base: 'USD', quote: 'CHF' },
+  { base: 'AUD', quote: 'USD' },
+  { base: 'USD', quote: 'CAD' },
+  { base: 'NZD', quote: 'USD' },
+  { base: 'EUR', quote: 'GBP' },
+  { base: 'EUR', quote: 'JPY' },
+  { base: 'EUR', quote: 'CHF' },
+  { base: 'GBP', quote: 'JPY' },
+  { base: 'USD', quote: 'CNY' },
+  { base: 'USD', quote: 'INR' },
+  { base: 'USD', quote: 'MXN' },
+  { base: 'USD', quote: 'BRL' },
+  { base: 'USD', quote: 'SEK' },
 ];
+
+// Flat list of every pair direction (used by the Compare section and note
+// validation). Derived from CURRENCY_GROUPS so both directions always exist.
+export const CURRENCY_PAIRS = CURRENCY_GROUPS.flatMap(g => [
+  { from: g.base,  to: g.quote, symbol: `${g.base}${g.quote}=X` },
+  { from: g.quote, to: g.base,  symbol: `${g.quote}${g.base}=X` },
+]);
 
 export const ALL_COMPARABLE_ASSETS = [
   ...INDEXES.map(a => ({ ...a, group: 'Indexes' })),

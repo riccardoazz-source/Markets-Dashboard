@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { format, subDays, subMonths, subYears, subWeeks, startOfYear } from 'date-fns';
+import { CURRENCY_GROUPS, CURRENCY_META } from '@/lib/config';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -38,7 +39,10 @@ async function fetchFrankfurter(url: string) {
   return res.json();
 }
 
-const ALL_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CNY', 'INR', 'CAD', 'AUD'];
+// Every currency referenced by any group (USD always included as the API base).
+const ALL_CURRENCIES = Array.from(
+  new Set(['USD', ...Object.keys(CURRENCY_META), ...CURRENCY_GROUPS.flatMap(g => [g.base, g.quote])]),
+);
 
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') ?? 'latest';
@@ -56,18 +60,19 @@ export async function GET(req: NextRequest) {
       const data = await fetchFrankfurter(`https://api.frankfurter.app/latest?from=USD&to=${targets}`);
       const rates = data.rates as Record<string, number>;
 
-      const pairs = [
-        { from: 'USD', to: 'EUR', rate: rates['EUR'] ?? null },
-        { from: 'EUR', to: 'USD', rate: rates['EUR'] ? 1 / rates['EUR'] : null },
-        { from: 'GBP', to: 'USD', rate: rates['GBP'] ? 1 / rates['GBP'] : null },
-        { from: 'USD', to: 'JPY', rate: rates['JPY'] ?? null },
-        { from: 'USD', to: 'CHF', rate: rates['CHF'] ?? null },
-        { from: 'USD', to: 'CNY', rate: rates['CNY'] ?? null },
-        { from: 'USD', to: 'INR', rate: rates['INR'] ?? null },
-        { from: 'USD', to: 'CAD', rate: rates['CAD'] ?? null },
-        { from: 'EUR', to: 'GBP', rate: (rates['GBP'] && rates['EUR']) ? rates['GBP'] / rates['EUR'] : null },
-        { from: 'EUR', to: 'JPY', rate: (rates['JPY'] && rates['EUR']) ? rates['JPY'] / rates['EUR'] : null },
-      ];
+      // usdRate(X) = units of X per 1 USD. Any cross rate A→B = usdRate(B)/usdRate(A).
+      const usdRate = (c: string): number | null => (c === 'USD' ? 1 : (rates[c] ?? null));
+
+      const pairs = CURRENCY_GROUPS.flatMap(g => {
+        const rBase = usdRate(g.base);
+        const rQuote = usdRate(g.quote);
+        const fwd = rBase && rQuote ? rQuote / rBase : null;
+        const rev = rBase && rQuote ? rBase / rQuote : null;
+        return [
+          { from: g.base, to: g.quote, rate: fwd },
+          { from: g.quote, to: g.base, rate: rev },
+        ];
+      });
 
       setCached(key, pairs);
       return NextResponse.json(pairs);
@@ -91,45 +96,17 @@ export async function GET(req: NextRequest) {
       const startDate = isCustom ? fromDateParam! : getStartDate(timeframe);
       const endDate   = isCustom ? toDateParam!   : format(new Date(), 'yyyy-MM-dd');
 
-      let actualFrom = from;
-      let actualTo = to;
-      let invert = false;
-
-      if (from === 'EUR' && to === 'GBP') { actualFrom = 'USD'; actualTo = 'GBP,EUR'; }
-      else if (from === 'EUR' && to === 'JPY') { actualFrom = 'USD'; actualTo = 'JPY,EUR'; }
-      else if (from === 'GBP') { actualFrom = 'USD'; actualTo = 'GBP'; invert = true; }
-      else if (from === 'EUR') { actualFrom = 'USD'; actualTo = 'EUR'; invert = true; }
-
-      const url = `https://api.frankfurter.app/${startDate}..${endDate}?from=${actualFrom}&to=${actualTo}`;
+      // Frankfurter rebases to any supported currency, so the pair can be
+      // requested directly — no USD routing / manual inversion needed.
+      const url = `https://api.frankfurter.app/${startDate}..${endDate}?from=${from}&to=${to}`;
       const data = await fetchFrankfurter(url);
 
       const rates = data.rates as Record<string, Record<string, number>>;
-      let points: { date: string; rate: number }[] = [];
+      const points = Object.entries(rates)
+        .map(([date, r]) => ({ date, rate: r[to] ?? 0 }))
+        .filter(p => p.rate > 0)
+        .sort((a, b) => a.date.localeCompare(b.date));
 
-      if (from === 'EUR' && to === 'GBP') {
-        points = Object.entries(rates).map(([date, r]) => ({
-          date,
-          rate: r['GBP'] && r['EUR'] ? r['GBP'] / r['EUR'] : 0,
-        }));
-      } else if (from === 'EUR' && to === 'JPY') {
-        points = Object.entries(rates).map(([date, r]) => ({
-          date,
-          rate: r['JPY'] && r['EUR'] ? r['JPY'] / r['EUR'] : 0,
-        }));
-      } else if (invert) {
-        const toCcy = actualTo as string;
-        points = Object.entries(rates).map(([date, r]) => ({
-          date,
-          rate: r[toCcy] ? 1 / r[toCcy] : 0,
-        }));
-      } else {
-        points = Object.entries(rates).map(([date, r]) => ({
-          date,
-          rate: r[actualTo] ?? 0,
-        }));
-      }
-
-      points.sort((a, b) => a.date.localeCompare(b.date));
       const avg = points.reduce((s, p) => s + p.rate, 0) / (points.length || 1);
       const result = { points, average: avg };
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { CURRENCY_PAIRS } from '@/lib/config';
+import { CURRENCY_GROUPS, CURRENCY_META } from '@/lib/config';
 import { Timeframe } from '@/lib/types';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
@@ -23,7 +23,15 @@ const TF_OPTIONS: Timeframe[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y'
 
 function decimals(rate: number | null) {
   if (!rate) return 4;
-  return rate > 100 ? 2 : rate > 10 ? 3 : 4;
+  if (rate >= 100) return 2;
+  if (rate >= 10) return 3;
+  if (rate >= 0.1) return 4;
+  if (rate >= 0.01) return 5;
+  return 6;
+}
+
+function flag(code: string) {
+  return CURRENCY_META[code]?.flag ?? '';
 }
 
 export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
@@ -88,6 +96,9 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
   const selectedRate = rates.find(r => r.from === selected?.from && r.to === selected?.to);
   const dec = decimals(selectedRate?.rate ?? null);
 
+  const rateOf = (from: string, to: string) =>
+    rates.find(r => r.from === from && r.to === to)?.rate ?? null;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -101,37 +112,55 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
       </div>
 
       {loading ? (
-        <LoadingGrid count={10} />
+        <LoadingGrid count={8} />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {rates.map(rate => {
-            const isSelected = selected?.from === rate.from && selected?.to === rate.to;
-            const d = decimals(rate.rate);
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {CURRENCY_GROUPS.map(g => {
+            const directions = [
+              { from: g.base, to: g.quote },
+              { from: g.quote, to: g.base },
+            ];
             return (
-              <button
-                key={`${rate.from}/${rate.to}`}
-                onClick={() => setSelected({ from: rate.from, to: rate.to })}
-                className={clsx(
-                  'rounded-xl border p-4 text-left transition-all duration-150 hover:border-accent/50',
-                  isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
-                )}
-              >
-                <div className="flex items-center gap-1.5 mb-3">
-                  <span className="text-sm font-bold text-white">{rate.from}</span>
-                  <ArrowRight size={12} className="text-gray-500" />
-                  <span className="text-sm font-bold text-white">{rate.to}</span>
+              <div key={`${g.base}-${g.quote}`}
+                className="rounded-xl border border-border bg-bg-card overflow-hidden">
+                {/* Header — flags identify both currencies of the group */}
+                <div className="flex items-center justify-center gap-1.5 px-3 py-2 bg-bg-input/40 border-b border-border">
+                  <span className="text-base leading-none">{flag(g.base)}</span>
+                  <span className="text-xs font-bold text-white">{g.base}</span>
+                  <span className="text-gray-600 text-xs mx-0.5">⇄</span>
+                  <span className="text-base leading-none">{flag(g.quote)}</span>
+                  <span className="text-xs font-bold text-white">{g.quote}</span>
                 </div>
-                {rate.rate != null ? (
-                  <p className="text-xl font-bold text-white">
-                    {rate.rate.toFixed(d)}
-                  </p>
-                ) : (
-                  <p className="text-gray-500 text-sm">N/A</p>
-                )}
-                <p className="text-[10px] text-gray-500 mt-1">
-                  1 {rate.from} = {rate.rate?.toFixed(d)} {rate.to}
-                </p>
-              </button>
+                {/* Both directions — a pair and its inverse, side by side */}
+                {directions.map((dir, i) => {
+                  const rate = rateOf(dir.from, dir.to);
+                  const isSelected = selected?.from === dir.from && selected?.to === dir.to;
+                  const d = decimals(rate);
+                  return (
+                    <button
+                      key={`${dir.from}/${dir.to}`}
+                      onClick={() => setSelected({ from: dir.from, to: dir.to })}
+                      className={clsx(
+                        'w-full flex items-center justify-between px-3 py-2.5 transition-colors',
+                        i === 1 && 'border-t border-border/60',
+                        isSelected ? 'bg-accent/15' : 'hover:bg-bg-hover',
+                      )}
+                    >
+                      <span className="flex items-center gap-1 text-[11px] text-gray-400">
+                        <span className="text-[13px] leading-none">{flag(dir.from)}</span>
+                        <span className="font-medium">{dir.from}</span>
+                        <ArrowRight size={9} className="text-gray-600" />
+                        <span className="text-[13px] leading-none">{flag(dir.to)}</span>
+                        <span className="font-medium">{dir.to}</span>
+                      </span>
+                      <span className={clsx('text-sm font-bold tabular-nums',
+                        isSelected ? 'text-accent' : 'text-white')}>
+                        {rate != null ? rate.toFixed(d) : 'N/A'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </div>
@@ -141,8 +170,12 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
         <div className="rounded-xl border border-border bg-bg-card p-5 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
-              <h3 className="text-lg font-bold text-white">
-                {selected.from} / {selected.to}
+              <h3 className="text-lg font-bold text-white flex items-center gap-1.5">
+                <span>{flag(selected.from)}</span>
+                {selected.from}
+                <span className="text-gray-500">/</span>
+                <span>{flag(selected.to)}</span>
+                {selected.to}
               </h3>
               {selectedRate?.rate != null && (
                 <span className="text-2xl font-bold text-accent">
