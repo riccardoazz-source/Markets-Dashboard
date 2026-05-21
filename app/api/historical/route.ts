@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { fetchStooqDaily } from '@/lib/stooq';
-import { subDays, subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
+import { subDays, subWeeks, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 
 export const runtime = 'edge';
 
@@ -20,6 +20,7 @@ function getStartDate(timeframe: string): Date {
   switch (timeframe) {
     case '1D':  return subDays(now, 4);
     case '1W':  return subWeeks(now, 1);
+    case 'MTD': return startOfMonth(now);
     case '1M':  return subMonths(now, 1);
     case '3M':  return subMonths(now, 3);
     case '6M':  return subMonths(now, 6);
@@ -34,7 +35,7 @@ function getStartDate(timeframe: string): Date {
 }
 
 function getInterval(timeframe: string): '1d' | '1wk' | '1mo' {
-  if (['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y'].includes(timeframe)) return '1d';
+  if (['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y'].includes(timeframe)) return '1d';
   if (['3Y', '5Y'].includes(timeframe)) return '1wk';
   return '1mo'; // 10Y and MAX
 }

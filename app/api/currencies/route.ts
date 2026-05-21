@@ -73,6 +73,11 @@ export async function GET(req: NextRequest) {
       const prevDay   = series[dates[dates.length - 2]] ?? latestDay;
       const ytdDay    = series[dates[0]];
 
+      const now2 = new Date();
+      const monthStartStr = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}-01`;
+      const mtdDate = dates.find(d => d >= monthStartStr);
+      const mtdDay = mtdDate ? series[mtdDate] : null;
+
       // usdRate(X) = units of X per 1 USD. Cross rate A→B = usdRate(B)/usdRate(A).
       const usdRate = (day: Record<string, number>, c: string): number | null =>
         c === 'USD' ? 1 : (day?.[c] ?? null);
@@ -90,6 +95,7 @@ export async function GET(req: NextRequest) {
             from: f, to: t, rate,
             change1d: pct(rate, cross(prevDay, f, t)),
             ytd:      pct(rate, cross(ytdDay, f, t)),
+            mtd:      mtdDay ? pct(rate, cross(mtdDay, f, t)) : null,
           };
         }),
       );

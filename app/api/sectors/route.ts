@@ -23,7 +23,7 @@ export async function GET() {
       return NextResponse.json(
         SECTORS.map((s, i) => ({
           symbol: s.symbol, name: s.name, category: s.category,
-          price: null, changePercent: null, oneYearReturn: null, ytdReturn: null,
+          price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null,
           high52w: null, low52w: null, rank: i + 1,
         }))
       );
@@ -39,6 +39,7 @@ export async function GET() {
         changePercent: q?.changePercent ?? null,
         oneYearReturn: q?.fiftyTwoWeekChangePercent ?? null,
         ytdReturn: q?.ytdChangePercent ?? null,
+        mtdReturn: q?.mtdChangePercent ?? null,
         high52w: q?.high52w ?? null,
         low52w: q?.low52w ?? null,
       };
@@ -56,7 +57,7 @@ export async function GET() {
     return NextResponse.json(
       SECTORS.map((s, i) => ({
         symbol: s.symbol, name: s.name, category: s.category,
-        price: null, changePercent: null, oneYearReturn: null,
+        price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null,
         high52w: null, low52w: null, rank: i + 1,
       }))
     );

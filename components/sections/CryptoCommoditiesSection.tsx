@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData, CryptoData } from '@/lib/types';
-import { formatPrice, formatPercent, formatMarketCap, colorForPercent, calculateCAGR } from '@/lib/utils';
+import { formatPrice, formatPercent, formatMarketCap, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -32,6 +32,7 @@ export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null })
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  const [dataMsg, setDataMsg] = useState<string | null>(null);
 
   const fetchCrypto = useCallback(async () => {
     try {
@@ -47,7 +48,7 @@ export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null })
     setHistLoading(true);
     try {
       const coin = CRYPTO_IDS.find(c => c.id === id);
-      const daysMap: Record<string, number> = { '1D': 3, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
+      const daysMap: Record<string, number> = { '1D': 3, '1W': 7, 'MTD': 35, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
       let days = daysMap[tf] ?? 365;
       if (override) {
         const ms = new Date(override.to).getTime() - new Date(override.from).getTime();
@@ -72,6 +73,7 @@ export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null })
 
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
+      setDataMsg(dataAvailabilityMessage(data, tf));
     } catch (e) { console.error(e); }
     finally { setHistLoading(false); }
   }, []);
@@ -90,7 +92,7 @@ export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null })
     if (jumpTo?.startsWith('crypto:')) setSelected(jumpTo.slice('crypto:'.length));
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
 
   const sorted = [...cryptoData].sort((a, b) => {
     const av = a[sortBy] ?? -Infinity;
@@ -179,6 +181,12 @@ export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null })
               onCustomRange={(from, to) => setCustomRange({ from, to })}
             />
           </div>
+
+          {dataMsg && (
+            <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+              ⚠ {dataMsg}
+            </p>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             <Stat label="Price" value={formatPrice(selectedCrypto.price)} />

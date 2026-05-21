@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { HistoricalPoint, Timeframe, QuoteData } from '@/lib/types';
 import {
   calculateCAGR, formatPercent, formatPrice, colorForPercent,
-  buildTotalReturnSeries, computeAssetIRR, DividendEvent,
+  buildTotalReturnSeries, computeAssetIRR, DividendEvent, dataAvailabilityMessage,
 } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -681,6 +681,7 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  const [dataMsg, setDataMsg] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { data: gistData } = useGistData();
@@ -718,8 +719,10 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
       const base = `/api/stock?symbol=${encodeURIComponent(sym)}&timeframe=${tf}`;
       const url = override ? `${base}&from=${override.from}&to=${override.to}` : base;
       const res = await fetch(url);
-      setData(await res.json() as StockData);
-    } catch { setData(null); }
+      const stockData = await res.json() as StockData;
+      setData(stockData);
+      setDataMsg(dataAvailabilityMessage(stockData?.prices ?? [], tf));
+    } catch { setData(null); setDataMsg(null); }
     finally { setLoading(false); }
   }, []);
 
@@ -754,7 +757,7 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
     }
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
 
   // All unique categories used across stock notes (for the category selector)
   const noteCategories = useMemo(() => {
@@ -959,6 +962,12 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
               onCustomRange={(from, to) => setCustomRange({ from, to })}
             />
           </div>
+
+          {dataMsg && (
+            <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+              ⚠ {dataMsg}
+            </p>
+          )}
 
           {/* Legend for dual lines + overlay toggles (EPS / Financials) */}
           {!loading && prices.length > 0 && (

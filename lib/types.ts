@@ -13,6 +13,7 @@ export interface QuoteData {
   low52w?: number | null;
   fiftyTwoWeekChangePercent?: number | null;
   ytdChangePercent?: number | null;
+  mtdChangePercent?: number | null;
   volume?: number | null;
 }
 
@@ -71,7 +72,7 @@ export interface AssetConfig {
   type: 'index' | 'etf' | 'crypto' | 'commodity' | 'currency' | 'sector' | 'macro';
 }
 
-export type Timeframe = '1D' | '1W' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | '3Y' | '5Y' | '10Y' | 'MAX';
+export type Timeframe = '1D' | '1W' | 'MTD' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | '3Y' | '5Y' | '10Y' | 'MAX';
 
 export interface CAGRData {
   timeframe: Timeframe;

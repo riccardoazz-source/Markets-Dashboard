@@ -27,6 +27,7 @@ export interface YahooQuote {
   low52w: number | null;
   fiftyTwoWeekChangePercent: number | null;
   ytdChangePercent: number | null;
+  mtdChangePercent: number | null;
   trailingPE: number | null;
   forwardPE: number | null;
   marketCap: number | null;
@@ -40,6 +41,19 @@ function computeYtd(price: number, timestamps: number[], closes: (number | null)
   for (let i = 0; i < timestamps.length; i++) {
     const c = closes[i];
     if (c != null && c > 0 && timestamps[i] >= yearStart) {
+      return ((price - c) / c) * 100;
+    }
+  }
+  return null;
+}
+
+// MTD reference: first valid close on/after the 1st of the current month.
+function computeMtd(price: number, timestamps: number[], closes: (number | null)[]): number | null {
+  const now = new Date();
+  const monthStart = Math.floor(new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000);
+  for (let i = 0; i < timestamps.length; i++) {
+    const c = closes[i];
+    if (c != null && c > 0 && timestamps[i] >= monthStart) {
       return ((price - c) / c) * 100;
     }
   }
@@ -352,6 +366,7 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
           : null,
       ytdChangePercent:
         (it.ytdReturn as number) != null ? (it.ytdReturn as number) * 100 : null,
+      mtdChangePercent: null,
       trailingPE: (it.trailingPE as number) ?? null,
       forwardPE: (it.forwardPE as number) ?? null,
       marketCap: (it.marketCap as number) ?? null,
@@ -409,6 +424,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     low52w: (m.fiftyTwoWeekLow as number) ?? null,
     fiftyTwoWeekChangePercent,
     ytdChangePercent: computeYtd(price, timestamps, closes),
+    mtdChangePercent: computeMtd(price, timestamps, closes),
     trailingPE: null,
     forwardPE: null,
     marketCap: null,
@@ -489,6 +505,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       low52w: (m.fiftyTwoWeekLow as number) ?? null,
       fiftyTwoWeekChangePercent,
       ytdChangePercent: computeYtd(price, timestamps, closes),
+      mtdChangePercent: computeMtd(price, timestamps, closes),
       trailingPE: null,
       forwardPE: null,
       marketCap: null,
@@ -553,6 +570,7 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
             ? Number(it.fiftyTwoWeekChangePercent) * 100
             : null,
         ytdChangePercent: it.ytdReturn != null ? Number(it.ytdReturn) * 100 : null,
+        mtdChangePercent: null,
         trailingPE: it.trailingPE != null ? Number(it.trailingPE) : null,
         forwardPE:  it.forwardPE  != null ? Number(it.forwardPE)  : null,
         marketCap:  it.marketCap  != null ? Number(it.marketCap)  : null,
@@ -681,6 +699,7 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
             low52w: null,
             fiftyTwoWeekChangePercent: null,
             ytdChangePercent: null,
+            mtdChangePercent: null,
             trailingPE,
             forwardPE,
             marketCap: typeof marketCapRaw === 'number' ? marketCapRaw : null,

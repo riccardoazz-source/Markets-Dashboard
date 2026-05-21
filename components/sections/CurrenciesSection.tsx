@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CURRENCY_GROUPS, CURRENCY_META } from '@/lib/config';
 import { Timeframe } from '@/lib/types';
+import { dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -18,11 +19,12 @@ interface CurrencyRate {
   rate: number | null;
   change1d: number | null;
   ytd: number | null;
+  mtd: number | null;
 }
 
 interface HistPoint { date: string; close: number }
 
-const TF_OPTIONS: Timeframe[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
+const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 function decimals(rate: number | null) {
   if (!rate) return 4;
@@ -70,6 +72,7 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  const [dataMsg, setDataMsg] = useState<string | null>(null);
 
   const fetchRates = useCallback(async () => {
     try {
@@ -93,8 +96,10 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
       const base = `/api/currencies?mode=historical&from=${from}&to=${to}&timeframe=${tf}`;
       const url = override ? `${base}&fromDate=${override.from}&toDate=${override.to}` : base;
       const data = await fetch(url).then(r => r.json()) as { points: { date: string; rate: number }[]; average: number };
-      setHistorical(data.points?.map(p => ({ date: p.date, close: p.rate })) ?? []);
+      const pts = data.points?.map(p => ({ date: p.date, close: p.rate })) ?? [];
+      setHistorical(pts);
       setAverage(data.average ?? null);
+      setDataMsg(dataAvailabilityMessage(pts, tf));
     } catch (e) {
       console.error(e);
     } finally {
@@ -119,7 +124,7 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
     }
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
 
   const selectedRate = rates.find(r => r.from === selected?.from && r.to === selected?.to);
   const dec = decimals(selectedRate?.rate ?? null);
@@ -196,6 +201,12 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
                           </span>
                         </span>
                         <span className="flex items-center gap-1">
+                          <span className="text-gray-600 uppercase tracking-wide">MTD</span>
+                          <span className={clsx('font-semibold', pctClass(d?.mtd ?? null))}>
+                            {pctText(d?.mtd ?? null)}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-1">
                           <span className="text-gray-600 uppercase tracking-wide">YTD</span>
                           <span className={clsx('font-semibold', pctClass(d?.ytd ?? null))}>
                             {pctText(d?.ytd ?? null)}
@@ -236,6 +247,12 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
               onCustomRange={(from, to) => setCustomRange({ from, to })}
             />
           </div>
+
+          {dataMsg && (
+            <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+              ⚠ {dataMsg}
+            </p>
+          )}
 
           <div className="flex gap-4 flex-wrap">
             {selectedRate?.change1d != null && (

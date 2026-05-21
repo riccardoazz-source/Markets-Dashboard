@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SECTORS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPercent, formatPrice, colorForPercent, calculateCAGR } from '@/lib/utils';
+import { formatPercent, formatPrice, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -18,25 +18,29 @@ interface SectorLiveData {
   changePercent: number | null;
   oneYearReturn: number | null;
   ytdReturn: number | null;
+  mtdReturn: number | null;
   high52w: number | null;
   low52w: number | null;
 }
 
 // Seed grid immediately from static config — never empty
 const INITIAL: SectorLiveData = {
-  price: null, changePercent: null, oneYearReturn: null, ytdReturn: null,
+  price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null,
   high52w: null, low52w: null,
 };
 
-const SORT_OPTIONS = [
+type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn';
+
+const SORT_OPTIONS: { value: SectorSortKey; label: string }[] = [
   { value: 'changePercent', label: 'Day' },
+  { value: 'mtdReturn',     label: 'MTD' },
   { value: 'ytdReturn',     label: 'YTD' },
 ];
 
 export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
   const [live, setLive] = useState<Record<string, SectorLiveData>>({});
   const [loading, setLoading] = useState(true);
-  const [sortBy, setSortBy] = useState('changePercent');
+  const [sortBy, setSortBy] = useState<SectorSortKey>('changePercent');
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
@@ -45,6 +49,7 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  const [dataMsg, setDataMsg] = useState<string | null>(null);
 
   const fetchSectors = useCallback(async () => {
     try {
@@ -55,6 +60,7 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
         changePercent: number | null;
         oneYearReturn: number | null;
         ytdReturn: number | null;
+        mtdReturn: number | null;
         high52w: number | null;
         low52w: number | null;
       }>;
@@ -83,6 +89,7 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
       const data = Array.isArray(raw) ? raw : [];
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
+      setDataMsg(dataAvailabilityMessage(data, tf));
     } catch (e) {
       console.error(e);
     } finally {
@@ -104,7 +111,7 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
     if (jumpTo) setSelected(jumpTo);
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
 
   // Merge static config with live data — always renders every sector
   const merged = SECTORS.map(s => ({
@@ -194,6 +201,11 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
                       : '—'
                     }
                   </div>
+                  {sector.mtdReturn != null && (
+                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.mtdReturn))}>
+                      MTD: {formatPercent(sector.mtdReturn, 1)}
+                    </p>
+                  )}
                   {ytd != null && (
                     <p className={clsx('text-[10px] mt-0.5', colorForPercent(ytd))}>
                       YTD: {formatPercent(ytd, 1)}
@@ -228,6 +240,13 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
               onCustomRange={(from, to) => setCustomRange({ from, to })}
             />
           </div>
+
+          {dataMsg && (
+            <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+              ⚠ {dataMsg}
+            </p>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {selectedSector.price != null && <Stat label="Price" value={`$${selectedSector.price.toFixed(2)}`} />}
             {selectedSector.changePercent != null && <Stat label="Day" value={formatPercent(selectedSector.changePercent)} color={colorForPercent(selectedSector.changePercent)} />}

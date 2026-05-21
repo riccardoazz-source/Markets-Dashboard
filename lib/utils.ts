@@ -1,5 +1,5 @@
 import { Timeframe, HistoricalPoint, CAGRData } from './types';
-import { format, subDays, subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
+import { format, subDays, subWeeks, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 
 export function formatPrice(price: number, currency = 'USD', compact = false): string {
   if (compact && price >= 1_000_000_000) {
@@ -44,6 +44,7 @@ export function getTimeframeStart(timeframe: Timeframe): string {
     // a 4-day window so weekends still leave at least one trading day.
     case '1D': date = subDays(now, 4); break;
     case '1W': date = subWeeks(now, 1); break;
+    case 'MTD': date = startOfMonth(now); break;
     case '1M': date = subMonths(now, 1); break;
     case '3M': date = subMonths(now, 3); break;
     case '6M': date = subMonths(now, 6); break;
@@ -62,6 +63,7 @@ export function getIntervalForTimeframe(timeframe: Timeframe): string {
   switch (timeframe) {
     case '1D':
     case '1W':
+    case 'MTD':
     case '1M': return '1d';
     case '3M':
     case '6M':
@@ -473,9 +475,28 @@ export function correlationMatrix(
 
 export function timeframeLabel(tf: Timeframe): string {
   const labels: Record<Timeframe, string> = {
-    '1D': '1 Day', '1W': '1 Week', '1M': '1 Month', '3M': '3 Months',
+    '1D': '1 Day', '1W': '1 Week', 'MTD': 'Month to Date', '1M': '1 Month', '3M': '3 Months',
     '6M': '6 Months', 'YTD': 'Year to Date', '1Y': '1 Year',
     '3Y': '3 Years', '5Y': '5 Years', '10Y': '10 Years', 'MAX': 'Max',
   };
   return labels[tf] ?? tf;
+}
+
+/**
+ * Returns a short notice when the data returned for a timeframe starts
+ * significantly later than requested. Returns null for MAX or when the gap
+ * is ≤30 days (weekends/holidays/data warmup are normal).
+ */
+export function dataAvailabilityMessage(
+  data: HistoricalPoint[],
+  timeframe: Timeframe,
+): string | null {
+  if (timeframe === 'MAX' || data.length < 2) return null;
+  const expectedStart = getTimeframeStart(timeframe);
+  const actualStart = data[0].date;
+  const gapDays = (new Date(actualStart).getTime() - new Date(expectedStart).getTime()) / 86_400_000;
+  if (gapDays <= 30) return null;
+  const d = new Date(actualStart + 'T12:00:00Z');
+  const label = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+  return `Data available from ${label}`;
 }

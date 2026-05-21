@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MACRO_INDICATORS, MacroUnit } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
-import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday } from '@/lib/utils';
+import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { HalvingChart } from '@/components/charts/HalvingChart';
@@ -85,6 +85,7 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  const [dataMsg, setDataMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -185,16 +186,19 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
     try {
       const from = override?.from ?? getTimeframeStart(tf);
       const toParam = override?.to ? `&to=${override.to}` : '';
+      let hist: HistoricalPoint[] = [];
       if (ind?.fetchUrl) {
         const res = await fetch(`/api/scrape?url=${encodeURIComponent(ind.fetchUrl)}&from=${from}`);
         const json = await res.json();
-        setHistorical(json.success && Array.isArray(json.data) ? scrapeToHist(json.data) : []);
+        hist = json.success && Array.isArray(json.data) ? scrapeToHist(json.data) : [];
       } else {
         const res = await fetch(`/api/macro?mode=history&id=${id}&from=${from}${toParam}`);
         const json = await res.json() as HistoricalPoint[];
-        setHistorical(Array.isArray(json) ? json : []);
+        hist = Array.isArray(json) ? json : [];
       }
-    } catch { setHistorical([]); }
+      setHistorical(hist);
+      setDataMsg(dataAvailabilityMessage(hist, tf));
+    } catch { setHistorical([]); setDataMsg(null); }
     finally { setHistLoading(false); }
   }, [allIndicators]);
 
@@ -213,7 +217,7 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
     if (jumpTo) setSelected(jumpTo);
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
 
   const filtered = allIndicators.filter(
     ind => category === 'All' || ind.category === category
@@ -335,6 +339,12 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
               onCustomRange={(from, to) => setCustomRange({ from, to })}
             />
           </div>
+
+          {dataMsg && (
+            <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+              ⚠ {dataMsg}
+            </p>
+          )}
 
           {/* Stats row */}
           {data[selected]?.latest && selected !== 'BTC_HALVING' && (
