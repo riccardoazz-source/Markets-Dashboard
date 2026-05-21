@@ -135,30 +135,26 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
     .map((s, i) => ({ ...s, rank: i + 1 }));
 
   const selectedSector = merged.find(s => s.symbol === selected);
-  const sortLabel = SORT_OPTIONS.find(o => o.value === sortBy)?.label ?? '';
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <p className="text-xs text-gray-500 font-medium">Sort:</p>
+        <span className="text-[10px] text-gray-600">{SECTORS.length} sectors</span>
+        <div className="flex items-center gap-2 shrink-0">
           <div className="flex gap-1 bg-bg-input rounded-lg p-1">
             {SORT_OPTIONS.map(opt => (
               <button key={opt.value} onClick={() => setSortBy(opt.value)}
                 className={clsx(
-                  'px-3 py-1 text-xs font-semibold rounded-md transition-all',
+                  'px-2.5 py-1 text-xs font-semibold rounded-md transition-all',
                   sortBy === opt.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100'
                 )}>
                 {opt.label}
               </button>
             ))}
           </div>
-        </div>
-        <div className="flex items-center gap-2 text-[10px] text-gray-600 shrink-0">
-          <span>{SECTORS.length} sectors · {sortLabel}</span>
-          {loading && <span className="text-accent animate-pulse">updating…</span>}
+          {loading && <span className="text-accent animate-pulse text-[10px]">updating…</span>}
           {lastUpdate && !loading && (
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1 text-[10px] text-gray-600">
               <RefreshCw size={9} />{lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}

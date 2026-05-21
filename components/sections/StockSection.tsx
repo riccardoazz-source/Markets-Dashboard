@@ -180,6 +180,14 @@ function detectReportingFreq(eps: EarningsPoint[]): string {
 
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
+type StockSortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent';
+
+const WATCHLIST_SORT_OPTIONS: { value: StockSortKey; label: string }[] = [
+  { value: 'changePercent',    label: 'Day' },
+  { value: 'mtdChangePercent', label: 'MTD' },
+  { value: 'ytdChangePercent', label: 'YTD' },
+];
+
 interface SearchHit { symbol: string; name: string; exchange: string; type: string }
 interface StockData {
   symbol: string;
@@ -687,6 +695,7 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
   const { data: gistData } = useGistData();
   const [watchlistQuotes, setWatchlistQuotes] = useState<Record<string, QuoteData>>({});
   const [watchlistCategory, setWatchlistCategory] = useState('Watchlist');
+  const [watchlistSort, setWatchlistSort] = useState<StockSortKey>('changePercent');
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -783,6 +792,25 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
     return syms;
   }, [gistData, watchlistCategory]);
 
+  // Watchlist sorted by the active sort key (Day / MTD / YTD); symbols whose
+  // quote hasn't loaded yet sink to the bottom.
+  const sortedWatchlistSymbols = useMemo(() => {
+    const valueOf = (sym: string): number | null => {
+      const q = watchlistQuotes[sym];
+      if (!q) return null;
+      if (watchlistSort === 'changePercent') return q.changePercent ?? null;
+      if (watchlistSort === 'mtdChangePercent') return q.mtdChangePercent ?? null;
+      return q.ytdChangePercent ?? null;
+    };
+    return [...watchlistSymbols].sort((a, b) => {
+      const av = valueOf(a), bv = valueOf(b);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return bv - av;
+    });
+  }, [watchlistSymbols, watchlistQuotes, watchlistSort]);
+
   useEffect(() => {
     if (!watchlistSymbols.length) { setWatchlistQuotes({}); return; }
     const sym = watchlistSymbols.join(',');
@@ -861,18 +889,31 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
       {(watchlistSymbols.length > 0 || noteCategories.length > 0) && (
         <div className="space-y-2">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-              ★ {watchlistCategory}
-            </h3>
-            {noteCategories.length > 1 && (
-              <div className="flex gap-1 flex-wrap">
-                {noteCategories.map(cat => (
-                  <button key={cat} onClick={() => setWatchlistCategory(cat)}
-                    className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
-                      watchlistCategory === cat
-                        ? 'border-amber-400/60 text-amber-300 bg-amber-400/10'
-                        : 'border-border text-gray-500 hover:text-gray-300')}>
-                    {cat}
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                ★ {watchlistCategory}
+              </h3>
+              {noteCategories.length > 1 && (
+                <div className="flex gap-1 flex-wrap">
+                  {noteCategories.map(cat => (
+                    <button key={cat} onClick={() => setWatchlistCategory(cat)}
+                      className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
+                        watchlistCategory === cat
+                          ? 'border-amber-400/60 text-amber-300 bg-amber-400/10'
+                          : 'border-border text-gray-500 hover:text-gray-300')}>
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {watchlistSymbols.length > 0 && (
+              <div className="flex gap-1 bg-bg-input rounded-lg p-1 shrink-0">
+                {WATCHLIST_SORT_OPTIONS.map(opt => (
+                  <button key={opt.value} onClick={() => setWatchlistSort(opt.value)}
+                    className={clsx('px-2.5 py-1 text-xs font-semibold rounded-md transition-all',
+                      watchlistSort === opt.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}>
+                    {opt.label}
                   </button>
                 ))}
               </div>
@@ -881,7 +922,7 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
 
           {watchlistSymbols.length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {watchlistSymbols.map(sym => {
+              {sortedWatchlistSymbols.map(sym => {
                 const q = watchlistQuotes[sym];
                 const change = q?.changePercent ?? null;
                 const mtd = q?.mtdChangePercent ?? null;
