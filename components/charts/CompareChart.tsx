@@ -296,6 +296,12 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         </div>
       )}
 
+      {halvingAsset && visibleHalvingDates.length === 0 && (
+        <p className="mb-1 text-[10px] text-amber-400/80">
+          ⚡ No Bitcoin halving falls in this period — switch to a longer timeframe (5Y / 10Y / MAX) to see the halving lines.
+        </p>
+      )}
+
       <ResponsiveContainer width="100%" height={height}>
         <LineChart
           data={chartData}

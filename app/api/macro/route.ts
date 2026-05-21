@@ -541,32 +541,51 @@ function parseMultplText(
   return pts;
 }
 
-async function fetchMultpl(
-  slug: string,
-  fromDate?: string,
-  timeoutMs = 12_000,
+async function fetchMultplOnce(
+  pagePath: string,
+  fromDate: string | undefined,
+  timeoutMs: number,
 ): Promise<{ date: string; value: number }[]> {
-  const target = `https://www.multpl.com/${slug}/table/by-month`;
-  const url = `https://r.jina.ai/${target}`;
+  const url = `https://r.jina.ai/https://www.multpl.com/${pagePath}`;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
       next: { revalidate: 21600 }, // monthly data — 6h cache keeps proxy load low
-      headers: { 'Accept': 'text/plain', 'X-Return-Format': 'text' },
+      headers: {
+        'Accept': 'text/plain',
+        'X-Return-Format': 'text',
+        // 'direct' = plain HTTP fetch on the proxy side (no headless browser).
+        // multpl's table pages are static HTML, so this is far faster and
+        // avoids timeouts on the long-history tables (P/E etc. go back to 1871).
+        'X-Engine': 'direct',
+      },
     });
-    if (!res.ok) { console.warn(`[multpl] ${slug} proxy HTTP ${res.status}`); return []; }
-    const text = await res.text();
-    const pts = parseMultplText(text, fromDate);
-    console.log(`[multpl] ${slug}: ${pts.length} pts`);
-    return pts;
+    if (!res.ok) { console.warn(`[multpl] ${pagePath} proxy HTTP ${res.status}`); return []; }
+    return parseMultplText(await res.text(), fromDate);
   } catch (e) {
-    console.error(`[multpl] ${slug} failed:`, (e as Error).message);
+    console.error(`[multpl] ${pagePath} failed:`, (e as Error).message);
     return [];
   } finally {
     clearTimeout(t);
   }
+}
+
+async function fetchMultpl(
+  slug: string,
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  // Monthly history first; fall back to the much smaller annual table if the
+  // monthly fetch returns nothing (proxy timeout / rate limit).
+  const monthly = await fetchMultplOnce(`${slug}/table/by-month`, fromDate, 12_000);
+  if (monthly.length > 0) {
+    console.log(`[multpl] ${slug}: ${monthly.length} pts (monthly)`);
+    return monthly;
+  }
+  const yearly = await fetchMultplOnce(`${slug}/table/by-year`, fromDate, 8_000);
+  console.log(`[multpl] ${slug}: ${yearly.length} pts (yearly fallback)`);
+  return yearly;
 }
 
 // ---------- NY Fed EFFR (Effective Federal Funds Rate, no key) ----------
