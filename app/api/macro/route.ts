@@ -53,6 +53,10 @@ function getFredApiKey(): string {
 const WIDE_WINDOW_SERIES = new Set([
   'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING',
   'GFDEGDQ188S', 'GFDEBTN', 'A939RC0A052NBEA',
+  // Market Value: Shiller history ends ~2023 and the multpl annual tables are
+  // small. Always fetch full history so the card has a latest value (the
+  // 18-month list-mode window would otherwise exclude all Shiller data).
+  'SP500_PE', 'SHILLER_CAPE', 'SP500_EPS', 'SP500_EYIELD', 'SP500_PSALES', 'SP500_PBOOK',
 ]);
 
 // ---------- FRED API (preferred when FRED_API_KEY is set) ----------
@@ -575,15 +579,14 @@ async function fetchMultpl(
   slug: string,
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  // Monthly history first; fall back to the much smaller annual table if the
-  // monthly fetch returns nothing (proxy timeout / rate limit).
-  const monthly = await fetchMultplOnce(`${slug}/table/by-month`, fromDate, 12_000);
-  if (monthly.length > 0) {
-    console.log(`[multpl] ${slug}: ${monthly.length} pts (monthly)`);
-    return monthly;
-  }
-  const yearly = await fetchMultplOnce(`${slug}/table/by-year`, fromDate, 8_000);
-  console.log(`[multpl] ${slug}: ${yearly.length} pts (yearly fallback)`);
+  // Annual table only (~150 rows). It is small enough for the proxy to render
+  // quickly and keeps the whole request well under the 25s edge limit.
+  // The previous monthly→annual sequence could take 20s per indicator, which
+  // timed out the entire request (all 6 Market Value cards → blank). Valuation
+  // ratios move slowly, so annual granularity is adequate; dense monthly
+  // history for the Shiller-sourced metrics comes from the Shiller CSV instead.
+  const yearly = await fetchMultplOnce(`${slug}/table/by-year`, fromDate, 9_000);
+  console.log(`[multpl] ${slug}: ${yearly.length} pts (annual)`);
   return yearly;
 }
 
@@ -1234,10 +1237,11 @@ async function fetchMacroSeries(
     return fetchYahooHistorical(src.symbol, fromDate);
   }
   if (src?.type === 'multpl' && src.slug) {
-    // For PE / CAPE / EPS / Earnings Yield: run Jina proxy and Shiller GitHub CSV
-    // in parallel. Jina (fixed — no longer sends invalid X-Engine header) gets
-    // current data. Shiller CSV is always reliable but lags ~2 years. Prefer Jina
-    // when it succeeds; fall back to Shiller so the chart is never blank.
+    // PE / CAPE / EPS / Earnings Yield: Shiller's GitHub CSV gives dense, fully
+    // reliable monthly history (1871 → ~2023). The Jina proxy supplies the
+    // recent annual tail (~2023 → today). Run both in parallel and merge so the
+    // chart always has history even if the proxy is blocked, and current values
+    // whenever the proxy succeeds.
     const isShillerSourced = fredId === 'SP500_PE' || fredId === 'SHILLER_CAPE' ||
       fredId === 'SP500_EPS' || fredId === 'SP500_EYIELD';
     if (isShillerSourced) {
@@ -1245,14 +1249,20 @@ async function fetchMacroSeries(
         fetchMultpl(src.slug, fromDate),
         fetchShillerCSV(fromDate),
       ]);
-      if (jinaResult.length > 0) return jinaResult;
-      // Jina failed — serve Shiller historical data so the chart isn't blank
-      if (fredId === 'SP500_PE')     return shillerResult.pe;
-      if (fredId === 'SHILLER_CAPE') return shillerResult.cape;
-      if (fredId === 'SP500_EPS')    return shillerResult.eps;
-      return shillerResult.ey; // SP500_EYIELD
+      const shillerPts =
+        fredId === 'SP500_PE'     ? shillerResult.pe   :
+        fredId === 'SHILLER_CAPE' ? shillerResult.cape :
+        fredId === 'SP500_EPS'    ? shillerResult.eps  :
+        shillerResult.ey;
+      if (jinaResult.length === 0) return shillerPts;
+      if (shillerPts.length === 0) return jinaResult;
+      // Merge: Shiller history + Jina points newer than Shiller's last date.
+      const cutoff = shillerPts[shillerPts.length - 1].date;
+      const merged = [...shillerPts, ...jinaResult.filter(p => p.date > cutoff)];
+      merged.sort((a, b) => a.date.localeCompare(b.date));
+      return merged;
     }
-    // P/S and P/B → Jina only (no Shiller fallback available for these)
+    // P/S and P/B → Jina only (no GitHub-hosted fallback exists for these)
     return fetchMultpl(src.slug, fromDate);
   }
   if (src?.type === 'computed') {
