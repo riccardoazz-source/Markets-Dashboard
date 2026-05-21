@@ -1,10 +1,10 @@
 'use client';
 
-import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, LayoutGrid } from 'lucide-react';
+import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen } from 'lucide-react';
 import { ForwardRefExoticComponent, RefAttributes } from 'react';
 import clsx from 'clsx';
 
-export type Section = 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'stock' | 'compare' | 'general' | 'sources';
+export type Section = 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'stock' | 'compare' | 'sources';
 
 type LucideIcon = ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>>;
 
@@ -17,7 +17,6 @@ const SECTIONS: { id: Section; label: string; short: string; Icon: LucideIcon }[
   { id: 'macro',       label: 'Macro',       short: 'Macro', Icon: Activity   },
   { id: 'stock',       label: 'Stocks',      short: 'Stocks',Icon: Briefcase  },
   { id: 'compare',     label: 'Compare',     short: 'vs.',   Icon: GitCompare },
-  { id: 'general',     label: 'General',     short: 'Gen',   Icon: LayoutGrid },
   { id: 'sources',     label: 'Sources',     short: 'Src',   Icon: BookOpen   },
 ];
 

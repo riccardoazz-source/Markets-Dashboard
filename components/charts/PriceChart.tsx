@@ -18,6 +18,7 @@ interface Props {
   isCurrency?: boolean;
   interpolationType?: 'monotone' | 'stepAfter';
   enableDragSelect?: boolean;
+  halvingDates?: string[];
 }
 
 function formatDate(dateStr: string, data: HistoricalPoint[]) {
@@ -42,7 +43,7 @@ function fmtDate(d: string) {
 export function PriceChart({
   data, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
-  enableDragSelect = true,
+  enableDragSelect = true, halvingDates,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
@@ -157,6 +158,16 @@ export function PriceChart({
               label={{ value: `Avg ${averageValue.toFixed(decimals)}`, fill: '#f59e0b', fontSize: 10, position: 'right' }}
             />
           )}
+          {halvingDates?.filter(d => d >= data[0].date && d <= data[data.length - 1].date).map(d => (
+            <ReferenceLine
+              key={d}
+              x={d}
+              stroke="#f59e0b"
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              label={{ value: '⚡', fill: '#f59e0b', fontSize: 11, position: 'top' }}
+            />
+          ))}
           <Area
             type={interpolationType}
             dataKey="close"

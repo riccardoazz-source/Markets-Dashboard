@@ -52,6 +52,8 @@ function getFredApiKey(): string {
 // value, and charts show the complete series regardless of the timeframe picked.
 const WIDE_WINDOW_SERIES = new Set([
   'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING',
+  'GFDEGDQ188S', 'GFDEBTN', 'A939RC0A052NBEA',
+  'SP500_PE', 'BUFFETT_IND', 'NDX100_PE', 'SP500_FWD_PE', 'SHILLER_CAPE', 'SP500_EPS', 'NDX100_EPS',
 ]);
 
 // ---------- FRED API (preferred when FRED_API_KEY is set) ----------
@@ -444,6 +446,160 @@ async function fetchBitcoinMonthlyRSI(
   const out = fromDate ? rsi.filter(p => p.date >= fromDate) : rsi;
   console.log(`[btc-rsi] ${out.length} pts`);
   return out;
+}
+
+// ---------- Bitcoin miner revenue (computed from halving schedule + BTC price) ----------
+// Halvings: rewards drop by 50% every ~210,000 blocks (~4 years).
+// ~144 blocks/day (one every 10 minutes on average).
+const HALVING_SCHEDULE: { date: string; reward: number }[] = [
+  { date: '2009-01-03', reward: 50    },
+  { date: '2012-11-28', reward: 25    },
+  { date: '2016-07-09', reward: 12.5  },
+  { date: '2020-05-11', reward: 6.25  },
+  { date: '2024-04-20', reward: 3.125 },
+];
+
+function rewardAt(dateStr: string): number {
+  let reward = HALVING_SCHEDULE[0].reward;
+  for (const h of HALVING_SCHEDULE) {
+    if (dateStr >= h.date) reward = h.reward;
+  }
+  return reward;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month, 0).getDate();
+}
+
+function getBitcoinMinedMonthly(fromDate?: string): { date: string; value: number }[] {
+  const start = fromDate ? new Date(fromDate) : new Date('2009-01-01');
+  const now   = new Date();
+  const pts: { date: string; value: number }[] = [];
+  let y = start.getFullYear();
+  let m = start.getMonth() + 1;
+  while (y < now.getFullYear() || (y === now.getFullYear() && m <= now.getMonth() + 1)) {
+    const dateStr = `${y}-${String(m).padStart(2, '0')}-01`;
+    const reward  = rewardAt(dateStr);
+    const days    = daysInMonth(y, m);
+    pts.push({ date: dateStr, value: reward * 144 * days });
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return pts;
+}
+
+async function getBitcoinMinerRevenue(
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  // Fetch monthly BTC-USD prices to get average price per month.
+  // Pass '2009-01-01' so fetchYahooYield selects range=max, interval=1mo.
+  const monthly = await fetchYahooYield('BTC-USD', '2009-01-01');
+  if (monthly.length < 5) { console.warn('[btc-miner] insufficient BTC history'); return []; }
+
+  // Build month → price map (YYYY-MM prefix)
+  const priceMap = new Map<string, number>();
+  for (const p of monthly) {
+    const mon = p.date.slice(0, 7); // YYYY-MM
+    priceMap.set(mon, p.value);
+  }
+
+  const mined = getBitcoinMinedMonthly(fromDate);
+  const revenue = mined
+    .map(p => {
+      const mon   = p.date.slice(0, 7);
+      const price = priceMap.get(mon);
+      if (!price) return null;
+      return { date: p.date, value: (p.value * price) / 1e9 }; // USD → billions
+    })
+    .filter((p): p is { date: string; value: number } => p !== null);
+
+  console.log(`[btc-miner] revenue: ${revenue.length} monthly pts`);
+  return revenue;
+}
+
+// ---------- Gurufocus economic indicators ----------
+// Gurufocus embeds chart data in page HTML as a JSON array of [date, value] pairs
+// inside a <script> tag. Multiple regex patterns are tried in order.
+async function fetchGurufocus(
+  indicatorId: number,
+  fromDate?: string,
+  timeoutMs = 10_000,
+): Promise<{ date: string; value: number }[]> {
+  const pageUrl = `https://www.gurufocus.com/economic_indicators/${indicatorId}`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(pageUrl, {
+      signal: ctrl.signal,
+      cache: 'no-store',
+      headers: {
+        'User-Agent': UA,
+        'Accept': 'text/html,application/xhtml+xml,*/*;q=0.9',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.gurufocus.com/',
+      },
+    });
+    if (!res.ok) { console.warn(`[gurufocus] ${indicatorId} HTTP ${res.status}`); return []; }
+    const html = await res.text();
+
+    // Gurufocus embeds data as a JSON array: [["YYYY-MM-DD", value], ...]
+    // Try several patterns that have been observed across different indicator pages.
+    const patterns = [
+      /\[\s*\["(\d{4}-\d{2}-\d{2})",\s*[\d.]+\]/,   // presence-check pattern
+    ];
+    // Broad extraction: find the first occurrence of [["YYYY-MM-DD", number], ...]
+    const arrayMatch = html.match(/(\[\s*\["\d{4}-\d{2}-\d{2}",\s*[\d.e+\-]+\](?:\s*,\s*\["\d{4}-\d{2}-\d{2}",\s*[\d.e+\-]+\])*\s*\])/);
+    void patterns;
+    if (arrayMatch) {
+      try {
+        const parsed = JSON.parse(arrayMatch[1]) as [string, number][];
+        const pts: { date: string; value: number }[] = [];
+        for (const [date, value] of parsed) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+          if (!isFinite(value)) continue;
+          if (fromDate && date < fromDate) continue;
+          pts.push({ date, value });
+        }
+        pts.sort((a, b) => a.date.localeCompare(b.date));
+        if (pts.length > 0) {
+          console.log(`[gurufocus] ${indicatorId}: ${pts.length} pts (array pattern)`);
+          return pts;
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Secondary: key-value JSON object {"dates":[...],"values":[...]}
+    const objMatch = html.match(/"dates"\s*:\s*(\[[^\]]+\])\s*,\s*"values"\s*:\s*(\[[^\]]+\])/);
+    if (objMatch) {
+      try {
+        const dates  = JSON.parse(objMatch[1]) as string[];
+        const values = JSON.parse(objMatch[2]) as number[];
+        const pts: { date: string; value: number }[] = [];
+        for (let i = 0; i < Math.min(dates.length, values.length); i++) {
+          const date = dates[i];
+          const value = values[i];
+          if (!/^\d{4}(-\d{2}(-\d{2})?)?$/.test(date)) continue;
+          const normDate = date.length === 4 ? `${date}-07-01` : date.length === 7 ? `${date}-01` : date;
+          if (!isFinite(value)) continue;
+          if (fromDate && normDate < fromDate) continue;
+          pts.push({ date: normDate, value });
+        }
+        pts.sort((a, b) => a.date.localeCompare(b.date));
+        if (pts.length > 0) {
+          console.log(`[gurufocus] ${indicatorId}: ${pts.length} pts (obj pattern)`);
+          return pts;
+        }
+      } catch { /* fall through */ }
+    }
+
+    console.warn(`[gurufocus] ${indicatorId}: no data pattern matched`);
+    return [];
+  } catch (e) {
+    console.error(`[gurufocus] ${indicatorId} failed:`, (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 // ---------- NY Fed EFFR (Effective Federal Funds Rate, no key) ----------
@@ -988,14 +1144,28 @@ async function fetchMacroSeries(
   if (src?.type === 'yahoo_price' && src.symbol) {
     return fetchYahooHistorical(src.symbol, fromDate);
   }
+  if (src?.type === 'gurufocus' && src.indicatorId) {
+    return fetchGurufocus(src.indicatorId, fromDate);
+  }
   if (src?.type === 'computed') {
-    if (fredId === 'BTC_HALVING') return getBitcoinHalvings(fromDate);
-    if (fredId === 'BTC_RSI')     return fetchBitcoinMonthlyRSI(fromDate);
+    if (fredId === 'BTC_HALVING')       return getBitcoinHalvings(fromDate);
+    if (fredId === 'BTC_RSI')           return fetchBitcoinMonthlyRSI(fromDate);
+    if (fredId === 'BTC_MINED_MONTHLY') return getBitcoinMinedMonthly(fromDate);
+    if (fredId === 'BTC_MINER_REVENUE') return getBitcoinMinerRevenue(fromDate);
     // WALCL: Fed total assets in millions on FRED → divide by 1000 for billions.
     if (fredId === 'WALCL') {
       const [fred, dbn] = await Promise.all([
         fetchFRED('WALCL', fromDate, 8_000),
         fetchDBnomicsFRED('WALCL', fromDate, 8_000),
+      ]);
+      const pts = fred.length ? fred : dbn;
+      return pts.map(p => ({ date: p.date, value: p.value / 1000 }));
+    }
+    // GFDEBTN: US Federal Debt in millions on FRED → divide by 1000 for billions.
+    if (fredId === 'GFDEBTN') {
+      const [fred, dbn] = await Promise.all([
+        fetchFRED('GFDEBTN', fromDate, 8_000),
+        fetchDBnomicsFRED('GFDEBTN', fromDate, 8_000),
       ]);
       const pts = fred.length ? fred : dbn;
       return pts.map(p => ({ date: p.date, value: p.value / 1000 }));
@@ -1186,7 +1356,7 @@ export async function GET(req: NextRequest) {
   // are fetched via fetchMacroSeries in a separate shard of the same Promise.all.
   const customSrcIds = ids.filter(id => {
     const s = indicatorSourceMap.get(id);
-    return s?.type === 'yahoo_ratio' || s?.type === 'yahoo_price' || s?.type === 'computed';
+    return s?.type === 'yahoo_ratio' || s?.type === 'yahoo_price' || s?.type === 'computed' || s?.type === 'gurufocus';
   });
   const standardIds = ids.filter(id => !customSrcIds.includes(id));
 

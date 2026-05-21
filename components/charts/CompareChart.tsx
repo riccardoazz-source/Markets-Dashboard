@@ -5,6 +5,7 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
+import { BTC_HALVING_DATES } from '@/lib/config';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 
@@ -89,9 +90,13 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   if (!assets.length) return null;
 
+  // BTC_HALVING is displayed as vertical reference lines, not as a data series.
+  const halvingAsset = assets.find(a => a.symbol === 'BTC_HALVING');
+  const nonHalvingAssets = assets.filter(a => a.symbol !== 'BTC_HALVING');
+
   const MAX_CHART_POINTS = 500;
   const rawDates = Array.from(new Set(
-    assets.flatMap(a => [
+    nonHalvingAssets.flatMap(a => [
       ...a.data.map(d => d.date),
       ...(a.trData ?? []).map(d => d.date),
     ])
@@ -103,14 +108,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     ? rawDates.filter((_, i) => i % step === 0 || i === rawDates.length - 1)
     : rawDates;
 
-  const assetMaps = assets.map(a => ({
+  const assetMaps = nonHalvingAssets.map(a => ({
     prices: new Map(a.data.map(d => [d.date, d.close])),
     tr:     a.trData ? new Map(a.trData.map(d => [d.date, d.close])) : null,
   }));
 
   const chartData = allDates.map(date => {
     const point: Record<string, unknown> = { date };
-    assets.forEach((a, idx) => {
+    nonHalvingAssets.forEach((a, idx) => {
       const v = assetMaps[idx].prices.get(date) ?? null;
       // In % change mode values can be 0 (start) or negative (loss from start)
       point[a.symbol] = v != null && isFinite(v) && (percentMode || v > 0) ? v : null;
@@ -122,6 +127,11 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     return point;
   });
 
+  // Halving dates visible in the current date range
+  const visibleHalvingDates = halvingAsset
+    ? BTC_HALVING_DATES.filter(d => allDates.length === 0 || (d >= allDates[0] && d <= allDates[allDates.length - 1]))
+    : [];
+
   // ── Y-axis grouping ───────────────────────────────────────────────────────
   // In % change mode (Google Finance style): single shared axis — all series
   // start at 0% so they are directly comparable on the same scale.
@@ -129,14 +139,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   // each asset is readable on its own scale regardless of timeframe.
   const { axisMap, hasRightAxis, hasRight2Axis } = (() => {
     const map: Record<string, AxisGroup> = {};
-    assets.forEach(a => { map[a.symbol] = 'left'; });
+    nonHalvingAssets.forEach(a => { map[a.symbol] = 'left'; });
 
     // Percent mode → single axis
     if (percentMode) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
-    if (assets.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
+    if (nonHalvingAssets.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
-    const levels = assets.map(a => {
+    const levels = nonHalvingAssets.map(a => {
       const series = a.rawData ?? a.data;
       let level = 0;
       for (let i = series.length - 1; i >= 0; i--) {
@@ -170,9 +180,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     return { axisMap: map, hasRightAxis: true, hasRight2Axis: true };
   })();
 
-  const leftAssets   = assets.filter(a => (axisMap[a.symbol] ?? 'left') === 'left');
-  const rightAssets  = hasRightAxis  ? assets.filter(a => axisMap[a.symbol] === 'right')  : [];
-  const right2Assets = hasRight2Axis ? assets.filter(a => axisMap[a.symbol] === 'right2') : [];
+  const leftAssets   = nonHalvingAssets.filter(a => (axisMap[a.symbol] ?? 'left') === 'left');
+  const rightAssets  = hasRightAxis  ? nonHalvingAssets.filter(a => axisMap[a.symbol] === 'right')  : [];
+  const right2Assets = hasRight2Axis ? nonHalvingAssets.filter(a => axisMap[a.symbol] === 'right2') : [];
 
   // Every axis scales independently to the data drawn on it, so each asset is
   // readable on its own scale regardless of how differently the others moved.
@@ -181,15 +191,18 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   const right2AxisProps = hasRight2Axis ? axisProps(right2Assets, logScale) : null;
 
   const legendItems: { key: string; name: string; color: string; dashed: boolean }[] = [];
-  assets.forEach(a => {
+  nonHalvingAssets.forEach(a => {
     legendItems.push({ key: a.symbol, name: a.name, color: a.color, dashed: false });
     if (a.trData) {
       legendItems.push({ key: `${a.symbol}_tr`, name: `${a.name} (Total Return)`, color: a.color, dashed: true });
     }
   });
+  if (halvingAsset) {
+    legendItems.push({ key: 'BTC_HALVING', name: 'Bitcoin Halvings', color: '#f59e0b', dashed: true });
+  }
 
   const selStats = range
-    ? assets.map(a => {
+    ? nonHalvingAssets.map(a => {
         const rows = chartData as { date: string; [k: string]: unknown }[];
         const lv = valueAtOrAfter(rows, range.left, a.symbol);
         const rv = valueAtOrBefore(rows, range.right, a.symbol);
@@ -337,7 +350,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           {percentMode && (
             <ReferenceLine yAxisId="left" y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1} />
           )}
-          {assets.map(a => (
+          {nonHalvingAssets.map(a => (
             <Line key={a.symbol}
               yAxisId={axisMap[a.symbol] ?? 'left'}
               type={a.type === 'macro' ? 'stepAfter' : 'monotone'}
@@ -345,12 +358,23 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               stroke={a.color} strokeWidth={2} dot={false}
               activeDot={{ r: 4 }} connectNulls />
           ))}
-          {assets.filter(a => a.trData).map(a => (
+          {nonHalvingAssets.filter(a => a.trData).map(a => (
             <Line key={`${a.symbol}_tr`}
               yAxisId={axisMap[a.symbol] ?? 'left'}
               type="monotone" dataKey={`${a.symbol}_tr`}
               stroke={a.color} strokeWidth={1.5} strokeDasharray="6 3"
               dot={false} activeDot={{ r: 3 }} connectNulls />
+          ))}
+          {visibleHalvingDates.map(d => (
+            <ReferenceLine
+              key={d}
+              yAxisId="left"
+              x={d}
+              stroke="#f59e0b"
+              strokeWidth={1.5}
+              strokeDasharray="5 3"
+              label={{ value: '⚡', fill: '#f59e0b', fontSize: 12, position: 'top' }}
+            />
           ))}
           {area && (
             <ReferenceArea

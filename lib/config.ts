@@ -1,7 +1,7 @@
 import { AssetConfig } from './types';
 
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$';
-export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Sentiment' | 'Crypto';
+export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Sentiment' | 'Crypto' | 'Debt' | 'Market Value';
 
 // ---------- Source metadata ----------
 // Each MacroIndicator declares its primary data source.
@@ -16,7 +16,8 @@ export type MacroSourceType =
   | 'fomc'         // Federal Reserve FOMC rate decisions (hardcoded table + FRED fallback)
   | 'yahoo_price'  // Yahoo Finance price series — symbol required
   | 'yahoo_ratio'  // Yahoo Finance: price(numerator) / price(denominator)
-  | 'computed';    // computed server-side in the API route (Bitcoin halving, RSI)
+  | 'gurufocus'    // Gurufocus economic indicators — indicatorId required
+  | 'computed';    // computed server-side in the API route (Bitcoin halving, RSI, miner revenue)
 
 export interface MacroSource {
   type: MacroSourceType;
@@ -25,6 +26,7 @@ export interface MacroSource {
   symbol?: string;      // yahoo_price only
   numerator?: string;   // yahoo_ratio only: top symbol
   denominator?: string; // yahoo_ratio only: bottom symbol
+  indicatorId?: number; // gurufocus only
 }
 
 export interface MacroIndicator {
@@ -124,6 +126,60 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'BTC_RSI',  name: 'Bitcoin Monthly RSI',     category: 'Crypto',      unit: 'idx',
     source: { type: 'computed', label: 'Computed from BTC-USD (Yahoo)',
               url: 'https://charts.bitbo.io/monthly-rsi/' } },
+  { id: 'BTC_MINER_REVENUE', name: 'Miner Monthly Revenue', category: 'Crypto', unit: 'B$',
+    source: { type: 'computed', label: 'Computed from halving schedule + BTC-USD (Yahoo)',
+              url: 'https://charts.bitbo.io/miner-monthly-revenue/' } },
+  { id: 'BTC_MINED_MONTHLY', name: 'Monthly BTC Mined',     category: 'Crypto', unit: 'idx',
+    source: { type: 'computed', label: 'Computed from halving schedule',
+              url: 'https://charts.bitbo.io/miner-monthly-revenue/' } },
+  // Debt — US federal debt and sustainability metrics
+  { id: 'GFDEGDQ188S', name: 'Debt / GDP Ratio',     category: 'Debt',        unit: '%',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/GFDEGDQ188S' } },
+  { id: 'GFDEBTN',     name: 'US Federal Debt',       category: 'Debt',        unit: 'B$',
+    source: { type: 'computed', label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/GFDEBTN' } },
+  // Growth addition
+  { id: 'A939RC0A052NBEA', name: 'Household Net Worth', category: 'Growth',    unit: 'B$',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/A939RC0A052NBEA' } },
+  // Market Value — valuation ratios from Gurufocus
+  { id: 'SP500_PE',         name: 'S&P 500 P/E Ratio',        category: 'Market Value', unit: 'idx',
+    source: { type: 'gurufocus', label: 'Gurufocus',
+              url: 'https://www.gurufocus.com/economic_indicators/57/sp-500-pe-ratio',
+              indicatorId: 57 } },
+  { id: 'BUFFETT_IND',      name: 'Buffett Indicator',         category: 'Market Value', unit: '%',
+    source: { type: 'gurufocus', label: 'Gurufocus',
+              url: 'https://www.gurufocus.com/economic_indicators/60/buffett-indicator',
+              indicatorId: 60 } },
+  { id: 'NDX100_PE',        name: 'NASDAQ 100 P/E Ratio',      category: 'Market Value', unit: 'idx',
+    source: { type: 'gurufocus', label: 'Gurufocus',
+              url: 'https://www.gurufocus.com/economic_indicators/6778/nasdaq-100-pe-ratio',
+              indicatorId: 6778 } },
+  { id: 'SP500_FWD_PE',     name: 'S&P 500 Forward P/E',       category: 'Market Value', unit: 'idx',
+    source: { type: 'gurufocus', label: 'Gurufocus',
+              url: 'https://www.gurufocus.com/economic_indicators/6061/sp-500-pe-ratio-with-forward-estimate',
+              indicatorId: 6061 } },
+  { id: 'SHILLER_CAPE',     name: 'S&P 500 Shiller CAPE',      category: 'Market Value', unit: 'idx',
+    source: { type: 'gurufocus', label: 'Gurufocus',
+              url: 'https://www.gurufocus.com/economic_indicators/56/sp-500-shiller-cape-ratio',
+              indicatorId: 56 } },
+  { id: 'SP500_EPS',        name: 'S&P 500 EPS',               category: 'Market Value', unit: 'idx',
+    source: { type: 'gurufocus', label: 'Gurufocus',
+              url: 'https://www.gurufocus.com/economic_indicators/58/sp-500-earnings-per-share',
+              indicatorId: 58 } },
+  { id: 'NDX100_EPS',       name: 'NASDAQ 100 EPS',            category: 'Market Value', unit: 'idx',
+    source: { type: 'gurufocus', label: 'Gurufocus',
+              url: 'https://www.gurufocus.com/economic_indicators/5870/nasdaq-100-earnings-per-share',
+              indicatorId: 5870 } },
+];
+
+// Bitcoin halving dates (exported so UI components can render them as reference lines).
+export const BTC_HALVING_DATES: string[] = [
+  '2012-11-28', // 1st: 50 → 25 BTC
+  '2016-07-09', // 2nd: 25 → 12.5 BTC
+  '2020-05-11', // 3rd: 12.5 → 6.25 BTC
+  '2024-04-20', // 4th: 6.25 → 3.125 BTC
 ];
 
 export const INDEXES: AssetConfig[] = [
