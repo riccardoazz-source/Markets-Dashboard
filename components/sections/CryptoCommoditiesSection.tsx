@@ -13,10 +13,11 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
-type SortKey = 'change24hPercent' | 'ytdChangePercent';
+type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'change24hPercent',  label: 'Day' },
+  { value: 'mtdChangePercent',  label: 'MTD' },
   { value: 'ytdChangePercent',  label: 'YTD' },
 ];
 
@@ -151,6 +152,11 @@ export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null })
                   {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                   {formatPercent(coin.change24hPercent)} <span className="text-[10px] font-medium opacity-70">day</span>
                 </div>
+                {coin.mtdChangePercent != null && (
+                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.mtdChangePercent))}>
+                    MTD: {formatPercent(coin.mtdChangePercent, 1)}
+                  </p>
+                )}
                 {coin.ytdChangePercent != null && (
                   <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.ytdChangePercent))}>
                     YTD: {formatPercent(coin.ytdChangePercent, 1)}
@@ -191,6 +197,9 @@ export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null })
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             <Stat label="Price" value={formatPrice(selectedCrypto.price)} />
             <Stat label="Day Change" value={formatPercent(selectedCrypto.change24hPercent)} color={colorForPercent(selectedCrypto.change24hPercent)} />
+            {selectedCrypto.mtdChangePercent != null && (
+              <Stat label="MTD Return" value={formatPercent(selectedCrypto.mtdChangePercent)} color={colorForPercent(selectedCrypto.mtdChangePercent)} />
+            )}
             {selectedCrypto.ytdChangePercent != null && (
               <Stat label="YTD Return" value={formatPercent(selectedCrypto.ytdChangePercent)} color={colorForPercent(selectedCrypto.ytdChangePercent)} />
             )}

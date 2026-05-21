@@ -178,7 +178,7 @@ function detectReportingFreq(eps: EarningsPoint[]): string {
   return 'less frequent';
 }
 
-const TF_OPTIONS: Timeframe[] = ['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
+const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface SearchHit { symbol: string; name: string; exchange: string; type: string }
 interface StockData {
@@ -884,6 +884,7 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
               {watchlistSymbols.map(sym => {
                 const q = watchlistQuotes[sym];
                 const change = q?.changePercent ?? null;
+                const mtd = q?.mtdChangePercent ?? null;
                 const ytd = q?.ytdChangePercent ?? null;
                 const isSelected = selected?.symbol === sym;
                 return (
@@ -913,12 +914,24 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
                     {q?.price != null && (
                       <p className="text-sm font-bold text-white">{formatPrice(q.price, q.currency ?? 'USD')}</p>
                     )}
-                    {ytd != null && (
-                      <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-border/40">
-                        <span className="text-[9px] text-gray-600 uppercase tracking-wide">YTD</span>
-                        <span className={clsx('text-[10px] font-semibold tabular-nums', ytd >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                          {ytd >= 0 ? '+' : ''}{ytd.toFixed(2)}%
-                        </span>
+                    {(mtd != null || ytd != null) && (
+                      <div className="mt-1.5 pt-1.5 border-t border-border/40 space-y-0.5">
+                        {mtd != null && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] text-gray-600 uppercase tracking-wide">MTD</span>
+                            <span className={clsx('text-[10px] font-semibold tabular-nums', mtd >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                              {mtd >= 0 ? '+' : ''}{mtd.toFixed(2)}%
+                            </span>
+                          </div>
+                        )}
+                        {ytd != null && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] text-gray-600 uppercase tracking-wide">YTD</span>
+                            <span className={clsx('text-[10px] font-semibold tabular-nums', ytd >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                              {ytd >= 0 ? '+' : ''}{ytd.toFixed(2)}%
+                            </span>
+                          </div>
+                        )}
                       </div>
                     )}
                     {!q && <p className="text-[10px] text-gray-600 animate-pulse">Loading…</p>}

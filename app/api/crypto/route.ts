@@ -66,6 +66,43 @@ async function fetchYtdAnchors(ids: string[]): Promise<Map<string, number>> {
   return map;
 }
 
+// 1st-of-month USD price per coin id — immutable once the month started, cached per month.
+const mtdAnchorCache = new Map<string, number>();
+let mtdAnchorMonth = '';
+
+async function fetchMtdAnchor(id: string): Promise<number | null> {
+  const now = new Date();
+  const monthKey = `${now.getUTCFullYear()}-${now.getUTCMonth()}`;
+  if (mtdAnchorMonth !== monthKey) { mtdAnchorCache.clear(); mtdAnchorMonth = monthKey; }
+  const cached = mtdAnchorCache.get(id);
+  if (cached != null) return cached;
+
+  // CoinGecko /coins/{id}/history needs DD-MM-YYYY format
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const dateStr = `01-${mm}-${now.getUTCFullYear()}`;
+  const url = `https://api.coingecko.com/api/v3/coins/${id}/history?date=${dateStr}&localization=false`;
+  try {
+    const res = await fetchCG(url, 10_000);
+    if (!res.ok) return null;
+    const json = await res.json() as { market_data?: { current_price?: { usd?: number } } };
+    const price = json?.market_data?.current_price?.usd;
+    if (typeof price === 'number' && isFinite(price) && price > 0) {
+      mtdAnchorCache.set(id, price);
+      return price;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+async function fetchMtdAnchors(ids: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const results = await Promise.all(
+    ids.map(id => fetchMtdAnchor(id).then(p => ({ id, p })).catch(() => ({ id, p: null })))
+  );
+  for (const { id, p } of results) if (p != null) map.set(id, p);
+  return map;
+}
+
 // CoinGecko free tier rate-limits at 30/min — retry with backoff on 429/5xx
 async function fetchCGWithRetry(url: string): Promise<Response> {
   let res = await fetchCG(url);
@@ -97,6 +134,10 @@ export async function GET(req: NextRequest) {
         fetchCGWithRetry(url),
         fetchYtdAnchors(coinIds).catch(() => new Map<string, number>()),
       ]);
+      // MTD anchors fetched after YTD to keep peak CoinGecko concurrency low
+      // (free tier rate-limits at 30/min). Both are cached, so this only hits
+      // the network on the first request of a new month.
+      const mtdAnchors = await fetchMtdAnchors(coinIds).catch(() => new Map<string, number>());
       if (!cgRes.ok) throw new Error(`CoinGecko: ${cgRes.status}`);
       const raw = await cgRes.json() as Array<Record<string, unknown>>;
 
@@ -108,6 +149,11 @@ export async function GET(req: NextRequest) {
           jan1Price != null && currentPrice > 0
             ? ((currentPrice - jan1Price) / jan1Price) * 100
             : null;
+        const monthStartPrice = mtdAnchors.get(coin.id as string);
+        const mtdChangePercent =
+          monthStartPrice != null && currentPrice > 0
+            ? ((currentPrice - monthStartPrice) / monthStartPrice) * 100
+            : null;
         return {
           id: coin.id,
           symbol: sym,
@@ -117,6 +163,7 @@ export async function GET(req: NextRequest) {
           change24hPercent: coin.price_change_percentage_24h,
           change7dPercent: coin.price_change_percentage_7d_in_currency,
           change1yPercent: coin.price_change_percentage_1y_in_currency ?? null,
+          mtdChangePercent,
           ytdChangePercent,
           marketCap: coin.market_cap,
           volume24h: coin.total_volume,

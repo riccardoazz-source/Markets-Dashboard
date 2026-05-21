@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { COMMODITIES } from '@/lib/config';
 import { QuoteData, HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPrice, formatPercent, colorForPercent, calculateCAGR } from '@/lib/utils';
+import { formatPrice, formatPercent, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -13,10 +13,11 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
 
-type SortKey = 'changePercent' | 'ytdChangePercent';
+type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'changePercent',      label: 'Day' },
+  { value: 'mtdChangePercent',   label: 'MTD' },
   { value: 'ytdChangePercent',   label: 'YTD' },
 ];
 
@@ -32,6 +33,7 @@ export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  const [dataMsg, setDataMsg] = useState<string | null>(null);
 
   const fetchQuotes = useCallback(async () => {
     try {
@@ -58,6 +60,7 @@ export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
       const data = Array.isArray(raw) ? raw : [];
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
+      setDataMsg(dataAvailabilityMessage(data, tf));
     } catch (e) { console.error(e); }
     finally { setHistLoading(false); }
   }, []);
@@ -76,15 +79,18 @@ export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
     if (jumpTo) setSelected(jumpTo);
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
+
+  const getValue = (q: QuoteData | undefined, key: SortKey): number | null => {
+    if (!q) return null;
+    if (key === 'changePercent') return q.changePercent ?? null;
+    if (key === 'mtdChangePercent') return q.mtdChangePercent ?? null;
+    return q.ytdChangePercent ?? null;
+  };
 
   const sorted = [...COMMODITIES].sort((a, b) => {
-    const qa = quotes[a.symbol];
-    const qb = quotes[b.symbol];
-    const av: number | null | undefined =
-      sortBy === 'changePercent' ? qa?.changePercent : qa?.ytdChangePercent;
-    const bv: number | null | undefined =
-      sortBy === 'changePercent' ? qb?.changePercent : qb?.ytdChangePercent;
+    const av = getValue(quotes[a.symbol], sortBy);
+    const bv = getValue(quotes[b.symbol], sortBy);
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;
@@ -124,6 +130,7 @@ export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
           {sorted.map(com => {
             const q = quotes[com.symbol];
             const day = q?.changePercent ?? 0;
+            const mtd = q?.mtdChangePercent;
             const ytd = q?.ytdChangePercent;
             const isUp = day >= 0;
             const isSelected = selected === com.symbol;
@@ -143,6 +150,11 @@ export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
                       {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                       {formatPercent(day)} <span className="text-[10px] font-medium opacity-70">day</span>
                     </div>
+                    {mtd != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(mtd))}>
+                        MTD: {formatPercent(mtd, 1)}
+                      </p>
+                    )}
                     {ytd != null && (
                       <p className={clsx('text-[10px] mt-0.5', colorForPercent(ytd))}>
                         YTD: {formatPercent(ytd, 1)}
@@ -178,9 +190,18 @@ export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
             />
           </div>
 
+          {dataMsg && (
+            <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+              ⚠ {dataMsg}
+            </p>
+          )}
+
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             <Stat label="Price" value={formatPrice(selectedQuote.price)} />
             <Stat label="Day Change" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
+            {selectedQuote.mtdChangePercent != null && (
+              <Stat label="MTD Return" value={formatPercent(selectedQuote.mtdChangePercent)} color={colorForPercent(selectedQuote.mtdChangePercent)} />
+            )}
             {selectedQuote.ytdChangePercent != null && (
               <Stat label="YTD Return" value={formatPercent(selectedQuote.ytdChangePercent)} color={colorForPercent(selectedQuote.ytdChangePercent)} />
             )}
