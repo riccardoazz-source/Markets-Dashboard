@@ -13,6 +13,7 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { useGistData } from '@/lib/gist';
+import { computeSMA, computeRSI, computeMACD } from '@/lib/indicators';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceArea, ReferenceLine,
@@ -199,6 +200,8 @@ interface DualChartToolsOverlay {
   avg?: boolean;
   stdDev?: boolean;
   minMax?: boolean;
+  sma50?: boolean;
+  sma200?: boolean;
 }
 
 function DualChart({
@@ -290,6 +293,19 @@ function DualChart({
     ...profMap.keys(),
     ...peMap.keys(),
   ])).sort();
+  // Tool overlay computations (on price series)
+  const toolCloses = prices.map(p => p.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
+
+  // SMA series for Golden Cross
+  const sma50Vals  = toolsOverlay?.sma50  ? computeSMA(toolCloses, 50)  : null;
+  const sma200Vals = toolsOverlay?.sma200 ? computeSMA(toolCloses, 200) : null;
+  const smaByDate  = new Map<string, { sma50: number | null; sma200: number | null }>();
+  if (sma50Vals || sma200Vals) {
+    prices.forEach((p, i) => {
+      smaByDate.set(p.date, { sma50: sma50Vals?.[i] ?? null, sma200: sma200Vals?.[i] ?? null });
+    });
+  }
+
   const chartData = allDates.map(date => ({
     date,
     price: priceMap.get(date) ?? null,
@@ -300,13 +316,12 @@ function DualChart({
     revIsAnnual: revIsAnnualMap.get(date) ?? false,
     profit: profMap.get(date) ?? null,
     pe: peMap.get(date) ?? null,
+    sma50:  smaByDate.get(date)?.sma50  ?? null,
+    sma200: smaByDate.get(date)?.sma200 ?? null,
   }));
 
   const decimals = 2;
   const isUp = (prices[prices.length - 1]?.close ?? 0) >= (prices[0]?.close ?? 0);
-
-  // Tool overlay computations (on price series)
-  const toolCloses = prices.map(p => p.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
   const toolAvg = toolCloses.length > 0 ? toolCloses.reduce((s, v) => s + v, 0) / toolCloses.length : null;
   const toolVariance = toolAvg != null && toolCloses.length > 1
     ? toolCloses.reduce((s, v) => s + (v - toolAvg) ** 2, 0) / toolCloses.length
@@ -418,6 +433,15 @@ function DualChart({
         {showPe && (
           <Line yAxisId="pe" type="monotone" dataKey="pe" stroke="#a3e635"
             strokeWidth={1.5} strokeDasharray="3 3" dot={false} connectNulls name="pe" />
+        )}
+        {/* SMA overlays for Golden Cross */}
+        {toolsOverlay?.sma50 && (
+          <Line yAxisId="price" type="monotone" dataKey="sma50" stroke="#f97316"
+            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="SMA 50" />
+        )}
+        {toolsOverlay?.sma200 && (
+          <Line yAxisId="price" type="monotone" dataKey="sma200" stroke="#a855f7"
+            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="SMA 200" />
         )}
         {area && (
           <ReferenceArea
@@ -1005,6 +1029,70 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
               No data found. Try a different ticker.
             </div>
           )}
+
+          {/* RSI / MACD oscillator sub-charts for stocks */}
+          {!loading && prices.length > 0 && activeTools.rsi && (() => {
+            const stockCloses = prices.map(p => p.close).filter((c): c is number => isFinite(c));
+            const rsiVals = computeRSI(stockCloses);
+            const rsiData = prices.map((p, i) => ({ date: p.date, rsi: rsiVals[i] }));
+            const valid = rsiData.filter(d => d.rsi != null);
+            if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
+            return (
+              <div className="rounded-lg border border-border p-3 bg-bg-input/40">
+                <p className="text-[10px] text-indigo-400 font-semibold mb-1">RSI 14</p>
+                <ResponsiveContainer width="100%" height={80}>
+                  <LineChart data={rsiData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+                    <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+                    <YAxis domain={[0, 100]} ticks={[30, 50, 70]}
+                      tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={24} />
+                    <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.6} />
+                    <ReferenceLine y={50} stroke="#6b7280" strokeDasharray="1 4" strokeOpacity={0.35} />
+                    <ReferenceLine y={30} stroke="#10b981" strokeDasharray="3 3" strokeOpacity={0.6} />
+                    <Line type="monotone" dataKey="rsi" stroke="#818cf8" strokeWidth={1.5} dot={false} connectNulls={false} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+                      formatter={(v: number) => [`${(v ?? 0).toFixed(1)}`, 'RSI 14']}
+                      labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
+
+          {!loading && prices.length > 0 && activeTools.macd && (() => {
+            const stockCloses = prices.map(p => p.close).filter((c): c is number => isFinite(c));
+            const macdResult = computeMACD(stockCloses);
+            const macdData = prices.map((p, i) => ({
+              date: p.date,
+              macd: macdResult.macd[i], signal: macdResult.signal[i], hist: macdResult.hist[i],
+            }));
+            const valid = macdData.filter(d => d.hist != null);
+            if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">MACD: not enough data</div>;
+            return (
+              <div className="rounded-lg border border-border p-3 bg-bg-input/40">
+                <p className="text-[10px] text-blue-400 font-semibold mb-1">MACD (12, 26, 9)</p>
+                <ResponsiveContainer width="100%" height={80}>
+                  <ComposedChart data={macdData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+                    <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+                    <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={36}
+                      tickFormatter={v => (v as number).toFixed(2)} />
+                    <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.4} />
+                    <Bar dataKey="hist" barSize={3}>
+                      {macdData.map((entry, i) => (
+                        <Cell key={i} fill={(entry.hist ?? 0) >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.7} />
+                      ))}
+                    </Bar>
+                    <Line type="monotone" dataKey="macd" stroke="#60a5fa" strokeWidth={1.5} dot={false} connectNulls={false} name="MACD" />
+                    <Line type="monotone" dataKey="signal" stroke="#f97316" strokeWidth={1} strokeDasharray="4 3" dot={false} connectNulls={false} name="Signal" />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+                      formatter={(v: number, name: string) => [v != null ? v.toFixed(4) : '—', name]}
+                      labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
 
           {!loading && prices.length > 0 && (
             <ChartTools data={prices} activeTools={activeTools} onChange={setActiveTools} />
