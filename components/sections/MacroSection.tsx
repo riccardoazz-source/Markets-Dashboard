@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES } from '@/lib/config';
+import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
@@ -238,6 +238,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const selectedIndicator = allIndicators.find(ind => ind.id === selected);
   const cagrData = selectedIndicator ? calculateCAGR(historical, timeframe) : null;
   const selIsRec = selected ? RECESSION_SET.has(selected) : false;
+  const selIsFOMC = selected === 'FOMC_MEETINGS';
 
   return (
     <div className="space-y-3">
@@ -277,9 +278,10 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           const isSelected = selected === ind.id;
           const ok = statusOk[ind.id];
           const isRec = RECESSION_SET.has(ind.id);
-          // Overlay series (recession bands, halving markers) behave differently
+          const isFOMC = ind.id === 'FOMC_MEETINGS';
+          // Overlay series (recession bands, halving/meeting markers) behave differently
           // from normal indicators — flag them so they are easy to spot.
-          const isSpecial = isRec || ind.id === 'BTC_HALVING';
+          const isSpecial = isRec || ind.id === 'BTC_HALVING' || isFOMC;
 
           return (
             <button key={ind.id}
@@ -307,7 +309,27 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
               {latest ? (
                 <>
-                  {isRec ? (
+                  {isFOMC ? (
+                    (() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const past = FOMC_MEETING_DATES.filter(d => d <= today);
+                      const future = FOMC_MEETING_DATES.filter(d => d > today);
+                      const lastMeeting = past[past.length - 1];
+                      const nextMeeting = future[0];
+                      const fmt = (d: string) => {
+                        try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); }
+                        catch { return d; }
+                      };
+                      return (
+                        <div className="space-y-0.5">
+                          <p className="text-xs text-gray-500">Last</p>
+                          <p className="text-sm font-bold text-gray-100">{lastMeeting ? fmt(lastMeeting) : '—'}</p>
+                          <p className="text-xs text-gray-500 mt-1">Next</p>
+                          <p className="text-sm font-bold text-blue-300">{nextMeeting ? fmt(nextMeeting) : '—'}</p>
+                        </div>
+                      );
+                    })()
+                  ) : isRec ? (
                     <p className={clsx('text-lg font-bold tabular-nums',
                       latest.value >= 0.5 ? 'text-down-text' : 'text-up-text')}>
                       {latest.value >= 0.5 ? 'In recession' : 'No recession'}
@@ -389,7 +411,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           )}
 
           {/* Stats row */}
-          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && (
+          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <Stat label="Latest" value={formatMacroValue(data[selected].latest!.value, selectedIndicator.unit)} />
               {data[selected].prev && (
@@ -410,6 +432,8 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
           {selected === 'BTC_HALVING' ? (
             <HalvingChart height={240} />
+          ) : selIsFOMC ? (
+            <FOMCMeetingsList />
           ) : histLoading ? (
             <div className="flex items-center justify-center h-44">
               <LoadingSpinner size={28} />
@@ -439,10 +463,10 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </div>
           )}
 
-          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
-          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && (
             <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
           )}
           {selected && <ChartNotes chartId={selected} />}
@@ -461,6 +485,45 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
     <div className="bg-bg-input rounded-lg px-3 py-2">
       <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
       <p className={clsx('text-sm font-bold', color ?? 'text-gray-100')}>{value}</p>
+    </div>
+  );
+}
+
+function FOMCMeetingsList() {
+  const today = new Date().toISOString().slice(0, 10);
+  const fmt = (d: string) => {
+    try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); }
+    catch { return d; }
+  };
+  const past = FOMC_MEETING_DATES.filter(d => d <= today).slice().reverse();
+  const future = FOMC_MEETING_DATES.filter(d => d > today);
+
+  return (
+    <div className="space-y-3">
+      {future.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider mb-1.5">Upcoming meetings</p>
+          <div className="space-y-1">
+            {future.map(d => (
+              <div key={d} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                <span className="text-sm text-blue-200">{fmt(d)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div>
+        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Past meetings</p>
+        <div className="max-h-64 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+          {past.map(d => (
+            <div key={d} className="flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-bg-input transition-colors">
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-600 shrink-0" />
+              <span className="text-xs text-gray-400">{fmt(d)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

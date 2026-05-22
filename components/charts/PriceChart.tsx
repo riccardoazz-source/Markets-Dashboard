@@ -188,6 +188,12 @@ export function PriceChart({
   const rawMin = closes.length > 0 ? Math.min(...closes) : 0;
   const rawMax = closes.length > 0 ? Math.max(...closes) : 1;
 
+  const TODAY = new Date().toISOString().slice(0, 10);
+  const hasFutureData = data.length > 0 && data[data.length - 1].date > TODAY;
+  const hasNegative = closes.some(v => v < 0);
+  const hasPositive = closes.some(v => v > 0);
+  const needsZeroLine = hasNegative && hasPositive;
+
   // Tool overlay computations (level overlays on main chart)
   const toolAvg = closes.length > 0 ? closes.reduce((s, v) => s + v, 0) / closes.length : null;
   const toolVariance = toolAvg != null && closes.length > 1
@@ -459,6 +465,14 @@ export function PriceChart({
               strokeDasharray="4 4"
               label={{ value: `Avg ${averageValue.toFixed(decimals)}`, fill: '#f59e0b', fontSize: 10, position: 'right' }}
             />
+          )}
+          {needsZeroLine && (
+            <ReferenceLine y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1.5}
+              label={{ value: '0', fill: '#6b7280', fontSize: 9, position: 'right' }} />
+          )}
+          {hasFutureData && (
+            <ReferenceLine x={TODAY} stroke="#6b7280" strokeWidth={1.5} strokeDasharray="5 3"
+              label={{ value: 'Today', fill: '#9ca3af', fontSize: 9, position: 'insideTopLeft' }} />
           )}
           {toolsOverlay?.avg && toolAvg != null && (
             <ReferenceLine y={toolAvg} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1.5}

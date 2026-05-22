@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { MACRO_INDICATORS } from '@/lib/config';
+import { MACRO_INDICATORS, FOMC_MEETING_DATES } from '@/lib/config';
 
 // Source map: look up MacroSource by indicator id for dispatch in fetchMacroSeries.
 const indicatorSourceMap = new Map(
@@ -54,7 +54,9 @@ const WIDE_WINDOW_SERIES = new Set([
   'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING', 'BTC_PRODUCTION_COST',
   'GFDEGDQ188S', 'GFDEBTN', 'A939RC0A052NBEA',
   // Recession indicators — bands are only useful with full history.
-  'USREC',
+  'USREC', 'SAHMREALTIME',
+  // Rates — full history needed to see yield curve inversions, negative ECB rates, etc.
+  'T10Y2Y', 'ECBDFR', 'FEDTARMD', 'FOMC_MEETINGS',
   // Market Value: Shiller history ends ~2023 and the multpl annual tables are
   // small. Always fetch full history so the card has a latest value (the
   // 18-month list-mode window would otherwise exclude all Shiller data).
@@ -1326,6 +1328,31 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_MINED_MONTHLY')    return getBitcoinMinedMonthly(fromDate);
     if (fredId === 'BTC_MINER_REVENUE')    return getBitcoinMinerRevenue(fromDate);
     if (fredId === 'BTC_PRODUCTION_COST')  return fetchBitcoinProductionCost(fromDate);
+    if (fredId === 'FOMC_MEETINGS') {
+      const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
+      return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+    }
+    if (fredId === 'FEDTARMD') {
+      // Try FRED / DBnomics first (may carry SEP dot-plot projections)
+      const [fred, dbn] = await Promise.all([
+        fetchFRED('FEDTARMD', fromDate, 8_000),
+        fetchDBnomicsFRED('FEDTARMD', fromDate, 8_000),
+      ]);
+      if (fred.length > 0) return fred;
+      if (dbn.length > 0) return dbn;
+      // Fallback: midpoint of FOMC target range from hardcoded table.
+      // Range system started 2008-12-16 (25bps range → midpoint = upper − 0.125).
+      const pts = FOMC_TARGET_UPPER.map(p => ({
+        date: p.date,
+        value: p.date >= '2008-12-16' ? p.value - 0.125 : p.value,
+      }));
+      const result = fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+      if (!result.length && FOMC_TARGET_UPPER.length > 0) {
+        const last = FOMC_TARGET_UPPER[FOMC_TARGET_UPPER.length - 1];
+        return [{ date: last.date, value: last.date >= '2008-12-16' ? last.value - 0.125 : last.value }];
+      }
+      return result;
+    }
     // WALCL: Fed total assets in millions on FRED → divide by 1000 for billions.
     if (fredId === 'WALCL') {
       const [fred, dbn] = await Promise.all([

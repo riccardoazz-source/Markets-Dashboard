@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from 'react';
-import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES } from '@/lib/config';
+import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
@@ -285,11 +285,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       const tfEnd = customRange ? customRange.to : null;
 
       // First pass: find each asset's first date that falls within the TF window.
-      // Recession assets carry full history and are excluded from commonStart so
-      // they don't constrain other assets' start date.
-      // Consider BOTH prices and totalReturnData so both lines share the same baseline.
+      // Recession assets and event overlays (BTC_HALVING, FOMC_MEETINGS) carry full
+      // history and are excluded from commonStart so they don't constrain other assets.
+      const EVENT_OVERLAY = new Set([...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS']);
       const firstDates = assets
-        .filter(a => !RECESSION_SET.has(a.symbol))
+        .filter(a => !EVENT_OVERLAY.has(a.symbol))
         .map(a => {
           const raw = a.rawData ?? a.data;
           const rawFirst = raw.find(d => d.date >= tfStart)?.date ?? tfStart;
@@ -304,11 +304,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
 
       return assets.map(a => {
         const raw = a.rawData ?? a.data;
-        const isRec = RECESSION_SET.has(a.symbol);
-        // rawFiltered: full history for recession assets so recessionBands in
-        // CompareChart can find historical intervals even on short timeframes.
-        let rawFiltered = isRec ? raw : raw.filter(d => d.date >= commonStart);
-        if (tfEnd && !isRec) rawFiltered = rawFiltered.filter(d => d.date <= tfEnd);
+        const isOverlay = EVENT_OVERLAY.has(a.symbol);
+        // rawFiltered: full history for overlay assets (recession bands, FOMC lines)
+        // so CompareChart can find all events even on short timeframes.
+        let rawFiltered = isOverlay ? raw : raw.filter(d => d.date >= commonStart);
+        if (tfEnd && !isOverlay) rawFiltered = rawFiltered.filter(d => d.date <= tfEnd);
         // displayFiltered: always trimmed to the visible range so the Stack
         // panel and all display charts align with the main chart timeframe.
         let displayFiltered = raw.filter(d => d.date >= commonStart);
@@ -318,7 +318,8 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         const divsFiltered = (a.dividends ?? []).filter(d =>
           d.date >= commonStart && (!tfEnd || d.date <= tfEnd)
         );
-        const displayRaw = a.type === 'macro'
+        const isRec = RECESSION_SET.has(a.symbol);
+        const displayRaw = a.type === 'macro' && !isOverlay
           ? extendToToday(dedupStepSeries(displayFiltered))
           : displayFiltered;
         const displayData = normalized ? pctChangeFromStart(displayRaw) : displayRaw;
@@ -329,7 +330,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         // Recompute PRICE-ONLY Return/CAGR on the trimmed (commonStart→today)
         // window so card numbers reflect exactly the same period the chart
         // shows. IRR already covers the dividend-inclusive metric separately.
-        const cagrPrice = calculateCAGR(rawFiltered, timeframe);
+        const cagrPrice = isOverlay ? null : calculateCAGR(rawFiltered, timeframe);
         const cagrTR = trFiltered && trFiltered.length > 1
           ? calculateCAGR(trFiltered, timeframe)
           : null;
@@ -363,10 +364,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const correl = useMemo(() => {
     try {
       // USREC is included with its raw 0/1 values (point-biserial correlation).
-      // BTC_HALVING is excluded here and added below as a 0/1 dummy (the block-
-      // reward step series 50→3.125 is spuriously correlated with any trend).
+      // BTC_HALVING and FOMC_MEETINGS are excluded here and added below as 0/1
+      // dummies (their raw series are event markers, not continuous values).
+      const DUMMY_SET = new Set(['BTC_HALVING', 'FOMC_MEETINGS']);
       const series: { symbol: string; data: HistoricalPoint[] }[] = displayAssets
-        .filter(a => a.symbol !== 'BTC_HALVING' && (a.rawData ?? a.data).length > 1)
+        .filter(a => !DUMMY_SET.has(a.symbol) && (a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
 
       const halvingAsset = displayAssets.find(a => a.symbol === 'BTC_HALVING');
@@ -380,6 +382,20 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
             ) ? 1 : 0,
           }));
           series.push({ symbol: 'BTC_HALVING', data: halvingDummy });
+        }
+      }
+
+      const fomcAsset = displayAssets.find(a => a.symbol === 'FOMC_MEETINGS');
+      if (fomcAsset) {
+        const baseDates = (fomcAsset.rawData ?? fomcAsset.data).map(d => d.date);
+        if (baseDates.length > 1) {
+          const fomcDummy: HistoricalPoint[] = baseDates.map(date => ({
+            date,
+            close: FOMC_MEETING_DATES.some(md =>
+              Math.abs(new Date(date).getTime() - new Date(md).getTime()) <= 3 * 24 * 60 * 60 * 1000
+            ) ? 1 : 0,
+          }));
+          series.push({ symbol: 'FOMC_MEETINGS', data: fomcDummy });
         }
       }
 

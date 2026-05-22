@@ -5,7 +5,7 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
-import { BTC_HALVING_DATES, RECESSION_SERIES, RECESSION_META } from '@/lib/config';
+import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META } from '@/lib/config';
 import { HalvingChart } from './HalvingChart';
 import { RecessionChart } from './RecessionChart';
 import { recessionIntervals } from '@/lib/utils';
@@ -108,12 +108,13 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   if (!assets.length) return null;
 
-  // BTC_HALVING (vertical lines) and recession series (shaded bands) are not
-  // drawn as data lines — they overlay the plottable assets.
+  // BTC_HALVING, FOMC_MEETINGS (vertical lines) and recession series (shaded bands)
+  // are not drawn as data lines — they overlay the plottable assets.
   const halvingAsset = assets.find(a => a.symbol === 'BTC_HALVING');
+  const fomcAsset    = assets.find(a => a.symbol === 'FOMC_MEETINGS');
   const recessionAssets = assets.filter(a => RECESSION_SET.has(a.symbol));
   const plottableAssets = assets.filter(
-    a => a.symbol !== 'BTC_HALVING' && !RECESSION_SET.has(a.symbol),
+    a => a.symbol !== 'BTC_HALVING' && a.symbol !== 'FOMC_MEETINGS' && !RECESSION_SET.has(a.symbol),
   );
 
   // Nothing to draw a line against → show a dedicated standalone chart.
@@ -129,6 +130,8 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     if (halvingAsset) return <HalvingChart height={height} />;
     return null;
   }
+
+  const TODAY = new Date().toISOString().slice(0, 10);
 
   const MAX_CHART_POINTS = 2000;
   const rawDates = Array.from(new Set(
@@ -153,11 +156,10 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     const point: Record<string, unknown> = { date };
     plottableAssets.forEach((a, idx) => {
       const v = assetMaps[idx].prices.get(date) ?? null;
-      // In % change mode values can be 0 (start) or negative (loss from start)
-      point[a.symbol] = v != null && isFinite(v) && (percentMode || v > 0) ? v : null;
+      point[a.symbol] = v != null && isFinite(v) ? v : null;
       if (assetMaps[idx].tr) {
         const tv = assetMaps[idx].tr!.get(date) ?? null;
-        point[`${a.symbol}_tr`] = tv != null && isFinite(tv) && (percentMode || tv > 0) ? tv : null;
+        point[`${a.symbol}_tr`] = tv != null && isFinite(tv) ? tv : null;
       }
     });
     return point;
@@ -178,6 +180,36 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           return best;
         })
     : [];
+
+  // FOMC meeting date lines — snapped to categories. Only show when ≤30 meetings
+  // are visible (too many lines clutter the chart; tell users to zoom in instead).
+  const visibleFomcDates = fomcAsset && allDates.length > 0
+    ? (() => {
+        const lo = allDates[0], hi = allDates[allDates.length - 1];
+        const inRange = FOMC_MEETING_DATES.filter(d => d >= lo && d <= hi);
+        if (inRange.length > 30) return null; // too dense — signal with null
+        return inRange.map(d => {
+          const tt = parseISO(d).getTime();
+          let best = allDates[0], bestDiff = Infinity;
+          for (const a of allDates) {
+            const diff = Math.abs(parseISO(a).getTime() - tt);
+            if (diff < bestDiff) { bestDiff = diff; best = a; }
+          }
+          return best;
+        });
+      })()
+    : null;
+
+  // "Today" vertical marker — shown when the chart contains future-dated data
+  // (e.g. Fed dot-plot projections). Snapped to nearest category date.
+  const hasFutureData = allDates.length > 0 && allDates[allDates.length - 1] > TODAY;
+  const todaySnapped = hasFutureData ? snapToDates(TODAY, allDates) : null;
+
+  // Zero reference line — helps read series that cross zero (T10Y2Y, ECBDFR).
+  const needsZeroLine = !percentMode && plottableAssets.some(a => {
+    const vals = (a.rawData ?? a.data).map(d => d.close);
+    return vals.some(v => v < 0) && vals.some(v => v > 0);
+  });
 
   // Recession bands — each recession interval clipped to the visible range and
   // snapped to category dates so the ReferenceArea renders on the X axis.
@@ -401,6 +433,28 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         </div>
       )}
 
+      {fomcAsset && visibleFomcDates === null && (
+        <div className="mb-3 rounded-lg border border-blue-400/30 bg-blue-400/10 px-4 py-3">
+          <p className="text-sm font-semibold text-blue-300">🏛 Too many FOMC meetings to display</p>
+          <p className="mt-0.5 text-xs text-blue-300/70">
+            Switch to <strong className="text-blue-200">3Y or shorter</strong> to see individual FOMC meeting date lines on the chart.
+          </p>
+        </div>
+      )}
+
+      {fomcAsset && visibleFomcDates !== null && visibleFomcDates.length === 0 && (
+        <div className="mb-3 rounded-lg border border-blue-400/30 bg-blue-400/10 px-4 py-3">
+          <p className="text-sm font-semibold text-blue-300">🏛 No FOMC meetings in this time range</p>
+        </div>
+      )}
+
+      {hasFutureData && (
+        <div className="mb-2 flex items-center gap-2 text-[11px] text-gray-500">
+          <span className="inline-block border-l-2 border-dashed border-gray-500 h-3" />
+          The dashed vertical line marks today — data to the right are projections.
+        </div>
+      )}
+
       <ResponsiveContainer width="100%" height={height}>
         <LineChart
           data={chartData}
@@ -472,6 +526,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           {percentMode && (
             <ReferenceLine yAxisId="left" y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1} />
           )}
+          {!percentMode && needsZeroLine && (
+            <ReferenceLine yAxisId="left" y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1} />
+          )}
           {/* Recession bands — drawn before the lines so they sit behind them */}
           {recessionBands.map(b => (
             <ReferenceArea
@@ -511,6 +568,27 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               label={{ value: '⚡', fill: '#f59e0b', fontSize: 12, position: 'top' }}
             />
           ))}
+          {visibleFomcDates && visibleFomcDates.map((d, i) => (
+            <ReferenceLine
+              key={`fomc-${i}`}
+              yAxisId="left"
+              x={d}
+              stroke="#3b82f6"
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              strokeOpacity={0.6}
+            />
+          ))}
+          {todaySnapped && (
+            <ReferenceLine
+              yAxisId="left"
+              x={todaySnapped}
+              stroke="#6b7280"
+              strokeWidth={1.5}
+              strokeDasharray="5 3"
+              label={{ value: 'Today', fill: '#9ca3af', fontSize: 9, position: 'insideTopLeft' }}
+            />
+          )}
           {area && (
             <ReferenceArea
               yAxisId="left"
