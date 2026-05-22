@@ -12,8 +12,10 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { CompareChart } from '@/components/charts/CompareChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { X, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Search, ChevronDown, ChevronUp, Layers } from 'lucide-react';
 import { ChartNotes } from '@/components/ui/ChartNotes';
+import { StackAnalysisPanel, DEFAULT_TOOLS } from '@/components/ui/StackAnalysisPanel';
+import type { ActiveTools } from '@/components/ui/ChartTools';
 
 class ChartErrorBoundary extends Component<
   { children: ReactNode },
@@ -67,6 +69,9 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   // Linear scale by default. Log is an opt-in toggle for when one asset has
   // returns many times larger than the others (e.g. an index vs a macro series).
   const [logScale, setLogScale] = useState(false);
+  const [showStack, setShowStack] = useState(false);
+  const [stackAssetIdx, setStackAssetIdx] = useState(0);
+  const [stackTools, setStackTools] = useState<ActiveTools>(DEFAULT_TOOLS);
   // Dual search: local config + remote Yahoo search
   const [search, setSearch] = useState('');
   const [remoteHits, setRemoteHits] = useState<SearchHit[]>([]);
@@ -371,6 +376,15 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                 Log
               </button>
             )}
+            <button
+              onClick={() => setShowStack(v => !v)}
+              title="Stack a technical analysis panel below the main chart"
+              className={clsx('flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full transition-all border',
+                showStack ? 'border-violet-400 text-violet-400 bg-violet-400/10' : 'border-border text-gray-400 hover:text-gray-200')}
+            >
+              <Layers size={12} />
+              Stack
+            </button>
           </div>
           <TimeframeSelector
             value={timeframe}
@@ -500,6 +514,16 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               sampleCount={correl.sampleCount}
               alignedData={correl.alignedData}
               names={Object.fromEntries(assets.map(a => [a.symbol, a.name]))}
+            />
+          )}
+
+          {showStack && displayAssets.length > 0 && (
+            <StackAnalysisPanel
+              assets={displayAssets}
+              assetIdx={Math.min(stackAssetIdx, displayAssets.length - 1)}
+              onAssetSelect={setStackAssetIdx}
+              activeTools={stackTools}
+              onToolsChange={setStackTools}
             />
           )}
         </ChartErrorBoundary>
