@@ -59,8 +59,12 @@ export function ChartNotes({ chartId, defaultCategory }: Props) {
     if (!editId) { setEditId(null); return; }
     const text = editText.trim();
     const category = editCategory.trim();
-    // Don't let an edit empty a note completely — cancel instead.
-    if (!text && !category) { setEditId(null); return; }
+    // If both fields are cleared, delete the note entirely.
+    if (!text && !category) {
+      await update({ notes: { [chartId]: notes.filter(n => n.id !== editId) } });
+      setEditId(null);
+      return;
+    }
     const updated = notes.map(n =>
       n.id === editId ? { ...n, text, date: todayStr(), category: category || undefined } : n,
     );
