@@ -175,37 +175,20 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   // Recessions — official NBER / OECD recession indicators. Binary 0/1 monthly
   // series: 1 = economy in recession. Rendered as shaded bands, not lines, so
   // they can be overlaid on any chart in Compare.
+  // Only USREC (NBER-based) is kept — it is the one recession series FRED still
+  // actively maintains. The OECD-based country indicators were discontinued
+  // around 2022 and would never reflect a new recession, so they are excluded.
   { id: 'USREC',   name: 'US Recessions',        category: 'Recessions', unit: 'idx',
     source: { type: 'fred',    label: 'FRED / NBER',
               url: 'https://fred.stlouisfed.org/series/USREC' } },
-  { id: 'EUROREC', name: 'Euro Area Recessions', category: 'Recessions', unit: 'idx',
-    source: { type: 'fred',    label: 'FRED / OECD',
-              url: 'https://fred.stlouisfed.org/series/EUROREC' } },
-  { id: 'CHNRECM', name: 'China Recessions',     category: 'Recessions', unit: 'idx',
-    source: { type: 'fred',    label: 'FRED / OECD',
-              url: 'https://fred.stlouisfed.org/series/CHNRECM' } },
-  { id: 'JPNRECM', name: 'Japan Recessions',     category: 'Recessions', unit: 'idx',
-    source: { type: 'fred',    label: 'FRED / OECD',
-              url: 'https://fred.stlouisfed.org/series/JPNRECM' } },
-  { id: 'INDRECM', name: 'India Recessions',     category: 'Recessions', unit: 'idx',
-    source: { type: 'fred',    label: 'FRED / OECD',
-              url: 'https://fred.stlouisfed.org/series/INDRECM' } },
-  { id: 'OECDRECM', name: 'OECD Total Recessions', category: 'Recessions', unit: 'idx',
-    source: { type: 'fred',    label: 'FRED / OECD',
-              url: 'https://fred.stlouisfed.org/series/OECDRECM' } },
 ];
 
 // Recession indicator series — handled specially everywhere (shaded bands
 // instead of lines). RECESSION_META carries the band label + tint for each.
-export const RECESSION_SERIES = ['USREC', 'EUROREC', 'CHNRECM', 'JPNRECM', 'INDRECM', 'OECDRECM'];
+export const RECESSION_SERIES = ['USREC'];
 
 export const RECESSION_META: Record<string, { label: string; color: string }> = {
-  USREC:    { label: 'US Recession',         color: '#64748b' },
-  EUROREC:  { label: 'Euro Area Recession',  color: '#6366f1' },
-  CHNRECM:  { label: 'China Recession',      color: '#f59e0b' },
-  JPNRECM:  { label: 'Japan Recession',      color: '#ec4899' },
-  INDRECM:  { label: 'India Recession',      color: '#10b981' },
-  OECDRECM: { label: 'OECD Total Recession', color: '#94a3b8' },
+  USREC: { label: 'US Recession', color: '#64748b' },
 };
 
 // Bitcoin halving dates (exported so UI components can render them as reference lines).

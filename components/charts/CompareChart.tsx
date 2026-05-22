@@ -343,7 +343,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         </div>
       )}
 
-      {recessionAssets.length > 0 && (
+      {recessionAssets.length > 0 && recessionBands.length > 0 && (
         <div className="mb-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
           {recessionAssets.map(a => {
             const meta = RECESSION_META[a.symbol] ?? { label: a.symbol, color: '#64748b' };
@@ -355,6 +355,18 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               </span>
             );
           })}
+        </div>
+      )}
+
+      {recessionAssets.length > 0 && recessionBands.length === 0 && (
+        <div className="mb-3 rounded-lg border border-slate-400/30 bg-slate-400/10 px-4 py-3">
+          <p className="text-sm font-semibold text-slate-300">No recession in this time range</p>
+          <p className="mt-0.5 text-xs text-slate-400/80">
+            The US economy was not in recession during the visible period — the
+            last one was <strong className="text-slate-300">Feb–Apr 2020</strong>.
+            Switch to <strong className="text-slate-300">10Y or MAX</strong> to
+            see past recessions shaded on the chart.
+          </p>
         </div>
       )}
 

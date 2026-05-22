@@ -307,20 +307,12 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
               {latest ? (
                 <>
-                  {isRec ? (() => {
-                    const msOld = Date.now() - new Date(latest.date + 'T00:00:00').getTime();
-                    const stale = msOld > 18 * 30 * 24 * 60 * 60 * 1000;
-                    return stale ? (
-                      <p className="text-sm font-semibold text-gray-500 leading-snug">
-                        Data discontinued
-                      </p>
-                    ) : (
-                      <p className={clsx('text-lg font-bold tabular-nums',
-                        latest.value >= 0.5 ? 'text-down-text' : 'text-up-text')}>
-                        {latest.value >= 0.5 ? 'In recession' : 'No recession'}
-                      </p>
-                    );
-                  })() : (
+                  {isRec ? (
+                    <p className={clsx('text-lg font-bold tabular-nums',
+                      latest.value >= 0.5 ? 'text-down-text' : 'text-up-text')}>
+                      {latest.value >= 0.5 ? 'In recession' : 'No recession'}
+                    </p>
+                  ) : (
                     <>
                       <p className="text-xl font-bold text-white tabular-nums">
                         {formatMacroValue(latest.value, ind.unit)}
