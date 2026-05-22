@@ -285,21 +285,30 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       const tfEnd = customRange ? customRange.to : null;
 
       // First pass: find each asset's first date that falls within the TF window.
+      // Recession assets carry full history and are excluded from commonStart so
+      // they don't constrain other assets' start date.
       // Consider BOTH prices and totalReturnData so both lines share the same baseline.
-      const firstDates = assets.map(a => {
-        const raw = a.rawData ?? a.data;
-        const rawFirst = raw.find(d => d.date >= tfStart)?.date ?? tfStart;
-        const tr = a.totalReturnData;
-        if (!tr || tr.length === 0) return rawFirst;
-        const trFirst = tr.find(d => d.date >= tfStart)?.date ?? tfStart;
-        return rawFirst > trFirst ? rawFirst : trFirst;
-      });
-      const commonStart = firstDates.reduce((a, b) => (a > b ? a : b));
+      const firstDates = assets
+        .filter(a => !RECESSION_SET.has(a.symbol))
+        .map(a => {
+          const raw = a.rawData ?? a.data;
+          const rawFirst = raw.find(d => d.date >= tfStart)?.date ?? tfStart;
+          const tr = a.totalReturnData;
+          if (!tr || tr.length === 0) return rawFirst;
+          const trFirst = tr.find(d => d.date >= tfStart)?.date ?? tfStart;
+          return rawFirst > trFirst ? rawFirst : trFirst;
+        });
+      const commonStart = firstDates.length > 0
+        ? firstDates.reduce((a, b) => (a > b ? a : b))
+        : tfStart;
 
       return assets.map(a => {
         const raw = a.rawData ?? a.data;
-        let rawFiltered = raw.filter(d => d.date >= commonStart);
-        if (tfEnd) rawFiltered = rawFiltered.filter(d => d.date <= tfEnd);
+        // Recession assets keep full history so their bands span the entire
+        // visible range even when other assets cover a short timeframe window.
+        const isRec = RECESSION_SET.has(a.symbol);
+        let rawFiltered = isRec ? raw : raw.filter(d => d.date >= commonStart);
+        if (tfEnd && !isRec) rawFiltered = rawFiltered.filter(d => d.date <= tfEnd);
         let trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
         if (tfEnd && trFiltered) trFiltered = trFiltered.filter(d => d.date <= tfEnd);
         const divsFiltered = (a.dividends ?? []).filter(d =>
