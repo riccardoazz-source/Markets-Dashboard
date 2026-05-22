@@ -888,27 +888,25 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
       {/* Watchlist grid */}
       {(watchlistSymbols.length > 0 || noteCategories.length > 0) && (
         <div className="space-y-2">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                ★ {watchlistCategory}
-              </h3>
-              {noteCategories.length > 1 && (
-                <div className="flex gap-1 flex-wrap">
-                  {noteCategories.map(cat => (
-                    <button key={cat} onClick={() => setWatchlistCategory(cat)}
-                      className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
-                        watchlistCategory === cat
-                          ? 'border-amber-400/60 text-amber-300 bg-amber-400/10'
-                          : 'border-border text-gray-500 hover:text-gray-300')}>
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+              ★ {watchlistCategory}
+            </h3>
+            {noteCategories.length > 1 && (
+              <div className="flex gap-1 flex-wrap">
+                {noteCategories.map(cat => (
+                  <button key={cat} onClick={() => setWatchlistCategory(cat)}
+                    className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
+                      watchlistCategory === cat
+                        ? 'border-amber-400/60 text-amber-300 bg-amber-400/10'
+                        : 'border-border text-gray-500 hover:text-gray-300')}>
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
             {watchlistSymbols.length > 0 && (
-              <div className="flex gap-1 bg-bg-input rounded-lg p-1 shrink-0">
+              <div className="flex gap-1 bg-bg-input rounded-lg p-1 ml-auto shrink-0">
                 {WATCHLIST_SORT_OPTIONS.map(opt => (
                   <button key={opt.value} onClick={() => setWatchlistSort(opt.value)}
                     className={clsx('px-2.5 py-1 text-xs font-semibold rounded-md transition-all',

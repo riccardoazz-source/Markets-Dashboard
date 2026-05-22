@@ -112,9 +112,13 @@ export function ChartNotes({ chartId, defaultCategory }: Props) {
                     placeholder="Category (optional)"
                     className="w-full bg-bg border border-border rounded px-2 py-1 text-[11px] text-gray-300 focus:outline-none focus:border-accent"
                   />
-                  <div className="flex gap-1 justify-end">
-                    <button onClick={commitEdit} className="p-1 text-emerald-400 hover:text-emerald-300"><Check size={13} /></button>
-                    <button onClick={() => setEditId(null)} className="p-1 text-gray-500 hover:text-gray-300"><X size={13} /></button>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={commitEdit} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold transition">
+                      <Check size={13} /> Save
+                    </button>
+                    <button onClick={() => setEditId(null)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-border text-gray-400 hover:text-gray-200 text-xs font-semibold transition">
+                      <X size={13} /> Cancel
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -132,9 +136,9 @@ export function ChartNotes({ chartId, defaultCategory }: Props) {
                       )}
                     </div>
                   </div>
-                  <div className={clsx('flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity')}>
-                    <button onClick={() => startEdit(note)} className="p-1 text-gray-500 hover:text-gray-300"><Edit2 size={11} /></button>
-                    <button onClick={() => deleteNote(note.id)} className="p-1 text-gray-500 hover:text-red-400"><Trash2 size={11} /></button>
+                  <div className="flex gap-0.5 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => startEdit(note)} className="p-2 sm:p-1 text-gray-500 hover:text-gray-300"><Edit2 size={12} /></button>
+                    <button onClick={() => deleteNote(note.id)} className="p-2 sm:p-1 text-gray-500 hover:text-red-400"><Trash2 size={12} /></button>
                   </div>
                 </div>
               )}

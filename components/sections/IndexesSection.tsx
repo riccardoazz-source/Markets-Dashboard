@@ -112,37 +112,36 @@ export function IndexesSection({ jumpTo }: { jumpTo?: string | null }) {
   return (
     <div className="space-y-3">
       {/* Filters row */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
-          {REGIONS.map(r => (
-            <button key={r} onClick={() => setSelectedRegion(r)}
-              className={clsx(
-                'px-3 py-1 text-xs font-semibold rounded-full transition-all whitespace-nowrap shrink-0',
-                selectedRegion === r
-                  ? 'bg-accent text-white'
-                  : 'text-gray-400 border border-border hover:border-border-light hover:text-gray-200'
-              )}>
-              {r}
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+        {REGIONS.map(r => (
+          <button key={r} onClick={() => setSelectedRegion(r)}
+            className={clsx(
+              'px-3 py-1 text-xs font-semibold rounded-full transition-all whitespace-nowrap shrink-0',
+              selectedRegion === r
+                ? 'bg-accent text-white'
+                : 'text-gray-400 border border-border hover:border-border-light hover:text-gray-200'
+            )}>
+            {r}
+          </button>
+        ))}
+      </div>
+      {/* Sort row — always right-aligned */}
+      <div className="flex items-center justify-end gap-2">
+        <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+          {SORT_OPTIONS.map(opt => (
+            <button key={opt.value} onClick={() => setSortBy(opt.value)}
+              className={clsx('px-2.5 py-1 text-xs font-semibold rounded-md transition-all',
+                sortBy === opt.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}>
+              {opt.label}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
-            {SORT_OPTIONS.map(opt => (
-              <button key={opt.value} onClick={() => setSortBy(opt.value)}
-                className={clsx('px-2.5 py-1 text-xs font-semibold rounded-md transition-all',
-                  sortBy === opt.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}>
-                {opt.label}
-              </button>
-            ))}
+        {lastUpdate && (
+          <div className="flex items-center gap-1 text-[10px] text-gray-600">
+            <RefreshCw size={10} />
+            {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
-          {lastUpdate && (
-            <div className="flex items-center gap-1 text-[10px] text-gray-600">
-              <RefreshCw size={10} />
-              {lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
       {loading ? (
