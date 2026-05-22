@@ -517,13 +517,13 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                 )}
                 {a.cagr != null && (
                   <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">CAGR (price only)</p>
+                    <p className="text-[10px] text-gray-500">CAGR</p>
                     <p className={clsx('text-sm font-semibold', colorForPercent(a.cagr))}>{formatPercent(a.cagr)}</p>
                   </div>
                 )}
                 {a.cagrWithDiv != null && (
                   <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">CAGR (w/ div. reinv.)</p>
+                    <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
                     <p className={clsx('text-sm font-semibold', colorForPercent(a.cagrWithDiv))}>{formatPercent(a.cagrWithDiv)}</p>
                   </div>
                 )}
