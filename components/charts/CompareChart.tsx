@@ -5,10 +5,27 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
-import { BTC_HALVING_DATES } from '@/lib/config';
+import { BTC_HALVING_DATES, RECESSION_SERIES, RECESSION_META } from '@/lib/config';
 import { HalvingChart } from './HalvingChart';
+import { RecessionChart } from './RecessionChart';
+import { recessionIntervals } from '@/lib/utils';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
+
+const RECESSION_SET = new Set(RECESSION_SERIES);
+
+// Nearest value in a sorted date array — recession band edges must land on an
+// actual category value to render on the categorical X axis.
+function snapToDates(target: string, dates: string[]): string {
+  if (dates.length === 0) return target;
+  const tt = parseISO(target).getTime();
+  let best = dates[0], bestDiff = Infinity;
+  for (const d of dates) {
+    const diff = Math.abs(parseISO(d).getTime() - tt);
+    if (diff < bestDiff) { bestDiff = diff; best = d; }
+  }
+  return best;
+}
 
 interface Props {
   assets: CompareAsset[];
@@ -91,18 +108,31 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   if (!assets.length) return null;
 
-  // BTC_HALVING is displayed as vertical reference lines, not as a data series.
+  // BTC_HALVING (vertical lines) and recession series (shaded bands) are not
+  // drawn as data lines — they overlay the plottable assets.
   const halvingAsset = assets.find(a => a.symbol === 'BTC_HALVING');
-  const nonHalvingAssets = assets.filter(a => a.symbol !== 'BTC_HALVING');
+  const recessionAssets = assets.filter(a => RECESSION_SET.has(a.symbol));
+  const plottableAssets = assets.filter(
+    a => a.symbol !== 'BTC_HALVING' && !RECESSION_SET.has(a.symbol),
+  );
 
-  // Only the halving series selected → show the dedicated halving-line chart.
-  if (halvingAsset && nonHalvingAssets.length === 0) {
-    return <HalvingChart height={height} />;
+  // Nothing to draw a line against → show a dedicated standalone chart.
+  if (plottableAssets.length === 0) {
+    if (recessionAssets.length > 0) {
+      return (
+        <RecessionChart
+          height={height}
+          datasets={recessionAssets.map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }))}
+        />
+      );
+    }
+    if (halvingAsset) return <HalvingChart height={height} />;
+    return null;
   }
 
   const MAX_CHART_POINTS = 2000;
   const rawDates = Array.from(new Set(
-    nonHalvingAssets.flatMap(a => [
+    plottableAssets.flatMap(a => [
       ...a.data.map(d => d.date),
       ...(a.trData ?? []).map(d => d.date),
     ])
@@ -114,14 +144,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     ? rawDates.filter((_, i) => i % step === 0 || i === rawDates.length - 1)
     : rawDates;
 
-  const assetMaps = nonHalvingAssets.map(a => ({
+  const assetMaps = plottableAssets.map(a => ({
     prices: new Map(a.data.map(d => [d.date, d.close])),
     tr:     a.trData ? new Map(a.trData.map(d => [d.date, d.close])) : null,
   }));
 
   const chartData = allDates.map(date => {
     const point: Record<string, unknown> = { date };
-    nonHalvingAssets.forEach((a, idx) => {
+    plottableAssets.forEach((a, idx) => {
       const v = assetMaps[idx].prices.get(date) ?? null;
       // In % change mode values can be 0 (start) or negative (loss from start)
       point[a.symbol] = v != null && isFinite(v) && (percentMode || v > 0) ? v : null;
@@ -149,6 +179,23 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         })
     : [];
 
+  // Recession bands — each recession interval clipped to the visible range and
+  // snapped to category dates so the ReferenceArea renders on the X axis.
+  const recessionBands = allDates.length > 0
+    ? recessionAssets.flatMap(a => {
+        const meta = RECESSION_META[a.symbol] ?? { label: a.symbol, color: '#64748b' };
+        const lo = allDates[0], hi = allDates[allDates.length - 1];
+        return recessionIntervals(a.rawData ?? a.data)
+          .filter(iv => iv.end >= lo && iv.start <= hi)
+          .map(iv => ({
+            key: `${a.symbol}-${iv.start}`,
+            x1: snapToDates(iv.start < lo ? lo : iv.start, allDates),
+            x2: snapToDates(iv.end > hi ? hi : iv.end, allDates),
+            color: meta.color,
+          }));
+      })
+    : [];
+
   // ── Y-axis grouping ───────────────────────────────────────────────────────
   // In % change mode (Google Finance style): single shared axis — all series
   // start at 0% so they are directly comparable on the same scale.
@@ -156,14 +203,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   // each asset is readable on its own scale regardless of timeframe.
   const { axisMap, hasRightAxis, hasRight2Axis } = (() => {
     const map: Record<string, AxisGroup> = {};
-    nonHalvingAssets.forEach(a => { map[a.symbol] = 'left'; });
+    plottableAssets.forEach(a => { map[a.symbol] = 'left'; });
 
     // Percent mode → single axis
     if (percentMode) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
-    if (nonHalvingAssets.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
+    if (plottableAssets.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
-    const levels = nonHalvingAssets.map(a => {
+    const levels = plottableAssets.map(a => {
       const series = a.rawData ?? a.data;
       let level = 0;
       for (let i = series.length - 1; i >= 0; i--) {
@@ -197,9 +244,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     return { axisMap: map, hasRightAxis: true, hasRight2Axis: true };
   })();
 
-  const leftAssets   = nonHalvingAssets.filter(a => (axisMap[a.symbol] ?? 'left') === 'left');
-  const rightAssets  = hasRightAxis  ? nonHalvingAssets.filter(a => axisMap[a.symbol] === 'right')  : [];
-  const right2Assets = hasRight2Axis ? nonHalvingAssets.filter(a => axisMap[a.symbol] === 'right2') : [];
+  const leftAssets   = plottableAssets.filter(a => (axisMap[a.symbol] ?? 'left') === 'left');
+  const rightAssets  = hasRightAxis  ? plottableAssets.filter(a => axisMap[a.symbol] === 'right')  : [];
+  const right2Assets = hasRight2Axis ? plottableAssets.filter(a => axisMap[a.symbol] === 'right2') : [];
 
   // Every axis scales independently to the data drawn on it, so each asset is
   // readable on its own scale regardless of how differently the others moved.
@@ -208,7 +255,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   const right2AxisProps = hasRight2Axis ? axisProps(right2Assets, logScale) : null;
 
   const legendItems: { key: string; name: string; color: string; dashed: boolean }[] = [];
-  nonHalvingAssets.forEach(a => {
+  plottableAssets.forEach(a => {
     legendItems.push({ key: a.symbol, name: a.name, color: a.color, dashed: false });
     if (a.trData) {
       legendItems.push({ key: `${a.symbol}_tr`, name: `${a.name} (Total Return)`, color: a.color, dashed: true });
@@ -219,7 +266,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   }
 
   const selStats = range
-    ? nonHalvingAssets.map(a => {
+    ? plottableAssets.map(a => {
         const rows = chartData as { date: string; [k: string]: unknown }[];
         const lv = valueAtOrAfter(rows, range.left, a.symbol);
         const rv = valueAtOrBefore(rows, range.right, a.symbol);
@@ -293,6 +340,21 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               ))}
             </span>
           )}
+        </div>
+      )}
+
+      {recessionAssets.length > 0 && (
+        <div className="mb-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+          {recessionAssets.map(a => {
+            const meta = RECESSION_META[a.symbol] ?? { label: a.symbol, color: '#64748b' };
+            return (
+              <span key={a.symbol} className="flex items-center gap-1.5 text-gray-400">
+                <span className="inline-block w-4 h-2.5 rounded-sm"
+                  style={{ backgroundColor: meta.color, opacity: 0.5 }} />
+                {meta.label}
+              </span>
+            );
+          })}
         </div>
       )}
 
@@ -377,7 +439,20 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           {percentMode && (
             <ReferenceLine yAxisId="left" y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1} />
           )}
-          {nonHalvingAssets.map(a => (
+          {/* Recession bands — drawn before the lines so they sit behind them */}
+          {recessionBands.map(b => (
+            <ReferenceArea
+              key={b.key}
+              yAxisId="left"
+              x1={b.x1}
+              x2={b.x2}
+              fill={b.color}
+              fillOpacity={0.16}
+              stroke={b.color}
+              strokeOpacity={0.25}
+            />
+          ))}
+          {plottableAssets.map(a => (
             <Line key={a.symbol}
               yAxisId={axisMap[a.symbol] ?? 'left'}
               type={a.type === 'macro' ? 'stepAfter' : 'monotone'}
@@ -385,7 +460,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               stroke={a.color} strokeWidth={2} dot={false}
               activeDot={{ r: 4 }} connectNulls />
           ))}
-          {nonHalvingAssets.filter(a => a.trData).map(a => (
+          {plottableAssets.filter(a => a.trData).map(a => (
             <Line key={`${a.symbol}_tr`}
               yAxisId={axisMap[a.symbol] ?? 'left'}
               type="monotone" dataKey={`${a.symbol}_tr`}

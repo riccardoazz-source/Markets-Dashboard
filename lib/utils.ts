@@ -129,6 +129,32 @@ export function pctChangeFromStart(data: HistoricalPoint[]): HistoricalPoint[] {
 }
 
 /**
+ * Collapses a binary 0/1 recession series into [start, end] intervals — one
+ * per contiguous run of 1s. `end` is the last date the series was still 1, so a
+ * band drawn x1=start..x2=end covers exactly the recession. Values ≥ 0.5 count
+ * as "in recession" to tolerate any float noise from the data source.
+ */
+export function recessionIntervals(
+  data: HistoricalPoint[],
+): { start: string; end: string }[] {
+  const out: { start: string; end: string }[] = [];
+  let start = '';
+  let lastOn = '';
+  for (const p of data) {
+    const on = typeof p.close === 'number' && p.close >= 0.5;
+    if (on) {
+      if (!start) start = p.date;
+      lastOn = p.date;
+    } else if (start) {
+      out.push({ start, end: lastOn });
+      start = '';
+    }
+  }
+  if (start) out.push({ start, end: lastOn });
+  return out;
+}
+
+/**
  * Benchmark overlay line: where the asset would sit if it had tracked SPY
  * exactly from the period start. spyLine[i] = asset[0].close × (spy@dateᵢ /
  * spy@date₀). SPY values are matched to each asset date via an at-or-before

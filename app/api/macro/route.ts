@@ -53,6 +53,8 @@ function getFredApiKey(): string {
 const WIDE_WINDOW_SERIES = new Set([
   'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING', 'BTC_PRODUCTION_COST',
   'GFDEGDQ188S', 'GFDEBTN', 'A939RC0A052NBEA',
+  // Recession indicators — bands are only useful with full history.
+  'USREC', 'EUROREC', 'CHNRECM', 'JPNRECM', 'INDRECM', 'OECDRECM',
   // Market Value: Shiller history ends ~2023 and the multpl annual tables are
   // small. Always fetch full history so the card has a latest value (the
   // 18-month list-mode window would otherwise exclude all Shiller data).

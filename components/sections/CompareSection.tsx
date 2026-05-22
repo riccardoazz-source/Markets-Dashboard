@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from 'react';
-import { ALL_COMPARABLE_ASSETS } from '@/lib/config';
+import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
@@ -58,6 +58,10 @@ interface SearchHit { symbol: string; name: string; exchange: string; type: stri
 
 // ── per-symbol name cache so custom stocks keep their name after fetching ──
 const nameCacheRef: Record<string, string> = {};
+
+// Recession series are overlays (shaded bands), not comparable data lines —
+// excluded from stats cards and the correlation matrix.
+const RECESSION_SET = new Set(RECESSION_SERIES);
 
 export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
@@ -352,7 +356,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const correl = useMemo(() => {
     try {
       const series = displayAssets
-        .filter(a => (a.rawData ?? a.data).length > 1)
+        .filter(a => !RECESSION_SET.has(a.symbol) && (a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
       return correlationMatrix(series);
     } catch (e) {
@@ -499,7 +503,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               same window the chart displays (commonStart → today), and prefer
               total-return values to match the dashed line. */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {displayAssets.map((a, i) => (
+            {displayAssets.map((a, i) => RECESSION_SET.has(a.symbol) ? null : (
               <div key={a.symbol} className="rounded-xl border p-3 bg-bg-card"
                 style={{ borderColor: CHART_COLORS[i % CHART_COLORS.length] + '66' }}>
                 <div className="flex items-center gap-2 mb-2">

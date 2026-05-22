@@ -1,21 +1,24 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { MACRO_INDICATORS, MacroUnit } from '@/lib/config';
+import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { HalvingChart } from '@/components/charts/HalvingChart';
+import { RecessionChart } from '@/components/charts/RecessionChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2, Layers } from 'lucide-react';
 
-const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Sentiment', 'Crypto', 'Debt', 'Market Value'];
+const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Sentiment', 'Crypto', 'Debt', 'Market Value', 'Recessions'];
+
+const RECESSION_SET = new Set(RECESSION_SERIES);
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface MacroLatest {
@@ -234,6 +237,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
   const selectedIndicator = allIndicators.find(ind => ind.id === selected);
   const cagrData = selectedIndicator ? calculateCAGR(historical, timeframe) : null;
+  const selIsRec = selected ? RECESSION_SET.has(selected) : false;
 
   return (
     <div className="space-y-3">
@@ -272,6 +276,10 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           const change = latest && prev ? latest.value - prev.value : null;
           const isSelected = selected === ind.id;
           const ok = statusOk[ind.id];
+          const isRec = RECESSION_SET.has(ind.id);
+          // Overlay series (recession bands, halving markers) behave differently
+          // from normal indicators — flag them so they are easy to spot.
+          const isSpecial = isRec || ind.id === 'BTC_HALVING';
 
           return (
             <button key={ind.id}
@@ -287,22 +295,36 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   ok ? 'bg-emerald-500' : 'bg-red-500'
                 )} />
               )}
-              <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1">
+              <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1 flex items-center gap-1">
+                {isSpecial && (
+                  <span title="Overlay series — drawn as bands/markers on charts, not a normal data line">
+                    <Layers size={10} className="text-violet-400 shrink-0" />
+                  </span>
+                )}
                 {ind.category}
               </p>
               <p className="text-sm font-semibold text-gray-100 leading-snug mb-2 pr-3">{ind.name}</p>
 
               {latest ? (
                 <>
-                  <p className="text-xl font-bold text-white tabular-nums">
-                    {formatMacroValue(latest.value, ind.unit)}
-                  </p>
-                  {change != null && (
-                    <div className={clsx('flex items-center gap-1 mt-0.5 text-xs font-semibold', colorForChange(change))}>
-                      {change > 0 ? <TrendingUp size={11} /> : change < 0 ? <TrendingDown size={11} /> : null}
-                      {formatMacroChange(change, ind.unit)}
-                      <span className="text-[10px] text-gray-600 font-normal">vs prev</span>
-                    </div>
+                  {isRec ? (
+                    <p className={clsx('text-lg font-bold tabular-nums',
+                      latest.value >= 0.5 ? 'text-down-text' : 'text-up-text')}>
+                      {latest.value >= 0.5 ? 'In recession' : 'No recession'}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-xl font-bold text-white tabular-nums">
+                        {formatMacroValue(latest.value, ind.unit)}
+                      </p>
+                      {change != null && (
+                        <div className={clsx('flex items-center gap-1 mt-0.5 text-xs font-semibold', colorForChange(change))}>
+                          {change > 0 ? <TrendingUp size={11} /> : change < 0 ? <TrendingDown size={11} /> : null}
+                          {formatMacroChange(change, ind.unit)}
+                          <span className="text-[10px] text-gray-600 font-normal">vs prev</span>
+                        </div>
+                      )}
+                    </>
                   )}
                   <p className="text-[10px] text-gray-600 mt-0.5">{formatShortDate(latest.date)}</p>
                 </>
@@ -367,7 +389,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           )}
 
           {/* Stats row */}
-          {data[selected]?.latest && selected !== 'BTC_HALVING' && (
+          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <Stat label="Latest" value={formatMacroValue(data[selected].latest!.value, selectedIndicator.unit)} />
               {data[selected].prev && (
@@ -392,6 +414,14 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             <div className="flex items-center justify-center h-44">
               <LoadingSpinner size={28} />
             </div>
+          ) : selIsRec ? (
+            historical.length > 0 ? (
+              <RecessionChart datasets={[{ symbol: selected, data: historical }]} height={240} />
+            ) : (
+              <div className="flex items-center justify-center h-44 text-gray-600 text-sm">
+                No recession data
+              </div>
+            )
           ) : historical.length > 0 ? (
             <PriceChart
               data={extendToToday(
@@ -409,10 +439,10 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </div>
           )}
 
-          {historical.length > 0 && selected !== 'BTC_HALVING' && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
-          {historical.length > 0 && selected !== 'BTC_HALVING' && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && (
             <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
           )}
           {selected && <ChartNotes chartId={selected} />}
