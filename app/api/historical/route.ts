@@ -35,9 +35,10 @@ function getStartDate(timeframe: string): Date {
 }
 
 function getInterval(timeframe: string): '1d' | '1wk' | '1mo' {
-  if (['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y'].includes(timeframe)) return '1d';
-  if (['3Y', '5Y'].includes(timeframe)) return '1wk';
-  return '1mo'; // 10Y and MAX
+  // Daily resolution up to 10Y; weekly only for MAX to keep very long
+  // histories manageable. Avoids the over-smoothed look of monthly data.
+  if (timeframe === 'MAX') return '1wk';
+  return '1d';
 }
 
 function toStooqInterval(interval: '1d' | '1wk' | '1mo'): 'd' | 'w' | 'm' {
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
   // For custom ranges, pick interval based on date span; otherwise use timeframe
   const spanDays = (to.getTime() - from.getTime()) / 86_400_000;
   const interval: '1d' | '1wk' | '1mo' = isCustom
-    ? (spanDays <= 366 ? '1d' : spanDays <= 365 * 5 ? '1wk' : '1mo')
+    ? (spanDays <= 365 * 11 ? '1d' : '1wk')
     : getInterval(timeframe);
 
   try {

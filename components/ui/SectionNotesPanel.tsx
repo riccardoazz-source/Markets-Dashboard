@@ -24,6 +24,7 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
   const [open, setOpen] = useState(false);
   const [editKey, setEditKey] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const [editCategory, setEditCategory] = useState('');
   const [filterCat, setFilterCat] = useState<string | null>(null);
   const [collapsedCats, setCollapsedCats] = useState<Set<string>>(new Set());
 
@@ -74,12 +75,13 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
   const startEdit = (n: FlatNote) => {
     setEditKey(`${n.chartId}:${n.id}`);
     setEditText(n.text);
+    setEditCategory(n.category ?? '');
   };
 
   const commitEdit = async (chartId: string, id: string) => {
     const text = editText.trim();
-    const note = (allNotes[chartId] ?? []).find(n => n.id === id);
-    if (!text && !note?.category) {
+    const category = editCategory.trim();
+    if (!text && !category) {
       // Both text and category empty → delete the note
       const updated = (allNotes[chartId] ?? []).filter(n => n.id !== id);
       await update({ notes: { [chartId]: updated } });
@@ -87,7 +89,7 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
       return;
     }
     const updated = (allNotes[chartId] ?? []).map(n =>
-      n.id === id ? { ...n, text, date: todayStr() } : n);
+      n.id === id ? { ...n, text, category: category || undefined, date: todayStr() } : n);
     await update({ notes: { [chartId]: updated } });
     setEditKey(null);
   };
@@ -246,6 +248,37 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
                                   }}
                                   className="w-full bg-bg border border-accent rounded px-2 py-1 text-xs text-gray-100 focus:outline-none resize-none min-h-[64px]"
                                   autoFocus
+                                />
+                                {allCategories.filter(Boolean).length > 0 && (
+                                  <div className="flex flex-wrap gap-1 items-center">
+                                    <span className="text-[9px] text-gray-600 uppercase tracking-wider mr-0.5">Categories</span>
+                                    {allCategories.filter(Boolean).map(cat => {
+                                      const active = editCategory.trim().toLowerCase() === cat.toLowerCase();
+                                      return (
+                                        <button
+                                          key={cat}
+                                          type="button"
+                                          onClick={() => setEditCategory(active ? '' : cat)}
+                                          className={clsx('px-2 py-0.5 text-[10px] font-medium rounded-full border transition-colors',
+                                            active
+                                              ? 'border-accent text-accent bg-accent/10'
+                                              : 'border-border text-gray-500 hover:text-gray-300')}
+                                        >
+                                          {cat}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                <input
+                                  value={editCategory}
+                                  onChange={e => setEditCategory(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') commitEdit(note.chartId, note.id);
+                                    if (e.key === 'Escape') setEditKey(null);
+                                  }}
+                                  placeholder="Category (optional)"
+                                  className="w-full bg-bg border border-border rounded px-2 py-1 text-[11px] text-gray-300 placeholder:text-gray-600 focus:outline-none focus:border-accent"
                                 />
                                 <div className="flex gap-2 justify-end">
                                   <button onClick={() => commitEdit(note.chartId, note.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold transition">

@@ -39,9 +39,11 @@ function getStartDate(timeframe: string): Date {
 }
 
 function getInterval(timeframe: string): '1d' | '1wk' | '1mo' {
-  if (['1D', '1W', '1M', '3M', '6M', 'YTD', '1Y'].includes(timeframe)) return '1d';
-  if (['3Y', '5Y'].includes(timeframe)) return '1wk';
-  return '1mo'; // 10Y and MAX
+  // Daily resolution for everything up to 10Y (≈2500 trading days — fine for
+  // both payload size and chart rendering). MAX uses weekly so century-long
+  // index histories stay manageable, but it is still far denser than monthly.
+  if (timeframe === 'MAX') return '1wk';
+  return '1d';
 }
 
 interface SearchHit {
@@ -181,7 +183,7 @@ export async function GET(req: NextRequest) {
   const to   = isCustom ? new Date(toParam!) : new Date();
   const spanDays = (to.getTime() - from.getTime()) / 86_400_000;
   const interval: '1d' | '1wk' | '1mo' = isCustom
-    ? (spanDays <= 366 ? '1d' : spanDays <= 365 * 5 ? '1wk' : '1mo')
+    ? (spanDays <= 365 * 11 ? '1d' : '1wk')
     : getInterval(timeframe);
 
   try {
