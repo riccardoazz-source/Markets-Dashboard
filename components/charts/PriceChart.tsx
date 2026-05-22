@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import {
   ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ReferenceLine, ReferenceArea,
@@ -8,6 +9,7 @@ import {
 import { HistoricalPoint } from '@/lib/types';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
+import { spyBenchmarkSeries } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels,
@@ -25,6 +27,7 @@ interface ToolsOverlay {
   fib?: boolean;
   rsi?: boolean;
   macd?: boolean;
+  spyRatio?: boolean;
 }
 
 interface Props {
@@ -147,6 +150,22 @@ export function PriceChart({
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
+  // vs SPY benchmark overlay — fetched here so the tool works in every section
+  // that renders a PriceChart without each one wiring up its own SPY fetch.
+  const spyActive = !!toolsOverlay?.spyRatio;
+  const fromDate = data?.[0]?.date;
+  const toDate = data && data.length > 0 ? data[data.length - 1].date : undefined;
+  const [spyData, setSpyData] = useState<HistoricalPoint[]>([]);
+  useEffect(() => {
+    if (!spyActive || !fromDate || !toDate) { setSpyData([]); return; }
+    let cancelled = false;
+    fetch(`/api/historical?symbol=SPY&from=${fromDate}&to=${toDate}`)
+      .then(r => r.json())
+      .then((d: HistoricalPoint[]) => { if (!cancelled && Array.isArray(d)) setSpyData(d); })
+      .catch(() => { if (!cancelled) setSpyData([]); });
+    return () => { cancelled = true; };
+  }, [spyActive, fromDate, toDate]);
+
   if (!data || data.length === 0 || !data[0]) {
     return (
       <div className="flex items-center justify-center text-gray-500 text-sm" style={{ height }}>
@@ -184,19 +203,32 @@ export function PriceChart({
   const bands      = toolsOverlay?.bollinger ? computeBollingerBands(closes, 20, 2) : null;
   const fibLevels  = toolsOverlay?.fib ? computeFibLevels(closes) : null;
 
-  // Y-axis domain — closes drive it; Bollinger bands can extend past the close range.
+  // vs SPY benchmark line — rebased to the asset's first price.
+  const spyLine = spyActive && spyData.length > 0
+    ? spyBenchmarkSeries(data, spyData)
+    : null;
+
+  // Y-axis domain — closes drive it; Bollinger bands + SPY line can extend
+  // past the close range.
   let domMin = rawMin, domMax = rawMax;
   if (bands) {
     for (const v of bands.upper) if (v != null && v > domMax) domMax = v;
     for (const v of bands.lower) if (v != null && v < domMin) domMin = v;
+  }
+  if (spyLine) {
+    for (const v of spyLine) {
+      if (v == null) continue;
+      if (v > domMax) domMax = v;
+      if (v < domMin) domMin = v;
+    }
   }
   const dataRange = domMax - domMin;
   const pad = Math.max(dataRange * 0.08, Math.abs(domMax) * 0.02, 0.001);
   const yMin = domMin >= 0 ? Math.max(0, domMin - pad) : domMin - pad;
   const yMax = domMax + pad;
 
-  // Extend data with overlay columns (SMA/EMA lines + Bollinger band range)
-  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || ema20Vals || bands;
+  // Extend data with overlay columns (SMA/EMA lines + Bollinger band range + SPY)
+  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || ema20Vals || bands || spyLine;
   const chartData = hasSeriesOverlay
     ? data.map((d, i) => ({
         ...d,
@@ -204,6 +236,7 @@ export function PriceChart({
         sma50:  sma50Vals?.[i]  ?? null,
         sma200: sma200Vals?.[i] ?? null,
         ema20:  ema20Vals?.[i]  ?? null,
+        spy:    spyLine?.[i]    ?? null,
         bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
           ? [bands.lower[i] as number, bands.upper[i] as number]
           : null,
@@ -254,8 +287,15 @@ export function PriceChart({
 
       {/* Overlay legend when active */}
       {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
-        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib) && (
+        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib ||
+        spyLine) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
+          {spyLine && (
+            <span className="flex items-center gap-1 text-[10px] text-slate-300">
+              <span className="inline-block w-5 border-t-2 border-dashed border-slate-300" />
+              vs SPY (benchmark)
+            </span>
+          )}
           {toolsOverlay?.sma20 && (
             <span className="flex items-center gap-1 text-[10px] text-cyan-400">
               <span className="inline-block w-5 border-t-2 border-cyan-400" />SMA 20
@@ -341,6 +381,7 @@ export function PriceChart({
               if (name === 'sma50')  return [value != null ? value.toFixed(decimals) : '—', 'SMA 50'];
               if (name === 'sma200') return [value != null ? value.toFixed(decimals) : '—', 'SMA 200'];
               if (name === 'ema20')  return [value != null ? value.toFixed(decimals) : '—', 'EMA 20'];
+              if (name === 'spy')    return [value != null ? value.toFixed(decimals) : '—', 'vs SPY (benchmark)'];
               if (name === 'bbRange') {
                 const r = value as unknown as [number, number] | null;
                 return [r ? `${r[0].toFixed(decimals)} – ${r[1].toFixed(decimals)}` : '—', 'Bollinger'];
@@ -403,6 +444,11 @@ export function PriceChart({
           {toolsOverlay?.ema20 && (
             <Line type="monotone" dataKey="ema20" stroke="#f472b6" strokeWidth={1.5}
               dot={false} activeDot={false} connectNulls={false} name="ema20" />
+          )}
+          {/* vs SPY benchmark */}
+          {spyLine && (
+            <Line type="monotone" dataKey="spy" stroke="#cbd5e1" strokeWidth={1.5}
+              strokeDasharray="5 3" dot={false} activeDot={false} connectNulls name="spy" />
           )}
 
           {/* Level overlays */}

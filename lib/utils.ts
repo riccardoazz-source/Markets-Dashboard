@@ -128,6 +128,47 @@ export function pctChangeFromStart(data: HistoricalPoint[]): HistoricalPoint[] {
   return data.map(d => ({ ...d, close: (d.close / base - 1) * 100 }));
 }
 
+/**
+ * Benchmark overlay line: where the asset would sit if it had tracked SPY
+ * exactly from the period start. spyLine[i] = asset[0].close × (spy@dateᵢ /
+ * spy@date₀). SPY values are matched to each asset date via an at-or-before
+ * lookup so series on different trading calendars (crypto 7d/wk vs equities)
+ * still align. Returns one value per asset point (null where SPY is missing).
+ */
+export function spyBenchmarkSeries(
+  data: HistoricalPoint[],
+  spy: HistoricalPoint[],
+): (number | null)[] {
+  const result: (number | null)[] = new Array(data.length).fill(null);
+  if (data.length === 0 || spy.length === 0) return result;
+  const assetBase = data[0]?.close;
+  if (!assetBase || assetBase <= 0) return result;
+
+  const spySorted = spy
+    .filter(p => p.close != null && p.close > 0 && isFinite(p.close))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (spySorted.length === 0) return result;
+
+  const valAtOrBefore = (date: string): number => {
+    let lo = 0, hi = spySorted.length - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (spySorted[mid].date <= date) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return spySorted[ans >= 0 ? ans : 0].close;
+  };
+
+  const spyBase = valAtOrBefore(data[0].date);
+  if (!spyBase || spyBase <= 0) return result;
+
+  for (let i = 0; i < data.length; i++) {
+    const sv = valAtOrBefore(data[i].date);
+    result[i] = assetBase * (sv / spyBase);
+  }
+  return result;
+}
+
 export function averageRate(data: { date: string; rate: number }[]): number {
   if (!data.length) return 0;
   return data.reduce((sum, d) => sum + d.rate, 0) / data.length;

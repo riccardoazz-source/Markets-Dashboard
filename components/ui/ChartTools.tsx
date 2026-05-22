@@ -21,12 +21,14 @@ export interface ActiveTools {
   fib: boolean;
   rsi: boolean;
   macd: boolean;
+  spyRatio: boolean;
 }
 
 export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
   sma20: false, sma50: false, sma200: false, ema20: false,
   bollinger: false, fib: false, rsi: false, macd: false,
+  spyRatio: false,
 };
 
 interface Props {
@@ -142,6 +144,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
             <>
               {/* ── Compact chip toggles ────────────────────────────────── */}
               <div className="flex flex-wrap gap-1.5 items-center">
+                <ToolChip active={activeTools.spyRatio} onToggle={() => toggle('spyRatio')} label="vs SPY" color="slate" />
+                <Divider />
                 <ToolChip active={activeTools.avg}     onToggle={() => toggle('avg')}     label="Avg"      color="amber"  />
                 <ToolChip active={activeTools.stdDev}  onToggle={() => toggle('stdDev')}  label="Std Dev"  color="sky"    />
                 <ToolChip active={activeTools.minMax}  onToggle={() => toggle('minMax')}  label="Min/Max"  color="violet" />
@@ -244,6 +248,14 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                       />
                     </>
                   )}
+
+                  {activeTools.spyRatio && (
+                    <div className="min-w-0 self-end">
+                      <p className="text-[10px] text-slate-400/80 whitespace-nowrap">
+                        vs SPY · benchmark line drawn on the chart
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -298,6 +310,7 @@ const COLOR_MAP = {
   rose:   { border: 'border-rose-400/60',   bg: 'bg-rose-400/10',   text: 'text-rose-400'   },
   teal:   { border: 'border-teal-400/60',   bg: 'bg-teal-400/10',   text: 'text-teal-400'   },
   yellow: { border: 'border-yellow-400/60', bg: 'bg-yellow-400/10', text: 'text-yellow-400' },
+  slate:  { border: 'border-slate-300/60',  bg: 'bg-slate-300/10',  text: 'text-slate-300'  },
 } as const;
 
 type ColorKey = keyof typeof COLOR_MAP;

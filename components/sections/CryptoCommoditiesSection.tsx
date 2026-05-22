@@ -9,7 +9,6 @@ import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
-import { SpyRatioChart } from '@/components/ui/SpyRatioChart';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
@@ -35,8 +34,6 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
   const [dataMsg, setDataMsg] = useState<string | null>(null);
-  const [showSpyRatio, setShowSpyRatio] = useState(false);
-  const [spyPrices, setSpyPrices] = useState<HistoricalPoint[]>([]);
 
   const fetchCrypto = useCallback(async () => {
     try {
@@ -96,19 +93,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
     if (jumpTo?.startsWith('crypto:')) setSelected(jumpTo.slice('crypto:'.length));
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); setShowSpyRatio(false); setSpyPrices([]); }, [selected]);
-
-  useEffect(() => {
-    if (!showSpyRatio || !selected) { setSpyPrices([]); return; }
-    let cancelled = false;
-    const tf = customRange ? 'MAX' : timeframe;
-    const base = `/api/historical?symbol=SPY&timeframe=${tf}`;
-    const url = customRange ? `${base}&from=${customRange.from}&to=${customRange.to}` : base;
-    fetch(url).then(r => r.json()).then((d: HistoricalPoint[]) => {
-      if (!cancelled && Array.isArray(d)) setSpyPrices(d);
-    }).catch(() => { if (!cancelled) setSpyPrices([]); });
-    return () => { cancelled = true; };
-  }, [showSpyRatio, selected, timeframe, customRange]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
 
   const sorted = [...cryptoData].sort((a, b) => {
     const av = a[sortBy] ?? -Infinity;
@@ -238,20 +223,6 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
             <Stat label="24h Volume" value={formatMarketCap(selectedCrypto.volume24h)} />
           </div>
 
-          {historical.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => setShowSpyRatio(v => !v)}
-                className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
-                  showSpyRatio ? 'border-violet-400 text-violet-400 bg-violet-400/10' : 'border-border text-gray-400 hover:text-gray-200')}
-              >
-                {showSpyRatio ? 'Hide vs SPY' : 'vs SPY ratio'}
-              </button>
-            </div>
-          )}
-          {!histLoading && showSpyRatio && spyPrices.length > 0 && historical.length > 0 && (
-            <SpyRatioChart prices={historical} spyPrices={spyPrices} />
-          )}
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : (

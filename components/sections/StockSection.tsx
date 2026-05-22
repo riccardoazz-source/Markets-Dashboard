@@ -5,13 +5,13 @@ import { HistoricalPoint, Timeframe, QuoteData } from '@/lib/types';
 import {
   calculateCAGR, formatPercent, formatPrice, colorForPercent,
   buildTotalReturnSeries, computeAssetIRR, DividendEvent, dataAvailabilityMessage,
+  spyBenchmarkSeries,
 } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
-import { SpyRatioChart } from '@/components/ui/SpyRatioChart';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { useGistData } from '@/lib/gist';
 import {
@@ -218,10 +218,11 @@ interface DualChartToolsOverlay {
   ema20?: boolean;
   bollinger?: boolean;
   fib?: boolean;
+  spyRatio?: boolean;
 }
 
 function DualChart({
-  prices, totalReturn, currency, eps, financials, toolsOverlay,
+  prices, totalReturn, currency, eps, financials, toolsOverlay, spyPrices,
 }: {
   prices: HistoricalPoint[];
   totalReturn: HistoricalPoint[];
@@ -229,6 +230,7 @@ function DualChart({
   eps?: EarningsPoint[];
   financials?: FinancialPoint[];
   toolsOverlay?: DualChartToolsOverlay;
+  spyPrices?: HistoricalPoint[];
 }) {
   const { handlers, range, area, clear } = useChartDragSelect();
   if (!prices.length) return null;
@@ -337,6 +339,17 @@ function DualChart({
     });
   }
 
+  // vs SPY benchmark line — rebased to the stock's first price, keyed by date.
+  const showSpy = !!toolsOverlay?.spyRatio && !!spyPrices && spyPrices.length > 0;
+  const spyByDate = new Map<string, number>();
+  if (showSpy) {
+    const spyLine = spyBenchmarkSeries(prices, spyPrices!);
+    prices.forEach((p, i) => {
+      const v = spyLine[i];
+      if (v != null) spyByDate.set(p.date, v);
+    });
+  }
+
   const chartData = allDates.map(date => ({
     date,
     price: priceMap.get(date) ?? null,
@@ -352,6 +365,7 @@ function DualChart({
     sma200: overlayByDate.get(date)?.sma200 ?? null,
     ema20:  overlayByDate.get(date)?.ema20  ?? null,
     bbRange: overlayByDate.get(date)?.bbRange ?? null,
+    spy: showSpy ? (spyByDate.get(date) ?? null) : null,
   }));
 
   const decimals = 2;
@@ -392,8 +406,13 @@ function DualChart({
         </div>
       )}
       {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
-        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib) && (
+        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
+          {showSpy && (
+            <span className="flex items-center gap-1 text-[10px] text-slate-300">
+              <span className="inline-block w-5 border-t-2 border-dashed border-slate-300" />vs SPY (benchmark)
+            </span>
+          )}
           {toolsOverlay?.sma20 && (
             <span className="flex items-center gap-1 text-[10px] text-cyan-400">
               <span className="inline-block w-5 border-t-2 border-cyan-400" />SMA 20
@@ -476,6 +495,7 @@ function DualChart({
             if (name === 'sma50')  return [value != null ? formatPrice(value, currency) : '—', 'SMA 50'];
             if (name === 'sma200') return [value != null ? formatPrice(value, currency) : '—', 'SMA 200'];
             if (name === 'ema20')  return [value != null ? formatPrice(value, currency) : '—', 'EMA 20'];
+            if (name === 'spy')    return [value != null ? formatPrice(value, currency) : '—', 'vs SPY (benchmark)'];
             if (name === 'bbRange') {
               const r = value as unknown as [number, number] | null;
               return [r ? `${formatPrice(r[0], currency)} – ${formatPrice(r[1], currency)}` : '—', 'Bollinger'];
@@ -536,6 +556,10 @@ function DualChart({
         {toolsOverlay?.ema20 && (
           <Line yAxisId="price" type="monotone" dataKey="ema20" stroke="#f472b6"
             strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="ema20" />
+        )}
+        {showSpy && (
+          <Line yAxisId="price" type="monotone" dataKey="spy" stroke="#cbd5e1"
+            strokeWidth={1.5} strokeDasharray="5 3" dot={false} activeDot={false} connectNulls name="spy" />
         )}
         {area && (
           <ReferenceArea
@@ -691,7 +715,6 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
   const [dataMsg, setDataMsg] = useState<string | null>(null);
-  const [showSpyRatio, setShowSpyRatio] = useState(false);
   const [spyPrices, setSpyPrices] = useState<HistoricalPoint[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -769,10 +792,10 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
     }
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); setShowSpyRatio(false); setSpyPrices([]); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); setSpyPrices([]); }, [selected]);
 
   useEffect(() => {
-    if (!showSpyRatio || !selected || selected.symbol === 'SPY') { setSpyPrices([]); return; }
+    if (!activeTools.spyRatio || !selected || selected.symbol === 'SPY') { setSpyPrices([]); return; }
     let cancelled = false;
     const tf = customRange ? 'MAX' : timeframe;
     const base = `/api/historical?symbol=SPY&timeframe=${tf}`;
@@ -781,7 +804,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       if (!cancelled && Array.isArray(d)) setSpyPrices(d);
     }).catch(() => { if (!cancelled) setSpyPrices([]); });
     return () => { cancelled = true; };
-  }, [showSpyRatio, selected, timeframe, customRange]);
+  }, [activeTools.spyRatio, selected, timeframe, customRange]);
 
   // All unique categories used across stock notes (for the category selector)
   const noteCategories = useMemo(() => {
@@ -1132,17 +1155,6 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                         Reports {reportFreq}
                       </span>
                     )}
-                    {selected.symbol !== 'SPY' && (
-                      <button
-                        onClick={() => setShowSpyRatio(v => !v)}
-                        className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
-                          showSpyRatio
-                            ? 'border-violet-400 text-violet-400 bg-violet-400/10'
-                            : 'border-border text-gray-400 hover:text-gray-200')}
-                      >
-                        {showSpyRatio ? 'Hide vs SPY' : 'vs SPY ratio'}
-                      </button>
-                    )}
                   </>
                 )}
               </div>
@@ -1203,10 +1215,6 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </div>
           )}
 
-          {!loading && showSpyRatio && spyPrices.length > 0 && prices.length > 0 && (
-            <SpyRatioChart prices={prices} spyPrices={spyPrices} />
-          )}
-
           {loading ? (
             <div className="flex items-center justify-center h-56"><LoadingSpinner size={32} /></div>
           ) : prices.length > 0 ? (
@@ -1217,6 +1225,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               eps={overlay === 'eps' ? earnings?.quarterly : undefined}
               financials={overlay === 'financials' ? earnings?.financials : undefined}
               toolsOverlay={activeTools}
+              spyPrices={spyPrices}
             />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-500 text-sm">
