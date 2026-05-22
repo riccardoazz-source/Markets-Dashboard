@@ -44,6 +44,11 @@ function formatMacroValue(value: number, unit: MacroUnit): string {
     if (value >= 1_000) return `${(value / 1_000).toFixed(1)}M`;
     return `${value.toLocaleString()}K`;
   }
+  if (unit === '$') {
+    if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+    if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+    return `$${value.toFixed(0)}`;
+  }
   return value.toFixed(1);
 }
 
@@ -54,6 +59,10 @@ function formatMacroChange(change: number, unit: MacroUnit): string {
   if (unit === 'K') {
     if (Math.abs(change) >= 1_000) return `${sign}${(change / 1_000).toFixed(0)}M`;
     return `${sign}${change.toFixed(0)}K`;
+  }
+  if (unit === '$') {
+    if (Math.abs(change) >= 1_000) return `${sign}$${(change / 1_000).toFixed(0)}K`;
+    return `${sign}$${change.toFixed(0)}`;
   }
   return `${sign}${change.toFixed(2)}`;
 }
@@ -326,7 +335,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              {onCompare && selected !== 'BTC_HALVING' && (
+              {onCompare && selected !== 'BTC_HALVING' && selected !== 'BTC_PRODUCTION_COST' && (
                 <button
                   onClick={() => onCompare(selected!)}
                   className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"

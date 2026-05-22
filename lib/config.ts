@@ -1,6 +1,6 @@
 import { AssetConfig } from './types';
 
-export type MacroUnit = '%' | 'K' | 'idx' | 'B$';
+export type MacroUnit = '%' | 'K' | 'idx' | 'B$' | '$';
 export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Sentiment' | 'Crypto' | 'Debt' | 'Market Value';
 
 // ---------- Source metadata ----------
@@ -132,6 +132,9 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'BTC_MINED_MONTHLY', name: 'Monthly BTC Mined',     category: 'Crypto', unit: 'idx',
     source: { type: 'computed', label: 'Computed from halving schedule',
               url: 'https://charts.bitbo.io/miner-monthly-revenue/' } },
+  { id: 'BTC_PRODUCTION_COST', name: 'BTC Production Cost',  category: 'Crypto', unit: '$',
+    source: { type: 'computed', label: 'Computed: network hashrate × 25 J/TH × $0.05/kWh (blockchain.info)',
+              url: 'https://en.macromicro.me/series/8194/bitcoin-production-total-cost' } },
   // Debt — US federal debt and sustainability metrics
   { id: 'GFDEGDQ188S', name: 'Debt / GDP Ratio',     category: 'Debt',        unit: '%',
     source: { type: 'fred',    label: 'FRED',

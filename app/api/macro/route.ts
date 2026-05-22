@@ -51,7 +51,7 @@ function getFredApiKey(): string {
 // For these, fetch the full history so the card still shows the last available
 // value, and charts show the complete series regardless of the timeframe picked.
 const WIDE_WINDOW_SERIES = new Set([
-  'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING',
+  'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING', 'BTC_PRODUCTION_COST',
   'GFDEGDQ188S', 'GFDEBTN', 'A939RC0A052NBEA',
   // Market Value: Shiller history ends ~2023 and the multpl annual tables are
   // small. Always fetch full history so the card has a latest value (the
@@ -428,6 +428,59 @@ function computeRSI(
     out.push({ date: closes[i].date, value: rsi() });
   }
   return out;
+}
+
+// ---------- Bitcoin production cost (electricity-based estimate) ----------
+// Formula: hashrate × efficiency × electricity_price / monthly_btc_mined
+// Assumptions: 25 J/TH efficiency (industry average), $0.05/kWh electricity.
+// Data source: blockchain.info hashrate chart (EH/s).
+async function fetchBitcoinProductionCost(
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  const url = 'https://api.blockchain.info/charts/hash-rate?format=json&timespan=all&sampled=true&metadata=false&cors=true';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Origin': 'https://www.blockchain.com' },
+    });
+    if (!res.ok) { console.error(`[btc-cost] blockchain.info HTTP ${res.status}`); return []; }
+    const json = await res.json() as { values?: { x: number; y: number }[] };
+    const raw = json?.values ?? [];
+    if (!raw.length) { console.warn('[btc-cost] no hashrate data'); return []; }
+
+    const J_PER_TH = 25;         // assumed miner efficiency (J/TH)
+    const USD_PER_KWH = 0.05;    // industrial electricity rate ($/kWh)
+    const HOURS_PER_MONTH = 24 * 30;
+
+    const out: { date: string; value: number }[] = [];
+    for (const pt of raw) {
+      const date = new Date(pt.x * 1000).toISOString().slice(0, 10);
+      if (fromDate && date < fromDate) continue;
+      const hashEH = pt.y;  // EH/s
+      if (!isFinite(hashEH) || hashEH <= 0) continue;
+      const reward = rewardAt(date);
+      // Power (W) = hashEH * 1e6 TH/s * J_PER_TH
+      const powerW = hashEH * 1e6 * J_PER_TH;
+      // Monthly energy (kWh)
+      const monthlyKWh = powerW * HOURS_PER_MONTH / 1000;
+      // Monthly cost ($)
+      const monthlyCost = monthlyKWh * USD_PER_KWH;
+      // Monthly BTC mined
+      const monthlyBTC = 144 * 30 * reward;
+      const costPerBTC = monthlyCost / monthlyBTC;
+      out.push({ date, value: Math.round(costPerBTC) });
+    }
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[btc-cost] ${out.length} pts`);
+    return out;
+  } catch (e) {
+    console.error('[btc-cost] failed:', (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 async function fetchBitcoinMonthlyRSI(
@@ -1266,10 +1319,11 @@ async function fetchMacroSeries(
     return fetchMultpl(src.slug, fromDate);
   }
   if (src?.type === 'computed') {
-    if (fredId === 'BTC_HALVING')       return getBitcoinHalvings(fromDate);
-    if (fredId === 'BTC_RSI')           return fetchBitcoinMonthlyRSI(fromDate);
-    if (fredId === 'BTC_MINED_MONTHLY') return getBitcoinMinedMonthly(fromDate);
-    if (fredId === 'BTC_MINER_REVENUE') return getBitcoinMinerRevenue(fromDate);
+    if (fredId === 'BTC_HALVING')          return getBitcoinHalvings(fromDate);
+    if (fredId === 'BTC_RSI')              return fetchBitcoinMonthlyRSI(fromDate);
+    if (fredId === 'BTC_MINED_MONTHLY')    return getBitcoinMinedMonthly(fromDate);
+    if (fredId === 'BTC_MINER_REVENUE')    return getBitcoinMinerRevenue(fromDate);
+    if (fredId === 'BTC_PRODUCTION_COST')  return fetchBitcoinProductionCost(fromDate);
     // WALCL: Fed total assets in millions on FRED → divide by 1000 for billions.
     if (fredId === 'WALCL') {
       const [fred, dbn] = await Promise.all([
