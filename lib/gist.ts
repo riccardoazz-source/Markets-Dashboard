@@ -95,7 +95,10 @@ export async function loadGistData(): Promise<GistData> {
         : Object.keys(remote).length > 0;
       const local = loadLocal();
       const remoteHasData = Object.keys(remote).length > 0;
-      const baseline = remoteHasData ? remote : local;
+      // Prefer local data over server so client-side deletes/edits survive
+      // a hard refresh even when the server write was slow or failed.
+      // Remote still provides fallback for chartIds not present locally.
+      const baseline = remoteHasData ? mergeNotes(remote, local) : local;
 
       // If a write landed while this fetch was in flight, _cache holds the
       // fresher state — keep it and only adopt baseline chartIds it lacks.

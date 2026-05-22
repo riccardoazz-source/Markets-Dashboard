@@ -59,6 +59,7 @@ const nameCacheRef: Record<string, string> = {};
 
 export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['^GSPC', '^NDX', 'GC=F']);
   const [assets, setAssets] = useState<CompareAsset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -207,19 +208,21 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const fetchAll = useCallback(async () => {
     if (!selectedSymbols.length) { setAssets([]); return; }
     setLoading(true);
+    // When a custom date range is active, always fetch MAX so the data covers it.
+    const fetchTF: Timeframe = customRange ? 'MAX' : timeframe;
     const results: (CompareAsset | null)[] = [];
     for (let i = 0; i < selectedSymbols.length; i++) {
       const color = CHART_COLORS[i % CHART_COLORS.length];
-      let asset = await fetchAsset(selectedSymbols[i], color, timeframe);
+      let asset = await fetchAsset(selectedSymbols[i], color, fetchTF);
       if (!asset) {
         await new Promise(r => setTimeout(r, 1500));
-        asset = await fetchAsset(selectedSymbols[i], color, timeframe);
+        asset = await fetchAsset(selectedSymbols[i], color, fetchTF);
       }
       results.push(asset);
     }
     setAssets(results.filter(Boolean) as CompareAsset[]);
     setLoading(false);
-  }, [selectedSymbols, timeframe, fetchAsset]);
+  }, [selectedSymbols, timeframe, customRange, fetchAsset]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -263,20 +266,30 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const displayAssets = useMemo(() => {
     if (!assets.length) return assets;
     try {
-      const tfStart = getTimeframeStart(timeframe);
+      const tfStart = customRange ? customRange.from : getTimeframeStart(timeframe);
+      const tfEnd = customRange ? customRange.to : null;
 
-      // First pass: find each asset's first date that falls within the TF window
+      // First pass: find each asset's first date that falls within the TF window.
+      // Consider BOTH prices and totalReturnData so both lines share the same baseline.
       const firstDates = assets.map(a => {
         const raw = a.rawData ?? a.data;
-        return raw.find(d => d.date >= tfStart)?.date ?? tfStart;
+        const rawFirst = raw.find(d => d.date >= tfStart)?.date ?? tfStart;
+        const tr = a.totalReturnData;
+        if (!tr || tr.length === 0) return rawFirst;
+        const trFirst = tr.find(d => d.date >= tfStart)?.date ?? tfStart;
+        return rawFirst > trFirst ? rawFirst : trFirst;
       });
       const commonStart = firstDates.reduce((a, b) => (a > b ? a : b));
 
       return assets.map(a => {
         const raw = a.rawData ?? a.data;
-        const rawFiltered = raw.filter(d => d.date >= commonStart);
-        const trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
-        const divsFiltered = a.dividends?.filter(d => d.date >= commonStart) ?? [];
+        let rawFiltered = raw.filter(d => d.date >= commonStart);
+        if (tfEnd) rawFiltered = rawFiltered.filter(d => d.date <= tfEnd);
+        let trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
+        if (tfEnd && trFiltered) trFiltered = trFiltered.filter(d => d.date <= tfEnd);
+        const divsFiltered = (a.dividends ?? []).filter(d =>
+          d.date >= commonStart && (!tfEnd || d.date <= tfEnd)
+        );
         // For macro series:
         //   1. dedup consecutive identical values → chart shows when value
         //      actually changed, not 100s of "no change" daily duplicates.
@@ -318,7 +331,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       console.error('[CompareSection] displayAssets error:', e);
       return assets;
     }
-  }, [assets, timeframe, normalized]);
+  }, [assets, timeframe, customRange, normalized]);
 
   const correl = useMemo(() => {
     try {
@@ -359,7 +372,13 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               </button>
             )}
           </div>
-          <TimeframeSelector value={timeframe} onChange={setTimeframe} options={TF_OPTIONS} />
+          <TimeframeSelector
+            value={timeframe}
+            onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+            options={TF_OPTIONS}
+            isCustom={!!customRange}
+            onCustomRange={(from, to) => setCustomRange({ from, to })}
+          />
         </div>
       </div>
 
@@ -453,7 +472,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                 </div>
                 {a.totalReturn != null && (
                   <div>
-                    <p className="text-[10px] text-gray-500">Return ({timeframe})</p>
+                    <p className="text-[10px] text-gray-500">Return ({customRange ? 'Custom' : timeframe})</p>
                     <p className={clsx('text-base font-bold', colorForPercent(a.totalReturn))}>{formatPercent(a.totalReturn)}</p>
                   </div>
                 )}
