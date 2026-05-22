@@ -78,7 +78,14 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
 
   const commitEdit = async (chartId: string, id: string) => {
     const text = editText.trim();
-    if (!text) { setEditKey(null); return; }
+    const note = (allNotes[chartId] ?? []).find(n => n.id === id);
+    if (!text && !note?.category) {
+      // Both text and category empty → delete the note
+      const updated = (allNotes[chartId] ?? []).filter(n => n.id !== id);
+      await update({ notes: { [chartId]: updated } });
+      setEditKey(null);
+      return;
+    }
     const updated = (allNotes[chartId] ?? []).map(n =>
       n.id === id ? { ...n, text, date: todayStr() } : n);
     await update({ notes: { [chartId]: updated } });
@@ -240,9 +247,13 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
                                   className="w-full bg-bg border border-accent rounded px-2 py-1 text-xs text-gray-100 focus:outline-none resize-none min-h-[64px]"
                                   autoFocus
                                 />
-                                <div className="flex gap-1 justify-end">
-                                  <button onClick={() => commitEdit(note.chartId, note.id)} className="p-1 text-emerald-400 hover:text-emerald-300"><Check size={14} /></button>
-                                  <button onClick={() => setEditKey(null)} className="p-1 text-gray-500 hover:text-gray-300"><X size={14} /></button>
+                                <div className="flex gap-2 justify-end">
+                                  <button onClick={() => commitEdit(note.chartId, note.id)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 text-xs font-semibold transition">
+                                    <Check size={13} /> Save
+                                  </button>
+                                  <button onClick={() => setEditKey(null)} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-border text-gray-400 hover:text-gray-200 text-xs font-semibold transition">
+                                    <X size={13} /> Cancel
+                                  </button>
                                 </div>
                               </div>
                             ) : (
@@ -259,12 +270,12 @@ export function SectionNotesPanel({ section, sectionLabel, onNavigate }: Props) 
                                   >
                                     {note.assetName}
                                   </button>
-                                  <div className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => startEdit(note)} className="p-1 text-gray-500 hover:text-gray-300"><Edit2 size={11} /></button>
-                                    <button onClick={() => deleteNote(note.chartId, note.id)} className="p-1 text-gray-500 hover:text-red-400"><Trash2 size={11} /></button>
+                                  <div className="flex gap-0.5 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => startEdit(note)} className="p-2 sm:p-1 text-gray-500 hover:text-gray-300"><Edit2 size={12} /></button>
+                                    <button onClick={() => deleteNote(note.chartId, note.id)} className="p-2 sm:p-1 text-gray-500 hover:text-red-400"><Trash2 size={12} /></button>
                                   </div>
                                 </div>
-                                <p className="text-xs text-gray-200 leading-relaxed whitespace-pre-wrap break-words">{note.text}</p>
+                                {note.text && <p className="text-xs text-gray-200 leading-relaxed whitespace-pre-wrap break-words">{note.text}</p>}
                                 <div className="flex items-center gap-2 mt-1.5">
                                   <p className="text-[10px] text-gray-600">{note.date}</p>
                                   {note.category && (
