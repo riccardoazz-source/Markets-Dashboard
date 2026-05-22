@@ -11,7 +11,7 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingSpinner, LoadingGrid } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { ArrowRight, RefreshCw } from 'lucide-react';
+import { ArrowRight, RefreshCw, BarChart2 } from 'lucide-react';
 
 interface CurrencyRate {
   from: string;
@@ -61,7 +61,7 @@ function pctText(v: number | null) {
   return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 }
 
-export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
+export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [rates, setRates] = useState<CurrencyRate[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ from: string; to: string } | null>(null);
@@ -225,7 +225,7 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
       {selected && (
         <div className="rounded-xl border border-border bg-bg-card p-5 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-lg font-bold text-white flex items-center gap-1.5">
                 <Flag code={selected.from} size={16} />
                 {selected.from}
@@ -237,6 +237,15 @@ export function CurrenciesSection({ jumpTo }: { jumpTo?: string | null }) {
                 <span className="text-2xl font-bold text-accent">
                   {selectedRate.rate.toFixed(dec)}
                 </span>
+              )}
+              {onCompare && (
+                <button
+                  onClick={() => onCompare(`${selected.from}${selected.to}=X`)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+                >
+                  <BarChart2 size={13} />
+                  Compare
+                </button>
               )}
             </div>
             <TimeframeSelector

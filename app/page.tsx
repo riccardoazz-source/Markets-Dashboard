@@ -52,6 +52,11 @@ export default function Home() {
     setJumpTarget(chartId);
   };
 
+  const handleCompare = (symbol: string) => {
+    setSection('compare');
+    setJumpTarget(`compare:${symbol}`);
+  };
+
   return (
     <>
       <Navbar active={section} onSelect={handleSectionSelect} />
@@ -70,13 +75,13 @@ export default function Home() {
           )}
         </div>
 
-        {section === 'indexes'     && <IndexesSection jumpTo={jumpTarget} />}
-        {section === 'currencies'  && <CurrenciesSection jumpTo={jumpTarget} />}
-        {section === 'crypto'      && <CryptoCommoditiesSection jumpTo={jumpTarget} />}
-        {section === 'commodities' && <CommoditiesSection jumpTo={jumpTarget} />}
-        {section === 'sectors'     && <SectorsSection jumpTo={jumpTarget} />}
-        {section === 'macro'       && <MacroSection jumpTo={jumpTarget} />}
-        {section === 'stock'       && <StockSection jumpTo={jumpTarget} />}
+        {section === 'indexes'     && <IndexesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
+        {section === 'currencies'  && <CurrenciesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
+        {section === 'crypto'      && <CryptoCommoditiesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
+        {section === 'commodities' && <CommoditiesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
+        {section === 'sectors'     && <SectorsSection jumpTo={jumpTarget} onCompare={handleCompare} />}
+        {section === 'macro'       && <MacroSection jumpTo={jumpTarget} onCompare={handleCompare} />}
+        {section === 'stock'       && <StockSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'compare'     && <CompareSection jumpTo={jumpTarget} />}
         {section === 'sources'     && <SourcesSection />}
       </main>

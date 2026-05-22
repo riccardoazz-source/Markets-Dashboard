@@ -11,7 +11,7 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
 type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent';
 
@@ -21,7 +21,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ytdChangePercent',   label: 'YTD' },
 ];
 
-export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
+export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>('changePercent');
@@ -176,9 +176,20 @@ export function CommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
               <h3 className="text-base font-bold text-white">{selectedConfig?.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">{selected} · {selectedConfig?.category}</p>
             </div>
-            <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300 shrink-0">
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onCompare && (
+                <button
+                  onClick={() => onCompare(selected!)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+                >
+                  <BarChart2 size={13} />
+                  Compare
+                </button>
+              )}
+              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
+                <X size={16} />
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
             <TimeframeSelector

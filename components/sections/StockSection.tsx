@@ -23,7 +23,7 @@ import {
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
-import { Search, X } from 'lucide-react';
+import { Search, X, BarChart2 } from 'lucide-react';
 
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
 interface FinancialPoint {
@@ -675,7 +675,7 @@ function EarningsBarChart({ quarterly, currency }: { quarterly: EarningsPoint[];
   );
 }
 
-export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
+export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -1006,13 +1006,24 @@ export function StockSection({ jumpTo }: { jumpTo?: string | null }) {
                 {data?.meta?.currency ? ` · ${data.meta.currency}` : ''}
               </p>
             </div>
-            <TimeframeSelector
-              value={timeframe}
-              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
-              options={TF_OPTIONS}
-              isCustom={!!customRange}
-              onCustomRange={(from, to) => setCustomRange({ from, to })}
-            />
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              {onCompare && (
+                <button
+                  onClick={() => onCompare(selected.symbol)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+                >
+                  <BarChart2 size={13} />
+                  Compare
+                </button>
+              )}
+              <TimeframeSelector
+                value={timeframe}
+                onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+                options={TF_OPTIONS}
+                isCustom={!!customRange}
+                onCustomRange={(from, to) => setCustomRange({ from, to })}
+              />
+            </div>
           </div>
 
           {dataMsg && (

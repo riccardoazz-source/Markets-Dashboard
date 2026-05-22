@@ -11,7 +11,7 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, Flame, RefreshCw, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, Flame, RefreshCw, X, BarChart2 } from 'lucide-react';
 
 interface SectorLiveData {
   price: number | null;
@@ -37,7 +37,7 @@ const SORT_OPTIONS: { value: SectorSortKey; label: string }[] = [
   { value: 'ytdReturn',     label: 'YTD' },
 ];
 
-export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
+export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [live, setLive] = useState<Record<string, SectorLiveData>>({});
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SectorSortKey>('changePercent');
@@ -226,7 +226,20 @@ export function SectorsSection({ jumpTo }: { jumpTo?: string | null }) {
               <h3 className="text-base font-bold text-white">{selectedSector.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">{selectedSector.symbol} · {selectedSector.category}</p>
             </div>
-              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300 shrink-0"><X size={16} /></button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onCompare && (
+                <button
+                  onClick={() => onCompare(selected!)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+                >
+                  <BarChart2 size={13} />
+                  Compare
+                </button>
+              )}
+              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
+                <X size={16} />
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
             <TimeframeSelector

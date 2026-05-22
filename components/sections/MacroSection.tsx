@@ -13,7 +13,7 @@ import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartToo
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
 const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Sentiment', 'Crypto', 'Debt', 'Market Value'];
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
@@ -71,7 +71,7 @@ function formatShortDate(dateStr: string): string {
   } catch { return dateStr; }
 }
 
-export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
+export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [mounted, setMounted] = useState(false);
   const [sourcesConfig, setSourcesConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [] });
   const [category, setCategory] = useState('All');
@@ -325,9 +325,20 @@ export function MacroSection({ jumpTo }: { jumpTo?: string | null }) {
                 )}
               </p>
             </div>
-            <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300 shrink-0">
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onCompare && selected !== 'BTC_HALVING' && (
+                <button
+                  onClick={() => onCompare(selected!)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+                >
+                  <BarChart2 size={13} />
+                  Compare
+                </button>
+              )}
+              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
+                <X size={16} />
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">

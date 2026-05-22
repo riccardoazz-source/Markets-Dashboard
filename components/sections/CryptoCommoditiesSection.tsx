@@ -11,7 +11,7 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, RefreshCw, X } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
 type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent';
 
@@ -21,7 +21,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ytdChangePercent',  label: 'YTD' },
 ];
 
-export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null }) {
+export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [cryptoData, setCryptoData] = useState<CryptoData[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>('change24hPercent');
@@ -174,9 +174,20 @@ export function CryptoCommoditiesSection({ jumpTo }: { jumpTo?: string | null })
               <h3 className="text-base font-bold text-white">{selectedCrypto.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">{selectedCrypto.symbol}</p>
             </div>
-            <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300 shrink-0">
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onCompare && (
+                <button
+                  onClick={() => onCompare(CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+                >
+                  <BarChart2 size={13} />
+                  Compare
+                </button>
+              )}
+              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
+                <X size={16} />
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
             <TimeframeSelector
