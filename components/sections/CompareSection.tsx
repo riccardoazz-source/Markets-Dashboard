@@ -491,6 +491,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               onAssetSelect={setStackAssetIdx}
               activeTools={stackTools}
               onToolsChange={setStackTools}
+              normalized={normalized}
             />
           )}
 

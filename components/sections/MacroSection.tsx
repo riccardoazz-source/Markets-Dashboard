@@ -335,7 +335,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              {onCompare && selected !== 'BTC_HALVING' && selected !== 'BTC_PRODUCTION_COST' && (
+              {onCompare && selected !== 'BTC_HALVING' && (
                 <button
                   onClick={() => onCompare(selected!)}
                   className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"

@@ -21,13 +21,14 @@ interface Props {
   onAssetSelect: (i: number) => void;
   activeTools: ActiveTools;
   onToolsChange: (t: ActiveTools) => void;
+  normalized?: boolean;
 }
 
 const fmtD = (d: string) => { try { return format(parseISO(d), 'MMM d, yyyy'); } catch { return d; } };
 
-export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTools, onToolsChange }: Props) {
+export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTools, onToolsChange, normalized }: Props) {
   const asset = assets[assetIdx];
-  const prices = asset?.rawData ?? asset?.data ?? [];
+  const prices = normalized ? (asset?.data ?? []) : (asset?.rawData ?? asset?.data ?? []);
   const color = asset?.color ?? CHART_COLORS[assetIdx % CHART_COLORS.length];
 
   const closes = useMemo(
@@ -117,9 +118,10 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
               tick={{ fill: '#6b7280', fontSize: 9 }}
               axisLine={false}
               tickLine={false}
-              width={40}
+              width={normalized ? 44 : 40}
               tickFormatter={v => {
                 const n = v as number;
+                if (normalized) return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
                 if (n >= 10000) return `${Math.round(n / 1000)}k`;
                 if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
                 return n.toFixed(n < 10 ? 2 : 0);
@@ -160,7 +162,8 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
             {bands && (
               <Line type="monotone" dataKey="bbMid" stroke="#eab308" strokeWidth={1} strokeOpacity={0.3} strokeDasharray="4 2" dot={false} connectNulls={false} legendType="none" />
             )}
-            <Line type="monotone" dataKey="price" stroke={color} strokeWidth={1.5} dot={false} connectNulls={false} name="Price" />
+            {normalized && <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="3 3" strokeOpacity={0.4} />}
+            <Line type="monotone" dataKey="price" stroke={color} strokeWidth={1.5} dot={false} connectNulls={false} name={normalized ? '% Change' : 'Price'} />
             {activeTools.sma20  && <Line type="monotone" dataKey="sma20"  stroke="#22d3ee" strokeWidth={1} dot={false} connectNulls={false} legendType="none" />}
             {activeTools.sma50  && <Line type="monotone" dataKey="sma50"  stroke="#fbbf24" strokeWidth={1} dot={false} connectNulls={false} legendType="none" />}
             {activeTools.sma200 && <Line type="monotone" dataKey="sma200" stroke="#a78bfa" strokeWidth={1} dot={false} connectNulls={false} legendType="none" />}
@@ -170,7 +173,7 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
             ))}
             <Tooltip
               contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
-              formatter={(v: number, name: string) => [v != null ? v.toFixed(2) : '—', name]}
+              formatter={(v: number, name: string) => [v != null ? (normalized ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : v.toFixed(2)) : '—', name]}
               labelFormatter={l => fmtD(l as string)}
             />
           </ComposedChart>
