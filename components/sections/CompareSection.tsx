@@ -62,7 +62,13 @@ const nameCacheRef: Record<string, string> = {};
 export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
-  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(['^GSPC', '^NDX', 'GC=F']);
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(() => {
+    if (jumpTo?.startsWith('compare:')) {
+      const syms = jumpTo.slice('compare:'.length).split(',').filter(Boolean);
+      if (syms.length > 0) return syms;
+    }
+    return ['^GSPC', '^NDX', 'GC=F'];
+  });
   const [assets, setAssets] = useState<CompareAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [normalized, setNormalized] = useState(true);
@@ -338,6 +344,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     }
   }, [assets, timeframe, customRange, normalized]);
 
+  const safeStackIdx = Math.min(stackAssetIdx, Math.max(0, displayAssets.length - 1));
+  const mainChartAssets = showStack && displayAssets.length > 1
+    ? displayAssets.filter((_, i) => i !== safeStackIdx)
+    : displayAssets;
+
   const correl = useMemo(() => {
     try {
       const series = displayAssets
@@ -470,8 +481,18 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       ) : displayAssets.length > 0 ? (
         <ChartErrorBoundary>
           <div className="rounded-xl border border-border bg-bg-card p-4">
-            <CompareChart assets={displayAssets} height={360} logScale={!normalized && logScale} percentMode={normalized} />
+            <CompareChart assets={mainChartAssets} height={360} logScale={!normalized && logScale} percentMode={normalized} />
           </div>
+
+          {showStack && displayAssets.length > 0 && (
+            <StackAnalysisPanel
+              assets={displayAssets}
+              assetIdx={safeStackIdx}
+              onAssetSelect={setStackAssetIdx}
+              activeTools={stackTools}
+              onToolsChange={setStackTools}
+            />
+          )}
 
           {/* Stats cards — use displayAssets so numbers are computed on the
               same window the chart displays (commonStart → today), and prefer
@@ -514,16 +535,6 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               sampleCount={correl.sampleCount}
               alignedData={correl.alignedData}
               names={Object.fromEntries(assets.map(a => [a.symbol, a.name]))}
-            />
-          )}
-
-          {showStack && displayAssets.length > 0 && (
-            <StackAnalysisPanel
-              assets={displayAssets}
-              assetIdx={Math.min(stackAssetIdx, displayAssets.length - 1)}
-              onAssetSelect={setStackAssetIdx}
-              activeTools={stackTools}
-              onToolsChange={setStackTools}
             />
           )}
         </ChartErrorBoundary>
