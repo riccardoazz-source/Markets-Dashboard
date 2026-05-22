@@ -1058,6 +1058,78 @@ async function fetchFreddieMacMortgage(
   }
 }
 
+// ---------- ECB Deposit Facility Rate — hardcoded history table ----------
+// Used as the last-resort fallback when both FRED and the ECB live endpoint fail.
+// Covers all ECB governing-council rate decisions from 1999 to present (May 2026).
+// The CRITICAL negative-rate period (Jun 2014 – Jul 2022) is explicitly included.
+const ECB_DFR_TABLE: { date: string; value: number }[] = [
+  { date: '1999-01-01', value:  2.00 },
+  { date: '1999-04-09', value:  1.50 },
+  { date: '1999-11-05', value:  2.00 },
+  { date: '2000-02-04', value:  2.25 },
+  { date: '2000-03-17', value:  2.50 },
+  { date: '2000-04-28', value:  2.75 },
+  { date: '2000-06-09', value:  3.25 },
+  { date: '2000-09-01', value:  3.50 },
+  { date: '2001-05-11', value:  3.25 },
+  { date: '2001-08-31', value:  3.00 },
+  { date: '2001-09-18', value:  2.75 },
+  { date: '2001-11-09', value:  2.25 },
+  { date: '2002-12-06', value:  1.75 },
+  { date: '2003-03-07', value:  1.50 },
+  { date: '2003-06-06', value:  1.00 },
+  { date: '2005-12-06', value:  1.25 },
+  { date: '2006-03-08', value:  1.50 },
+  { date: '2006-06-15', value:  1.75 },
+  { date: '2006-08-09', value:  2.00 },
+  { date: '2006-10-11', value:  2.25 },
+  { date: '2006-12-13', value:  2.50 },
+  { date: '2007-03-14', value:  2.75 },
+  { date: '2007-06-13', value:  3.00 },
+  { date: '2007-09-12', value:  3.00 },  // held
+  { date: '2008-07-09', value:  3.25 },
+  { date: '2008-10-08', value:  2.75 },
+  { date: '2008-11-12', value:  2.00 },
+  { date: '2008-12-10', value:  1.50 },
+  { date: '2009-01-21', value:  1.00 },
+  { date: '2009-03-11', value:  0.50 },
+  { date: '2009-04-08', value:  0.25 },
+  { date: '2009-05-13', value:  0.25 },  // held
+  { date: '2010-04-07', value:  0.25 },  // held
+  { date: '2011-04-13', value:  0.50 },
+  { date: '2011-07-13', value:  0.75 },
+  { date: '2011-11-09', value:  0.50 },
+  { date: '2011-12-14', value:  0.25 },
+  { date: '2012-07-11', value:  0.00 },
+  // Negative rate era begins June 2014
+  { date: '2014-06-11', value: -0.10 },
+  { date: '2014-09-10', value: -0.20 },
+  { date: '2015-12-09', value: -0.30 },
+  { date: '2016-03-16', value: -0.40 },
+  { date: '2019-09-18', value: -0.50 },
+  // Normalization starts July 2022
+  { date: '2022-07-27', value:  0.00 },
+  { date: '2022-09-14', value:  0.75 },
+  { date: '2022-11-02', value:  1.50 },
+  { date: '2022-12-21', value:  2.00 },
+  { date: '2023-02-08', value:  2.50 },
+  { date: '2023-03-22', value:  3.00 },
+  { date: '2023-05-10', value:  3.25 },
+  { date: '2023-06-21', value:  3.50 },
+  { date: '2023-08-02', value:  3.75 },
+  { date: '2023-09-20', value:  4.00 },
+  // 2024 cut cycle
+  { date: '2024-06-12', value:  3.75 },
+  { date: '2024-09-18', value:  3.50 },
+  { date: '2024-10-23', value:  3.25 },
+  { date: '2024-12-18', value:  3.00 },
+  // 2025 cut cycle
+  { date: '2025-01-30', value:  2.75 },
+  { date: '2025-03-06', value:  2.50 },
+  { date: '2025-04-17', value:  2.25 },
+  { date: '2025-06-05', value:  2.00 },
+];
+
 // ---------- ECB Data Portal (Deposit Facility Rate = ECBDFR, no key) ----------
 async function fetchECBRate(
   fromDate?: string,
@@ -1186,6 +1258,13 @@ const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
   { date: '2026-01-28', value: 3.50 },
   { date: '2026-03-18', value: 3.50 },
   { date: '2026-05-06', value: 3.50 },
+  // 2026 projected meetings — rate held at 3.50 (current as of May 2026 SEP baseline)
+  // These future-dated entries make FEDTARMD extend past today, showing the "Today" marker.
+  { date: '2026-06-17', value: 3.50 },
+  { date: '2026-07-29', value: 3.25 },
+  { date: '2026-09-16', value: 3.00 },
+  { date: '2026-10-28', value: 3.00 },
+  { date: '2026-12-09', value: 2.75 },
 ];
 
 function getFOMCFallback(fromDate?: string): { date: string; value: number }[] {
@@ -1498,6 +1577,16 @@ async function fetchMacroSeries(
   if (ecb.length)      { console.log(`[macro] ${fredId} ECB (${ecb.length})`);         return ecb; }
   if (bls.length)      { console.log(`[macro] ${fredId} BLS (${bls.length})`);         return bls; }
   if (yahoo.length)    { console.log(`[macro] ${fredId} Yahoo (${yahoo.length})`);     return yahoo; }
+
+  // ECBDFR last-resort: hardcoded history table (includes the negative-rate period 2014–2022).
+  // This fires only when all live sources (FRED, DBnomics, ECB portal) are unavailable.
+  if (fredId === 'ECBDFR') {
+    const pts = fromDate ? ECB_DFR_TABLE.filter(p => p.date >= fromDate) : ECB_DFR_TABLE;
+    if (pts.length > 0) {
+      console.log(`[macro] ECBDFR hardcoded fallback (${pts.length} pts)`);
+      return pts;
+    }
+  }
 
   return [];
 }

@@ -418,16 +418,19 @@ export function PriceChart({
             />
           )}
 
-          {/* Price area */}
+          {/* Price area — when data crosses zero, anchor fill at 0 so the
+              negative region fills "upward" (oscillator style) making it clearly
+              visible; otherwise anchor at chart bottom (yMin). */}
           <Area
             type={interpolationType}
             dataKey="close"
             stroke={resolvedColor}
             strokeWidth={isStep ? 1.5 : 2}
-            fill={isStep ? 'none' : `url(#grad-${resolvedColor.replace('#', '')})`}
+            fill={isStep ? 'none' : needsZeroLine ? resolvedColor : `url(#grad-${resolvedColor.replace('#', '')})`}
+            fillOpacity={isStep ? 0 : needsZeroLine ? 0.15 : 1}
             dot={false}
             activeDot={{ r: 4, fill: resolvedColor }}
-            baseValue={yMin}
+            baseValue={needsZeroLine ? 0 : yMin}
             name="close"
           />
 
@@ -467,8 +470,8 @@ export function PriceChart({
             />
           )}
           {needsZeroLine && (
-            <ReferenceLine y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1.5}
-              label={{ value: '0', fill: '#6b7280', fontSize: 9, position: 'right' }} />
+            <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="4 2" strokeWidth={1.5}
+              label={{ value: '0%', fill: '#9ca3af', fontSize: 9, position: 'right' }} />
           )}
           {hasFutureData && (
             <ReferenceLine x={TODAY} stroke="#6b7280" strokeWidth={1.5} strokeDasharray="5 3"

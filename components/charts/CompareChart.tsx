@@ -70,10 +70,13 @@ type AxisGroup = 'left' | 'right' | 'right2';
 const LOG_TICKS = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
 
 // Min/max of every value plotted for a group of assets (price + optional TR).
+// For log scale we only consider strictly positive values (log of 0 or negative is undefined).
+// For linear scale the caller always returns ['auto', 'auto'] so this function isn't used.
 function groupRange(group: CompareAsset[]): { lo: number; hi: number } {
   let lo = Infinity, hi = -Infinity;
   group.forEach(a => {
     [...a.data, ...(a.trData ?? [])].forEach(d => {
+      // Only strictly-positive values for log-scale domain computation.
       if (d.close > 0 && isFinite(d.close)) {
         lo = Math.min(lo, d.close);
         hi = Math.max(hi, d.close);
@@ -128,6 +131,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       );
     }
     if (halvingAsset) return <HalvingChart height={height} />;
+    if (fomcAsset)    return <FOMCMeetingsCompareDisplay />;
     return null;
   }
 
@@ -263,12 +267,16 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
     if (plottableAssets.length < 2) return { axisMap: map, hasRightAxis: false, hasRight2Axis: false };
 
+    // Use |last value| as the "magnitude" for axis-grouping purposes.
+    // Assets whose last value is 0 or very small get level=0 and stay on the left axis.
+    // Assets with negative latest values (e.g. T10Y2Y inversion) use their absolute value
+    // so they participate in magnitude-based grouping.
     const levels = plottableAssets.map(a => {
       const series = a.rawData ?? a.data;
       let level = 0;
       for (let i = series.length - 1; i >= 0; i--) {
         const c = series[i]?.close;
-        if (typeof c === 'number' && isFinite(c) && c > 0) { level = c; break; }
+        if (typeof c === 'number' && isFinite(c) && c !== 0) { level = Math.abs(c); break; }
       }
       return { symbol: a.symbol, level };
     }).filter(x => x.level > 0);
@@ -316,6 +324,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   });
   if (halvingAsset) {
     legendItems.push({ key: 'BTC_HALVING', name: 'Bitcoin Halvings', color: '#f59e0b', dashed: true });
+  }
+  if (fomcAsset) {
+    legendItems.push({ key: 'FOMC_MEETINGS', name: 'FOMC Meetings', color: '#3b82f6', dashed: true });
   }
 
   const selStats = range
@@ -527,7 +538,8 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
             <ReferenceLine yAxisId="left" y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1} />
           )}
           {!percentMode && needsZeroLine && (
-            <ReferenceLine yAxisId="left" y={0} stroke="#374151" strokeDasharray="4 2" strokeWidth={1} />
+            <ReferenceLine yAxisId="left" y={0} stroke="#6b7280" strokeDasharray="4 2" strokeWidth={1.5}
+              label={{ value: '0', fill: '#9ca3af', fontSize: 9, position: 'right' }} />
           )}
           {/* Recession bands — drawn before the lines so they sit behind them */}
           {recessionBands.map(b => (
@@ -606,6 +618,58 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       {!range && (
         <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to compare a period</p>
       )}
+    </div>
+  );
+}
+
+// ── Standalone FOMC meetings display (used when FOMC_MEETINGS is the only asset) ──
+function FOMCMeetingsCompareDisplay() {
+  const today = new Date().toISOString().slice(0, 10);
+  const fmt = (d: string) => {
+    try {
+      return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+      });
+    } catch { return d; }
+  };
+  const past   = FOMC_MEETING_DATES.filter(d => d <= today).slice().reverse();
+  const future = FOMC_MEETING_DATES.filter(d => d > today);
+
+  return (
+    <div className="space-y-4 py-2">
+      <div className="rounded-lg border border-blue-400/30 bg-blue-400/10 px-4 py-3">
+        <p className="text-sm font-semibold text-blue-300 mb-0.5">🏛 FOMC Meeting Dates</p>
+        <p className="text-xs text-blue-300/70">
+          Add a market or macro series alongside to overlay meeting dates on the chart.
+        </p>
+      </div>
+      {future.length > 0 && (
+        <div>
+          <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider mb-2">Upcoming meetings</p>
+          <div className="space-y-1">
+            {future.map(d => (
+              <div key={d} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                <span className="text-sm text-blue-200">{fmt(d)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div>
+        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Past meetings (recent first)</p>
+        <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+          {past.slice(0, 40).map(d => (
+            <div key={d} className="flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-white/5 transition-colors">
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-600 shrink-0" />
+              <span className="text-xs text-gray-400">{fmt(d)}</span>
+            </div>
+          ))}
+          {past.length > 40 && (
+            <p className="text-[10px] text-gray-600 px-3 py-1">… and {past.length - 40} more</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
