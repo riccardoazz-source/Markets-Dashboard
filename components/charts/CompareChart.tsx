@@ -100,7 +100,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     return <HalvingChart height={height} />;
   }
 
-  const MAX_CHART_POINTS = 500;
+  const MAX_CHART_POINTS = 2000;
   const rawDates = Array.from(new Set(
     nonHalvingAssets.flatMap(a => [
       ...a.data.map(d => d.date),

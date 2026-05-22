@@ -505,6 +505,9 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                 <div className="flex items-center gap-2 mb-2">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
                   <p className="text-sm font-semibold text-gray-100 truncate">{a.name}</p>
+                  {a.totalReturnData && (
+                    <span className="ml-auto shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-400/10 text-emerald-400 border border-emerald-400/20">DIV</span>
+                  )}
                 </div>
                 {a.totalReturn != null && (
                   <div>
@@ -514,14 +517,14 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                 )}
                 {a.cagr != null && (
                   <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">CAGR</p>
+                    <p className="text-[10px] text-gray-500">CAGR (price only)</p>
                     <p className={clsx('text-sm font-semibold', colorForPercent(a.cagr))}>{formatPercent(a.cagr)}</p>
                   </div>
                 )}
-                {a.irr != null && (
+                {a.cagrWithDiv != null && (
                   <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
-                    <p className={clsx('text-sm font-semibold', colorForPercent(a.irr))}>{formatPercent(a.irr)}</p>
+                    <p className="text-[10px] text-gray-500">CAGR (w/ div. reinv.)</p>
+                    <p className={clsx('text-sm font-semibold', colorForPercent(a.cagrWithDiv))}>{formatPercent(a.cagrWithDiv)}</p>
                   </div>
                 )}
               </div>
