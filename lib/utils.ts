@@ -513,11 +513,12 @@ export function correlationMatrix(
     return { labels, matrix: labels.map(() => labels.map(() => null)), sampleCount: 0, alignedData: [] };
   }
 
-  // ── Aligned value arrays, then drop any row with invalid/non-positive value ─
+  // ── Aligned value arrays, then drop any row with invalid values ─────────
+  // Allow 0 (valid for binary indicators like USREC 0/1); only drop NaN/Inf.
   const aligned: number[][] = filled.map(m => validKeys.map(k => m.get(k)!));
   const validIdx: number[] = [];
   for (let i = 0; i < aligned[0].length; i++) {
-    if (aligned.every(r => isFinite(r[i]) && r[i] > 0)) validIdx.push(i);
+    if (aligned.every(r => isFinite(r[i]) && r[i] >= 0)) validIdx.push(i);
   }
   const cleaned: number[][] = aligned.map(r => validIdx.map(i => r[i]));
   const sampleCount = validIdx.length;

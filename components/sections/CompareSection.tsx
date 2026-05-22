@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from 'react';
-import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES } from '@/lib/config';
+import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
@@ -59,8 +59,8 @@ interface SearchHit { symbol: string; name: string; exchange: string; type: stri
 // ── per-symbol name cache so custom stocks keep their name after fetching ──
 const nameCacheRef: Record<string, string> = {};
 
-// Recession series are overlays (shaded bands), not comparable data lines —
-// excluded from stats cards and the correlation matrix.
+// Recession series render as shaded bands, not data lines — excluded from
+// stats cards. Included in correlation as 0/1 (point-biserial correlation).
 const RECESSION_SET = new Set(RECESSION_SERIES);
 
 export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
@@ -304,25 +304,23 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
 
       return assets.map(a => {
         const raw = a.rawData ?? a.data;
-        // Recession assets keep full history so their bands span the entire
-        // visible range even when other assets cover a short timeframe window.
         const isRec = RECESSION_SET.has(a.symbol);
+        // rawFiltered: full history for recession assets so recessionBands in
+        // CompareChart can find historical intervals even on short timeframes.
         let rawFiltered = isRec ? raw : raw.filter(d => d.date >= commonStart);
         if (tfEnd && !isRec) rawFiltered = rawFiltered.filter(d => d.date <= tfEnd);
+        // displayFiltered: always trimmed to the visible range so the Stack
+        // panel and all display charts align with the main chart timeframe.
+        let displayFiltered = raw.filter(d => d.date >= commonStart);
+        if (tfEnd) displayFiltered = displayFiltered.filter(d => d.date <= tfEnd);
         let trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
         if (tfEnd && trFiltered) trFiltered = trFiltered.filter(d => d.date <= tfEnd);
         const divsFiltered = (a.dividends ?? []).filter(d =>
           d.date >= commonStart && (!tfEnd || d.date <= tfEnd)
         );
-        // For macro series:
-        //   1. dedup consecutive identical values → chart shows when value
-        //      actually changed, not 100s of "no change" daily duplicates.
-        //   2. extendToToday → line extends horizontally to today, clearly
-        //      showing "value is still current" instead of ending mid-axis
-        //      and looking like the value collapsed.
         const displayRaw = a.type === 'macro'
-          ? extendToToday(dedupStepSeries(rawFiltered))
-          : rawFiltered;
+          ? extendToToday(dedupStepSeries(displayFiltered))
+          : displayFiltered;
         const displayData = normalized ? pctChangeFromStart(displayRaw) : displayRaw;
         const displayTrData = trFiltered
           ? (normalized ? pctChangeFromStart(trFiltered) : trFiltered)
@@ -364,9 +362,27 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
 
   const correl = useMemo(() => {
     try {
-      const series = displayAssets
-        .filter(a => !RECESSION_SET.has(a.symbol) && (a.rawData ?? a.data).length > 1)
+      // USREC is included with its raw 0/1 values (point-biserial correlation).
+      // BTC_HALVING is excluded here and added below as a 0/1 dummy (the block-
+      // reward step series 50→3.125 is spuriously correlated with any trend).
+      const series: { symbol: string; data: HistoricalPoint[] }[] = displayAssets
+        .filter(a => a.symbol !== 'BTC_HALVING' && (a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
+
+      const halvingAsset = displayAssets.find(a => a.symbol === 'BTC_HALVING');
+      if (halvingAsset) {
+        const baseDates = (halvingAsset.rawData ?? halvingAsset.data).map(d => d.date);
+        if (baseDates.length > 1) {
+          const halvingDummy: HistoricalPoint[] = baseDates.map(date => ({
+            date,
+            close: BTC_HALVING_DATES.some(hd =>
+              Math.abs(new Date(date).getTime() - new Date(hd).getTime()) <= 7 * 24 * 60 * 60 * 1000
+            ) ? 1 : 0,
+          }));
+          series.push({ symbol: 'BTC_HALVING', data: halvingDummy });
+        }
+      }
+
       return correlationMatrix(series);
     } catch (e) {
       console.error('[CompareSection] correlationMatrix error:', e);
