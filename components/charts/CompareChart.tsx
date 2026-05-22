@@ -181,19 +181,40 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   // Recession bands — each recession interval clipped to the visible range and
   // snapped to category dates so the ReferenceArea renders on the X axis.
+  // A minimum span keeps short recessions (e.g. the 2-month 2020 COVID slump)
+  // visible even on a multi-decade MAX axis where they would be sub-pixel.
   const recessionBands = allDates.length > 0
-    ? recessionAssets.flatMap(a => {
-        const meta = RECESSION_META[a.symbol] ?? { label: a.symbol, color: '#64748b' };
+    ? (() => {
         const lo = allDates[0], hi = allDates[allDates.length - 1];
-        return recessionIntervals(a.rawData ?? a.data)
-          .filter(iv => iv.end >= lo && iv.start <= hi)
-          .map(iv => ({
-            key: `${a.symbol}-${iv.start}`,
-            x1: snapToDates(iv.start < lo ? lo : iv.start, allDates),
-            x2: snapToDates(iv.end > hi ? hi : iv.end, allDates),
-            color: meta.color,
-          }));
-      })
+        const minSpan = Math.max(2, Math.round(allDates.length * 0.008));
+        return recessionAssets.flatMap(a => {
+          const meta = RECESSION_META[a.symbol] ?? { label: a.symbol, color: '#64748b' };
+          return recessionIntervals(a.rawData ?? a.data)
+            .filter(iv => iv.end >= lo && iv.start <= hi)
+            .map(iv => {
+              const s = snapToDates(iv.start < lo ? lo : iv.start, allDates);
+              const e = snapToDates(iv.end > hi ? hi : iv.end, allDates);
+              let i1 = allDates.indexOf(s);
+              let i2 = allDates.indexOf(e);
+              if (i2 - i1 < minSpan) {
+                const center = Math.round((i1 + i2) / 2);
+                i1 = center - Math.floor(minSpan / 2);
+                i2 = i1 + minSpan;
+                if (i1 < 0) { i1 = 0; i2 = minSpan; }
+                if (i2 > allDates.length - 1) {
+                  i2 = allDates.length - 1;
+                  i1 = Math.max(0, i2 - minSpan);
+                }
+              }
+              return {
+                key: `${a.symbol}-${iv.start}`,
+                x1: allDates[i1],
+                x2: allDates[i2],
+                color: meta.color,
+              };
+            });
+        });
+      })()
     : [];
 
   // ── Y-axis grouping ───────────────────────────────────────────────────────
@@ -459,9 +480,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               x1={b.x1}
               x2={b.x2}
               fill={b.color}
-              fillOpacity={0.16}
+              fillOpacity={0.22}
               stroke={b.color}
-              strokeOpacity={0.25}
+              strokeOpacity={0.5}
             />
           ))}
           {plottableAssets.map(a => (
