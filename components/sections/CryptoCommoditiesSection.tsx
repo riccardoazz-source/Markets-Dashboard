@@ -38,9 +38,13 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
   const fetchCrypto = useCallback(async () => {
     try {
       const res = await fetch('/api/crypto?mode=markets');
-      const data = await res.json() as CryptoData[];
-      setCryptoData(data);
-      setLastUpdate(new Date());
+      const data = await res.json();
+      // Guard: API may return { error: '...' } when CoinGecko is rate-limited.
+      // Spreading a non-array would throw "Symbol.iterator is not a function".
+      if (Array.isArray(data)) {
+        setCryptoData(data as CryptoData[]);
+        setLastUpdate(new Date());
+      }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
@@ -56,8 +60,8 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
         days = Math.ceil(ms / 86_400_000) + 1;
       }
       const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
-      const raw = await res.json() as HistoricalPoint[];
-      let data = Array.isArray(raw) ? raw : [];
+      const rawJson = await res.json();
+      let data: HistoricalPoint[] = Array.isArray(rawJson) ? (rawJson as HistoricalPoint[]) : [];
       if (override) data = data.filter(p => p.date >= override.from && p.date <= override.to);
 
       // Yahoo Finance fallback when CoinGecko is rate-limited (common for >1Y ranges)
@@ -95,7 +99,10 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
 
   useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
 
-  const sorted = [...cryptoData].sort((a, b) => {
+  // Double-guard: cryptoData is initialised as [] but could be stale if a fetch
+  // overwrote state with a non-array error object. Spread on non-array throws.
+  const safeData = Array.isArray(cryptoData) ? cryptoData : [];
+  const sorted = [...safeData].sort((a, b) => {
     const av = a[sortBy] ?? -Infinity;
     const bv = b[sortBy] ?? -Infinity;
     return (bv as number) - (av as number);

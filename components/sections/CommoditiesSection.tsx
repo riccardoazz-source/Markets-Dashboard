@@ -39,7 +39,8 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
     try {
       const symbols = COMMODITIES.map(c => c.symbol).join(',');
       const res = await fetch(`/api/quotes?symbols=${symbols}`);
-      const data = await res.json() as QuoteData[];
+      const rawQ = await res.json();
+      const data: QuoteData[] = Array.isArray(rawQ) ? (rawQ as QuoteData[]) : [];
       const map: Record<string, QuoteData> = {};
       data.forEach(q => { map[q.symbol] = q; });
       setQuotes(map);

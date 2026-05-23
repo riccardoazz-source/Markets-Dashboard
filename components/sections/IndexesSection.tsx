@@ -42,7 +42,8 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     const symbols = INDEXES.map(i => i.symbol).join(',');
     try {
       const res = await fetch(`/api/quotes?symbols=${symbols}`);
-      const data = await res.json() as QuoteData[];
+      const rawQ = await res.json();
+      const data: QuoteData[] = Array.isArray(rawQ) ? (rawQ as QuoteData[]) : [];
       const map: Record<string, QuoteData> = {};
       data.forEach(q => { map[q.symbol] = q; });
       setQuotes(map);
