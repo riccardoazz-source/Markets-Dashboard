@@ -1583,6 +1583,35 @@ async function fetchMacroSeries(
   return [];
 }
 
+// ---------- Bitcoin next block height (for dynamic halving estimate) ----------
+async function fetchBitcoinBlockHeight(timeoutMs = 4_000): Promise<number | null> {
+  for (const url of [
+    'https://mempool.space/api/blocks/tip/height',
+    'https://blockchain.info/q/getblockcount',
+  ]) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': UA, 'Accept': 'text/plain,application/json,*/*' },
+      });
+      if (!res.ok) continue;
+      const text = await res.text();
+      const height = parseInt(text.trim(), 10);
+      if (isFinite(height) && height > 800_000) {
+        console.log(`[btc-height] block ${height} from ${url}`);
+        return height;
+      }
+    } catch (e) {
+      console.warn(`[btc-height] ${url} failed:`, (e as Error).message);
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  return null;
+}
+
 // ---------- Snapshot fallbacks (list-mode card display only) ----------
 // Last-resort values when both FRED and DBnomics fail for series that have no
 // alternative provider (no BLS / Treasury / ECB / Yahoo equivalent).
@@ -1638,6 +1667,25 @@ export async function GET(req: NextRequest) {
       if (stale) return NextResponse.json(stale, { headers: CACHE_HEADERS });
       return NextResponse.json([], { status: 200 });
     }
+  }
+
+  // Bitcoin next halving estimate (dynamic, based on current block height)
+  if (mode === 'btc-next-halving') {
+    const cacheKey = 'btc-next-halving';
+    const cached = getCached(cacheKey, 30 * 60_000); // 30-min cache
+    if (cached) return NextResponse.json(cached, { headers: CACHE_HEADERS });
+    const height = await fetchBitcoinBlockHeight();
+    const NEXT_HALVING_BLOCK = 1_050_000; // 5th halving (after 4th at 840,000)
+    let estimatedDate = '2028-04-20'; // fallback: +4y from 2024-04-20
+    let blocksRemaining: number | null = null;
+    if (height !== null) {
+      blocksRemaining = Math.max(0, NEXT_HALVING_BLOCK - height);
+      const msLeft = blocksRemaining * 10 * 60 * 1000; // 10 min/block
+      estimatedDate = new Date(Date.now() + msLeft).toISOString().slice(0, 10);
+    }
+    const result = { estimatedDate, blocksRemaining, blockHeight: height };
+    cache.set(cacheKey, { data: result, ts: Date.now() });
+    return NextResponse.json(result, { headers: CACHE_HEADERS });
   }
 
   // Latest values for a list of series

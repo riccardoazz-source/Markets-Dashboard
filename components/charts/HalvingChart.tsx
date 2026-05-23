@@ -1,27 +1,46 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine,
 } from 'recharts';
 import { BTC_HALVING_DATES } from '@/lib/config';
 import { format, parseISO } from 'date-fns';
 
+interface NextHalving { estimatedDate: string; blocksRemaining: number | null; blockHeight: number | null }
+
 // Bitcoin halvings shown as vertical reference lines on a continuous time axis.
+// Past halvings → solid amber lines. Estimated next halving → dashed amber line.
 export function HalvingChart({ height = 240 }: { height?: number }) {
-  // Continuous monthly axis from Jan 2012 → current month.
+  const [next, setNext] = useState<NextHalving | null>(null);
+
+  useEffect(() => {
+    fetch('/api/macro?mode=btc-next-halving')
+      .then(r => r.json() as Promise<NextHalving>)
+      .then(d => setNext(d))
+      .catch(() => null);
+  }, []);
+
+  // Fallback estimate when API hasn't loaded yet: +4y from last known halving
+  const lastKnown = BTC_HALVING_DATES[BTC_HALVING_DATES.length - 1];
+  const nextDate: string = next?.estimatedDate ?? (() => {
+    const d = new Date(lastKnown + 'T12:00:00Z');
+    d.setFullYear(d.getFullYear() + 4);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  // Monthly axis from Jan 2012 → estimated next halving
   const data: { date: string; v: number }[] = [];
-  const now = new Date();
+  const axisEnd = new Date(nextDate + 'T12:00:00Z');
   const d = new Date(2012, 0, 1);
-  while (d <= now) {
+  while (d <= axisEnd) {
     data.push({ date: format(d, 'yyyy-MM-dd'), v: 0 });
     d.setMonth(d.getMonth() + 1);
   }
 
-  // Snap a halving date to the nearest monthly data point so the
-  // ReferenceLine renders on the category X axis.
   const snap = (target: string): string => {
     const tt = parseISO(target).getTime();
-    let best = data[0].date, bestDiff = Infinity;
+    let best = data[0]?.date ?? target, bestDiff = Infinity;
     for (const p of data) {
       const diff = Math.abs(parseISO(p.date).getTime() - tt);
       if (diff < bestDiff) { bestDiff = diff; best = p.date; }
@@ -41,18 +60,29 @@ export function HalvingChart({ height = 240 }: { height?: number }) {
         />
         <YAxis hide domain={[0, 1]} />
         <Line dataKey="v" stroke="transparent" dot={false} isAnimationActive={false} />
+
+        {/* Past halvings — solid amber */}
         {BTC_HALVING_DATES.map(hd => (
           <ReferenceLine
             key={hd}
             x={snap(hd)}
             stroke="#f59e0b"
             strokeWidth={2}
-            label={{
-              value: `⚡ ${format(parseISO(hd), "MMM ''yy")}`,
-              fill: '#f59e0b', fontSize: 10, position: 'insideTop',
-            }}
+            label={{ value: `⚡ ${format(parseISO(hd), "MMM ''yy")}`, fill: '#f59e0b', fontSize: 10, position: 'insideTop' }}
           />
         ))}
+
+        {/* Estimated next halving — dashed amber */}
+        {data.length > 0 && (
+          <ReferenceLine
+            x={snap(nextDate)}
+            stroke="#f59e0b"
+            strokeWidth={1.5}
+            strokeDasharray="6 3"
+            strokeOpacity={0.65}
+            label={{ value: `⚡ ~${format(parseISO(nextDate), "MMM ''yy")} (est.)`, fill: '#f59e0b', fontSize: 10, position: 'insideTop' }}
+          />
+        )}
       </LineChart>
     </ResponsiveContainer>
   );

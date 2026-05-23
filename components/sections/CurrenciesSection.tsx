@@ -135,7 +135,12 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-medium text-gray-400">USD &amp; EUR Currency Pairs</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-medium text-gray-400">USD &amp; EUR Currency Pairs</h2>
+          <span className="text-[10px] text-gray-500 bg-bg-input px-2 py-0.5 rounded-full border border-border">
+            {CURRENCY_GROUPS.length} pairs · {CURRENCY_GROUPS.length * 2} directions
+          </span>
+        </div>
         {lastUpdate && (
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <RefreshCw size={11} />

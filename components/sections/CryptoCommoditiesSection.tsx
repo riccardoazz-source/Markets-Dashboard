@@ -112,7 +112,10 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-end gap-2 flex-wrap">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[10px] text-gray-500 bg-bg-input px-2 py-0.5 rounded-full border border-border">
+          {CRYPTO_IDS.length} cryptocurrencies
+        </span>
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex gap-1 bg-bg-input rounded-lg p-1">
             {SORT_OPTIONS.map(opt => (

@@ -112,6 +112,12 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
   return (
     <div className="space-y-3">
+      {/* Count chip */}
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-gray-500 bg-bg-input px-2 py-0.5 rounded-full border border-border">
+          {INDEXES.length} indexes
+        </span>
+      </div>
       {/* Filters row */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {REGIONS.map(r => (

@@ -87,6 +87,7 @@ function formatShortDate(dateStr: string): string {
 export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [mounted, setMounted] = useState(false);
   const [sourcesConfig, setSourcesConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [] });
+  const [btcNextHalvingDate, setBtcNextHalvingDate] = useState<string | null>(null);
   const [category, setCategory] = useState('All');
   const [data, setData] = useState<Record<string, MacroLatest>>({});
   const [statusOk, setStatusOk] = useState<Record<string, boolean>>({});
@@ -105,6 +106,11 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
     setSourcesConfig(loadSourcesConfig());
     const handler = () => setSourcesConfig(loadSourcesConfig());
     window.addEventListener('mkt-sources-changed', handler);
+    // Fetch dynamic next halving estimate from block height API
+    fetch('/api/macro?mode=btc-next-halving')
+      .then(r => r.json() as Promise<{ estimatedDate: string }>)
+      .then(d => setBtcNextHalvingDate(d.estimatedDate))
+      .catch(() => null);
     return () => window.removeEventListener('mkt-sources-changed', handler);
   }, []);
 
@@ -258,14 +264,19 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1 text-[10px] text-gray-600 shrink-0">
-          {loading && <span className="text-accent animate-pulse">loading…</span>}
-          {lastUpdate && !loading && (
-            <span className="flex items-center gap-1">
-              <RefreshCw size={9} />{lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          )}
-          <span className="text-gray-700 ml-1">Sources: FRED · BLS · NY Fed · ECB</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[10px] text-gray-500 bg-bg-input px-2 py-0.5 rounded-full border border-border">
+            {filtered.length} indicator{filtered.length !== 1 ? 's' : ''}
+          </span>
+          <div className="flex items-center gap-1 text-[10px] text-gray-600">
+            {loading && <span className="text-accent animate-pulse">loading…</span>}
+            {lastUpdate && !loading && (
+              <span className="flex items-center gap-1">
+                <RefreshCw size={9} />{lastUpdate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+            <span className="text-gray-700 ml-1">FRED · BLS · NY Fed · ECB</span>
+          </div>
         </div>
       </div>
 
@@ -335,12 +346,17 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                       const today = new Date().toISOString().slice(0, 10);
                       const past = BTC_HALVING_DATES.filter(d => d <= today);
                       const lastHalving = past[past.length - 1];
-                      // Next halving ≈ 4 years after last (210,000 blocks × ~10 min each)
-                      const nextHalvingLabel = lastHalving ? (() => {
-                        const d = new Date(lastHalving + 'T12:00:00Z');
-                        d.setFullYear(d.getFullYear() + 4);
-                        return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
-                      })() : '~2028';
+                      // Use dynamic block-height estimate if available, else +4y fallback
+                      const nextHalvingLabel = btcNextHalvingDate
+                        ? new Date(btcNextHalvingDate + 'T12:00:00Z')
+                            .toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+                        : lastHalving
+                          ? (() => {
+                              const d = new Date(lastHalving + 'T12:00:00Z');
+                              d.setFullYear(d.getFullYear() + 4);
+                              return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+                            })()
+                          : '~2028';
                       const fmt = (d: string) => {
                         try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); }
                         catch { return d; }
