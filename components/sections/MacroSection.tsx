@@ -148,7 +148,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
     const dataUpdates: Record<string, MacroLatest> = {};
     const okUpdates: Record<string, boolean> = {};
-    const snapUpdates: Record<string, boolean> = {};
+    const gistUpdates: Record<string, boolean> = {};
 
     const from18 = new Date();
     from18.setMonth(from18.getMonth() - 18);
@@ -165,7 +165,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           json.forEach(d => {
             dataUpdates[d.id] = d;
             okUpdates[d.id] = d.latest !== null;
-            snapUpdates[d.id] = d.latest !== null && d.fromGist === true;
+            gistUpdates[d.id] = d.latest !== null && d.fromGist === true;
           });
         } catch (e) { console.error('[macro] list error', e); }
       })(),
@@ -198,7 +198,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
     setData(prev => ({ ...prev, ...dataUpdates }));
     setStatusOk(prev => ({ ...prev, ...okUpdates }));
-    setStatusSnap(prev => ({ ...prev, ...snapUpdates }));
+    setStatusGist(prev => ({ ...prev, ...gistUpdates }));
     setLastUpdate(new Date());
     setLoading(false);
   }, [allIndicators]);
@@ -297,7 +297,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           const change = latest && prev ? latest.value - prev.value : null;
           const isSelected = selected === ind.id;
           const ok = statusOk[ind.id];
-          const snap = statusSnap[ind.id];
+          const snap = statusGist[ind.id];
           const isRec = RECESSION_SET.has(ind.id);
           const isFOMC = ind.id === 'FOMC_MEETINGS';
           // Overlay series (recession bands, halving/meeting markers) behave differently
@@ -314,7 +314,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               {/* Status dot: green = live data, amber = snapshot fallback, red = no data */}
               {ok !== undefined && (
                 <span
-                  title={snap ? 'Snapshot fallback — live source unavailable' : ok ? 'Live data' : 'No data'}
+                  title={snap ? 'Cloud cache — live source unavailable' : ok ? 'Live data' : 'No data'}
                   className={clsx(
                     'absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full',
                     !ok ? 'bg-red-500' : snap ? 'bg-amber-400' : 'bg-emerald-500'
@@ -457,9 +457,9 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             />
           </div>
 
-          {statusSnap[selected] && (
+          {statusGist[selected] && (
             <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
-              🟡 Live source unavailable — showing last-known snapshot value. Historical chart may have limited data.
+              🟡 Live source unavailable — showing data from cloud cache. Historical chart may have limited data.
             </p>
           )}
 
