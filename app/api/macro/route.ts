@@ -1624,18 +1624,47 @@ async function fetchBitcoinBlockHeight(timeoutMs = 4_000): Promise<number | null
 // Last updated from FRED: 2025-08 (values approximate for dates past cutoff).
 type Pt = { date: string; value: number };
 const SNAPSHOT_FALLBACKS: Record<string, Pt[]> = {
-  // Real Estate — HOUST (Thousands of Units, SAAR)
-  HOUST:             [{ date: '2025-05-01', value: 1336 }, { date: '2025-06-01', value: 1348 }],
-  // Money — M2 Money Stock (Billions of Dollars, SA)
+  // ── Rates ────────────────────────────────────────────────────────────────
+  // FEDFUNDS: NY Fed EFFR fallback covers this, but snapshot is last resort.
+  // Effective rate ≈ target midpoint; Fed held at 4.25-4.50% into Q1 2025.
+  FEDFUNDS:          [{ date: '2025-02-01', value: 4.33 }, { date: '2025-03-01', value: 4.33 }],
+  // ── Growth ───────────────────────────────────────────────────────────────
+  // GDP (Nominal, Billions $, SAAR) — World Bank fallback covers this too.
+  GDP:               [{ date: '2024-07-01', value: 29339 }, { date: '2024-10-01', value: 29692 }],
+  // GDPC1 (Real GDP, Chained 2017 Billions, SAAR)
+  GDPC1:             [{ date: '2024-07-01', value: 23360 }, { date: '2024-10-01', value: 23528 }],
+  // INDPRO (Industrial Production, Index 2017=100) — OECD fallback covers this.
+  INDPRO:            [{ date: '2025-02-01', value: 103.1 }, { date: '2025-03-01', value: 103.3 }],
+  // ── Real Estate ──────────────────────────────────────────────────────────
+  // HOUST (Thousands of Units, SAAR)
+  HOUST:             [{ date: '2025-03-01', value: 1324 },  { date: '2025-04-01', value: 1361 }],
+  // MORTGAGE30US (%, Weekly) — Freddie Mac fallback covers this.
+  MORTGAGE30US:      [{ date: '2025-04-10', value: 6.62 },  { date: '2025-04-17', value: 6.83 }],
+  // ── Money ────────────────────────────────────────────────────────────────
+  // M2SL (Billions, SA)
   M2SL:              [{ date: '2025-06-01', value: 21695 }, { date: '2025-07-01', value: 21742 }],
-  // Money — Fed Balance Sheet (Billions of Dollars; WALCL is millions on FRED, /1000 applied in handler)
+  // WALCL (Billions; raw FRED is millions but /1000 applied in fetchMacroSeries)
   WALCL:             [{ date: '2025-06-01', value: 6845 },  { date: '2025-07-01', value: 6773 }],
-  // Money — Delinquency rates (%, Quarterly, SA)
+  // Delinquency rates (%, Quarterly, SA)
   DRCLACBS:          [{ date: '2025-01-01', value: 2.87 },  { date: '2025-04-01', value: 2.94 }],
   DRALACBN:          [{ date: '2025-01-01', value: 1.69 },  { date: '2025-04-01', value: 1.73 }],
   DRCRELEXFACBS:     [{ date: '2025-01-01', value: 8.89 },  { date: '2025-04-01', value: 9.31 }],
-  // Money — discontinued Z.1 series (Billions of Dollars, Quarterly)
+  // Discontinued Z.1 series (Billions, Quarterly)
   BOGZ1FA673065500Q: [{ date: '2024-04-01', value: 5.1 },   { date: '2024-07-01', value: 4.8 }],
+  // ── Debt ─────────────────────────────────────────────────────────────────
+  // GFDEGDQ188S (Federal Debt to GDP, %, Quarterly)
+  GFDEGDQ188S:       [{ date: '2024-04-01', value: 122.3 }, { date: '2024-07-01', value: 123.5 }],
+  // GFDEBTN (US Federal Debt, Billions; raw FRED is millions but /1000 applied)
+  GFDEBTN:           [{ date: '2025-01-01', value: 36157 }, { date: '2025-02-01', value: 36444 }],
+  // ── Growth / Wealth ──────────────────────────────────────────────────────
+  // A939RC0A052NBEA (Household Net Worth, Billions, Quarterly)
+  A939RC0A052NBEA:   [{ date: '2024-04-01', value: 161156 }, { date: '2024-07-01', value: 163799 }],
+  // ── Recessions ───────────────────────────────────────────────────────────
+  USREC:             [{ date: '2025-03-01', value: 0 },     { date: '2025-04-01', value: 0 }],
+  SAHMREALTIME:      [{ date: '2025-02-01', value: 0.30 },  { date: '2025-03-01', value: 0.27 }],
+  // ── Market Value ─────────────────────────────────────────────────────────
+  // SP500_PBOOK: Jina proxy of multpl.com (no GitHub fallback for P/B)
+  SP500_PBOOK:       [{ date: '2025-01-01', value: 5.01 },  { date: '2025-02-01', value: 4.85 }],
 };
 
 export async function GET(req: NextRequest) {
