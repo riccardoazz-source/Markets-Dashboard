@@ -1616,60 +1616,67 @@ async function fetchBitcoinBlockHeight(timeoutMs = 4_000): Promise<number | null
   return null;
 }
 
-// ---------- Snapshot fallbacks (list-mode card display only) ----------
-// Last-resort values when both FRED and DBnomics fail for series that have no
-// alternative provider (no BLS / Treasury / ECB / Yahoo equivalent).
-// These keep cards from showing "No data" on mobile where FRED is rate-limited.
-// History charts still show "No historical data" until the live source recovers —
-// these single points are only enough for the card (latest + prev).
-// All values are seasonally-adjusted, matching FRED conventions.
-// ⚠ Update after each major release:
-//   HOUST/M2SL/WALCL → monthly; delinquency → quarterly; BOGZ1FA673065500Q → discontinued.
-// Last updated from FRED: 2025-08 (values approximate for dates past cutoff).
-type Pt = { date: string; value: number };
-const SNAPSHOT_FALLBACKS: Record<string, Pt[]> = {
-  // ── Rates ────────────────────────────────────────────────────────────────
-  // FEDFUNDS: NY Fed EFFR fallback covers this, but snapshot is last resort.
-  // Effective rate ≈ target midpoint; Fed held at 4.25-4.50% into Q1 2025.
-  FEDFUNDS:          [{ date: '2025-02-01', value: 4.33 }, { date: '2025-03-01', value: 4.33 }],
-  // ── Growth ───────────────────────────────────────────────────────────────
-  // GDP (Nominal, Billions $, SAAR) — World Bank fallback covers this too.
-  GDP:               [{ date: '2024-07-01', value: 29339 }, { date: '2024-10-01', value: 29692 }],
-  // GDPC1 (Real GDP, Chained 2017 Billions, SAAR)
-  GDPC1:             [{ date: '2024-07-01', value: 23360 }, { date: '2024-10-01', value: 23528 }],
-  // INDPRO (Industrial Production, Index 2017=100) — OECD fallback covers this.
-  INDPRO:            [{ date: '2025-02-01', value: 103.1 }, { date: '2025-03-01', value: 103.3 }],
-  // ── Real Estate ──────────────────────────────────────────────────────────
-  // HOUST (Thousands of Units, SAAR)
-  HOUST:             [{ date: '2025-03-01', value: 1324 },  { date: '2025-04-01', value: 1361 }],
-  // MORTGAGE30US (%, Weekly) — Freddie Mac fallback covers this.
-  MORTGAGE30US:      [{ date: '2025-04-10', value: 6.62 },  { date: '2025-04-17', value: 6.83 }],
-  // ── Money ────────────────────────────────────────────────────────────────
-  // M2SL (Billions, SA)
-  M2SL:              [{ date: '2025-06-01', value: 21695 }, { date: '2025-07-01', value: 21742 }],
-  // WALCL (Billions; raw FRED is millions but /1000 applied in fetchMacroSeries)
-  WALCL:             [{ date: '2025-06-01', value: 6845 },  { date: '2025-07-01', value: 6773 }],
-  // Delinquency rates (%, Quarterly, SA)
-  DRCLACBS:          [{ date: '2025-01-01', value: 2.87 },  { date: '2025-04-01', value: 2.94 }],
-  DRALACBN:          [{ date: '2025-01-01', value: 1.69 },  { date: '2025-04-01', value: 1.73 }],
-  DRCRELEXFACBS:     [{ date: '2025-01-01', value: 8.89 },  { date: '2025-04-01', value: 9.31 }],
-  // Discontinued Z.1 series (Billions, Quarterly)
-  BOGZ1FA673065500Q: [{ date: '2024-04-01', value: 5.1 },   { date: '2024-07-01', value: 4.8 }],
-  // ── Debt ─────────────────────────────────────────────────────────────────
-  // GFDEGDQ188S (Federal Debt to GDP, %, Quarterly)
-  GFDEGDQ188S:       [{ date: '2024-04-01', value: 122.3 }, { date: '2024-07-01', value: 123.5 }],
-  // GFDEBTN (US Federal Debt, Billions; raw FRED is millions but /1000 applied)
-  GFDEBTN:           [{ date: '2025-01-01', value: 36157 }, { date: '2025-02-01', value: 36444 }],
-  // ── Growth / Wealth ──────────────────────────────────────────────────────
-  // A939RC0A052NBEA (Household Net Worth, Billions, Quarterly)
-  A939RC0A052NBEA:   [{ date: '2024-04-01', value: 161156 }, { date: '2024-07-01', value: 163799 }],
-  // ── Recessions ───────────────────────────────────────────────────────────
-  USREC:             [{ date: '2025-03-01', value: 0 },     { date: '2025-04-01', value: 0 }],
-  SAHMREALTIME:      [{ date: '2025-02-01', value: 0.30 },  { date: '2025-03-01', value: 0.27 }],
-  // ── Market Value ─────────────────────────────────────────────────────────
-  // SP500_PBOOK: Jina proxy of multpl.com (no GitHub fallback for P/B)
-  SP500_PBOOK:       [{ date: '2025-01-01', value: 5.01 },  { date: '2025-02-01', value: 4.85 }],
-};
+// ── Gist macro cache (persistent fallback for cold-start failures) ──────────
+// Uses a separate file in the same Gist as the notes, so notes are never touched.
+const GIST_MACRO_FILE = 'markets-macro-cache.json';
+
+interface GistCacheEntry {
+  id: string;
+  latest: { date: string; value: number } | null;
+  prev:   { date: string; value: number } | null;
+}
+interface GistMacroCache { savedAt: string; data: GistCacheEntry[] }
+
+async function readGistMacroCache(timeoutMs = 4_000): Promise<Map<string, GistCacheEntry> | null> {
+  const gistId    = process.env.GITHUB_GIST_ID;
+  const gistToken = process.env.GITHUB_GIST_TOKEN;
+  if (!gistId || !gistToken) return null;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${gistToken}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': UA,
+      },
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    const gist = await res.json() as { files?: Record<string, { content?: string }> };
+    const content = gist.files?.[GIST_MACRO_FILE]?.content;
+    if (!content) return null;
+    const parsed = JSON.parse(content) as GistMacroCache;
+    const map = new Map<string, GistCacheEntry>();
+    for (const entry of parsed.data ?? []) map.set(entry.id, entry);
+    return map;
+  } catch { return null; } finally { clearTimeout(t); }
+}
+
+async function saveGistMacroCache(entries: GistCacheEntry[]): Promise<void> {
+  const gistId    = process.env.GITHUB_GIST_ID;
+  const gistToken = process.env.GITHUB_GIST_TOKEN;
+  if (!gistId || !gistToken) return;
+  const payload: GistMacroCache = { savedAt: new Date().toISOString(), data: entries };
+  try {
+    await fetch(`https://api.github.com/gists/${gistId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${gistToken}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type': 'application/json',
+        'User-Agent': UA,
+      },
+      body: JSON.stringify({
+        files: { [GIST_MACRO_FILE]: { content: JSON.stringify(payload, null, 2) } },
+      }),
+    });
+    console.log(`[macro] Gist cache saved: ${entries.filter(e => e.latest).length} entries`);
+  } catch (e) { console.error('[macro] Gist save failed:', (e as Error).message); }
+}
 
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') ?? 'list';
@@ -1686,20 +1693,12 @@ export async function GET(req: NextRequest) {
       // Discontinued/quarterly series: ignore the timeframe filter so the chart
       // still shows their (older) full history instead of an empty range.
       const pts = await fetchMacroSeries(id, WIDE_WINDOW_SERIES.has(id) ? undefined : from);
-      let data = pts.map(p => ({ date: p.date, close: p.value }));
+      const data = pts.map(p => ({ date: p.date, close: p.value }));
       if (data.length > 0) {
         cache.set(key, { data, ts: Date.now() });
       } else {
         const stale = getCached(key, STALE);
         if (stale) return NextResponse.json(stale, { headers: CACHE_HEADERS });
-        // Last resort: snapshot values prevent "No historical data" on mobile.
-        // Only 2 points, so the chart shows a flat reference line rather than
-        // a full history — better than a blank chart.
-        const snap = SNAPSHOT_FALLBACKS[id];
-        if (snap?.length) {
-          console.warn(`[macro] history ${id} using SNAPSHOT fallback (${snap.length} pts)`);
-          data = snap.map(p => ({ date: p.date, close: p.value }));
-        }
       }
       return NextResponse.json(data, { headers: CACHE_HEADERS });
     } catch (err) {
@@ -1770,7 +1769,7 @@ export async function GET(req: NextRequest) {
   const needsWBkd = standardIds.includes('GDPC1');
   const needsWBcd = standardIds.includes('GDP');
 
-  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD, customSrcBatch, nyFedEffrPts] = await Promise.all([
+  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD, customSrcBatch, nyFedEffrPts, gistCacheMap] = await Promise.all([
     // FRED API (key) is the reliable primary — 4s gives it room even on a
     // latency spike; it normally returns in well under 1s.
     // Discontinued/quarterly series get the full history (undefined fromDate)
@@ -1802,6 +1801,7 @@ export async function GET(req: NextRequest) {
       : Promise.resolve([] as { id: string; pts: Pts }[]),
     // NY Fed EFFR — fallback for FEDFUNDS when FRED/DBnomics fail (no IP blocks, very fast).
     standardIds.includes('FEDFUNDS') ? fetchNYFedEffr(fromStr, 3_000, true) : Promise.resolve<Pts>([]),
+    readGistMacroCache(4_000),   // persistent cloud cache — last resort
   ]);
 
   const fredMap      = new Map(fredResults.map(r => [r.id, r.pts]));
@@ -1845,26 +1845,47 @@ export async function GET(req: NextRequest) {
     if (!pts.length && id === 'GDP')          pts = wbCD;
     if (!pts.length && id === 'MORTGAGE30US') pts = fmMortgage;
     if (!pts.length) pts = customSrcMap.get(id) ?? [];
-    // Last resort: snapshot values for FRED-only series with no alternative provider.
-    // Prevents "No data" on mobile where FRED/DBnomics are more likely to time out.
-    // fromSnapshot flag lets the client show an amber (rather than green) status dot.
-    let fromSnapshot = false;
-    if (!pts.length) {
-      const snap = SNAPSHOT_FALLBACKS[id];
-      if (snap?.length) {
-        console.warn(`[macro] ${id} using SNAPSHOT fallback (${snap.length} pts)`);
-        pts = snap;
-        fromSnapshot = true;
-      }
+
+    if (pts.length > 0) {
+      return {
+        id,
+        latest: pts[pts.length - 1],
+        prev:   pts.length > 1 ? pts[pts.length - 2] : null,
+        fromGist: false,
+      };
     }
-    if (!pts.length) return { id, latest: null, prev: null, fromSnapshot: false };
-    return {
-      id,
-      latest: pts[pts.length - 1],
-      prev: pts.length > 1 ? pts[pts.length - 2] : null,
-      fromSnapshot,
-    };
+
+    // Live sources all failed — try persistent Gist cache.
+    const cached = gistCacheMap?.get(id);
+    if (cached?.latest) {
+      console.log(`[macro] ${id} served from Gist cache (${cached.latest.date})`);
+      return { id, latest: cached.latest, prev: cached.prev, fromGist: true };
+    }
+
+    return { id, latest: null, prev: null, fromGist: false };
   });
+
+  // Merge fresh results with existing Gist cache and save async.
+  // Priority: red indicators (those in Gist as null or missing) get filled first.
+  // We never overwrite a Gist entry with null — only update with fresh data.
+  const entriesToSave: GistCacheEntry[] = ids.map(id => {
+    const r = results.find(x => x.id === id)!;
+    if (!r.fromGist && r.latest !== null) {
+      // Fresh live data — update the cloud
+      return { id, latest: r.latest, prev: r.prev };
+    }
+    // No live data — keep existing Gist value (or null if new)
+    const existing = gistCacheMap?.get(id);
+    return existing ?? { id, latest: null, prev: null };
+  });
+  const freshCount = entriesToSave.filter(e => {
+    const r = results.find(x => x.id === e.id);
+    return r && !r.fromGist && r.latest !== null;
+  }).length;
+  if (freshCount > 0) {
+    // Fire-and-forget — don't block the response
+    saveGistMacroCache(entriesToSave).catch(() => {});
+  }
 
   const okCount = results.filter(r => r.latest != null).length;
   const fredOk = ids.filter(id => (fredMap.get(id) ?? []).length > 0).length;

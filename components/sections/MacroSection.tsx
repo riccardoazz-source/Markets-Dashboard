@@ -26,7 +26,7 @@ interface MacroLatest {
   id: string;
   latest: { date: string; value: number } | null;
   prev:   { date: string; value: number } | null;
-  fromSnapshot?: boolean; // true when live APIs failed and a hardcoded fallback was used
+  fromGist?: boolean; // true when live APIs failed and the Gist cloud cache was used
 }
 
 interface UnifiedIndicator {
@@ -92,7 +92,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [category, setCategory] = useState('All');
   const [data, setData] = useState<Record<string, MacroLatest>>({});
   const [statusOk, setStatusOk] = useState<Record<string, boolean>>({});
-  const [statusSnap, setStatusSnap] = useState<Record<string, boolean>>({});
+  const [statusGist, setStatusGist] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -165,7 +165,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           json.forEach(d => {
             dataUpdates[d.id] = d;
             okUpdates[d.id] = d.latest !== null;
-            snapUpdates[d.id] = d.latest !== null && d.fromSnapshot === true;
+            snapUpdates[d.id] = d.latest !== null && d.fromGist === true;
           });
         } catch (e) { console.error('[macro] list error', e); }
       })(),
