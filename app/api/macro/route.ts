@@ -1583,6 +1583,32 @@ async function fetchMacroSeries(
   return [];
 }
 
+// ---------- Snapshot fallbacks (list-mode card display only) ----------
+// Last-resort values when both FRED and DBnomics fail for series that have no
+// alternative provider (no BLS / Treasury / ECB / Yahoo equivalent).
+// These keep cards from showing "No data" on mobile where FRED is rate-limited.
+// History charts still show "No historical data" until the live source recovers —
+// these single points are only enough for the card (latest + prev).
+// All values are seasonally-adjusted, matching FRED conventions.
+// ⚠ Update after each major release:
+//   HOUST/M2SL/WALCL → monthly; delinquency → quarterly; BOGZ1FA673065500Q → discontinued.
+// Last updated from FRED: 2025-08 (values approximate for dates past cutoff).
+type Pt = { date: string; value: number };
+const SNAPSHOT_FALLBACKS: Record<string, Pt[]> = {
+  // Real Estate — HOUST (Thousands of Units, SAAR)
+  HOUST:             [{ date: '2025-05-01', value: 1336 }, { date: '2025-06-01', value: 1348 }],
+  // Money — M2 Money Stock (Billions of Dollars, SA)
+  M2SL:              [{ date: '2025-06-01', value: 21695 }, { date: '2025-07-01', value: 21742 }],
+  // Money — Fed Balance Sheet (Billions of Dollars; WALCL is millions on FRED, /1000 applied in handler)
+  WALCL:             [{ date: '2025-06-01', value: 6845 },  { date: '2025-07-01', value: 6773 }],
+  // Money — Delinquency rates (%, Quarterly, SA)
+  DRCLACBS:          [{ date: '2025-01-01', value: 2.87 },  { date: '2025-04-01', value: 2.94 }],
+  DRALACBN:          [{ date: '2025-01-01', value: 1.69 },  { date: '2025-04-01', value: 1.73 }],
+  DRCRELEXFACBS:     [{ date: '2025-01-01', value: 8.89 },  { date: '2025-04-01', value: 9.31 }],
+  // Money — discontinued Z.1 series (Billions of Dollars, Quarterly)
+  BOGZ1FA673065500Q: [{ date: '2024-04-01', value: 5.1 },   { date: '2024-07-01', value: 4.8 }],
+};
+
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') ?? 'list';
 
@@ -1729,6 +1755,15 @@ export async function GET(req: NextRequest) {
     if (!pts.length && id === 'GDP')          pts = wbCD;
     if (!pts.length && id === 'MORTGAGE30US') pts = fmMortgage;
     if (!pts.length) pts = customSrcMap.get(id) ?? [];
+    // Last resort: snapshot values for FRED-only series with no alternative provider.
+    // Prevents "No data" on mobile where FRED/DBnomics are more likely to time out.
+    if (!pts.length) {
+      const snap = SNAPSHOT_FALLBACKS[id];
+      if (snap?.length) {
+        console.warn(`[macro] ${id} using SNAPSHOT fallback (${snap.length} pts)`);
+        pts = snap;
+      }
+    }
     if (!pts.length) return { id, latest: null, prev: null };
     return {
       id,
