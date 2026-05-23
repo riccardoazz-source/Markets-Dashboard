@@ -1534,6 +1534,10 @@ async function fetchMacroSeries(
     if (fred.length)  { console.log(`[macro] FEDFUNDS FRED (${fred.length})`);    return fred; }
     if (dbn.length)   { console.log(`[macro] FEDFUNDS DBnomics (${dbn.length})`); return dbn; }
     if (nyfed.length) { console.log(`[macro] FEDFUNDS NY Fed (${nyfed.length})`); return nyfed; }
+    // Last resort: FOMC target upper bound as proxy. Effective rate ≈ target
+    // within a few bps, so this gives a usable step-function history chart.
+    const fomc = getFOMCFallback(fromDate);
+    if (fomc.length) { console.warn(`[macro] FEDFUNDS using FOMC target proxy (${fomc.length} pts)`); return fomc; }
     return [];
   }
 
@@ -1682,12 +1686,20 @@ export async function GET(req: NextRequest) {
       // Discontinued/quarterly series: ignore the timeframe filter so the chart
       // still shows their (older) full history instead of an empty range.
       const pts = await fetchMacroSeries(id, WIDE_WINDOW_SERIES.has(id) ? undefined : from);
-      const data = pts.map(p => ({ date: p.date, close: p.value }));
+      let data = pts.map(p => ({ date: p.date, close: p.value }));
       if (data.length > 0) {
         cache.set(key, { data, ts: Date.now() });
       } else {
         const stale = getCached(key, STALE);
         if (stale) return NextResponse.json(stale, { headers: CACHE_HEADERS });
+        // Last resort: snapshot values prevent "No historical data" on mobile.
+        // Only 2 points, so the chart shows a flat reference line rather than
+        // a full history — better than a blank chart.
+        const snap = SNAPSHOT_FALLBACKS[id];
+        if (snap?.length) {
+          console.warn(`[macro] history ${id} using SNAPSHOT fallback (${snap.length} pts)`);
+          data = snap.map(p => ({ date: p.date, close: p.value }));
+        }
       }
       return NextResponse.json(data, { headers: CACHE_HEADERS });
     } catch (err) {
@@ -1823,6 +1835,7 @@ export async function GET(req: NextRequest) {
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
     if (!pts.length && id === 'DFEDTARU')     pts = getFOMCFallback(fromStr);
     if (!pts.length && id === 'FEDFUNDS')     pts = nyFedEffrPts;
+    if (!pts.length && id === 'FEDFUNDS')     pts = getFOMCFallback(fromStr); // proxy: eff ≈ target
     if (!pts.length && id === 'ECBDFR')       pts = ecbPts;
     if (!pts.length && id === 'DGS2')         pts = tDgs2.length  ? tDgs2  : yahooIrx;
     if (!pts.length && id === 'DGS10')        pts = tDgs10.length ? tDgs10 : yahooTnx;
@@ -1834,18 +1847,22 @@ export async function GET(req: NextRequest) {
     if (!pts.length) pts = customSrcMap.get(id) ?? [];
     // Last resort: snapshot values for FRED-only series with no alternative provider.
     // Prevents "No data" on mobile where FRED/DBnomics are more likely to time out.
+    // fromSnapshot flag lets the client show an amber (rather than green) status dot.
+    let fromSnapshot = false;
     if (!pts.length) {
       const snap = SNAPSHOT_FALLBACKS[id];
       if (snap?.length) {
         console.warn(`[macro] ${id} using SNAPSHOT fallback (${snap.length} pts)`);
         pts = snap;
+        fromSnapshot = true;
       }
     }
-    if (!pts.length) return { id, latest: null, prev: null };
+    if (!pts.length) return { id, latest: null, prev: null, fromSnapshot: false };
     return {
       id,
       latest: pts[pts.length - 1],
       prev: pts.length > 1 ? pts[pts.length - 2] : null,
+      fromSnapshot,
     };
   });
 

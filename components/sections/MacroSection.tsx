@@ -26,6 +26,7 @@ interface MacroLatest {
   id: string;
   latest: { date: string; value: number } | null;
   prev:   { date: string; value: number } | null;
+  fromSnapshot?: boolean; // true when live APIs failed and a hardcoded fallback was used
 }
 
 interface UnifiedIndicator {
@@ -91,6 +92,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [category, setCategory] = useState('All');
   const [data, setData] = useState<Record<string, MacroLatest>>({});
   const [statusOk, setStatusOk] = useState<Record<string, boolean>>({});
+  const [statusSnap, setStatusSnap] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -146,6 +148,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
     const dataUpdates: Record<string, MacroLatest> = {};
     const okUpdates: Record<string, boolean> = {};
+    const snapUpdates: Record<string, boolean> = {};
 
     const from18 = new Date();
     from18.setMonth(from18.getMonth() - 18);
@@ -159,7 +162,11 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           const ids = builtins.map(ind => ind.id).join(',');
           const res = await fetch(`/api/macro?mode=list&ids=${ids}`);
           const json = await res.json() as MacroLatest[];
-          json.forEach(d => { dataUpdates[d.id] = d; okUpdates[d.id] = d.latest !== null; });
+          json.forEach(d => {
+            dataUpdates[d.id] = d;
+            okUpdates[d.id] = d.latest !== null;
+            snapUpdates[d.id] = d.latest !== null && d.fromSnapshot === true;
+          });
         } catch (e) { console.error('[macro] list error', e); }
       })(),
 
@@ -191,6 +198,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
     setData(prev => ({ ...prev, ...dataUpdates }));
     setStatusOk(prev => ({ ...prev, ...okUpdates }));
+    setStatusSnap(prev => ({ ...prev, ...snapUpdates }));
     setLastUpdate(new Date());
     setLoading(false);
   }, [allIndicators]);
@@ -289,6 +297,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           const change = latest && prev ? latest.value - prev.value : null;
           const isSelected = selected === ind.id;
           const ok = statusOk[ind.id];
+          const snap = statusSnap[ind.id];
           const isRec = RECESSION_SET.has(ind.id);
           const isFOMC = ind.id === 'FOMC_MEETINGS';
           // Overlay series (recession bands, halving/meeting markers) behave differently
@@ -302,12 +311,15 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50 relative',
                 isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
               )}>
-              {/* Status dot */}
+              {/* Status dot: green = live data, amber = snapshot fallback, red = no data */}
               {ok !== undefined && (
-                <span className={clsx(
-                  'absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full',
-                  ok ? 'bg-emerald-500' : 'bg-red-500'
-                )} />
+                <span
+                  title={snap ? 'Snapshot fallback — live source unavailable' : ok ? 'Live data' : 'No data'}
+                  className={clsx(
+                    'absolute top-2.5 right-2.5 w-1.5 h-1.5 rounded-full',
+                    !ok ? 'bg-red-500' : snap ? 'bg-amber-400' : 'bg-emerald-500'
+                  )}
+                />
               )}
               <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1 flex items-center gap-1">
                 {isSpecial && (
@@ -444,6 +456,12 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               onCustomRange={(from, to) => setCustomRange({ from, to })}
             />
           </div>
+
+          {statusSnap[selected] && (
+            <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+              🟡 Live source unavailable — showing last-known snapshot value. Historical chart may have limited data.
+            </p>
+          )}
 
           {dataMsg && (
             <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
