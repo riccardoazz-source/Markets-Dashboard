@@ -58,10 +58,6 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'T10Y2Y',   name: '10Y–2Y Spread',          category: 'Rates',       unit: '%',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/T10Y2Y' } },
-  // FOMC dot-plot median projection — includes future projected rate path
-  { id: 'FEDTARMD', name: 'Fed Rate Projection',    category: 'Rates',       unit: '%',
-    source: { type: 'computed', label: 'Federal Reserve (FOMC dot plot)',
-              url: 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm' } },
   // FOMC meeting dates — rendered as vertical reference lines (event overlay, not a data series)
   { id: 'FOMC_MEETINGS', name: 'FOMC Meeting Dates', category: 'Rates',      unit: 'idx',
     source: { type: 'computed', label: 'Federal Reserve',

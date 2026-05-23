@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES } from '@/lib/config';
+import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES, BTC_HALVING_DATES } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
@@ -299,15 +299,11 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 )} />
               )}
               <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1 flex items-center gap-1">
-                {isFOMC ? (
-                  <span title="Event overlay — shown as vertical lines on charts" className="text-blue-400 text-[10px] shrink-0">🏛</span>
-                ) : ind.id === 'BTC_HALVING' ? (
-                  <span title="Event overlay — shown as vertical lines on charts" className="text-amber-400 text-[10px] shrink-0">⚡</span>
-                ) : isRec ? (
-                  <span title="Recession overlay — shown as shaded bands on charts">
+                {isSpecial && (
+                  <span title="Special overlay — shown as reference lines or shaded bands on charts">
                     <Layers size={10} className="text-violet-400 shrink-0" />
                   </span>
-                ) : null}
+                )}
                 {ind.category}
               </p>
               <p className="text-sm font-semibold text-gray-100 leading-snug mb-2 pr-3">{ind.name}</p>
@@ -331,6 +327,30 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                           <p className="text-sm font-bold text-gray-100">{lastMeeting ? fmt(lastMeeting) : '—'}</p>
                           <p className="text-xs text-gray-500 mt-1">Next</p>
                           <p className="text-sm font-bold text-blue-300">{nextMeeting ? fmt(nextMeeting) : '—'}</p>
+                        </div>
+                      );
+                    })()
+                  ) : ind.id === 'BTC_HALVING' ? (
+                    (() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const past = BTC_HALVING_DATES.filter(d => d <= today);
+                      const lastHalving = past[past.length - 1];
+                      // Next halving ≈ 4 years after last (210,000 blocks × ~10 min each)
+                      const nextHalvingLabel = lastHalving ? (() => {
+                        const d = new Date(lastHalving + 'T12:00:00Z');
+                        d.setFullYear(d.getFullYear() + 4);
+                        return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+                      })() : '~2028';
+                      const fmt = (d: string) => {
+                        try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); }
+                        catch { return d; }
+                      };
+                      return (
+                        <div className="space-y-0.5">
+                          <p className="text-xs text-gray-500">Last</p>
+                          <p className="text-sm font-bold text-gray-100">{lastHalving ? fmt(lastHalving) : '—'}</p>
+                          <p className="text-xs text-gray-500 mt-1">Next (est.)</p>
+                          <p className="text-sm font-bold text-violet-300">{nextHalvingLabel}</p>
                         </div>
                       );
                     })()

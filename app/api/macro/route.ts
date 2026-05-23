@@ -56,7 +56,7 @@ const WIDE_WINDOW_SERIES = new Set([
   // Recession indicators — bands are only useful with full history.
   'USREC', 'SAHMREALTIME',
   // Rates — full history needed to see yield curve inversions, negative ECB rates, etc.
-  'T10Y2Y', 'ECBDFR', 'FEDTARMD', 'FOMC_MEETINGS',
+  'T10Y2Y', 'ECBDFR', 'FOMC_MEETINGS',
   // Market Value: Shiller history ends ~2023 and the multpl annual tables are
   // small. Always fetch full history so the card has a latest value (the
   // 18-month list-mode window would otherwise exclude all Shiller data).
@@ -1258,9 +1258,7 @@ const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
   { date: '2026-01-28', value: 3.50 },
   { date: '2026-03-18', value: 3.50 },
   { date: '2026-05-06', value: 3.50 },
-  // 2026 projected meetings — rate held at current 3.50 (no cuts assumed).
-  // These future-dated entries make FEDTARMD extend past today so the "Today"
-  // reference line appears in charts. Rate is kept FLAT (no dot-plot speculation).
+  // 2026 projected meetings — rate held at current 3.50 (no cuts assumed, flat).
   { date: '2026-06-17', value: 3.50 },
   { date: '2026-07-29', value: 3.50 },
   { date: '2026-09-16', value: 3.50 },
@@ -1412,27 +1410,6 @@ async function fetchMacroSeries(
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
     }
-    if (fredId === 'FEDTARMD') {
-      // Try FRED / DBnomics first (may carry SEP dot-plot projections)
-      const [fred, dbn] = await Promise.all([
-        fetchFRED('FEDTARMD', fromDate, 8_000),
-        fetchDBnomicsFRED('FEDTARMD', fromDate, 8_000),
-      ]);
-      if (fred.length > 0) return fred;
-      if (dbn.length > 0) return dbn;
-      // Fallback: midpoint of FOMC target range from hardcoded table.
-      // Range system started 2008-12-16 (25bps range → midpoint = upper − 0.125).
-      const pts = FOMC_TARGET_UPPER.map(p => ({
-        date: p.date,
-        value: p.date >= '2008-12-16' ? p.value - 0.125 : p.value,
-      }));
-      const result = fromDate ? pts.filter(p => p.date >= fromDate) : pts;
-      if (!result.length && FOMC_TARGET_UPPER.length > 0) {
-        const last = FOMC_TARGET_UPPER[FOMC_TARGET_UPPER.length - 1];
-        return [{ date: last.date, value: last.date >= '2008-12-16' ? last.value - 0.125 : last.value }];
-      }
-      return result;
-    }
     // WALCL: Fed total assets in millions on FRED → divide by 1000 for billions.
     if (fredId === 'WALCL') {
       const [fred, dbn] = await Promise.all([
@@ -1545,6 +1522,20 @@ async function fetchMacroSeries(
 
   const yahooSym = YAHOO_YIELD_MAP[fredId];
   const blsSym   = BLS_MAP[fredId];
+
+  // FEDFUNDS: Effective Federal Funds Rate. Primary = FRED/DBnomics.
+  // Fallback = NY Fed EFFR API (same data, no IP restrictions).
+  if (fredId === 'FEDFUNDS') {
+    const [fred, dbn, nyfed] = await Promise.all([
+      fetchFRED('FEDFUNDS', fromDate, 8_000),
+      fetchDBnomicsFRED('FEDFUNDS', fromDate, 8_000),
+      fetchNYFedEffr(fromDate, 6_000, false),
+    ]);
+    if (fred.length)  { console.log(`[macro] FEDFUNDS FRED (${fred.length})`);    return fred; }
+    if (dbn.length)   { console.log(`[macro] FEDFUNDS DBnomics (${dbn.length})`); return dbn; }
+    if (nyfed.length) { console.log(`[macro] FEDFUNDS NY Fed (${nyfed.length})`); return nyfed; }
+    return [];
+  }
 
   // DFEDTARU: pure FRED step-function series. DBnomics is primary. Hardcoded
   // table is always available as last resort.
@@ -1664,7 +1655,7 @@ export async function GET(req: NextRequest) {
   const needsWBkd = standardIds.includes('GDPC1');
   const needsWBcd = standardIds.includes('GDP');
 
-  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD, customSrcBatch] = await Promise.all([
+  const [fredResults, dbnomicsResults, blsBatch, tDgs2, tDgs10, ecbPts, yahooTnx, yahooIrx, oecdIndPro, fmMortgage, wbKD, wbCD, customSrcBatch, nyFedEffrPts] = await Promise.all([
     // FRED API (key) is the reliable primary — 4s gives it room even on a
     // latency spike; it normally returns in well under 1s.
     // Discontinued/quarterly series get the full history (undefined fromDate)
@@ -1694,6 +1685,8 @@ export async function GET(req: NextRequest) {
           pts: await fetchMacroSeries(id, WIDE_WINDOW_SERIES.has(id) ? undefined : fromStr),
         })))
       : Promise.resolve([] as { id: string; pts: Pts }[]),
+    // NY Fed EFFR — fallback for FEDFUNDS when FRED/DBnomics fail (no IP blocks, very fast).
+    standardIds.includes('FEDFUNDS') ? fetchNYFedEffr(fromStr, 3_000, true) : Promise.resolve<Pts>([]),
   ]);
 
   const fredMap      = new Map(fredResults.map(r => [r.id, r.pts]));
@@ -1726,6 +1719,7 @@ export async function GET(req: NextRequest) {
     if (!pts.length) pts = dbnMap.get(id) ?? [];
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
     if (!pts.length && id === 'DFEDTARU')     pts = getFOMCFallback(fromStr);
+    if (!pts.length && id === 'FEDFUNDS')     pts = nyFedEffrPts;
     if (!pts.length && id === 'ECBDFR')       pts = ecbPts;
     if (!pts.length && id === 'DGS2')         pts = tDgs2.length  ? tDgs2  : yahooIrx;
     if (!pts.length && id === 'DGS10')        pts = tDgs10.length ? tDgs10 : yahooTnx;
