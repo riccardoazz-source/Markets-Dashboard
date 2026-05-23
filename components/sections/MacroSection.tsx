@@ -7,6 +7,7 @@ import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, exten
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { HalvingChart } from '@/components/charts/HalvingChart';
+import { FOMCChart } from '@/components/charts/FOMCChart';
 import { RecessionChart } from '@/components/charts/RecessionChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
@@ -298,11 +299,15 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 )} />
               )}
               <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1 flex items-center gap-1">
-                {isSpecial && (
-                  <span title="Overlay series — drawn as bands/markers on charts, not a normal data line">
+                {isFOMC ? (
+                  <span title="Event overlay — shown as vertical lines on charts" className="text-blue-400 text-[10px] shrink-0">🏛</span>
+                ) : ind.id === 'BTC_HALVING' ? (
+                  <span title="Event overlay — shown as vertical lines on charts" className="text-amber-400 text-[10px] shrink-0">⚡</span>
+                ) : isRec ? (
+                  <span title="Recession overlay — shown as shaded bands on charts">
                     <Layers size={10} className="text-violet-400 shrink-0" />
                   </span>
-                )}
+                ) : null}
                 {ind.category}
               </p>
               <p className="text-sm font-semibold text-gray-100 leading-snug mb-2 pr-3">{ind.name}</p>
@@ -433,7 +438,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           {selected === 'BTC_HALVING' ? (
             <HalvingChart height={240} />
           ) : selIsFOMC ? (
-            <FOMCMeetingsList />
+            <FOMCChart height={240} />
           ) : histLoading ? (
             <div className="flex items-center justify-center h-44">
               <LoadingSpinner size={28} />
@@ -485,45 +490,6 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
     <div className="bg-bg-input rounded-lg px-3 py-2">
       <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
       <p className={clsx('text-sm font-bold', color ?? 'text-gray-100')}>{value}</p>
-    </div>
-  );
-}
-
-function FOMCMeetingsList() {
-  const today = new Date().toISOString().slice(0, 10);
-  const fmt = (d: string) => {
-    try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); }
-    catch { return d; }
-  };
-  const past = FOMC_MEETING_DATES.filter(d => d <= today).slice().reverse();
-  const future = FOMC_MEETING_DATES.filter(d => d > today);
-
-  return (
-    <div className="space-y-3">
-      {future.length > 0 && (
-        <div>
-          <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider mb-1.5">Upcoming meetings</p>
-          <div className="space-y-1">
-            {future.map(d => (
-              <div key={d} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
-                <span className="text-sm text-blue-200">{fmt(d)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      <div>
-        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Past meetings</p>
-        <div className="max-h-64 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-          {past.map(d => (
-            <div key={d} className="flex items-center gap-2 px-3 py-1 rounded-lg hover:bg-bg-input transition-colors">
-              <span className="w-1.5 h-1.5 rounded-full bg-gray-600 shrink-0" />
-              <span className="text-xs text-gray-400">{fmt(d)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

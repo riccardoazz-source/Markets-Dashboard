@@ -1258,13 +1258,14 @@ const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
   { date: '2026-01-28', value: 3.50 },
   { date: '2026-03-18', value: 3.50 },
   { date: '2026-05-06', value: 3.50 },
-  // 2026 projected meetings — rate held at 3.50 (current as of May 2026 SEP baseline)
-  // These future-dated entries make FEDTARMD extend past today, showing the "Today" marker.
+  // 2026 projected meetings — rate held at current 3.50 (no cuts assumed).
+  // These future-dated entries make FEDTARMD extend past today so the "Today"
+  // reference line appears in charts. Rate is kept FLAT (no dot-plot speculation).
   { date: '2026-06-17', value: 3.50 },
-  { date: '2026-07-29', value: 3.25 },
-  { date: '2026-09-16', value: 3.00 },
-  { date: '2026-10-28', value: 3.00 },
-  { date: '2026-12-09', value: 2.75 },
+  { date: '2026-07-29', value: 3.50 },
+  { date: '2026-09-16', value: 3.50 },
+  { date: '2026-10-28', value: 3.50 },
+  { date: '2026-12-09', value: 3.50 },
 ];
 
 function getFOMCFallback(fromDate?: string): { date: string; value: number }[] {
