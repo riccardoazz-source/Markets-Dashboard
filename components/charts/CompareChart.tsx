@@ -447,9 +447,10 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
       {fomcAsset && visibleFomcDates === null && (
         <div className="mb-3 rounded-lg border border-blue-400/30 bg-blue-400/10 px-4 py-3">
-          <p className="text-sm font-semibold text-blue-300">🏛 Too many FOMC meetings to display</p>
+          <p className="text-sm font-semibold text-blue-300">🏛 FOMC meeting lines hidden at this zoom level</p>
           <p className="mt-0.5 text-xs text-blue-300/70">
-            Switch to <strong className="text-blue-200">3Y or shorter</strong> to see individual FOMC meeting date lines on the chart.
+            Too many meetings to draw as vertical lines — switch to <strong className="text-blue-200">3Y or shorter</strong> to show them.
+            All meetings <strong className="text-blue-200">since 2000</strong> are included in the correlation analysis below.
           </p>
         </div>
       )}

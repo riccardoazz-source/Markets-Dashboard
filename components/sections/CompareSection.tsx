@@ -371,32 +371,49 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         .filter(a => !DUMMY_SET.has(a.symbol) && (a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
 
-      const halvingAsset = displayAssets.find(a => a.symbol === 'BTC_HALVING');
-      if (halvingAsset) {
-        const baseDates = (halvingAsset.rawData ?? halvingAsset.data).map(d => d.date);
-        if (baseDates.length > 1) {
-          const halvingDummy: HistoricalPoint[] = baseDates.map(date => ({
-            date,
-            close: BTC_HALVING_DATES.some(hd =>
-              Math.abs(new Date(date).getTime() - new Date(hd).getTime()) <= 7 * 24 * 60 * 60 * 1000
-            ) ? 1 : 0,
-          }));
-          series.push({ symbol: 'BTC_HALVING', data: halvingDummy });
+      // Helper: generate a monthly 0/1 dummy spanning minMonth..maxMonth.
+      // We use the 15th of each month as the anchor date so cadence detection
+      // sees ~30-day spacing → classified as 'M' (monthly) in correlationMatrix.
+      // Explicit 0s are inserted for non-event months so LOCF doesn't carry a
+      // stale 1 forward and inflate the series to a near-constant.
+      function monthlyDummy(
+        minMonth: string, // 'YYYY-MM'
+        maxMonth: string,
+        eventMonths: Set<string>,
+      ): HistoricalPoint[] {
+        const pts: HistoricalPoint[] = [];
+        const cur = new Date(minMonth + '-15T12:00:00Z');
+        const end = new Date(maxMonth + '-15T12:00:00Z');
+        while (cur <= end) {
+          const m = cur.toISOString().slice(0, 7);
+          pts.push({ date: m + '-15', close: eventMonths.has(m) ? 1 : 0 });
+          cur.setUTCMonth(cur.getUTCMonth() + 1);
         }
+        return pts;
+      }
+
+      // Reference date range from the first non-dummy series (e.g. Bitcoin).
+      const refData = series[0]?.data ?? [];
+      const refMin = refData.length > 0 ? refData[0].date.slice(0, 7) : null;
+      const refMax = refData.length > 0 ? refData[refData.length - 1].date.slice(0, 7) : null;
+
+      const halvingAsset = displayAssets.find(a => a.symbol === 'BTC_HALVING');
+      if (halvingAsset && refMin && refMax) {
+        // BTC_HALVING: 1 in the month of each past halving, 0 otherwise.
+        const halvingMonths = new Set(BTC_HALVING_DATES.map(d => d.slice(0, 7)));
+        const halvingDummy = monthlyDummy(refMin, refMax, halvingMonths);
+        if (halvingDummy.length > 1) series.push({ symbol: 'BTC_HALVING', data: halvingDummy });
       }
 
       const fomcAsset = displayAssets.find(a => a.symbol === 'FOMC_MEETINGS');
-      if (fomcAsset) {
-        const baseDates = (fomcAsset.rawData ?? fomcAsset.data).map(d => d.date);
-        if (baseDates.length > 1) {
-          const fomcDummy: HistoricalPoint[] = baseDates.map(date => ({
-            date,
-            close: FOMC_MEETING_DATES.some(md =>
-              Math.abs(new Date(date).getTime() - new Date(md).getTime()) <= 3 * 24 * 60 * 60 * 1000
-            ) ? 1 : 0,
-          }));
-          series.push({ symbol: 'FOMC_MEETINGS', data: fomcDummy });
-        }
+      if (fomcAsset && refMin && refMax) {
+        // FOMC_MEETINGS: 1 in every month that contains at least one meeting, 0 otherwise.
+        // We cannot use fomcAsset.rawData as the base because it only contains meeting
+        // dates (all value=1) — mapping those dates against FOMC_MEETING_DATES would
+        // always return 1, giving a constant series with zero variance (correlation = —).
+        const fomcMonthSet = new Set(FOMC_MEETING_DATES.map(d => d.slice(0, 7)));
+        const fomcDummy = monthlyDummy(refMin, refMax, fomcMonthSet);
+        if (fomcDummy.length > 1) series.push({ symbol: 'FOMC_MEETINGS', data: fomcDummy });
       }
 
       return correlationMatrix(series);
