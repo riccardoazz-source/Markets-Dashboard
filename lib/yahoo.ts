@@ -32,6 +32,8 @@ export interface YahooQuote {
   forwardPE: number | null;
   marketCap: number | null;
   volume: number | null;
+  /** Trailing annual dividend yield as a decimal (e.g. 0.012 = 1.2%). Null when no dividend. */
+  dividendYield: number | null;
 }
 
 // YTD reference: first valid close on/after Jan 1 of the current year.
@@ -371,6 +373,9 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
       forwardPE: (it.forwardPE as number) ?? null,
       marketCap: (it.marketCap as number) ?? null,
       volume: (it.regularMarketVolume as number) ?? null,
+      dividendYield: (it.trailingAnnualDividendYield as number) > 0
+        ? (it.trailingAnnualDividendYield as number)
+        : null,
     }));
   } catch (e) {
     console.error('[yahoo-v7] fetch failed:', (e as Error).message);
@@ -412,6 +417,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
   }
 
+  const divYield = Number(m.trailingAnnualDividendYield);
   return {
     symbol,
     name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
@@ -429,6 +435,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     forwardPE: null,
     marketCap: null,
     volume: (m.regularMarketVolume as number) ?? null,
+    dividendYield: isFinite(divYield) && divYield > 0 ? divYield : null,
   };
 }
 
@@ -493,6 +500,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
     }
 
+    const divYield = Number(m.trailingAnnualDividendYield);
     return {
       symbol,
       name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
@@ -510,6 +518,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       forwardPE: null,
       marketCap: null,
       volume: (m.regularMarketVolume as number) ?? null,
+      dividendYield: isFinite(divYield) && divYield > 0 ? divYield : null,
     };
   } catch {
     return null;
@@ -575,6 +584,8 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
         forwardPE:  it.forwardPE  != null ? Number(it.forwardPE)  : null,
         marketCap:  it.marketCap  != null ? Number(it.marketCap)  : null,
         volume:     it.regularMarketVolume != null ? Number(it.regularMarketVolume) : null,
+        dividendYield: it.trailingAnnualDividendYield != null && Number(it.trailingAnnualDividendYield) > 0
+          ? Number(it.trailingAnnualDividendYield) : null,
       };
     }).filter(q => q.price > 0);
   } catch { /* try next host */ }
@@ -704,6 +715,7 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
             forwardPE,
             marketCap: typeof marketCapRaw === 'number' ? marketCapRaw : null,
             volume: null,
+            dividendYield: null,
           } satisfies YahooQuote,
         };
       }));

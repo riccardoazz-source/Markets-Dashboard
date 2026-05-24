@@ -15,6 +15,8 @@ export interface QuoteData {
   ytdChangePercent?: number | null;
   mtdChangePercent?: number | null;
   volume?: number | null;
+  /** Trailing annual dividend yield as a decimal (e.g. 0.012 = 1.2%). Present and > 0 when the asset pays dividends. */
+  dividendYield?: number | null;
 }
 
 export interface HistoricalPoint {

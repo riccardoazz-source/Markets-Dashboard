@@ -281,6 +281,7 @@ export const INDEXES: AssetConfig[] = [
   { symbol: '^DJI',      name: 'Dow Jones',             category: 'USA',            region: 'America', type: 'index' },
   { symbol: '^RUT',      name: 'Russell 2000',          category: 'USA',            region: 'America', type: 'index' },
   { symbol: '^STOXX50E', name: 'Euro Stoxx 50',         category: 'Europe',         region: 'EU',      type: 'index' },
+  { symbol: '^STOXX',    name: 'STOXX Europe 600',      category: 'Europe',         region: 'EU',      type: 'index' },
   { symbol: '^GDAXI',    name: 'DAX',                   category: 'Germany',        region: 'EU',      type: 'index' },
   { symbol: '^FTSE',     name: 'FTSE 100',              category: 'UK',             region: 'EU',      type: 'index' },
   { symbol: '^FCHI',     name: 'CAC 40',                category: 'France',         region: 'EU',      type: 'index' },
@@ -332,9 +333,11 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'AIQ',   name: 'AI & Machine Learning',   category: 'Tech',       type: 'sector' },
   { symbol: 'WCLD',  name: 'Cloud Computing',         category: 'Tech',       type: 'sector' },
   { symbol: 'CIBR',  name: 'Cybersecurity',           category: 'Tech',       type: 'sector' },
+  { symbol: 'MAGS',  name: 'Magnificent Seven',       category: 'Tech',       type: 'sector' },
   { symbol: 'XLV',   name: 'Healthcare',              category: 'Health',     type: 'sector' },
   { symbol: 'XBI',   name: 'Biotech & Pharma',        category: 'Health',     type: 'sector' },
   { symbol: 'XLF',   name: 'Financials',              category: 'Finance',    type: 'sector' },
+  { symbol: 'C6M.PA',name: 'EU Banks (STOXX 600)',    category: 'Finance',    type: 'sector' },
   { symbol: 'BITQ',  name: 'Crypto & Digital Payments',category: 'Crypto',    type: 'sector' },
   { symbol: 'XLY',   name: 'Consumer Discr.',         category: 'Consumer',   type: 'sector' },
   { symbol: 'XLP',   name: 'Consumer Staples',        category: 'Consumer',   type: 'sector' },
@@ -348,6 +351,9 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'XLB',   name: 'Materials',               category: 'Materials',  type: 'sector' },
   { symbol: 'XLRE',  name: 'Real Estate',             category: 'Real Estate',type: 'sector' },
   { symbol: 'XLU',   name: 'Utilities',               category: 'Utilities',  type: 'sector' },
+  // USD Treasury long-duration UCITS ETFs (listed on LSE — accumulating & distributing)
+  { symbol: 'IBTL.L',name: 'US T-Bond 20+yr (Acc)',  category: 'Bonds',      type: 'sector' },
+  { symbol: 'IDTL.L',name: 'US T-Bond 20+yr (Dist)', category: 'Bonds',      type: 'sector' },
 ];
 
 // Currency metadata — flag emoji + ISO-3166 country code + full name, keyed by

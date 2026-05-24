@@ -165,13 +165,20 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               <button key={idx.symbol}
                 onClick={() => setSelected(isSelected ? null : idx.symbol)}
                 className={clsx(
-                  'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
+                  'relative rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                   isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
                 )}>
                 <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mb-1">
                   {idx.category}
                 </p>
-                <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">{idx.name}</p>
+                <div className="flex items-start justify-between gap-1 mb-2">
+                  <p className="text-sm font-semibold text-gray-100 leading-snug">{idx.name}</p>
+                  {q?.dividendYield != null && q.dividendYield > 0 && (
+                    <span className="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
+                      DIV
+                    </span>
+                  )}
+                </div>
                 {q && q.price > 0 ? (
                   <>
                     <p className="text-lg font-bold text-white tabular-nums">

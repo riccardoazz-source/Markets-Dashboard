@@ -981,11 +981,18 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   >
                     <div className="flex items-center justify-between mb-0.5">
                       <span className="text-xs font-bold text-gray-100 font-mono">{sym}</span>
-                      {change != null && (
-                        <span className={clsx('text-[10px] font-bold tabular-nums', change >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                          {change >= 0 ? '+' : ''}{change.toFixed(2)}%
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {q?.dividendYield != null && q.dividendYield > 0 && (
+                          <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
+                            DIV
+                          </span>
+                        )}
+                        {change != null && (
+                          <span className={clsx('text-[10px] font-bold tabular-nums', change >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                            {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                          </span>
+                        )}
+                      </div>
                     </div>
                     {q?.name && <p className="text-[10px] text-gray-500 truncate mb-1">{q.name}</p>}
                     {q?.price != null && (

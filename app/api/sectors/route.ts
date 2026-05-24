@@ -24,7 +24,7 @@ export async function GET() {
         SECTORS.map((s, i) => ({
           symbol: s.symbol, name: s.name, category: s.category,
           price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null,
-          high52w: null, low52w: null, rank: i + 1,
+          high52w: null, low52w: null, dividendYield: null, rank: i + 1,
         }))
       );
     }
@@ -42,6 +42,7 @@ export async function GET() {
         mtdReturn: q?.mtdChangePercent ?? null,
         high52w: q?.high52w ?? null,
         low52w: q?.low52w ?? null,
+        dividendYield: q?.dividendYield ?? null,
       };
     });
 

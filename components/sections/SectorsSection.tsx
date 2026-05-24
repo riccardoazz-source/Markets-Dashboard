@@ -21,12 +21,13 @@ interface SectorLiveData {
   mtdReturn: number | null;
   high52w: number | null;
   low52w: number | null;
+  dividendYield?: number | null;
 }
 
 // Seed grid immediately from static config — never empty
 const INITIAL: SectorLiveData = {
   price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null,
-  high52w: null, low52w: null,
+  high52w: null, low52w: null, dividendYield: null,
 };
 
 type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn';
@@ -185,7 +186,14 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                 <span className="text-[10px] font-bold text-gray-600">#{sector.rank}</span>
                 <span className="text-[10px] text-gray-500 uppercase tracking-wider">{sector.category}</span>
               </div>
-              <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">{sector.name}</p>
+              <div className="flex items-start justify-between gap-1 mb-2">
+                <p className="text-sm font-semibold text-gray-100 leading-snug">{sector.name}</p>
+                {!isHot && sector.dividendYield != null && sector.dividendYield > 0 && (
+                  <span className="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
+                    DIV
+                  </span>
+                )}
+              </div>
 
               {sector.price != null ? (
                 <>
