@@ -62,6 +62,29 @@ function computeMtd(price: number, timestamps: number[], closes: (number | null)
   return null;
 }
 
+// Compute trailing-12-month dividend yield from v8/chart events.
+// The v8/chart meta does NOT carry trailingAnnualDividendYield (that's a v7-only field).
+// Adding &events=div to the chart query gives us actual dividend payment records,
+// from which we derive: yield = sum(dividends paid in last year) / current price.
+function computeDivYieldFromEvents(
+  result: Record<string, unknown>,
+  price: number,
+): number | null {
+  if (!price) return null;
+  const events = result.events as Record<string, unknown> | undefined;
+  const divs = events?.dividends as Record<string, { amount?: number; date?: number }> | undefined;
+  if (!divs) return null;
+  const oneYearAgo = Date.now() / 1000 - 365 * 86_400;
+  let total = 0;
+  for (const key of Object.keys(divs)) {
+    const ev = divs[key];
+    const amt = Number(ev?.amount);
+    const ts  = Number(ev?.date);
+    if (isFinite(amt) && amt > 0 && isFinite(ts) && ts >= oneYearAgo) total += amt;
+  }
+  return total > 0 ? total / price : null;
+}
+
 interface CrumbSession { cookie: string; crumb: string; ts: number }
 
 const CRUMB_TTL = 25 * 60_000;
@@ -386,7 +409,8 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
 async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
   // range=1y&interval=1d: daily closes — second-to-last is yesterday's close
   // (chartPreviousClose is the start-of-range value, NOT the previous trading day).
-  const result = await fetchChartRaw(symbol, 'range=1y&interval=1d', 5_000);
+  // events=div: include dividend payment events so we can compute trailing yield.
+  const result = await fetchChartRaw(symbol, 'range=1y&interval=1d&events=div', 5_000);
   if (!result) return null;
 
   const m = (result.meta as Record<string, unknown> | undefined) ?? {};
@@ -417,7 +441,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
   }
 
-  const divYield = Number(m.trailingAnnualDividendYield);
+  const divYield = computeDivYieldFromEvents(result, price);
   return {
     symbol,
     name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
@@ -435,7 +459,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     forwardPE: null,
     marketCap: null,
     volume: (m.regularMarketVolume as number) ?? null,
-    dividendYield: isFinite(divYield) && divYield > 0 ? divYield : null,
+    dividendYield: divYield,
   };
 }
 
@@ -457,7 +481,7 @@ async function fetchQuotesV8Fallback(symbols: string[]): Promise<YahooQuote[]> {
 async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
   const url =
     `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-    `?range=1y&interval=1d&includePrePost=false`;
+    `?range=1y&interval=1d&includePrePost=false&events=div`;
   try {
     const res = await fetchWithTimeout(url, {
       headers: {
@@ -500,7 +524,6 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
     }
 
-    const divYield = Number(m.trailingAnnualDividendYield);
     return {
       symbol,
       name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
@@ -518,7 +541,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       forwardPE: null,
       marketCap: null,
       volume: (m.regularMarketVolume as number) ?? null,
-      dividendYield: isFinite(divYield) && divYield > 0 ? divYield : null,
+      dividendYield: computeDivYieldFromEvents(result, price),
     };
   } catch {
     return null;
