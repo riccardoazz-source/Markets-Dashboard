@@ -275,16 +275,11 @@ export const BTC_HALVING_DATES: string[] = [
   '2024-04-20', // 4th: 6.25 → 3.125 BTC
 ];
 
-// Pure stock-market indices — Yahoo Finance native index symbols.
-// No ETFs: an index is a calculated price level, not a tradable security, so it
-// never distributes dividends. ETF wrappers that track these indices belong in
-// SECTORS or as separate watchlist items.
-//
-// Notes on global / emerging-market gaps:
-// - MSCI World, MSCI ACWI, and MSCI Emerging Markets do not have reliable
-//   free-data price-index symbols on Yahoo Finance — they are only accessible
-//   via ETF proxies (SWDA.L, SSAC.L, EIMI.L). They are intentionally omitted
-//   here; add them as ETFs if needed.
+// Pure stock-market indices — Yahoo Finance native index symbols where they
+// exist. MSCI World and MSCI EM IMI do not have reliable free price-index
+// symbols on Yahoo Finance, so we use accumulating UCITS ETFs as proxies:
+// they don't distribute dividends, so they behave like a price level in the UI
+// (no DIV badge, no dividend distortion in returns).
 export const INDEXES: AssetConfig[] = [
   { symbol: '^GSPC',     name: 'S&P 500',              category: 'USA',            region: 'America', type: 'index' },
   { symbol: '^NDX',      name: 'NASDAQ 100',            category: 'USA',            region: 'America', type: 'index' },
@@ -295,6 +290,9 @@ export const INDEXES: AssetConfig[] = [
   { symbol: '^GDAXI',    name: 'DAX',                   category: 'Germany',        region: 'EU',      type: 'index' },
   { symbol: '^FTSE',     name: 'FTSE 100',              category: 'UK',             region: 'EU',      type: 'index' },
   { symbol: '^FCHI',     name: 'CAC 40',                category: 'France',         region: 'EU',      type: 'index' },
+  // Global / EM — accumulating UCITS ETF proxies (no MSCI price-index on Yahoo)
+  { symbol: 'SWDA.L',    name: 'MSCI World',            category: 'Global',         region: 'Global',  type: 'etf'   },
+  { symbol: 'EIMI.L',    name: 'MSCI Emerg. Markets',   category: 'Emerging',       region: 'EM',      type: 'etf'   },
   { symbol: '^N225',     name: 'Nikkei 225',            category: 'Japan',          region: 'Asia',    type: 'index' },
   { symbol: '^HSI',      name: 'Hang Seng',             category: 'Hong Kong',      region: 'Asia',    type: 'index' },
   { symbol: '000300.SS', name: 'CSI 300',               category: 'China',          region: 'Asia',    type: 'index' },

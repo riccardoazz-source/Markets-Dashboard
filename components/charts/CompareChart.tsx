@@ -186,13 +186,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         })
     : [];
 
-  // FOMC meeting date lines — snapped to categories. Only show when ≤30 meetings
-  // are visible (too many lines clutter the chart; tell users to zoom in instead).
+  // FOMC meeting date lines — snapped to categories. Always rendered (even
+  // dense MAX-timeframe views with ~100 meetings); the dashed lines stay subtle
+  // enough that they don't dominate the chart, and hiding them was confusing
+  // because users couldn't tell the dates were loaded at all.
   const visibleFomcDates = fomcAsset && allDates.length > 0
     ? (() => {
         const lo = allDates[0], hi = allDates[allDates.length - 1];
         const inRange = FOMC_MEETING_DATES.filter(d => d >= lo && d <= hi);
-        if (inRange.length > 30) return null; // too dense — signal with null
         return inRange.map(d => {
           const tt = parseISO(d).getTime();
           let best = allDates[0], bestDiff = Infinity;
@@ -441,16 +442,6 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           <p className="mt-0.5 text-xs text-amber-300/80">
             Past halvings: <strong className="text-amber-300">Nov 2012 · Jul 2016 · May 2020 · Apr 2024</strong>.
             Switch to <strong className="text-amber-300">5Y, 10Y or MAX</strong> to see the halving lines overlaid on the chart.
-          </p>
-        </div>
-      )}
-
-      {fomcAsset && visibleFomcDates === null && (
-        <div className="mb-3 rounded-lg border border-blue-400/30 bg-blue-400/10 px-4 py-3">
-          <p className="text-sm font-semibold text-blue-300">🏛 FOMC meeting lines hidden at this zoom level</p>
-          <p className="mt-0.5 text-xs text-blue-300/70">
-            Too many meetings to draw as vertical lines — switch to <strong className="text-blue-200">3Y or shorter</strong> to show them.
-            All meetings <strong className="text-blue-200">since 2000</strong> are included in the correlation analysis below.
           </p>
         </div>
       )}
