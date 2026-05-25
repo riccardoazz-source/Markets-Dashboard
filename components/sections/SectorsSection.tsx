@@ -313,7 +313,8 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               <Stat label={`CAGR ${timeframe}`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
             </>}
             {irr != null && (
-              <Stat label={`IRR (${timeframe})`} value={`${irr >= 0 ? '+' : ''}${irr.toFixed(2)}%`} color="text-amber-400" />
+              /* computeAssetIRR returns a decimal (0.085 = 8.5%) — multiply by 100 for display */
+              <Stat label={`IRR (${timeframe})`} value={formatPercent(irr * 100)} color="text-amber-400" />
             )}
             {selectedSector.high52w != null && <Stat label="52W High" value={formatPrice(selectedSector.high52w)} />}
             {selectedSector.low52w != null && <Stat label="52W Low" value={formatPrice(selectedSector.low52w)} />}

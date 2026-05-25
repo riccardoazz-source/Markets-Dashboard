@@ -297,7 +297,8 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               </>
             )}
             {irr != null && (
-              <Stat label={`IRR (${timeframe})`} value={`${irr >= 0 ? '+' : ''}${irr.toFixed(2)}%`} color="text-amber-400" />
+              /* computeAssetIRR returns a decimal (0.085 = 8.5%) — multiply by 100 for display */
+              <Stat label={`IRR (${timeframe})`} value={formatPercent(irr * 100)} color="text-amber-400" />
             )}
             {selectedQuote.high52w != null && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
             {selectedQuote.low52w != null && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}

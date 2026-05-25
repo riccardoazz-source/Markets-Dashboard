@@ -275,6 +275,16 @@ export const BTC_HALVING_DATES: string[] = [
   '2024-04-20', // 4th: 6.25 → 3.125 BTC
 ];
 
+// Pure stock-market indices — Yahoo Finance native index symbols.
+// No ETFs: an index is a calculated price level, not a tradable security, so it
+// never distributes dividends. ETF wrappers that track these indices belong in
+// SECTORS or as separate watchlist items.
+//
+// Notes on global / emerging-market gaps:
+// - MSCI World, MSCI ACWI, and MSCI Emerging Markets do not have reliable
+//   free-data price-index symbols on Yahoo Finance — they are only accessible
+//   via ETF proxies (SWDA.L, SSAC.L, EIMI.L). They are intentionally omitted
+//   here; add them as ETFs if needed.
 export const INDEXES: AssetConfig[] = [
   { symbol: '^GSPC',     name: 'S&P 500',              category: 'USA',            region: 'America', type: 'index' },
   { symbol: '^NDX',      name: 'NASDAQ 100',            category: 'USA',            region: 'America', type: 'index' },
@@ -285,13 +295,14 @@ export const INDEXES: AssetConfig[] = [
   { symbol: '^GDAXI',    name: 'DAX',                   category: 'Germany',        region: 'EU',      type: 'index' },
   { symbol: '^FTSE',     name: 'FTSE 100',              category: 'UK',             region: 'EU',      type: 'index' },
   { symbol: '^FCHI',     name: 'CAC 40',                category: 'France',         region: 'EU',      type: 'index' },
-  // Global / regional — accumulating UCITS ETFs (no dividend distribution)
-  { symbol: 'SWDA.L',    name: 'MSCI World (Acc)',      category: 'Global',         region: 'Global',  type: 'etf'   },
-  { symbol: 'SSAC.L',    name: 'MSCI ACWI (Acc)',       category: 'Global',         region: 'Global',  type: 'etf'   },
-  { symbol: 'EIMI.L',    name: 'MSCI Emerg. Mkts (Acc)',category: 'Emerging',       region: 'EM',      type: 'etf'   },
   { symbol: '^N225',     name: 'Nikkei 225',            category: 'Japan',          region: 'Asia',    type: 'index' },
-  { symbol: 'FXI',       name: 'China Large-Cap',       category: 'China',          region: 'Asia',    type: 'etf'   },
-  { symbol: 'IIND.L',    name: 'MSCI India (Acc)',      category: 'India',          region: 'Asia',    type: 'etf'   },
+  { symbol: '^HSI',      name: 'Hang Seng',             category: 'Hong Kong',      region: 'Asia',    type: 'index' },
+  { symbol: '000300.SS', name: 'CSI 300',               category: 'China',          region: 'Asia',    type: 'index' },
+  { symbol: '^BSESN',    name: 'BSE Sensex',            category: 'India',          region: 'Asia',    type: 'index' },
+  { symbol: '^KS11',     name: 'KOSPI',                 category: 'Korea',          region: 'Asia',    type: 'index' },
+  { symbol: '^AXJO',     name: 'ASX 200',               category: 'Australia',      region: 'Asia',    type: 'index' },
+  { symbol: '^GSPTSE',   name: 'TSX Composite',         category: 'Canada',         region: 'America', type: 'index' },
+  { symbol: '^BVSP',     name: 'Bovespa',               category: 'Brazil',         region: 'America', type: 'index' },
 ];
 
 export const COMMODITIES: AssetConfig[] = [
