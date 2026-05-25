@@ -285,12 +285,13 @@ export const INDEXES: AssetConfig[] = [
   { symbol: '^GDAXI',    name: 'DAX',                   category: 'Germany',        region: 'EU',      type: 'index' },
   { symbol: '^FTSE',     name: 'FTSE 100',              category: 'UK',             region: 'EU',      type: 'index' },
   { symbol: '^FCHI',     name: 'CAC 40',                category: 'France',         region: 'EU',      type: 'index' },
-  { symbol: 'URTH',      name: 'MSCI World',            category: 'Global',         region: 'Global',  type: 'etf'   },
-  { symbol: 'ACWI',      name: 'MSCI ACWI',             category: 'Global',         region: 'Global',  type: 'etf'   },
-  { symbol: 'EEM',       name: 'MSCI Emerg. Markets',   category: 'Emerging',       region: 'EM',      type: 'etf'   },
+  // Global / regional — accumulating UCITS ETFs (no dividend distribution)
+  { symbol: 'SWDA.L',    name: 'MSCI World (Acc)',      category: 'Global',         region: 'Global',  type: 'etf'   },
+  { symbol: 'SSAC.L',    name: 'MSCI ACWI (Acc)',       category: 'Global',         region: 'Global',  type: 'etf'   },
+  { symbol: 'EIMI.L',    name: 'MSCI Emerg. Mkts (Acc)',category: 'Emerging',       region: 'EM',      type: 'etf'   },
   { symbol: '^N225',     name: 'Nikkei 225',            category: 'Japan',          region: 'Asia',    type: 'index' },
   { symbol: 'FXI',       name: 'China Large-Cap',       category: 'China',          region: 'Asia',    type: 'etf'   },
-  { symbol: 'INDA',      name: 'MSCI India',            category: 'India',          region: 'Asia',    type: 'etf'   },
+  { symbol: 'IIND.L',    name: 'MSCI India (Acc)',      category: 'India',          region: 'Asia',    type: 'etf'   },
 ];
 
 export const COMMODITIES: AssetConfig[] = [
@@ -337,7 +338,7 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'XLV',   name: 'Healthcare',              category: 'Health',     type: 'sector' },
   { symbol: 'XBI',   name: 'Biotech & Pharma',        category: 'Health',     type: 'sector' },
   { symbol: 'XLF',   name: 'Financials',              category: 'Finance',    type: 'sector' },
-  { symbol: 'C6M.PA',name: 'EU Banks (STOXX 600)',    category: 'Finance',    type: 'sector' },
+  { symbol: 'EXV1.DE',name: 'EU Banks (STOXX 600)',   category: 'Finance',    type: 'sector' },
   { symbol: 'BITQ',  name: 'Crypto & Digital Payments',category: 'Crypto',    type: 'sector' },
   { symbol: 'XLY',   name: 'Consumer Discr.',         category: 'Consumer',   type: 'sector' },
   { symbol: 'XLP',   name: 'Consumer Staples',        category: 'Consumer',   type: 'sector' },

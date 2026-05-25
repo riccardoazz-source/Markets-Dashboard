@@ -1,15 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { INDEXES } from '@/lib/config';
 import { QuoteData, HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPrice, formatPercent, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
+import { formatPrice, formatPercent, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, type DividendEvent } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -37,6 +38,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
   const [dataMsg, setDataMsg] = useState<string | null>(null);
+  const [divData, setDivData] = useState<{ adjPrices: HistoricalPoint[]; dividends: DividendEvent[] } | null>(null);
 
   const fetchQuotes = useCallback(async () => {
     const symbols = INDEXES.map(i => i.symbol).join(',');
@@ -83,7 +85,44 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     if (jumpTo) setSelected(jumpTo);
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); setDivData(null); }, [selected]);
+
+  // Fetch adjusted-price + dividend data for distributing ETFs
+  useEffect(() => {
+    if (!selected || !quotes[selected]?.dividendYield) return;
+    const params = customRange
+      ? `symbol=${encodeURIComponent(selected)}&timeframe=${timeframe}&from=${customRange.from}&to=${customRange.to}`
+      : `symbol=${encodeURIComponent(selected)}&timeframe=${timeframe}`;
+    fetch(`/api/stock?${params}`)
+      .then(r => r.json())
+      .then((raw: { adjPrices?: HistoricalPoint[]; dividends?: DividendEvent[] }) => {
+        const adj = raw.adjPrices ?? [];
+        const divs = raw.dividends ?? [];
+        if (adj.length > 0 || divs.length > 0) setDivData({ adjPrices: adj, dividends: divs });
+      })
+      .catch(() => {});
+  }, [selected, timeframe, customRange, quotes]);
+
+  // Dual-line chart data: price vs total return, normalized to 0% at period start
+  const divChartData = useMemo(() => {
+    if (!historical.length || !divData?.adjPrices.length) return null;
+    const adjMap = new Map<string, number>(divData.adjPrices.map(p => [p.date, p.close]));
+    const priceBase = historical[0].close;
+    const adjBase = divData.adjPrices[0].close;
+    return historical.map(p => {
+      const adj = adjMap.get(p.date);
+      return {
+        date: p.date,
+        price: ((p.close - priceBase) / priceBase) * 100,
+        totalReturn: adj != null ? ((adj - adjBase) / adjBase) * 100 : undefined,
+      };
+    });
+  }, [historical, divData]);
+
+  const irr = useMemo(() => {
+    if (!divData?.dividends.length || !historical.length) return null;
+    return computeAssetIRR(historical, divData.dividends);
+  }, [historical, divData]);
 
   const filtered = INDEXES.filter(
     i => selectedRegion === 'All' || i.region === selectedRegion
@@ -257,6 +296,9 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                 <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
               </>
             )}
+            {irr != null && (
+              <Stat label={`IRR (${timeframe})`} value={`${irr >= 0 ? '+' : ''}${irr.toFixed(2)}%`} color="text-amber-400" />
+            )}
             {selectedQuote.high52w != null && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
             {selectedQuote.low52w != null && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
             {selectedQuote.trailingPE != null && <Stat label="P/E" value={selectedQuote.trailingPE.toFixed(1)} />}
@@ -265,16 +307,63 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
+          ) : divChartData ? (
+            /* Dual-line: price vs total return (normalized % from period start) */
+            <div className="space-y-1">
+              <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                <span className="flex items-center gap-1"><span className="inline-block w-4 h-px bg-slate-400"/>Price</span>
+                <span className="flex items-center gap-1"><span className="inline-block w-4 h-px bg-amber-400"/>Total Return</span>
+              </div>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={divChartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+                    interval="preserveStartEnd"
+                    tickFormatter={d => {
+                      const date = new Date(d);
+                      const n = divChartData.length;
+                      if (n < 60)  return date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+                      if (n < 700) return date.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+                      return String(date.getFullYear());
+                    }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+                    tickFormatter={v => `${v >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`} />
+                  <Tooltip
+                    contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: 11, padding: '6px 10px' }}
+                    labelStyle={{ color: '#94a3b8', fontSize: 10, marginBottom: 2 }}
+                    formatter={(val: number, name: string) => [`${val >= 0 ? '+' : ''}${val.toFixed(2)}%`, name]}
+                  />
+                  <Line dataKey="price" name="Price" stroke="#94a3b8" dot={false} strokeWidth={1.5} connectNulls />
+                  <Line dataKey="totalReturn" name="Total Return" stroke="#f59e0b" dot={false} strokeWidth={1.5} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           ) : (
             <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
           )}
 
-          {cagrData && (
+          {/* Dividend list for distributing ETFs */}
+          {divData && divData.dividends.length > 0 && (
+            <div className="bg-bg-input rounded-lg px-3 py-2.5">
+              <p className="text-[10px] text-gray-500 font-medium mb-1.5">Dividends (last {Math.min(divData.dividends.length, 8)})</p>
+              <div className="space-y-1">
+                {divData.dividends.slice(-8).reverse().map(d => (
+                  <div key={d.date} className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500">{d.date}</span>
+                    <span className="text-[10px] font-semibold text-amber-400">
+                      {selectedQuote.currency ?? 'USD'} {d.amount.toFixed(4)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {cagrData && !divChartData && (
             <p className="text-[10px] text-gray-600">
               {cagrData.startDate} → {cagrData.endDate} · {formatPrice(cagrData.startPrice)} → {formatPrice(cagrData.endPrice)}
             </p>
           )}
-          {historical.length > 0 && (
+          {!divChartData && historical.length > 0 && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} />}

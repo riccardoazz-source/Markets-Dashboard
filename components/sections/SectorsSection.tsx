@@ -1,15 +1,16 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { SECTORS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPercent, formatPrice, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
+import { formatPercent, formatPrice, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, type DividendEvent } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, Flame, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -51,6 +52,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
   const [dataMsg, setDataMsg] = useState<string | null>(null);
+  const [divData, setDivData] = useState<{ adjPrices: HistoricalPoint[]; dividends: DividendEvent[] } | null>(null);
 
   const fetchSectors = useCallback(async () => {
     try {
@@ -64,6 +66,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
         mtdReturn: number | null;
         high52w: number | null;
         low52w: number | null;
+        dividendYield: number | null;
       }>;
       if (Array.isArray(data) && data.length > 0) {
         const map: Record<string, SectorLiveData> = {};
@@ -112,7 +115,23 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     if (jumpTo) setSelected(jumpTo);
   }, [jumpTo]);
 
-  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
+  useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); setDivData(null); }, [selected]);
+
+  // Fetch adjusted-price + dividend data for distributing ETFs
+  useEffect(() => {
+    if (!selected || !live[selected]?.dividendYield) return;
+    const params = customRange
+      ? `symbol=${encodeURIComponent(selected)}&timeframe=${timeframe}&from=${customRange.from}&to=${customRange.to}`
+      : `symbol=${encodeURIComponent(selected)}&timeframe=${timeframe}`;
+    fetch(`/api/stock?${params}`)
+      .then(r => r.json())
+      .then((raw: { adjPrices?: HistoricalPoint[]; dividends?: DividendEvent[] }) => {
+        const adj = raw.adjPrices ?? [];
+        const divs = raw.dividends ?? [];
+        if (adj.length > 0 || divs.length > 0) setDivData({ adjPrices: adj, dividends: divs });
+      })
+      .catch(() => {});
+  }, [selected, timeframe, customRange, live]);
 
   // Merge static config with live data — always renders every sector
   const merged = SECTORS.map(s => ({
@@ -136,6 +155,27 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     .map((s, i) => ({ ...s, rank: i + 1 }));
 
   const selectedSector = merged.find(s => s.symbol === selected);
+
+  // Dual-line chart data: price vs total return, normalized to 0% at period start
+  const divChartData = useMemo(() => {
+    if (!historical.length || !divData?.adjPrices.length) return null;
+    const adjMap = new Map<string, number>(divData.adjPrices.map(p => [p.date, p.close]));
+    const priceBase = historical[0].close;
+    const adjBase = divData.adjPrices[0].close;
+    return historical.map(p => {
+      const adj = adjMap.get(p.date);
+      return {
+        date: p.date,
+        price: ((p.close - priceBase) / priceBase) * 100,
+        totalReturn: adj != null ? ((adj - adjBase) / adjBase) * 100 : undefined,
+      };
+    });
+  }, [historical, divData]);
+
+  const irr = useMemo(() => {
+    if (!divData?.dividends.length || !historical.length) return null;
+    return computeAssetIRR(historical, divData.dividends);
+  }, [historical, divData]);
 
   return (
     <div className="space-y-3">
@@ -265,21 +305,73 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-            {selectedSector.price != null && <Stat label="Price" value={`$${selectedSector.price.toFixed(2)}`} />}
+            {selectedSector.price != null && <Stat label="Price" value={formatPrice(selectedSector.price)} />}
             {selectedSector.changePercent != null && <Stat label="Day" value={formatPercent(selectedSector.changePercent)} color={colorForPercent(selectedSector.changePercent)} />}
             {selectedSector.ytdReturn != null && <Stat label="YTD" value={formatPercent(selectedSector.ytdReturn)} color={colorForPercent(selectedSector.ytdReturn)} />}
             {cagrData && <>
               <Stat label={`Return ${timeframe}`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
               <Stat label={`CAGR ${timeframe}`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
             </>}
+            {irr != null && (
+              <Stat label={`IRR (${timeframe})`} value={`${irr >= 0 ? '+' : ''}${irr.toFixed(2)}%`} color="text-amber-400" />
+            )}
             {selectedSector.high52w != null && <Stat label="52W High" value={formatPrice(selectedSector.high52w)} />}
             {selectedSector.low52w != null && <Stat label="52W Low" value={formatPrice(selectedSector.low52w)} />}
           </div>
-          {histLoading
-            ? <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
-            : <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
-          }
-          {historical.length > 0 && (
+          {histLoading ? (
+            <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
+          ) : divChartData ? (
+            /* Dual-line: price vs total return (normalized % from period start) */
+            <div className="space-y-1">
+              <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                <span className="flex items-center gap-1"><span className="inline-block w-4 h-px bg-slate-400"/>Price</span>
+                <span className="flex items-center gap-1"><span className="inline-block w-4 h-px bg-amber-400"/>Total Return</span>
+              </div>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={divChartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+                    interval="preserveStartEnd"
+                    tickFormatter={d => {
+                      const date = new Date(d);
+                      const n = divChartData.length;
+                      if (n < 60)  return date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+                      if (n < 700) return date.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+                      return String(date.getFullYear());
+                    }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+                    tickFormatter={v => `${v >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`} />
+                  <Tooltip
+                    contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: 11, padding: '6px 10px' }}
+                    labelStyle={{ color: '#94a3b8', fontSize: 10, marginBottom: 2 }}
+                    formatter={(val: number, name: string) => [`${val >= 0 ? '+' : ''}${val.toFixed(2)}%`, name]}
+                  />
+                  <Line dataKey="price" name="Price" stroke="#94a3b8" dot={false} strokeWidth={1.5} connectNulls />
+                  <Line dataKey="totalReturn" name="Total Return" stroke="#f59e0b" dot={false} strokeWidth={1.5} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
+          )}
+
+          {/* Dividend list for distributing ETFs */}
+          {divData && divData.dividends.length > 0 && (
+            <div className="bg-bg-input rounded-lg px-3 py-2.5">
+              <p className="text-[10px] text-gray-500 font-medium mb-1.5">Dividends (last {Math.min(divData.dividends.length, 8)})</p>
+              <div className="space-y-1">
+                {divData.dividends.slice(-8).reverse().map(d => (
+                  <div key={d.date} className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500">{d.date}</span>
+                    <span className="text-[10px] font-semibold text-amber-400">
+                      {d.amount.toFixed(4)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!divChartData && historical.length > 0 && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} />}
