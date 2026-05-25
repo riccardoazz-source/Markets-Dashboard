@@ -11,6 +11,7 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
+import { DividendsPanel } from '@/components/charts/DividendsBarChart';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -298,7 +299,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             )}
             {irr != null && (
               /* computeAssetIRR returns a decimal (0.085 = 8.5%) — multiply by 100 for display */
-              <Stat label={`IRR (${timeframe})`} value={formatPercent(irr * 100)} color="text-amber-400" />
+              <Stat label={`IRR (${timeframe})`} value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />
             )}
             {selectedQuote.high52w != null && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
             {selectedQuote.low52w != null && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
@@ -310,53 +311,53 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : divChartData ? (
             /* Dual-line: price vs total return (normalized % from period start) */
-            <div className="space-y-1">
-              <div className="flex items-center gap-3 text-[10px] text-gray-500">
-                <span className="flex items-center gap-1"><span className="inline-block w-4 h-px bg-slate-400"/>Price</span>
-                <span className="flex items-center gap-1"><span className="inline-block w-4 h-px bg-amber-400"/>Total Return</span>
-              </div>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={divChartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
-                    interval="preserveStartEnd"
-                    tickFormatter={d => {
-                      const date = new Date(d);
-                      const n = divChartData.length;
-                      if (n < 60)  return date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
-                      if (n < 700) return date.toLocaleString('en-US', { month: 'short', year: '2-digit' });
-                      return String(date.getFullYear());
-                    }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
-                    tickFormatter={v => `${v >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`} />
-                  <Tooltip
-                    contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: 11, padding: '6px 10px' }}
-                    labelStyle={{ color: '#94a3b8', fontSize: 10, marginBottom: 2 }}
-                    formatter={(val: number, name: string) => [`${val >= 0 ? '+' : ''}${val.toFixed(2)}%`, name]}
-                  />
-                  <Line dataKey="price" name="Price" stroke="#94a3b8" dot={false} strokeWidth={1.5} connectNulls />
-                  <Line dataKey="totalReturn" name="Total Return" stroke="#f59e0b" dot={false} strokeWidth={1.5} connectNulls />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            (() => {
+              const last = divChartData[divChartData.length - 1];
+              const isUp = (last?.price ?? 0) >= 0;
+              const priceColor = isUp ? '#10b981' : '#ef4444';
+              const trColor    = isUp ? '#34d399' : '#f87171';
+              return (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-3 text-[10px] text-gray-500">
+                    <span className="flex items-center gap-1"><span className="inline-block w-4 h-px" style={{ background: priceColor }}/>Price</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-4 border-t border-dashed" style={{ borderColor: trColor }}/>Total Return</span>
+                  </div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={divChartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+                        interval="preserveStartEnd"
+                        tickFormatter={d => {
+                          const date = new Date(d);
+                          const n = divChartData.length;
+                          if (n < 60)  return date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+                          if (n < 700) return date.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+                          return String(date.getFullYear());
+                        }} />
+                      <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+                        tickFormatter={v => `${v >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`} />
+                      <Tooltip
+                        contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: 11, padding: '6px 10px' }}
+                        labelStyle={{ color: '#94a3b8', fontSize: 10, marginBottom: 2 }}
+                        formatter={(val: number, name: string) => [`${val >= 0 ? '+' : ''}${val.toFixed(2)}%`, name]}
+                      />
+                      <Line dataKey="price" name="Price" stroke={priceColor} dot={false} strokeWidth={2} connectNulls />
+                      <Line dataKey="totalReturn" name="Total Return" stroke={trColor} dot={false} strokeWidth={2} strokeDasharray="6 3" connectNulls />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              );
+            })()
           ) : (
             <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
           )}
 
-          {/* Dividend list for distributing ETFs */}
+          {/* Dividends — same bar chart + collapsible list as StockSection */}
           {divData && divData.dividends.length > 0 && (
-            <div className="bg-bg-input rounded-lg px-3 py-2.5">
-              <p className="text-[10px] text-gray-500 font-medium mb-1.5">Dividends (last {Math.min(divData.dividends.length, 8)})</p>
-              <div className="space-y-1">
-                {divData.dividends.slice(-8).reverse().map(d => (
-                  <div key={d.date} className="flex items-center justify-between">
-                    <span className="text-[10px] text-gray-500">{d.date}</span>
-                    <span className="text-[10px] font-semibold text-amber-400">
-                      {selectedQuote.currency ?? 'USD'} {d.amount.toFixed(4)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <DividendsPanel
+              dividends={divData.dividends}
+              currency={selectedQuote.currency ?? 'USD'}
+              periodStartDate={historical[0]?.date}
+            />
           )}
 
           {cagrData && !divChartData && (

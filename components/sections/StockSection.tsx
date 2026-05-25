@@ -25,6 +25,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
 import { Search, X, BarChart2 } from 'lucide-react';
+import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
 
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
 interface FinancialPoint {
@@ -607,32 +608,6 @@ function DualChart({
         <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to measure a period</p>
       )}
     </div>
-  );
-}
-
-function DividendsBarChart({ dividends, currency }: { dividends: DividendEvent[]; currency: string }) {
-  if (!dividends.length) return null;
-  const data = dividends.map(d => ({ date: d.date, amount: d.amount }));
-  return (
-    <ResponsiveContainer width="100%" height={160}>
-      <BarChart data={data} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-        <XAxis dataKey="date"
-          tickFormatter={d => { try { return format(parseISO(d as string), "MMM ''yy"); } catch { return d as string; } }}
-          tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={40} />
-        <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} width={56}
-          tickFormatter={v => (v as number).toFixed(2)}
-          domain={[(dataMin: number) => dataMin * 0.85, (dataMax: number) => dataMax * 1.1]} />
-        <Tooltip
-          contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
-          itemStyle={{ color: '#e2e8f0' }}
-          labelStyle={{ color: '#e2e8f0', fontWeight: 600 }}
-          formatter={(value: number) => [formatPrice(value, currency), 'Dividend']}
-          labelFormatter={label => { try { return format(parseISO(label as string), 'MMM d, yyyy'); } catch { return label as string; } }}
-        />
-        <Bar dataKey="amount" fill="#10b981" radius={[2, 2, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
   );
 }
 
