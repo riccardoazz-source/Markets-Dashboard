@@ -287,9 +287,8 @@ export const FED_CHAIR_CHANGES: { date: string; name: string }[] = [
   { date: '1987-08-11', name: 'Greenspan' },     // Alan Greenspan
   { date: '2006-02-01', name: 'Bernanke' },      // Ben Bernanke
   { date: '2014-02-03', name: 'Yellen' },        // Janet Yellen
-  { date: '2018-02-05', name: 'Powell' },        // Jerome Powell (1st term)
-  { date: '2022-05-23', name: 'Powell (2nd)' },  // Jerome Powell (2nd term, sworn in May 23 2022)
-  { date: '2026-02-01', name: 'Warsh' },         // Kevin Warsh (took office Feb 2026)
+  { date: '2018-02-05', name: 'Powell' },        // Jerome Powell
+  { date: '2026-05-22', name: 'Warsh' },         // Kevin Warsh
 ];
 
 // Bitcoin halving dates (exported so UI components can render them as reference lines).
