@@ -23,6 +23,7 @@ interface ToolsOverlay {
   sma50?: boolean;
   sma200?: boolean;
   ema20?: boolean;
+  ema100?: boolean;
   bollinger?: boolean;
   fib?: boolean;
   rsi?: boolean;
@@ -208,6 +209,7 @@ export function PriceChart({
   const sma50Vals  = toolsOverlay?.sma50  ? computeSMA(closes, 50)  : null;
   const sma200Vals = toolsOverlay?.sma200 ? computeSMA(closes, 200) : null;
   const ema20Vals  = toolsOverlay?.ema20  ? computeEMA(closes, 20)  : null;
+  const ema100Vals = toolsOverlay?.ema100 ? computeEMA(closes, 100) : null;
   const bands      = toolsOverlay?.bollinger ? computeBollingerBands(closes, 20, 2) : null;
   const fibLevels  = toolsOverlay?.fib ? computeFibLevels(closes) : null;
 
@@ -236,15 +238,16 @@ export function PriceChart({
   const yMax = domMax + pad;
 
   // Extend data with overlay columns (SMA/EMA lines + Bollinger band range + SPY)
-  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || ema20Vals || bands || spyLine;
+  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || ema20Vals || ema100Vals || bands || spyLine;
   const chartData = hasSeriesOverlay
     ? data.map((d, i) => ({
         ...d,
         sma20:  sma20Vals?.[i]  ?? null,
         sma50:  sma50Vals?.[i]  ?? null,
         sma200: sma200Vals?.[i] ?? null,
-        ema20:  ema20Vals?.[i]  ?? null,
-        spy:    spyLine?.[i]    ?? null,
+        ema20:  ema20Vals?.[i]   ?? null,
+        ema100: ema100Vals?.[i]  ?? null,
+        spy:    spyLine?.[i]     ?? null,
         bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
           ? [bands.lower[i] as number, bands.upper[i] as number]
           : null,
@@ -303,7 +306,7 @@ export function PriceChart({
 
       {/* Overlay legend when active */}
       {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
-        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib ||
+        toolsOverlay?.ema20 || toolsOverlay?.ema100 || toolsOverlay?.bollinger || toolsOverlay?.fib ||
         spyLine) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
           {spyLine && (
@@ -330,6 +333,11 @@ export function PriceChart({
           {toolsOverlay?.ema20 && (
             <span className="flex items-center gap-1 text-[10px] text-rose-400">
               <span className="inline-block w-5 border-t-2 border-rose-400" />EMA 20
+            </span>
+          )}
+          {toolsOverlay?.ema100 && (
+            <span className="flex items-center gap-1 text-[10px] text-pink-400">
+              <span className="inline-block w-5 border-t-2 border-pink-400" />EMA 100
             </span>
           )}
           {toolsOverlay?.bollinger && (
@@ -397,6 +405,7 @@ export function PriceChart({
               if (name === 'sma50')  return [value != null ? value.toFixed(decimals) : '—', 'SMA 50'];
               if (name === 'sma200') return [value != null ? value.toFixed(decimals) : '—', 'SMA 200'];
               if (name === 'ema20')  return [value != null ? value.toFixed(decimals) : '—', 'EMA 20'];
+              if (name === 'ema100') return [value != null ? value.toFixed(decimals) : '—', 'EMA 100'];
               if (name === 'spy')    return [value != null ? value.toFixed(decimals) : '—', 'vs SPY (benchmark)'];
               if (name === 'bbRange') {
                 const r = value as unknown as [number, number] | null;
@@ -463,6 +472,11 @@ export function PriceChart({
           {toolsOverlay?.ema20 && (
             <Line type="monotone" dataKey="ema20" stroke="#f472b6" strokeWidth={1.5}
               dot={false} activeDot={false} connectNulls={false} name="ema20" />
+          )}
+          {/* EMA 100 */}
+          {toolsOverlay?.ema100 && (
+            <Line type="monotone" dataKey="ema100" stroke="#ec4899" strokeWidth={1.5}
+              strokeDasharray="6 3" dot={false} activeDot={false} connectNulls={false} name="ema100" />
           )}
           {/* vs SPY benchmark */}
           {spyLine && (

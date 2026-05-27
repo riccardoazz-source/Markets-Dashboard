@@ -17,6 +17,7 @@ export interface ActiveTools {
   sma50: boolean;
   sma200: boolean;
   ema20: boolean;
+  ema100: boolean;
   bollinger: boolean;
   fib: boolean;
   rsi: boolean;
@@ -26,7 +27,7 @@ export interface ActiveTools {
 
 export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
-  sma20: false, sma50: false, sma200: false, ema20: false,
+  sma20: false, sma50: false, sma200: false, ema20: false, ema100: false,
   bollinger: false, fib: false, rsi: false, macd: false,
   spyRatio: false,
 };
@@ -96,7 +97,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
     const macdOut   = n >= 34  ? computeMACD(closes) : null;
     return {
       sma20:   n >= 20  ? last(computeSMA(closes, 20))  : null,
-      ema20:   n >= 20  ? last(computeEMA(closes, 20))  : null,
+      ema20:   n >= 20  ? last(computeEMA(closes, 20))   : null,
+      ema100:  n >= 100 ? last(computeEMA(closes, 100))  : null,
       sma50:   sma50val,
       sma200:  sma200val,
       cross:   sma50val != null && sma200val != null
@@ -152,6 +154,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                 <Divider />
                 <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={n < 20}  />
                 <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={n < 20}  />
+                <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={n < 100} />
                 <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={n < 50}  />
                 <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={n < 200} />
                 <Divider />
@@ -187,6 +190,9 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                   )}
                   {activeTools.ema20 && iv.ema20 != null && (
                     <Res label="EMA 20" value={iv.ema20.toFixed(decimals)} color="text-rose-400" />
+                  )}
+                  {activeTools.ema100 && iv.ema100 != null && (
+                    <Res label="EMA 100" value={iv.ema100.toFixed(decimals)} color="text-pink-400" />
                   )}
                   {activeTools.sma50 && iv.sma50 != null && (
                     <Res label="SMA 50" value={iv.sma50.toFixed(decimals)} color="text-orange-400" />
