@@ -242,7 +242,8 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : (
-            <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
+            <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools}
+              onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
           {historical.length > 0 && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />

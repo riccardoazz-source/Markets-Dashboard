@@ -268,12 +268,26 @@ export const FOMC_MEETING_DATES: string[] = [
 ];
 
 // Federal Reserve chair change events — rendered as red reference lines on the FOMC chart.
-// Each entry is the date the new chair's term began (confirmation / oath of office).
+// Each entry is the date the new chair's term began (took office / oath of office),
+// sourced from https://en.wikipedia.org/wiki/Chair_of_the_Federal_Reserve.
+// Complete history since the Fed's founding in 1914.
 export const FED_CHAIR_CHANGES: { date: string; name: string }[] = [
-  { date: '1987-08-11', name: 'Greenspan' }, // Aug 11, 1987
-  { date: '2006-02-01', name: 'Bernanke' },  // Feb  1, 2006
-  { date: '2014-02-03', name: 'Yellen' },    // Feb  3, 2014
-  { date: '2018-02-05', name: 'Powell' },    // Feb  5, 2018
+  { date: '1914-08-10', name: 'Hamlin' },        // Charles S. Hamlin
+  { date: '1916-08-10', name: 'Harding' },       // W. P. G. Harding
+  { date: '1923-05-01', name: 'Crissinger' },    // Daniel R. Crissinger
+  { date: '1927-10-04', name: 'Young' },         // Roy A. Young
+  { date: '1930-09-16', name: 'Meyer' },         // Eugene Meyer
+  { date: '1933-05-19', name: 'Black' },         // Eugene R. Black
+  { date: '1934-11-15', name: 'Eccles' },        // Marriner S. Eccles
+  { date: '1948-04-15', name: 'McCabe' },        // Thomas B. McCabe
+  { date: '1951-04-02', name: 'Martin' },        // William McChesney Martin Jr.
+  { date: '1970-02-01', name: 'Burns' },         // Arthur F. Burns
+  { date: '1978-03-08', name: 'Miller' },        // G. William Miller
+  { date: '1979-08-06', name: 'Volcker' },       // Paul Volcker
+  { date: '1987-08-11', name: 'Greenspan' },     // Alan Greenspan
+  { date: '2006-02-01', name: 'Bernanke' },      // Ben Bernanke
+  { date: '2014-02-03', name: 'Yellen' },        // Janet Yellen
+  { date: '2018-02-05', name: 'Powell' },        // Jerome Powell
 ];
 
 // Bitcoin halving dates (exported so UI components can render them as reference lines).

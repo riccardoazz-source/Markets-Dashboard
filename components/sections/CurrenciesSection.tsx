@@ -327,6 +327,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
               height={240}
               isCurrency={true}
               toolsOverlay={activeTools}
+              onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }}
             />
           )}
           {historical.length > 0 && (

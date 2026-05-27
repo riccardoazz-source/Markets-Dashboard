@@ -543,7 +543,8 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       ) : displayAssets.length > 0 ? (
         <ChartErrorBoundary>
           <div className="rounded-xl border border-border bg-bg-card p-4">
-            <CompareChart assets={mainChartAssets} height={360} logScale={!normalized && logScale} percentMode={normalized} />
+            <CompareChart assets={mainChartAssets} height={360} logScale={!normalized && logScale} percentMode={normalized}
+              onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           </div>
 
           {showStack && displayAssets.length > 0 && (

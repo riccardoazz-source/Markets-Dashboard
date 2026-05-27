@@ -515,6 +515,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               isCurrency={false}
               interpolationType={selectedIndicator?.unit === '%' ? 'stepAfter' : 'monotone'}
               toolsOverlay={activeTools}
+              onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }}
             />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-600 text-sm">
