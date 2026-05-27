@@ -129,7 +129,9 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           // Add 10% buffer so commonStart alignment never truncates the first visible point.
           days = Math.max(365, Math.ceil(spanMs / 86_400_000 * 1.1));
         } else {
-          const daysMap: Record<string, number> = { '1D': 3, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
+          // Cap at 3650: CoinGecko free tier silently returns MONTHLY data for
+          // days > ~3650, breaking SMA/EMA tools (e.g. MAX=4000 → 141 monthly pts).
+          const daysMap: Record<string, number> = { '1D': 3, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 3650 };
           days = daysMap[tf] ?? 365;
         }
         const coinId = symbol.replace('-USD', '').toLowerCase();
@@ -138,10 +140,17 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           xrp: 'ripple', ada: 'cardano', avax: 'avalanche-2', link: 'chainlink',
         };
         const id = coinMap[coinId] ?? coinId;
-        const cgRes = await fetch(`/api/crypto?mode=historical&id=${id}&days=${days}`);
-        if (cgRes.ok) {
-          const json = await cgRes.json();
-          if (Array.isArray(json) && json.length > 0) data = json as HistoricalPoint[];
+        // For MAX timeframe: try Yahoo first (daily from 2014, more complete than CG cap)
+        if (tf === 'MAX' && !dateRange) {
+          const yhRes = await fetch(`/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=MAX`);
+          if (yhRes.ok) { const j = await yhRes.json(); if (Array.isArray(j) && j.length > 500) data = j; }
+        }
+        if (!data.length) {
+          const cgRes = await fetch(`/api/crypto?mode=historical&id=${id}&days=${days}`);
+          if (cgRes.ok) {
+            const json = await cgRes.json();
+            if (Array.isArray(json) && json.length > 0) data = json as HistoricalPoint[];
+          }
         }
         if (!data.length) {
           const histParams = dateRange

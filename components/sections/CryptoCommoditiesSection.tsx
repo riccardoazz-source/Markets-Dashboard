@@ -88,11 +88,30 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           }
         }
       } else {
-        const daysMap: Record<string, number> = { '1D': 3, '1W': 7, 'MTD': 35, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
+        // CoinGecko granularity: > 90 days → daily, but free-tier caps daily
+        // data at ~3650 days (10 years). Requesting days=4000+ silently
+        // degrades to MONTHLY data (~141 points), which breaks SMA/EMA tools.
+        // For MAX: use Yahoo Finance (daily from 2014) as primary source.
+        const daysMap: Record<string, number> = { '1D': 3, '1W': 7, 'MTD': 35, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 3650 };
         const days = daysMap[tf] ?? 365;
-        const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
-        const rawJson = await res.json();
-        data = Array.isArray(rawJson) ? (rawJson as HistoricalPoint[]) : [];
+
+        // For MAX, try Yahoo Finance first (daily from 2014, ~4400 pts)
+        if (tf === 'MAX') {
+          const yahooSym = CRYPTO_YAHOO_SYMBOLS[coin?.id ?? id];
+          if (yahooSym) {
+            const yRes = await fetch(`/api/historical?symbol=${encodeURIComponent(yahooSym)}&timeframe=MAX`);
+            if (yRes.ok) {
+              const yRaw = await yRes.json() as HistoricalPoint[];
+              if (Array.isArray(yRaw) && yRaw.length > 500) data = yRaw;
+            }
+          }
+        }
+
+        if (!data.length) {
+          const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
+          const rawJson = await res.json();
+          data = Array.isArray(rawJson) ? (rawJson as HistoricalPoint[]) : [];
+        }
 
         // Yahoo Finance fallback when CoinGecko is rate-limited (common for >1Y ranges)
         if (!data.length) {
