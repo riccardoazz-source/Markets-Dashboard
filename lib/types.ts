@@ -14,6 +14,7 @@ export interface QuoteData {
   fiftyTwoWeekChangePercent?: number | null;
   ytdChangePercent?: number | null;
   mtdChangePercent?: number | null;
+  fiveYearChangePercent?: number | null;
   volume?: number | null;
   /** Trailing annual dividend yield as a decimal (e.g. 0.012 = 1.2%). Present and > 0 when the asset pays dividends. */
   dividendYield?: number | null;
@@ -49,6 +50,7 @@ export interface CryptoData {
   change1yPercent?: number | null;
   mtdChangePercent?: number | null;
   ytdChangePercent?: number | null;
+  fiveYearChangePercent?: number | null;
   marketCap: number;
   volume24h: number;
   image?: string;

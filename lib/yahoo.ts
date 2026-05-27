@@ -28,6 +28,7 @@ export interface YahooQuote {
   fiftyTwoWeekChangePercent: number | null;
   ytdChangePercent: number | null;
   mtdChangePercent: number | null;
+  fiveYearChangePercent: number | null;
   trailingPE: number | null;
   forwardPE: number | null;
   marketCap: number | null;
@@ -56,6 +57,30 @@ function computeMtd(price: number, timestamps: number[], closes: (number | null)
   for (let i = 0; i < timestamps.length; i++) {
     const c = closes[i];
     if (c != null && c > 0 && timestamps[i] >= monthStart) {
+      return ((price - c) / c) * 100;
+    }
+  }
+  return null;
+}
+
+// 5Y reference: first valid close on/after 5 years ago.
+function computeFiveYear(price: number, timestamps: number[], closes: (number | null)[]): number | null {
+  const fiveYearsAgo = Math.floor((Date.now() - 5 * 365 * 86_400_000) / 1000);
+  for (let i = 0; i < timestamps.length; i++) {
+    const c = closes[i];
+    if (c != null && c > 0 && timestamps[i] >= fiveYearsAgo) {
+      return ((price - c) / c) * 100;
+    }
+  }
+  return null;
+}
+
+// 52-week reference: first valid close on/after 365 days ago.
+function computeFiftyTwoWeek(price: number, timestamps: number[], closes: (number | null)[]): number | null {
+  const oneYearAgo = Math.floor((Date.now() - 365 * 86_400_000) / 1000);
+  for (let i = 0; i < timestamps.length; i++) {
+    const c = closes[i];
+    if (c != null && c > 0 && timestamps[i] >= oneYearAgo) {
       return ((price - c) / c) * 100;
     }
   }
@@ -392,6 +417,7 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
       ytdChangePercent:
         (it.ytdReturn as number) != null ? (it.ytdReturn as number) * 100 : null,
       mtdChangePercent: null,
+      fiveYearChangePercent: null,
       trailingPE: (it.trailingPE as number) ?? null,
       forwardPE: (it.forwardPE as number) ?? null,
       marketCap: (it.marketCap as number) ?? null,
@@ -407,10 +433,10 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
 }
 
 async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
-  // range=1y&interval=1d: daily closes — second-to-last is yesterday's close
-  // (chartPreviousClose is the start-of-range value, NOT the previous trading day).
+  // range=5y&interval=1d: 5 years of daily closes — needed to compute fiveYearChangePercent.
+  // YTD/MTD/52W are computed by timestamp filtering, so a wider range is harmless.
   // events=div: include dividend payment events so we can compute trailing yield.
-  const result = await fetchChartRaw(symbol, 'range=1y&interval=1d&events=div', 5_000);
+  const result = await fetchChartRaw(symbol, 'range=5y&interval=1d&events=div', 6_000);
   if (!result) return null;
 
   const m = (result.meta as Record<string, unknown> | undefined) ?? {};
@@ -435,12 +461,6 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
   const changePercent = ((price - prev) / prev) * 100;
   const change = price - prev;
 
-  let fiftyTwoWeekChangePercent: number | null = null;
-  const firstValid = validCloses[0];
-  if (firstValid && firstValid > 0) {
-    fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
-  }
-
   const divYield = computeDivYieldFromEvents(result, price);
   return {
     symbol,
@@ -452,9 +472,10 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     currency: (m.currency as string) ?? 'USD',
     high52w: (m.fiftyTwoWeekHigh as number) ?? null,
     low52w: (m.fiftyTwoWeekLow as number) ?? null,
-    fiftyTwoWeekChangePercent,
+    fiftyTwoWeekChangePercent: computeFiftyTwoWeek(price, timestamps, closes),
     ytdChangePercent: computeYtd(price, timestamps, closes),
     mtdChangePercent: computeMtd(price, timestamps, closes),
+    fiveYearChangePercent: computeFiveYear(price, timestamps, closes),
     trailingPE: null,
     forwardPE: null,
     marketCap: null,
@@ -481,7 +502,7 @@ async function fetchQuotesV8Fallback(symbols: string[]): Promise<YahooQuote[]> {
 async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
   const url =
     `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-    `?range=1y&interval=1d&includePrePost=false&events=div`;
+    `?range=5y&interval=1d&includePrePost=false&events=div`;
   try {
     const res = await fetchWithTimeout(url, {
       headers: {
@@ -517,13 +538,6 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
     const changePercent = prev > 0 ? ((price - prev) / prev) * 100 : 0;
     const change = prev > 0 ? price - prev : 0;
 
-    // 1Y change: from first valid daily close (about 252 trading days ago)
-    let fiftyTwoWeekChangePercent: number | null = null;
-    const firstValid = validCloses[0];
-    if (firstValid && firstValid > 0) {
-      fiftyTwoWeekChangePercent = ((price - firstValid) / firstValid) * 100;
-    }
-
     return {
       symbol,
       name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
@@ -534,9 +548,10 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       currency: (m.currency as string) ?? 'USD',
       high52w: (m.fiftyTwoWeekHigh as number) ?? null,
       low52w: (m.fiftyTwoWeekLow as number) ?? null,
-      fiftyTwoWeekChangePercent,
+      fiftyTwoWeekChangePercent: computeFiftyTwoWeek(price, timestamps, closes),
       ytdChangePercent: computeYtd(price, timestamps, closes),
       mtdChangePercent: computeMtd(price, timestamps, closes),
+      fiveYearChangePercent: computeFiveYear(price, timestamps, closes),
       trailingPE: null,
       forwardPE: null,
       marketCap: null,
@@ -603,6 +618,7 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
             : null,
         ytdChangePercent: it.ytdReturn != null ? Number(it.ytdReturn) * 100 : null,
         mtdChangePercent: null,
+        fiveYearChangePercent: null,
         trailingPE: it.trailingPE != null ? Number(it.trailingPE) : null,
         forwardPE:  it.forwardPE  != null ? Number(it.forwardPE)  : null,
         marketCap:  it.marketCap  != null ? Number(it.marketCap)  : null,
@@ -734,6 +750,7 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
             fiftyTwoWeekChangePercent: null,
             ytdChangePercent: null,
             mtdChangePercent: null,
+            fiveYearChangePercent: null,
             trailingPE,
             forwardPE,
             marketCap: typeof marketCapRaw === 'number' ? marketCapRaw : null,

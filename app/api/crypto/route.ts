@@ -103,6 +103,44 @@ async function fetchMtdAnchors(ids: string[]): Promise<Map<string, number>> {
   return map;
 }
 
+// 5-years-ago USD price per coin id — for 5Y change %.
+// Cached for one calendar day since "5 years ago" only shifts by one day per day.
+const fiveYearAnchorCache = new Map<string, { price: number; day: string }>();
+
+async function fetchFiveYearAnchor(id: string): Promise<number | null> {
+  const today = new Date().toISOString().slice(0, 10);
+  const cached = fiveYearAnchorCache.get(id);
+  if (cached && cached.day === today) return cached.price;
+
+  const target = new Date();
+  target.setUTCFullYear(target.getUTCFullYear() - 5);
+  const dd = String(target.getUTCDate()).padStart(2, '0');
+  const mm = String(target.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = target.getUTCFullYear();
+  const dateStr = `${dd}-${mm}-${yyyy}`;
+  const url = `https://api.coingecko.com/api/v3/coins/${id}/history?date=${dateStr}&localization=false`;
+  try {
+    const res = await fetchCG(url, 10_000);
+    if (!res.ok) return null;
+    const json = await res.json() as { market_data?: { current_price?: { usd?: number } } };
+    const price = json?.market_data?.current_price?.usd;
+    if (typeof price === 'number' && isFinite(price) && price > 0) {
+      fiveYearAnchorCache.set(id, { price, day: today });
+      return price;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+async function fetchFiveYearAnchors(ids: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const results = await Promise.all(
+    ids.map(id => fetchFiveYearAnchor(id).then(p => ({ id, p })).catch(() => ({ id, p: null })))
+  );
+  for (const { id, p } of results) if (p != null) map.set(id, p);
+  return map;
+}
+
 // CoinGecko free tier rate-limits at 30/min — retry with backoff on 429/5xx
 async function fetchCGWithRetry(url: string): Promise<Response> {
   let res = await fetchCG(url);
@@ -138,6 +176,8 @@ export async function GET(req: NextRequest) {
       // (free tier rate-limits at 30/min). Both are cached, so this only hits
       // the network on the first request of a new month.
       const mtdAnchors = await fetchMtdAnchors(coinIds).catch(() => new Map<string, number>());
+      // 5Y anchors: cached per day so the network hit is only once per day.
+      const fiveYearAnchors = await fetchFiveYearAnchors(coinIds).catch(() => new Map<string, number>());
       if (!cgRes.ok) throw new Error(`CoinGecko: ${cgRes.status}`);
       const raw = await cgRes.json() as Array<Record<string, unknown>>;
 
@@ -154,6 +194,11 @@ export async function GET(req: NextRequest) {
           monthStartPrice != null && currentPrice > 0
             ? ((currentPrice - monthStartPrice) / monthStartPrice) * 100
             : null;
+        const fiveYearPrice = fiveYearAnchors.get(coin.id as string);
+        const fiveYearChangePercent =
+          fiveYearPrice != null && currentPrice > 0
+            ? ((currentPrice - fiveYearPrice) / fiveYearPrice) * 100
+            : null;
         return {
           id: coin.id,
           symbol: sym,
@@ -165,6 +210,7 @@ export async function GET(req: NextRequest) {
           change1yPercent: coin.price_change_percentage_1y_in_currency ?? null,
           mtdChangePercent,
           ytdChangePercent,
+          fiveYearChangePercent,
           marketCap: coin.market_cap,
           volume24h: coin.total_volume,
           image: coin.image,

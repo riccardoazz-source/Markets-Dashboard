@@ -13,19 +13,23 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
-type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent';
+type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'changePercent',      label: 'Day' },
-  { value: 'mtdChangePercent',   label: 'MTD' },
-  { value: 'ytdChangePercent',   label: 'YTD' },
+  { value: 'changePercent',         label: 'Day' },
+  { value: 'mtdChangePercent',      label: 'MTD' },
+  { value: 'ytdChangePercent',      label: 'YTD' },
+  { value: 'fiveYearChangePercent', label: '5Y' },
 ];
+
+const COMMODITY_CATEGORIES = ['All', ...Array.from(new Set(COMMODITIES.map(c => c.category)))];
 
 export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>('changePercent');
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState('All');
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
@@ -86,10 +90,15 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
     if (!q) return null;
     if (key === 'changePercent') return q.changePercent ?? null;
     if (key === 'mtdChangePercent') return q.mtdChangePercent ?? null;
-    return q.ytdChangePercent ?? null;
+    if (key === 'ytdChangePercent') return q.ytdChangePercent ?? null;
+    return q.fiveYearChangePercent ?? null;
   };
 
-  const sorted = [...COMMODITIES].sort((a, b) => {
+  const filteredCommodities = selectedCategory === 'All'
+    ? COMMODITIES
+    : COMMODITIES.filter(c => c.category === selectedCategory);
+
+  const sorted = [...filteredCommodities].sort((a, b) => {
     const av = getValue(quotes[a.symbol], sortBy);
     const bv = getValue(quotes[b.symbol], sortBy);
     if (av == null && bv == null) return 0;
@@ -105,7 +114,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <span className="text-[10px] text-gray-500 bg-bg-input px-2 py-0.5 rounded-full border border-border">
-          {COMMODITIES.length} commodities
+          {filteredCommodities.length} commodities
         </span>
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex gap-1 bg-bg-input rounded-lg p-1">
@@ -126,6 +135,21 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
         </div>
       </div>
 
+      {/* Category filter */}
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+        {COMMODITY_CATEGORIES.map(c => (
+          <button key={c} onClick={() => setSelectedCategory(c)}
+            className={clsx(
+              'px-3 py-1 text-xs font-semibold rounded-full transition-all whitespace-nowrap shrink-0',
+              selectedCategory === c
+                ? 'bg-accent text-white'
+                : 'text-gray-400 border border-border hover:border-border-light hover:text-gray-200'
+            )}>
+            {c}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <LoadingGrid count={COMMODITIES.length} />
       ) : (
@@ -135,6 +159,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
             const day = q?.changePercent ?? 0;
             const mtd = q?.mtdChangePercent;
             const ytd = q?.ytdChangePercent;
+            const fiveYear = q?.fiveYearChangePercent;
             const isUp = day >= 0;
             const isSelected = selected === com.symbol;
             return (
@@ -161,6 +186,11 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                     {ytd != null && (
                       <p className={clsx('text-[10px] mt-0.5', colorForPercent(ytd))}>
                         YTD: {formatPercent(ytd, 1)}
+                      </p>
+                    )}
+                    {fiveYear != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(fiveYear))}>
+                        5Y: {formatPercent(fiveYear, 1)}
                       </p>
                     )}
                   </>

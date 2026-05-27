@@ -10,19 +10,21 @@ import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
+import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
 const REGIONS = ['All', 'America', 'EU', 'Asia', 'Global', 'EM'];
 
-type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent';
+type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'changePercent',    label: 'Day' },
-  { value: 'mtdChangePercent', label: 'MTD' },
-  { value: 'ytdChangePercent', label: 'YTD' },
+  { value: 'changePercent',         label: 'Day' },
+  { value: 'mtdChangePercent',      label: 'MTD' },
+  { value: 'ytdChangePercent',      label: 'YTD' },
+  { value: 'fiveYearChangePercent', label: '5Y' },
 ];
 
 export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
@@ -133,7 +135,8 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     if (!q) return null;
     if (key === 'changePercent') return q.changePercent ?? null;
     if (key === 'mtdChangePercent') return q.mtdChangePercent ?? null;
-    return q.ytdChangePercent ?? null;
+    if (key === 'ytdChangePercent') return q.ytdChangePercent ?? null;
+    return q.fiveYearChangePercent ?? null;
   };
 
   const sortedFiltered = [...filtered].sort((a, b) => {
@@ -238,6 +241,11 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                         YTD: {formatPercent(ytd, 1)}
                       </p>
                     )}
+                    {q.fiveYearChangePercent != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(q.fiveYearChangePercent))}>
+                        5Y: {formatPercent(q.fiveYearChangePercent, 1)}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <p className="text-xs text-gray-600">Loading…</p>
@@ -310,43 +318,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : divChartData ? (
-            /* Dual-line: price vs total return (normalized % from period start) */
-            (() => {
-              const last = divChartData[divChartData.length - 1];
-              const isUp = (last?.price ?? 0) >= 0;
-              const priceColor = isUp ? '#10b981' : '#ef4444';
-              const trColor    = isUp ? '#34d399' : '#f87171';
-              return (
-                <div className="space-y-1">
-                  <div className="flex items-center gap-3 text-[10px] text-gray-500">
-                    <span className="flex items-center gap-1"><span className="inline-block w-4 h-px" style={{ background: priceColor }}/>Price</span>
-                    <span className="flex items-center gap-1"><span className="inline-block w-4 border-t border-dashed" style={{ borderColor: trColor }}/>Total Return</span>
-                  </div>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={divChartData} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
-                        interval="preserveStartEnd"
-                        tickFormatter={d => {
-                          const date = new Date(d);
-                          const n = divChartData.length;
-                          if (n < 60)  return date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
-                          if (n < 700) return date.toLocaleString('en-US', { month: 'short', year: '2-digit' });
-                          return String(date.getFullYear());
-                        }} />
-                      <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
-                        tickFormatter={v => `${v >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`} />
-                      <Tooltip
-                        contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: 11, padding: '6px 10px' }}
-                        labelStyle={{ color: '#94a3b8', fontSize: 10, marginBottom: 2 }}
-                        formatter={(val: number, name: string) => [`${val >= 0 ? '+' : ''}${val.toFixed(2)}%`, name]}
-                      />
-                      <Line dataKey="price" name="Price" stroke={priceColor} dot={false} strokeWidth={2} connectNulls />
-                      <Line dataKey="totalReturn" name="Total Return" stroke={trColor} dot={false} strokeWidth={2} strokeDasharray="6 3" connectNulls />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              );
-            })()
+            <DualLineDragChart data={divChartData} />
           ) : (
             <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
           )}
@@ -381,6 +353,84 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
     <div className="bg-bg-input rounded-lg px-3 py-2">
       <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
       <p className={clsx('text-sm font-bold', color ?? 'text-gray-100')}>{value}</p>
+    </div>
+  );
+}
+
+interface DualLinePoint { date: string; price: number; totalReturn?: number }
+
+function DualLineDragChart({ data }: { data: DualLinePoint[] }) {
+  const { handlers, range, area, clear } = useChartDragSelect();
+  const last = data[data.length - 1];
+  const isUp = (last?.price ?? 0) >= 0;
+  const priceColor = isUp ? '#10b981' : '#ef4444';
+  const trColor    = isUp ? '#34d399' : '#f87171';
+
+  let selStats: { left: string; right: string; priceDelta: number; trDelta: number | null } | null = null;
+  if (range) {
+    const pL = valueAtOrAfter(data, range.left, 'price');
+    const pR = valueAtOrBefore(data, range.right, 'price');
+    const tL = valueAtOrAfter(data, range.left, 'totalReturn');
+    const tR = valueAtOrBefore(data, range.right, 'totalReturn');
+    if (pL != null && pR != null) {
+      selStats = {
+        left: range.left,
+        right: range.right,
+        priceDelta: pR - pL,
+        trDelta: tL != null && tR != null ? tR - tL : null,
+      };
+    }
+  }
+
+  return (
+    <div className="space-y-1 select-none">
+      {selStats && (
+        <div className="flex items-center justify-between bg-bg-input rounded-lg px-3 py-1.5 text-xs flex-wrap gap-2">
+          <span className="text-gray-400">{selStats.left} → {selStats.right}</span>
+          <div className="flex items-center gap-3">
+            <span className={clsx('font-bold tabular-nums', selStats.priceDelta >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+              Price {selStats.priceDelta >= 0 ? '+' : ''}{selStats.priceDelta.toFixed(2)}%
+            </span>
+            {selStats.trDelta != null && (
+              <span className={clsx('font-bold tabular-nums', selStats.trDelta >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                TR {selStats.trDelta >= 0 ? '+' : ''}{selStats.trDelta.toFixed(2)}%
+              </span>
+            )}
+            <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px] ml-1">✕</button>
+          </div>
+        </div>
+      )}
+      <div className="flex items-center gap-3 text-[10px] text-gray-500">
+        <span className="flex items-center gap-1"><span className="inline-block w-4 h-px" style={{ background: priceColor }}/>Price</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-4 border-t border-dashed" style={{ borderColor: trColor }}/>Total Return</span>
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}
+          {...handlers} style={{ cursor: 'crosshair' }}>
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+            interval="preserveStartEnd"
+            tickFormatter={d => {
+              const date = new Date(d);
+              const n = data.length;
+              if (n < 60)  return date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+              if (n < 700) return date.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+              return String(date.getFullYear());
+            }} />
+          <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false}
+            tickFormatter={v => `${v >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`} />
+          <Tooltip
+            contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: 11, padding: '6px 10px' }}
+            labelStyle={{ color: '#94a3b8', fontSize: 10, marginBottom: 2 }}
+            formatter={(val: number, name: string) => [`${val >= 0 ? '+' : ''}${val.toFixed(2)}%`, name]}
+          />
+          <Line dataKey="price" name="Price" stroke={priceColor} dot={false} strokeWidth={2} connectNulls />
+          <Line dataKey="totalReturn" name="Total Return" stroke={trColor} dot={false} strokeWidth={2} strokeDasharray="6 3" connectNulls />
+          {area && (
+            <ReferenceArea x1={area.left} x2={area.right}
+              fill="#6366f1" fillOpacity={0.15} stroke="#6366f1" strokeOpacity={0.4} strokeWidth={1} />
+          )}
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }

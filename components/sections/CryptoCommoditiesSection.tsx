@@ -13,12 +13,13 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
-type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent';
+type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'change24hPercent',  label: 'Day' },
-  { value: 'mtdChangePercent',  label: 'MTD' },
-  { value: 'ytdChangePercent',  label: 'YTD' },
+  { value: 'change24hPercent',     label: 'Day' },
+  { value: 'mtdChangePercent',     label: 'MTD' },
+  { value: 'ytdChangePercent',     label: 'YTD' },
+  { value: 'fiveYearChangePercent',label: '5Y' },
 ];
 
 export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
@@ -169,6 +170,11 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 {coin.ytdChangePercent != null && (
                   <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.ytdChangePercent))}>
                     YTD: {formatPercent(coin.ytdChangePercent, 1)}
+                  </p>
+                )}
+                {coin.fiveYearChangePercent != null && (
+                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.fiveYearChangePercent))}>
+                    5Y: {formatPercent(coin.fiveYearChangePercent, 1)}
                   </p>
                 )}
               </button>
