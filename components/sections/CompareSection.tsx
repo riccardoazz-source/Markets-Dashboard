@@ -112,7 +112,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const fetchAsset = useCallback(async (symbol: string, color: string, tf: Timeframe): Promise<CompareAsset | null> => {
+  const fetchAsset = useCallback(async (symbol: string, color: string, tf: Timeframe, dateRange?: { from: string; to: string }): Promise<CompareAsset | null> => {
     const config = ALL_COMPARABLE_ASSETS.find(a => a.symbol === symbol);
     const displayName = nameCacheRef[symbol] ?? config?.name ?? symbol;
 
@@ -122,8 +122,16 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       let dividends: { date: string; amount: number }[] = [];
 
       if (config?.type === 'crypto') {
-        const daysMap: Record<string, number> = { '1D': 3, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
-        const days = daysMap[tf] ?? 365;
+        // For custom date ranges, compute days from the range span; otherwise use the timeframe map.
+        let days: number;
+        if (dateRange) {
+          const spanMs = new Date(dateRange.to).getTime() - new Date(dateRange.from).getTime();
+          // Add 10% buffer so commonStart alignment never truncates the first visible point.
+          days = Math.max(365, Math.ceil(spanMs / 86_400_000 * 1.1));
+        } else {
+          const daysMap: Record<string, number> = { '1D': 3, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
+          days = daysMap[tf] ?? 365;
+        }
         const coinId = symbol.replace('-USD', '').toLowerCase();
         const coinMap: Record<string, string> = {
           btc: 'bitcoin', eth: 'ethereum', sol: 'solana', bnb: 'binancecoin',
@@ -136,27 +144,38 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           if (Array.isArray(json) && json.length > 0) data = json as HistoricalPoint[];
         }
         if (!data.length) {
-          const yhRes = await fetch(`/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`);
+          const histParams = dateRange
+            ? `symbol=${encodeURIComponent(symbol)}&from=${dateRange.from}&to=${dateRange.to}&timeframe=MAX`
+            : `symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`;
+          const yhRes = await fetch(`/api/historical?${histParams}`);
           if (yhRes.ok) { const j = await yhRes.json(); if (Array.isArray(j) && j.length) data = j; }
         }
         if (!data.length) return null;
       } else if (config?.type === 'macro') {
-        const from = getTimeframeStart(tf);
-        const res = await fetch(`/api/macro?mode=history&id=${encodeURIComponent(symbol)}&from=${from}`);
+        const from = dateRange ? dateRange.from : getTimeframeStart(tf);
+        const toParam = dateRange ? `&to=${dateRange.to}` : '';
+        const res = await fetch(`/api/macro?mode=history&id=${encodeURIComponent(symbol)}&from=${from}${toParam}`);
         if (!res.ok) return null;
         const json = await res.json();
         if (!Array.isArray(json) || !json.length) return null;
         data = json as HistoricalPoint[];
       } else if (config?.type === 'currency') {
-        // Currency pairs: use /api/historical (Yahoo USDEUR=X etc.)
-        const res = await fetch(`/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`);
+        // Currency pairs: use /api/historical with date params when a custom range is active.
+        const urlParams = dateRange
+          ? `symbol=${encodeURIComponent(symbol)}&from=${dateRange.from}&to=${dateRange.to}&timeframe=MAX`
+          : `symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`;
+        const res = await fetch(`/api/historical?${urlParams}`);
         if (!res.ok) return null;
         const json = await res.json();
         if (!Array.isArray(json) || !json.length) return null;
         data = json as HistoricalPoint[];
       } else {
-        // Stocks/indexes/ETFs/sectors → use stock API for adjPrices + dividends
-        const res = await fetch(`/api/stock?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`);
+        // Stocks/indexes/ETFs/sectors — use date params when a custom range is set so Yahoo
+        // gets a targeted period1/period2 query (reliable) instead of range=max (large/slow).
+        const stockUrl = dateRange
+          ? `/api/stock?symbol=${encodeURIComponent(symbol)}&from=${dateRange.from}&to=${dateRange.to}`
+          : `/api/stock?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`;
+        const res = await fetch(stockUrl);
         if (res.ok) {
           const json = await res.json() as StockApiResp;
           if (Array.isArray(json.prices) && json.prices.length) {
@@ -176,7 +195,10 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           }
         }
         if (!data.length) {
-          const fb = await fetch(`/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`);
+          const fbParams = dateRange
+            ? `symbol=${encodeURIComponent(symbol)}&from=${dateRange.from}&to=${dateRange.to}&timeframe=MAX`
+            : `symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`;
+          const fb = await fetch(`/api/historical?${fbParams}`);
           if (fb.ok) { const j = await fb.json(); if (Array.isArray(j) && j.length) data = j; }
         }
         if (!data.length) return null;
@@ -223,15 +245,18 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const fetchAll = useCallback(async () => {
     if (!selectedSymbols.length) { setAssets([]); return; }
     setLoading(true);
-    // When a custom date range is active, always fetch MAX so the data covers it.
+    // For custom ranges: pass the exact from/to dates so APIs request a targeted
+    // period1/period2 query from Yahoo (fast & reliable) instead of range=max.
+    // For standard timeframes: use the timeframe string as before.
     const fetchTF: Timeframe = customRange ? 'MAX' : timeframe;
+    const dateRange = customRange ? { from: customRange.from, to: customRange.to } : undefined;
     const results: (CompareAsset | null)[] = [];
     for (let i = 0; i < selectedSymbols.length; i++) {
       const color = CHART_COLORS[i % CHART_COLORS.length];
-      let asset = await fetchAsset(selectedSymbols[i], color, fetchTF);
+      let asset = await fetchAsset(selectedSymbols[i], color, fetchTF, dateRange);
       if (!asset) {
         await new Promise(r => setTimeout(r, 1500));
-        asset = await fetchAsset(selectedSymbols[i], color, fetchTF);
+        asset = await fetchAsset(selectedSymbols[i], color, fetchTF, dateRange);
       }
       results.push(asset);
     }
