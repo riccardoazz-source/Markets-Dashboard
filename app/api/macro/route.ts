@@ -1534,17 +1534,20 @@ async function fetchMacroSeries(
   const yahooSym = YAHOO_YIELD_MAP[fredId];
   const blsSym   = BLS_MAP[fredId];
 
-  // FEDFUNDS: Effective Federal Funds Rate. Primary = FRED/DBnomics.
-  // Fallback = NY Fed EFFR API (same data, no IP restrictions).
+  // FEDFUNDS: Effective Federal Funds Rate.
+  // Primary = NY Fed EFFR (DAILY — same source FRED aggregates monthly).
+  // Fallbacks = FRED/DBnomics monthly (lower resolution but more available).
+  // Using NY Fed first gives daily granularity on the chart instead of monthly
+  // step-changes only — restores the intra-month volatility the FRED series loses.
   if (fredId === 'FEDFUNDS') {
-    const [fred, dbn, nyfed] = await Promise.all([
+    const [nyfed, fred, dbn] = await Promise.all([
+      fetchNYFedEffr(fromDate, 6_000, false),
       fetchFRED('FEDFUNDS', fromDate, 8_000),
       fetchDBnomicsFRED('FEDFUNDS', fromDate, 8_000),
-      fetchNYFedEffr(fromDate, 6_000, false),
     ]);
-    if (fred.length)  { console.log(`[macro] FEDFUNDS FRED (${fred.length})`);    return fred; }
-    if (dbn.length)   { console.log(`[macro] FEDFUNDS DBnomics (${dbn.length})`); return dbn; }
-    if (nyfed.length) { console.log(`[macro] FEDFUNDS NY Fed (${nyfed.length})`); return nyfed; }
+    if (nyfed.length) { console.log(`[macro] FEDFUNDS NY Fed daily (${nyfed.length})`); return nyfed; }
+    if (fred.length)  { console.log(`[macro] FEDFUNDS FRED monthly (${fred.length})`);   return fred; }
+    if (dbn.length)   { console.log(`[macro] FEDFUNDS DBnomics monthly (${dbn.length})`); return dbn; }
     // Last resort: FOMC target upper bound as proxy. Effective rate ≈ target
     // within a few bps, so this gives a usable step-function history chart.
     const fomc = getFOMCFallback(fromDate);
@@ -1839,13 +1842,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Assemble final results — DBnomics slots in right after FRED (it mirrors it)
+  // Assemble final results — DBnomics slots in right after FRED (it mirrors it).
+  // Special case: FEDFUNDS prefers NY Fed (daily) over FRED (monthly) so the
+  // chart shows daily granularity instead of monthly aggregates.
   const results = ids.map(id => {
-    let pts = fredMap.get(id) ?? [];
+    let pts: { date: string; value: number }[] = [];
+    if (id === 'FEDFUNDS' && nyFedEffrPts.length) pts = nyFedEffrPts;
+    if (!pts.length) pts = fredMap.get(id) ?? [];
     if (!pts.length) pts = dbnMap.get(id) ?? [];
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
     if (!pts.length && id === 'DFEDTARU')     pts = getFOMCFallback(fromStr);
-    if (!pts.length && id === 'FEDFUNDS')     pts = nyFedEffrPts;
     if (!pts.length && id === 'FEDFUNDS')     pts = getFOMCFallback(fromStr); // proxy: eff ≈ target
     if (!pts.length && id === 'ECBDFR')       pts = ecbPts;
     if (!pts.length && id === 'DGS2')         pts = tDgs2.length  ? tDgs2  : yahooIrx;

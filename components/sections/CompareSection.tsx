@@ -6,7 +6,7 @@ import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
   CHART_COLORS, getTimeframeStart, buildTotalReturnSeries, computeAssetIRR,
-  correlationMatrix, dedupStepSeries, extendToToday, CorrAlignedRow,
+  correlationMatrix, extendToToday, CorrAlignedRow,
 } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { CompareChart } from '@/components/charts/CompareChart';
@@ -344,8 +344,14 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           d.date >= commonStart && (!tfEnd || d.date <= tfEnd)
         );
         const isRec = RECESSION_SET.has(a.symbol);
+        // Macro series: only extend to today (so the line reaches "now" visually).
+        // Removed dedupStepSeries: it dropped any data point whose value matched
+        // the previous one, which thinned the series during flat-policy periods
+        // and hid intra-period jitter on daily series (NY Fed EFFR, T-yields).
+        // The chart already uses type="stepAfter" for macro, which renders the
+        // step look from the full data.
         const displayRaw = a.type === 'macro' && !isOverlay
-          ? extendToToday(dedupStepSeries(displayFiltered))
+          ? extendToToday(displayFiltered)
           : displayFiltered;
         const displayData = normalized ? pctChangeFromStart(displayRaw) : displayRaw;
         const displayTrData = trFiltered

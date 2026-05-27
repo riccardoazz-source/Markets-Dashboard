@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES, BTC_HALVING_DATES } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
-import { getTimeframeStart, calculateCAGR, formatPercent, dedupStepSeries, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
+import { getTimeframeStart, calculateCAGR, formatPercent, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { HalvingChart } from '@/components/charts/HalvingChart';
@@ -527,13 +527,13 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           ) : historical.length > 0 ? (
             <PriceChart
               data={(() => {
-                // Step-function indicators (e.g. interest rates): remove consecutive
-                // duplicates so Recharts renders clean staircase lines.
-                const base = selectedIndicator?.unit === '%'
-                  ? dedupStepSeries(historical) : historical;
-                // When a custom drag-selection is active, respect its end date exactly.
+                // Show every data point as-is. Recharts type="stepAfter" already
+                // renders the staircase look; deduping consecutive identical
+                // values dropped legitimate points (and lost intra-period jitter
+                // on daily series like NY Fed EFFR or T-yields).
+                // For custom drag-selection: respect its end date exactly.
                 // extendToToday would append a synthetic "today" point past the range.
-                return customRange ? base : extendToToday(base);
+                return customRange ? historical : extendToToday(historical);
               })()}
               color="auto"
               height={220}
