@@ -38,11 +38,8 @@ function getStartDate(timeframe: string): Date {
   }
 }
 
-function getInterval(timeframe: string): '1d' | '1wk' | '1mo' {
-  // Daily resolution for everything up to 10Y (≈2500 trading days — fine for
-  // both payload size and chart rendering). MAX uses weekly so century-long
-  // index histories stay manageable, but it is still far denser than monthly.
-  if (timeframe === 'MAX') return '1wk';
+function getInterval(_timeframe: string): '1d' | '1wk' | '1mo' {
+  // Always daily — never reduce or thin data regardless of timeframe.
   return '1d';
 }
 
@@ -181,10 +178,8 @@ export async function GET(req: NextRequest) {
 
   const from = isCustom ? new Date(fromParam!) : getStartDate(timeframe);
   const to   = isCustom ? new Date(toParam!) : new Date();
-  const spanDays = (to.getTime() - from.getTime()) / 86_400_000;
-  const interval: '1d' | '1wk' | '1mo' = isCustom
-    ? (spanDays <= 365 * 11 ? '1d' : '1wk')
-    : getInterval(timeframe);
+  // Always daily — never reduce or thin data for any timeframe or custom range.
+  const interval: '1d' | '1wk' | '1mo' = '1d';
 
   try {
     const data = await fetchYahooData(symbol, from, to, interval, true);
