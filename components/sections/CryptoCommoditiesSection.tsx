@@ -54,25 +54,55 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
     setHistLoading(true);
     try {
       const coin = CRYPTO_IDS.find(c => c.id === id);
-      const daysMap: Record<string, number> = { '1D': 3, '1W': 7, 'MTD': 35, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
-      let days = daysMap[tf] ?? 365;
-      if (override) {
-        const ms = new Date(override.to).getTime() - new Date(override.from).getTime();
-        days = Math.ceil(ms / 86_400_000) + 1;
-      }
-      const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
-      const rawJson = await res.json();
-      let data: HistoricalPoint[] = Array.isArray(rawJson) ? (rawJson as HistoricalPoint[]) : [];
-      if (override) data = data.filter(p => p.date >= override.from && p.date <= override.to);
+      let data: HistoricalPoint[] = [];
 
-      // Yahoo Finance fallback when CoinGecko is rate-limited (common for >1Y ranges)
-      if (!data.length) {
-        const yahooSym = CRYPTO_YAHOO_SYMBOLS[id];
+      if (override) {
+        // For a custom date range, use Yahoo Finance directly — CoinGecko's
+        // ?days=N API always returns the LAST N days from today (it cannot
+        // target a specific past window), so it returns the wrong period for
+        // old custom ranges. Yahoo supports an explicit from/to window.
+        const yahooSym = CRYPTO_YAHOO_SYMBOLS[coin?.id ?? id];
         if (yahooSym) {
-          const fbRes = await fetch(`/api/historical?symbol=${encodeURIComponent(yahooSym)}&timeframe=${tf}`);
-          if (fbRes.ok) {
-            const fbRaw = await fbRes.json() as HistoricalPoint[];
-            if (Array.isArray(fbRaw) && fbRaw.length) data = fbRaw;
+          const yRes = await fetch(
+            `/api/historical?symbol=${encodeURIComponent(yahooSym)}&timeframe=MAX&from=${override.from}&to=${override.to}`
+          );
+          if (yRes.ok) {
+            const yRaw = await yRes.json() as HistoricalPoint[];
+            if (Array.isArray(yRaw) && yRaw.length) {
+              data = yRaw.filter(p => p.date >= override.from && p.date <= override.to);
+            }
+          }
+        }
+        // If Yahoo didn't cover the range, try CoinGecko range API
+        if (!data.length) {
+          const from1 = Math.floor(new Date(override.from).getTime() / 1000);
+          const to1 = Math.floor(new Date(override.to).getTime() / 1000) + 86400;
+          const cgRes = await fetch(
+            `/api/crypto?mode=historical&id=${coin?.id ?? id}&from=${from1}&to=${to1}`
+          );
+          if (cgRes.ok) {
+            const cgRaw = await cgRes.json() as HistoricalPoint[];
+            if (Array.isArray(cgRaw) && cgRaw.length) {
+              data = cgRaw.filter(p => p.date >= override.from && p.date <= override.to);
+            }
+          }
+        }
+      } else {
+        const daysMap: Record<string, number> = { '1D': 3, '1W': 7, 'MTD': 35, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 4000 };
+        const days = daysMap[tf] ?? 365;
+        const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
+        const rawJson = await res.json();
+        data = Array.isArray(rawJson) ? (rawJson as HistoricalPoint[]) : [];
+
+        // Yahoo Finance fallback when CoinGecko is rate-limited (common for >1Y ranges)
+        if (!data.length) {
+          const yahooSym = CRYPTO_YAHOO_SYMBOLS[coin?.id ?? id];
+          if (yahooSym) {
+            const fbRes = await fetch(`/api/historical?symbol=${encodeURIComponent(yahooSym)}&timeframe=${tf}`);
+            if (fbRes.ok) {
+              const fbRaw = await fbRes.json() as HistoricalPoint[];
+              if (Array.isArray(fbRaw) && fbRaw.length) data = fbRaw;
+            }
           }
         }
       }

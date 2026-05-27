@@ -223,6 +223,13 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
         const json = await res.json() as HistoricalPoint[];
         hist = Array.isArray(json) ? json : [];
       }
+      // Client-side range clip: the API may return data beyond override.to (server
+      // does not enforce the upper bound), and extendToToday would add today's date
+      // even when a custom end date was requested.  Clip both bounds here so the
+      // chart shows exactly what was drag-selected.
+      if (override) {
+        hist = hist.filter(p => p.date >= override.from && p.date <= override.to);
+      }
       setHistorical(hist);
       setDataMsg(dataAvailabilityMessage(hist, tf));
     } catch { setHistorical([]); setDataMsg(null); }
@@ -507,9 +514,15 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             )
           ) : historical.length > 0 ? (
             <PriceChart
-              data={extendToToday(
-                selectedIndicator?.unit === '%' ? dedupStepSeries(historical) : historical
-              )}
+              data={(() => {
+                // Step-function indicators (e.g. interest rates): remove consecutive
+                // duplicates so Recharts renders clean staircase lines.
+                const base = selectedIndicator?.unit === '%'
+                  ? dedupStepSeries(historical) : historical;
+                // When a custom drag-selection is active, respect its end date exactly.
+                // extendToToday would append a synthetic "today" point past the range.
+                return customRange ? base : extendToToday(base);
+              })()}
               color="auto"
               height={220}
               isCurrency={false}

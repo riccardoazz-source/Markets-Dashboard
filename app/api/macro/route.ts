@@ -1267,9 +1267,20 @@ const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
 ];
 
 function getFOMCFallback(fromDate?: string): { date: string; value: number }[] {
-  const pts = fromDate
-    ? FOMC_TARGET_UPPER.filter(p => p.date >= fromDate)
-    : FOMC_TARGET_UPPER;
+  if (!fromDate) return FOMC_TARGET_UPPER;
+
+  const pts = FOMC_TARGET_UPPER.filter(p => p.date >= fromDate);
+  const prevPts = FOMC_TARGET_UPPER.filter(p => p.date < fromDate);
+
+  // If fromDate falls mid-era (e.g. the zero-rate period 2008-2015 where no entries
+  // exist), the first matching entry would jump ahead years.  Inject a synthetic
+  // opening point at fromDate carrying the rate that was already in effect, so the
+  // step chart correctly shows a flat line from the start of the requested window.
+  if (prevPts.length > 0 && (pts.length === 0 || pts[0].date > fromDate)) {
+    const lastBefore = prevPts[prevPts.length - 1];
+    return [{ date: fromDate, value: lastBefore.value }, ...pts];
+  }
+
   // Always ensure we return at least the last known rate even if it's before fromDate
   if (pts.length === 0 && FOMC_TARGET_UPPER.length > 0) {
     return [FOMC_TARGET_UPPER[FOMC_TARGET_UPPER.length - 1]];
