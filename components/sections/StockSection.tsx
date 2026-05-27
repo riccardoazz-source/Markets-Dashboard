@@ -967,8 +967,15 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                     )}
                   >
                     <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-xs font-bold text-gray-100 font-mono">{sym}</span>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="text-xs font-bold text-gray-100 font-mono">{sym}</span>
+                        {q?.currency && q.currency !== 'USD' && (
+                          <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none shrink-0">
+                            {q.currency}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
                         {q?.dividendYield != null && q.dividendYield > 0 && (
                           <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
                             DIV
@@ -1040,10 +1047,14 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
               <h3 className="text-base font-bold text-white truncate">{selected.name}</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
+              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                 <span className="font-mono">{selected.symbol}</span>
-                {selected.exchange ? ` · ${selected.exchange}` : ''}
-                {data?.meta?.currency ? ` · ${data.meta.currency}` : ''}
+                {selected.exchange ? `· ${selected.exchange}` : ''}
+                {data?.meta?.currency && (
+                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                    {data.meta.currency}
+                  </span>
+                )}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap justify-end">

@@ -169,7 +169,14 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                   'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                   isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
                 )}>
-                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1">{com.category}</p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none">{com.category}</p>
+                  {q?.currency && (
+                    <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                      {q.currency}
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">{com.name}</p>
                 {q && q.price > 0 ? (
                   <>
@@ -208,7 +215,14 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 className="text-base font-bold text-white">{selectedConfig?.name}</h3>
-              <p className="text-xs text-gray-500 mt-0.5">{selected} · {selectedConfig?.category}</p>
+              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
+                {selected} · {selectedConfig?.category}
+                {selectedQuote?.currency && (
+                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                    {selectedQuote.currency}
+                  </span>
+                )}
+              </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               {onCompare && (

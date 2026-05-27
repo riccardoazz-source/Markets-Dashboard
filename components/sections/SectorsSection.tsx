@@ -26,12 +26,13 @@ interface SectorLiveData {
   high52w: number | null;
   low52w: number | null;
   dividendYield?: number | null;
+  currency?: string | null;
 }
 
 // Seed grid immediately from static config — never empty
 const INITIAL: SectorLiveData = {
   price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null, fiveYearReturn: null,
-  high52w: null, low52w: null, dividendYield: null,
+  high52w: null, low52w: null, dividendYield: null, currency: null,
 };
 
 type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn';
@@ -252,9 +253,16 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                   <Flame size={8} />HOT
                 </span>
               )}
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className="text-[10px] font-bold text-gray-600">#{sector.rank}</span>
-                <span className="text-[10px] text-gray-500 uppercase tracking-wider">{sector.category}</span>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-gray-600">#{sector.rank}</span>
+                  <span className="text-[10px] text-gray-500 uppercase tracking-wider">{sector.category}</span>
+                </div>
+                {sector.currency && (
+                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                    {sector.currency}
+                  </span>
+                )}
               </div>
               <div className="flex items-start justify-between gap-1 mb-2">
                 <p className="text-sm font-semibold text-gray-100 leading-snug">{sector.name}</p>
@@ -307,7 +315,14 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 className="text-base font-bold text-white">{selectedSector.name}</h3>
-              <p className="text-xs text-gray-500 mt-0.5">{selectedSector.symbol} · {selectedSector.category}</p>
+              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
+                {selectedSector.symbol} · {selectedSector.category}
+                {selectedSector.currency && (
+                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                    {selectedSector.currency}
+                  </span>
+                )}
+              </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               {onCompare && (

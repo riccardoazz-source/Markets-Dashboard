@@ -44,6 +44,7 @@ export async function GET() {
         high52w: q?.high52w ?? null,
         low52w: q?.low52w ?? null,
         dividendYield: q?.dividendYield ?? null,
+        currency: q?.currency ?? 'USD',
       };
     });
 

@@ -328,14 +328,21 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   )}
                 />
               )}
-              <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mb-1 flex items-center gap-1">
-                {isSpecial && (
-                  <span title="Special overlay — shown as reference lines or shaded bands on charts">
-                    <Layers size={10} className="text-violet-400 shrink-0" />
+              <div className="flex items-center justify-between mb-1 pr-3">
+                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider flex items-center gap-1">
+                  {isSpecial && (
+                    <span title="Special overlay — shown as reference lines or shaded bands on charts">
+                      <Layers size={10} className="text-violet-400 shrink-0" />
+                    </span>
+                  )}
+                  {ind.category}
+                </p>
+                {(ind.unit === '$' || ind.unit === 'B$') && (
+                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                    USD
                   </span>
                 )}
-                {ind.category}
-              </p>
+              </div>
               <p className="text-sm font-semibold text-gray-100 leading-snug mb-2 pr-3">{ind.name}</p>
 
               {latest ? (
@@ -431,10 +438,15 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 className="text-base font-bold text-white">{selectedIndicator.name}</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
+              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                 {selectedIndicator.isBuiltin ? `Series: ${selected} · ` : ''}{selectedIndicator.category} · Unit: {selectedIndicator.unit}
+                {(selectedIndicator.unit === '$' || selectedIndicator.unit === 'B$') && (
+                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                    USD
+                  </span>
+                )}
                 {selectedIndicator.fetchUrl && (
-                  <span className="ml-1 text-accent/70">· custom URL</span>
+                  <span className="text-accent/70">· custom URL</span>
                 )}
               </p>
             </div>

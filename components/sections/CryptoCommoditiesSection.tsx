@@ -180,12 +180,17 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                   'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                   isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
                 )}>
-                <div className="flex items-center gap-2 mb-2">
-                  {coin.image && <img src={coin.image} alt={coin.name} className="w-6 h-6 rounded-full" />}
-                  <div>
-                    <p className="text-xs font-bold text-gray-100 leading-none">{coin.name}</p>
-                    <p className="text-[10px] text-gray-500">{coin.symbol}</p>
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    {coin.image && <img src={coin.image} alt={coin.name} className="w-6 h-6 rounded-full" />}
+                    <div>
+                      <p className="text-xs font-bold text-gray-100 leading-none">{coin.name}</p>
+                      <p className="text-[10px] text-gray-500">{coin.symbol}</p>
+                    </div>
                   </div>
+                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none shrink-0">
+                    USD
+                  </span>
                 </div>
                 <p className="text-lg font-bold text-white tabular-nums">{formatPrice(coin.price)}</p>
                 <div className={clsx('flex items-center gap-1 mt-0.5 text-sm font-bold', colorForPercent(coin.change24hPercent))}>
@@ -218,7 +223,12 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           <div className="flex items-start justify-between gap-2">
             <div>
               <h3 className="text-base font-bold text-white">{selectedCrypto.name}</h3>
-              <p className="text-xs text-gray-500 mt-0.5">{selectedCrypto.symbol}</p>
+              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
+                {selectedCrypto.symbol}
+                <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                  USD
+                </span>
+              </p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               {onCompare && (
