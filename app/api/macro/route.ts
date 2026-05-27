@@ -318,8 +318,9 @@ async function fetchYahooYield(
     : 180;
   const rangeParam = daysAgo > 3500 ? 'max' : daysAgo > 1500 ? '10y'
     : daysAgo > 800 ? '5y' : daysAgo > 300 ? '1y' : '6mo';
-  const interval: '1d' | '1wk' | '1mo' = daysAgo > 1500 ? '1mo'
-    : daysAgo > 300 ? '1wk' : '1d';
+  // Always daily — never thin/downsample to weekly or monthly buckets, even
+  // for long ranges (MAX). Causes blunt-looking lines in Compare and elsewhere.
+  const interval: '1d' | '1wk' | '1mo' = '1d';
 
   for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
     const url =
@@ -490,8 +491,8 @@ async function fetchBitcoinProductionCost(
 async function fetchBitcoinMonthlyRSI(
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  // Pass a very old date so fetchYahooYield selects range=max, interval=1mo —
-  // RSI's 14-month lookback needs the full monthly history regardless of fromDate.
+  // Pass a very old date so fetchYahooYield selects range=max —
+  // RSI's 14-month lookback needs the full history regardless of fromDate.
   const monthly = await fetchYahooYield('BTC-USD', '2010-01-01');
   if (monthly.length < 20) { console.warn('[btc-rsi] insufficient BTC history'); return []; }
   const rsi = computeRSI(monthly, 14);
@@ -543,8 +544,7 @@ function getBitcoinMinedMonthly(fromDate?: string): { date: string; value: numbe
 async function getBitcoinMinerRevenue(
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  // Fetch monthly BTC-USD prices to get average price per month.
-  // Pass '2009-01-01' so fetchYahooYield selects range=max, interval=1mo.
+  // Fetch full BTC-USD history. Pass '2009-01-01' so fetchYahooYield selects range=max.
   const monthly = await fetchYahooYield('BTC-USD', '2009-01-01');
   if (monthly.length < 5) { console.warn('[btc-miner] insufficient BTC history'); return []; }
 

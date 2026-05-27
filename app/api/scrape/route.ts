@@ -400,7 +400,8 @@ async function fetchYahoo(symbol: string, fromDate?: string): Promise<{ data: DP
   const daysAgo = fromDate ? (Date.now() - new Date(fromDate).getTime()) / 86_400_000 : 365;
   const range = daysAgo > 3500 ? 'max' : daysAgo > 1500 ? '10y' : daysAgo > 800 ? '5y'
     : daysAgo > 300 ? '1y' : '6mo';
-  const interval = daysAgo > 1500 ? '1mo' : daysAgo > 300 ? '1wk' : '1d';
+  // Always daily — no thinning, even for MAX-range queries.
+  const interval = '1d';
   for (const host of ['query2.finance.yahoo.com','query1.finance.yahoo.com']) {
     const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
     const ctrl = new AbortController();

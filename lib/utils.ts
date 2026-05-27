@@ -59,24 +59,6 @@ export function getTimeframeStart(timeframe: Timeframe): string {
   return format(date, 'yyyy-MM-dd');
 }
 
-export function getIntervalForTimeframe(timeframe: Timeframe): string {
-  switch (timeframe) {
-    case '1D':
-    case '1W':
-    case 'MTD':
-    case '1M': return '1d';
-    case '3M':
-    case '6M':
-    case 'YTD':
-    case '1Y': return '1d';
-    case '3Y':
-    case '5Y': return '1wk';
-    case '10Y':
-    case 'MAX': return '1mo';
-    default: return '1d';
-  }
-}
-
 export function calculateCAGR(
   data: HistoricalPoint[],
   timeframe: Timeframe
