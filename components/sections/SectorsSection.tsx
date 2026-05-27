@@ -14,7 +14,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceA
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, Flame, RefreshCw, X, BarChart2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
 interface SectorLiveData {
   price: number | null;
@@ -237,8 +237,6 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
         {sorted.map(sector => {
           const day = sector.changePercent;
           const ytd = sector.ytdReturn;
-          const primary = getValue(sector);
-          const isHot = sector.rank <= 2 && (day ?? 0) > 0;
           const isSelected = selected === sector.symbol;
 
           return (
@@ -248,11 +246,6 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                 'relative rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                 isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
               )}>
-              {isHot && (
-                <span className="absolute top-2 right-2 flex items-center gap-0.5 bg-hot text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                  <Flame size={8} />HOT
-                </span>
-              )}
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-bold text-gray-600">#{sector.rank}</span>
@@ -266,7 +259,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               </div>
               <div className="flex items-start justify-between gap-1 mb-2">
                 <p className="text-sm font-semibold text-gray-100 leading-snug">{sector.name}</p>
-                {!isHot && sector.dividendYield != null && sector.dividendYield > 0 && (
+                {sector.dividendYield != null && sector.dividendYield > 0 && (
                   <span className="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
                     DIV
                   </span>
@@ -387,7 +380,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             />
           )}
 
-          {!divChartData && historical.length > 0 && (
+          {historical.length > 0 && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} />}

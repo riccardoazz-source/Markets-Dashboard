@@ -969,7 +969,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                     <div className="flex items-center justify-between mb-0.5">
                       <div className="flex items-center gap-1 min-w-0">
                         <span className="text-xs font-bold text-gray-100 font-mono">{sym}</span>
-                        {q?.currency && q.currency !== 'USD' && (
+                        {q?.currency && (
                           <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none shrink-0">
                             {q.currency}
                           </span>

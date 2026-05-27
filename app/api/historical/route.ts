@@ -34,10 +34,8 @@ function getStartDate(timeframe: string): Date {
   }
 }
 
-function getInterval(timeframe: string): '1d' | '1wk' | '1mo' {
-  // Daily resolution up to 10Y; weekly only for MAX to keep very long
-  // histories manageable. Avoids the over-smoothed look of monthly data.
-  if (timeframe === 'MAX') return '1wk';
+function getInterval(_timeframe: string): '1d' | '1wk' | '1mo' {
+  // Always daily — never reduce or thin data regardless of timeframe.
   return '1d';
 }
 
@@ -61,11 +59,8 @@ export async function GET(req: NextRequest) {
 
   const from = isCustom ? new Date(fromParam!) : getStartDate(timeframe);
   const to   = isCustom ? new Date(toParam!) : new Date();
-  // For custom ranges, pick interval based on date span; otherwise use timeframe
-  const spanDays = (to.getTime() - from.getTime()) / 86_400_000;
-  const interval: '1d' | '1wk' | '1mo' = isCustom
-    ? (spanDays <= 365 * 11 ? '1d' : '1wk')
-    : getInterval(timeframe);
+  // Always daily — never reduce or thin data for any timeframe or custom range.
+  const interval: '1d' | '1wk' | '1mo' = '1d';
 
   try {
     let data = await fetchYahooChart(symbol, from, to, interval);

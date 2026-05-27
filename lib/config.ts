@@ -315,7 +315,7 @@ export const INDEXES: AssetConfig[] = [
   { symbol: '^FTSE',     name: 'FTSE 100',              category: 'UK',             region: 'EU',      type: 'index' },
   { symbol: '^FCHI',     name: 'CAC 40',                category: 'France',         region: 'EU',      type: 'index' },
   // Global / EM — accumulating UCITS ETF proxies (no MSCI price-index on Yahoo)
-  { symbol: 'SWDA.L',    name: 'MSCI World',            category: 'Global',         region: 'Global',  type: 'etf'   },
+  { symbol: 'URTH',      name: 'MSCI World',            category: 'Global',         region: 'Global',  type: 'etf'   },
   { symbol: 'EIMI.L',    name: 'MSCI Emerg. Markets',   category: 'Emerging',       region: 'EM',      type: 'etf'   },
   { symbol: '^N225',     name: 'Nikkei 225',            category: 'Japan',          region: 'Asia',    type: 'index' },
   { symbol: '^HSI',      name: 'Hang Seng',             category: 'Hong Kong',      region: 'Asia',    type: 'index' },
