@@ -267,6 +267,15 @@ export const FOMC_MEETING_DATES: string[] = [
   '2026-06-17','2026-07-29','2026-09-16','2026-10-28','2026-12-09',
 ];
 
+// Federal Reserve chair change events — rendered as red reference lines on the FOMC chart.
+// Each entry is the date the new chair's term began (confirmation / oath of office).
+export const FED_CHAIR_CHANGES: { date: string; name: string }[] = [
+  { date: '1987-08-11', name: 'Greenspan' }, // Aug 11, 1987
+  { date: '2006-02-01', name: 'Bernanke' },  // Feb  1, 2006
+  { date: '2014-02-03', name: 'Yellen' },    // Feb  3, 2014
+  { date: '2018-02-05', name: 'Powell' },    // Feb  5, 2018
+];
+
 // Bitcoin halving dates (exported so UI components can render them as reference lines).
 export const BTC_HALVING_DATES: string[] = [
   '2012-11-28', // 1st: 50 → 25 BTC

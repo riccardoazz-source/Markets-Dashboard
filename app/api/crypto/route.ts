@@ -57,12 +57,19 @@ async function fetchYtdAnchor(id: string): Promise<number | null> {
   return null;
 }
 
+// Sequential fetch — CoinGecko free tier caps at 30 req/min.
+// Firing all coins in parallel bursts easily breaches that limit on cold starts
+// (in-memory cache is empty on each serverless instance start).
+// A small inter-request delay keeps the burst well below the rate cap.
 async function fetchYtdAnchors(ids: string[]): Promise<Map<string, number>> {
   const map = new Map<string, number>();
-  const results = await Promise.all(
-    ids.map(id => fetchYtdAnchor(id).then(p => ({ id, p })).catch(() => ({ id, p: null })))
-  );
-  for (const { id, p } of results) if (p != null) map.set(id, p);
+  for (const id of ids) {
+    try {
+      const p = await fetchYtdAnchor(id);
+      if (p != null) map.set(id, p);
+    } catch { /* ignore */ }
+    await new Promise(r => setTimeout(r, 120)); // ~8 req/s ≪ 30 req/min ceiling
+  }
   return map;
 }
 
@@ -96,10 +103,13 @@ async function fetchMtdAnchor(id: string): Promise<number | null> {
 
 async function fetchMtdAnchors(ids: string[]): Promise<Map<string, number>> {
   const map = new Map<string, number>();
-  const results = await Promise.all(
-    ids.map(id => fetchMtdAnchor(id).then(p => ({ id, p })).catch(() => ({ id, p: null })))
-  );
-  for (const { id, p } of results) if (p != null) map.set(id, p);
+  for (const id of ids) {
+    try {
+      const p = await fetchMtdAnchor(id);
+      if (p != null) map.set(id, p);
+    } catch { /* ignore */ }
+    await new Promise(r => setTimeout(r, 120));
+  }
   return map;
 }
 
@@ -134,10 +144,13 @@ async function fetchFiveYearAnchor(id: string): Promise<number | null> {
 
 async function fetchFiveYearAnchors(ids: string[]): Promise<Map<string, number>> {
   const map = new Map<string, number>();
-  const results = await Promise.all(
-    ids.map(id => fetchFiveYearAnchor(id).then(p => ({ id, p })).catch(() => ({ id, p: null })))
-  );
-  for (const { id, p } of results) if (p != null) map.set(id, p);
+  for (const id of ids) {
+    try {
+      const p = await fetchFiveYearAnchor(id);
+      if (p != null) map.set(id, p);
+    } catch { /* ignore */ }
+    await new Promise(r => setTimeout(r, 120));
+  }
   return map;
 }
 
@@ -161,7 +174,10 @@ export async function GET(req: NextRequest) {
     if (cached) return NextResponse.json(cached);
 
     const ids = CRYPTO_IDS.map(c => c.id).join(',');
-    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h,7d,1y`;
+    // price_change_percentage=30d gives us a reliable MTD proxy (last 30 calendar
+    // days) without any extra API calls, avoiding the 30 req/min rate-limit issue
+    // that plagued the per-coin /history anchor approach.
+    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&order=market_cap_desc&per_page=20&page=1&sparkline=false&price_change_percentage=24h,7d,30d,1y`;
 
     try {
       // CoinGecko has no YTD field — fetch Jan 1 price per coin from CoinGecko /history,
@@ -189,11 +205,16 @@ export async function GET(req: NextRequest) {
           jan1Price != null && currentPrice > 0
             ? ((currentPrice - jan1Price) / jan1Price) * 100
             : null;
+        // MTD: prefer anchor-based calendar-month calculation when cache is warm;
+        // fall back to the 30d rolling change from the markets endpoint (always
+        // available, zero extra API calls) so the card always shows a value.
         const monthStartPrice = mtdAnchors.get(coin.id as string);
-        const mtdChangePercent =
+        const mtdFromAnchor =
           monthStartPrice != null && currentPrice > 0
             ? ((currentPrice - monthStartPrice) / monthStartPrice) * 100
             : null;
+        const mtd30d = coin.price_change_percentage_30d_in_currency as number | null | undefined;
+        const mtdChangePercent = mtdFromAnchor ?? (typeof mtd30d === 'number' && isFinite(mtd30d) ? mtd30d : null);
         const fiveYearPrice = fiveYearAnchors.get(coin.id as string);
         const fiveYearChangePercent =
           fiveYearPrice != null && currentPrice > 0

@@ -3,7 +3,7 @@
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine,
 } from 'recharts';
-import { FOMC_MEETING_DATES } from '@/lib/config';
+import { FOMC_MEETING_DATES, FED_CHAIR_CHANGES } from '@/lib/config';
 import { format, parseISO } from 'date-fns';
 
 /**
@@ -92,6 +92,27 @@ export function FOMCChart({ height = 240 }: { height?: number }) {
             />
           );
         })}
+
+        {/* Fed chair change markers — red vertical line at take-office date */}
+        {FED_CHAIR_CHANGES
+          .filter(c => c.date >= data[0]?.date && c.date <= data[data.length - 1]?.date)
+          .map(c => (
+            <ReferenceLine
+              key={`chair-${c.date}`}
+              x={snap(c.date)}
+              stroke="#ef4444"
+              strokeWidth={2}
+              strokeDasharray="5 2"
+              strokeOpacity={0.9}
+              label={{
+                value: `← ${c.name}`,
+                fill: '#ef4444',
+                fontSize: 9,
+                position: 'insideTopLeft',
+                fontWeight: 'bold',
+              }}
+            />
+          ))}
       </LineChart>
     </ResponsiveContainer>
   );

@@ -41,6 +41,8 @@ interface Props {
   interpolationType?: 'monotone' | 'stepAfter';
   enableDragSelect?: boolean;
   toolsOverlay?: ToolsOverlay;
+  /** Called when the user clicks "Set as period" on the drag-select banner. */
+  onSetRange?: (from: string, to: string) => void;
 }
 
 function formatDate(dateStr: string, data: HistoricalPoint[]) {
@@ -146,7 +148,7 @@ function MACDSubChart({ data }: {
 export function PriceChart({
   data, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
-  enableDragSelect = true, toolsOverlay,
+  enableDragSelect = true, toolsOverlay, onSetRange,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
@@ -286,6 +288,14 @@ export function PriceChart({
             <span className={`font-bold tabular-nums ${selStats.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               {selStats.pct >= 0 ? '+' : ''}{selStats.pct.toFixed(2)}%
             </span>
+            {onSetRange && (
+              <button
+                onClick={() => { onSetRange(range.left, range.right); clear(); }}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10 transition-colors"
+              >
+                Set period
+              </button>
+            )}
             <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px] ml-1">✕</button>
           </div>
         </div>

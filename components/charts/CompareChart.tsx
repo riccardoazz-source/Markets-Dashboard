@@ -5,7 +5,7 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
-import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META } from '@/lib/config';
+import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES } from '@/lib/config';
 import { HalvingChart } from './HalvingChart';
 import { FOMCChart } from './FOMCChart';
 import { RecessionChart } from './RecessionChart';
@@ -33,6 +33,8 @@ interface Props {
   height?: number;
   logScale?: boolean;
   percentMode?: boolean;
+  /** Called when the user clicks "Set as period" on the drag-select banner. */
+  onSetRange?: (from: string, to: string) => void;
 }
 
 function formatDate(dateStr: string, allDates: string[]) {
@@ -107,7 +109,7 @@ function axisProps(group: CompareAsset[], logScale: boolean): object {
   };
 }
 
-export function CompareChart({ assets, height = 340, logScale = false, percentMode = false }: Props) {
+export function CompareChart({ assets, height = 340, logScale = false, percentMode = false, onSetRange }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
   if (!assets.length) return null;
@@ -138,19 +140,16 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   const TODAY = new Date().toISOString().slice(0, 10);
 
-  const MAX_CHART_POINTS = 2000;
-  const rawDates = Array.from(new Set(
+  // Use ALL unique dates from every asset — no thinning. Thinning step-function series
+  // (interest rates, FOMC decisions, ECB rates) can drop the exact change dates, making
+  // them appear as smooth curves instead of staircases. Modern browsers handle tens of
+  // thousands of SVG path segments comfortably, so no down-sampling is needed.
+  const allDates = Array.from(new Set(
     plottableAssets.flatMap(a => [
       ...a.data.map(d => d.date),
       ...(a.trData ?? []).map(d => d.date),
     ])
   )).sort();
-  const step = rawDates.length > MAX_CHART_POINTS
-    ? Math.ceil(rawDates.length / MAX_CHART_POINTS)
-    : 1;
-  const allDates = step > 1
-    ? rawDates.filter((_, i) => i % step === 0 || i === rawDates.length - 1)
-    : rawDates;
 
   const assetMaps = plottableAssets.map(a => ({
     prices: new Map(a.data.map(d => [d.date, d.close])),
@@ -190,6 +189,13 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   // dense MAX-timeframe views with ~100 meetings); the dashed lines stay subtle
   // enough that they don't dominate the chart, and hiding them was confusing
   // because users couldn't tell the dates were loaded at all.
+  //
+  // The first FOMC meeting after each Fed chair change date is rendered in red
+  // so users can see at a glance when monetary policy transitioned to a new chair.
+  const chairChangeFirstMeetings = new Set(
+    FED_CHAIR_CHANGES.map(c => FOMC_MEETING_DATES.find(d => d > c.date)).filter(Boolean) as string[]
+  );
+
   const visibleFomcDates = fomcAsset && allDates.length > 0
     ? (() => {
         const lo = allDates[0], hi = allDates[allDates.length - 1];
@@ -201,7 +207,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
             const diff = Math.abs(parseISO(a).getTime() - tt);
             if (diff < bestDiff) { bestDiff = diff; best = a; }
           }
-          return best;
+          return { snapped: best, original: d, isChairChange: chairChangeFirstMeetings.has(d) };
         });
       })()
     : null;
@@ -355,9 +361,19 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     <div className="relative select-none">
       {range && selStats && (
         <div className="mb-2 bg-bg-input rounded-lg px-3 py-2 text-xs space-y-1">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="text-gray-400">{fmtDate(range.left)} → {fmtDate(range.right)}</span>
-            <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px]">✕ clear</button>
+            <div className="flex items-center gap-2">
+              {onSetRange && (
+                <button
+                  onClick={() => { onSetRange(range.left, range.right); clear(); }}
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10 transition-colors"
+                >
+                  Set period
+                </button>
+              )}
+              <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px]">✕ clear</button>
+            </div>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             {selStats.map(s => (
@@ -573,15 +589,19 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               label={{ value: '⚡', fill: '#f59e0b', fontSize: 12, position: 'top' }}
             />
           ))}
-          {visibleFomcDates && visibleFomcDates.map((d, i) => (
+          {visibleFomcDates && visibleFomcDates.map((item, i) => (
             <ReferenceLine
               key={`fomc-${i}`}
               yAxisId="left"
-              x={d}
-              stroke="#3b82f6"
-              strokeWidth={1}
-              strokeDasharray="3 3"
-              strokeOpacity={0.6}
+              x={item.snapped}
+              stroke={item.isChairChange ? '#ef4444' : '#3b82f6'}
+              strokeWidth={item.isChairChange ? 1.5 : 1}
+              strokeDasharray={item.isChairChange ? '4 2' : '3 3'}
+              strokeOpacity={item.isChairChange ? 0.85 : 0.6}
+              label={item.isChairChange ? {
+                value: FED_CHAIR_CHANGES.find(c => FOMC_MEETING_DATES.find(d => d > c.date) === item.original)?.name ?? '',
+                fill: '#ef4444', fontSize: 9, position: 'insideTopRight',
+              } : undefined}
             />
           ))}
           {todaySnapped && (

@@ -357,9 +357,10 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : divChartData ? (
-            <DualLineDragChart data={divChartData} />
+            <DualLineDragChart data={divChartData} onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           ) : (
-            <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools} />
+            <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools}
+              onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
 
           {/* Dividends — same bar chart + collapsible list as StockSection */}
@@ -393,7 +394,7 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
 
 interface DualLinePoint { date: string; price: number; totalReturn?: number }
 
-function DualLineDragChart({ data }: { data: DualLinePoint[] }) {
+function DualLineDragChart({ data, onSetRange }: { data: DualLinePoint[]; onSetRange?: (from: string, to: string) => void }) {
   const { handlers, range, area, clear } = useChartDragSelect();
   const last = data[data.length - 1];
   const isUp = (last?.price ?? 0) >= 0;
@@ -429,6 +430,14 @@ function DualLineDragChart({ data }: { data: DualLinePoint[] }) {
               <span className={clsx('font-bold tabular-nums', selStats.trDelta >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                 TR {selStats.trDelta >= 0 ? '+' : ''}{selStats.trDelta.toFixed(2)}%
               </span>
+            )}
+            {onSetRange && (
+              <button
+                onClick={() => { onSetRange(selStats!.left, selStats!.right); clear(); }}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10 transition-colors"
+              >
+                Set period
+              </button>
             )}
             <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px] ml-1">✕</button>
           </div>

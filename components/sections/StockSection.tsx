@@ -224,7 +224,7 @@ interface DualChartToolsOverlay {
 }
 
 function DualChart({
-  prices, totalReturn, currency, eps, financials, toolsOverlay, spyPrices,
+  prices, totalReturn, currency, eps, financials, toolsOverlay, spyPrices, onSetRange,
 }: {
   prices: HistoricalPoint[];
   totalReturn: HistoricalPoint[];
@@ -233,6 +233,7 @@ function DualChart({
   financials?: FinancialPoint[];
   toolsOverlay?: DualChartToolsOverlay;
   spyPrices?: HistoricalPoint[];
+  onSetRange?: (from: string, to: string) => void;
 }) {
   const { handlers, range, area, clear } = useChartDragSelect();
   if (!prices.length) return null;
@@ -403,6 +404,14 @@ function DualChart({
             <span className={`font-bold tabular-nums ${selStats.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               {selStats.pct >= 0 ? '+' : ''}{selStats.pct.toFixed(2)}%
             </span>
+            {onSetRange && (
+              <button
+                onClick={() => { onSetRange(range.left, range.right); clear(); }}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10 transition-colors"
+              >
+                Set period
+              </button>
+            )}
             <button onClick={clear} className="text-gray-600 hover:text-gray-300 text-[10px] ml-1">✕</button>
           </div>
         </div>
@@ -1219,6 +1228,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               financials={overlay === 'financials' ? earnings?.financials : undefined}
               toolsOverlay={activeTools}
               spyPrices={spyPrices}
+              onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }}
             />
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-500 text-sm">
