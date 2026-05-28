@@ -274,25 +274,28 @@ export async function fetchYahooData(
   const period2 = Math.floor(to.getTime() / 1000);
   const eventsQ = includeEvents ? '&events=div%2Csplit' : '';
 
-  // Yahoo Finance does not handle negative period1 (dates before 1970-01-01) correctly
-  // and silently returns a short window instead of all history. Use range=max directly.
-  let result: Record<string, unknown> | null = null;
-  if (period1 < 0) {
-    result = await fetchChartRaw(symbol, `range=max&interval=${interval}${eventsQ}`, 10_000);
-  } else {
-    result = await fetchChartRaw(
-      symbol,
-      `period1=${period1}&period2=${period2}&interval=${interval}${eventsQ}`,
-      8_000,
-    );
-    // If period-based query failed (common for futures on Vercel Edge), try range-based
-    if (!result) {
-      const daysAgo = (Date.now() - from.getTime()) / (1000 * 60 * 60 * 24);
-      const rangeStr = daysToRangeParam(daysAgo);
-      if (rangeStr) {
-        result = await fetchChartRaw(symbol, `range=${rangeStr}&interval=${interval}${eventsQ}`, 8_000);
-      }
-    }
+  // CRITICAL: Yahoo's `range=max` parameter returns REDUCED granularity (weekly/
+  // monthly chunks for older data) even when interval=1d is requested. Period-based
+  // queries (period1/period2 + interval=1d) reliably return DAILY data for the full
+  // span. This is why a 10Y view (period-based) looks dense but a MAX view via
+  // range=max looked coarse. So: always use a period-based query, clamping period1
+  // to >= 0 (Yahoo mishandles NEGATIVE period1 — pre-1970 dates — returning a short
+  // window, but period1=0 is fine and yields full daily history from 1970 onward,
+  // which covers essentially every asset: crypto from 2014, most stocks/indices
+  // post-1970). range=max is kept only as a last-resort fallback.
+  const safeP1 = Math.max(0, period1);
+  let result: Record<string, unknown> | null = await fetchChartRaw(
+    symbol,
+    `period1=${safeP1}&period2=${period2}&interval=${interval}${eventsQ}`,
+    10_000,
+  );
+
+  // Fallback: if the period-based query failed entirely (common for futures on
+  // Vercel Edge, or rate limiting), try a range-based query.
+  if (!result) {
+    const daysAgo = (Date.now() - from.getTime()) / (1000 * 60 * 60 * 24);
+    const rangeStr = daysToRangeParam(daysAgo) ?? 'max';
+    result = await fetchChartRaw(symbol, `range=${rangeStr}&interval=${interval}${eventsQ}`, 8_000);
   }
 
   if (!result) return { meta: null, points: [], dividends: [] };

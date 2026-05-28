@@ -313,19 +313,19 @@ async function fetchYahooYield(
   yahooSym: string,
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  const daysAgo = fromDate
-    ? (Date.now() - new Date(fromDate).getTime()) / 86_400_000
-    : 180;
-  const rangeParam = daysAgo > 3500 ? 'max' : daysAgo > 1500 ? '10y'
-    : daysAgo > 800 ? '5y' : daysAgo > 300 ? '1y' : '6mo';
-  // Always daily — never thin/downsample to weekly or monthly buckets, even
-  // for long ranges (MAX). Causes blunt-looking lines in Compare and elsewhere.
-  const interval: '1d' | '1wk' | '1mo' = '1d';
+  // Use a period-based query (period1/period2 + interval=1d) rather than range=.
+  // Yahoo's range= parameter (esp. range=max) degrades to weekly/monthly chunks
+  // for older data even with interval=1d; period-based queries return true daily.
+  // Clamp period1 to >= 0 (Yahoo mishandles negative/pre-1970 timestamps).
+  const period1 = fromDate
+    ? Math.max(0, Math.floor(new Date(fromDate).getTime() / 1000))
+    : Math.floor((Date.now() - 180 * 86_400_000) / 1000);
+  const period2 = Math.floor(Date.now() / 1000);
 
   for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
     const url =
       `https://${host}/v8/finance/chart/${encodeURIComponent(yahooSym)}` +
-      `?range=${rangeParam}&interval=${interval}`;
+      `?period1=${period1}&period2=${period2}&interval=1d`;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 4_000);
     try {
