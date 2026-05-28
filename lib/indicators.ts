@@ -109,6 +109,18 @@ export function computeFibLevels(closes: number[]): { ratio: number; value: numb
   return FIB_RATIOS.map(r => ({ ratio: r, value: high - r * (high - low) }));
 }
 
+/**
+ * Rate of Change (Momentum): (close[i] - close[i-period]) / close[i-period] * 100.
+ * period=1 → daily, period=5 → weekly, period=21 → monthly.
+ */
+export function computeMomentum(closes: number[], period: number): (number | null)[] {
+  return closes.map((c, i) => {
+    if (i < period) return null;
+    const prev = closes[i - period];
+    return prev > 0 ? (c / prev - 1) * 100 : null;
+  });
+}
+
 /** MACD (12, 26, 9). Returns three arrays of length = closes.length. */
 export function computeMACD(closes: number[]): {
   macd: (number | null)[];

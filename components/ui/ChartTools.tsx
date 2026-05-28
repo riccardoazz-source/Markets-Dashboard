@@ -6,7 +6,7 @@ import { Calculator, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
-  computeBollingerBands, computeFibLevels,
+  computeBollingerBands, computeFibLevels, computeMomentum,
 } from '@/lib/indicators';
 
 export interface ActiveTools {
@@ -22,6 +22,9 @@ export interface ActiveTools {
   fib: boolean;
   rsi: boolean;
   macd: boolean;
+  momentumDaily: boolean;
+  momentumWeekly: boolean;
+  momentumMonthly: boolean;
   spyRatio: boolean;
 }
 
@@ -29,6 +32,7 @@ export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
   sma20: false, sma50: false, sma200: false, ema20: false, ema100: false,
   bollinger: false, fib: false, rsi: false, macd: false,
+  momentumDaily: false, momentumWeekly: false, momentumMonthly: false,
   spyRatio: false,
 };
 
@@ -106,11 +110,14 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                  : null,
       bbUpper: bbands ? last(bbands.upper) : null,
       bbLower: bbands ? last(bbands.lower) : null,
-      rsi:     n >= 15  ? last(computeRSI(closes, 14))  : null,
-      macd:    macdOut  ? last(macdOut.macd)   : null,
-      signal:  macdOut  ? last(macdOut.signal) : null,
-      hist:    macdOut  ? last(macdOut.hist)   : null,
-      fibs:    n >= 2   ? computeFibLevels(closes) : null,
+      rsi:              n >= 15 ? last(computeRSI(closes, 14))       : null,
+      macd:             macdOut ? last(macdOut.macd)                  : null,
+      signal:           macdOut ? last(macdOut.signal)                : null,
+      hist:             macdOut ? last(macdOut.hist)                  : null,
+      fibs:             n >= 2  ? computeFibLevels(closes)            : null,
+      momentumDaily:    n >= 2  ? last(computeMomentum(closes, 1))   : null,
+      momentumWeekly:   n >= 6  ? last(computeMomentum(closes, 5))   : null,
+      momentumMonthly:  n >= 22 ? last(computeMomentum(closes, 21))  : null,
     };
   }, [closes, n]);
 
@@ -163,6 +170,10 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                 <Divider />
                 <ToolChip active={activeTools.rsi}  onToggle={() => toggle('rsi')}  label="RSI 14" color="indigo" disabled={n < 15} />
                 <ToolChip active={activeTools.macd} onToggle={() => toggle('macd')} label="MACD"   color="green"  disabled={n < 34} />
+                <Divider />
+                <ToolChip active={activeTools.momentumDaily}   onToggle={() => toggle('momentumDaily')}   label="Mom. Daily"   color="sky"    disabled={n < 2}  />
+                <ToolChip active={activeTools.momentumWeekly}  onToggle={() => toggle('momentumWeekly')}  label="Mom. Weekly"  color="sky"    disabled={n < 6}  />
+                <ToolChip active={activeTools.momentumMonthly} onToggle={() => toggle('momentumMonthly')} label="Mom. Monthly" color="sky"    disabled={n < 22} />
               </div>
 
               {/* ── Results strip — visible when any tool is active ──────── */}
@@ -253,6 +264,28 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                         color={iv.hist >= 0 ? 'text-emerald-400' : 'text-red-400'}
                       />
                     </>
+                  )}
+
+                  {activeTools.momentumDaily && iv.momentumDaily != null && (
+                    <Res
+                      label="Mom. 1D"
+                      value={(iv.momentumDaily >= 0 ? '+' : '') + iv.momentumDaily.toFixed(2) + '%'}
+                      color={iv.momentumDaily >= 0 ? 'text-sky-400' : 'text-red-400'}
+                    />
+                  )}
+                  {activeTools.momentumWeekly && iv.momentumWeekly != null && (
+                    <Res
+                      label="Mom. 1W"
+                      value={(iv.momentumWeekly >= 0 ? '+' : '') + iv.momentumWeekly.toFixed(2) + '%'}
+                      color={iv.momentumWeekly >= 0 ? 'text-sky-400' : 'text-red-400'}
+                    />
+                  )}
+                  {activeTools.momentumMonthly && iv.momentumMonthly != null && (
+                    <Res
+                      label="Mom. 1M"
+                      value={(iv.momentumMonthly >= 0 ? '+' : '') + iv.momentumMonthly.toFixed(2) + '%'}
+                      color={iv.momentumMonthly >= 0 ? 'text-sky-400' : 'text-red-400'}
+                    />
                   )}
 
                   {activeTools.spyRatio && (

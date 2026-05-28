@@ -12,7 +12,7 @@ import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useCh
 import { spyBenchmarkSeries } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
-  computeBollingerBands, computeFibLevels,
+  computeBollingerBands, computeFibLevels, computeMomentum,
 } from '@/lib/indicators';
 
 interface ToolsOverlay {
@@ -28,6 +28,9 @@ interface ToolsOverlay {
   fib?: boolean;
   rsi?: boolean;
   macd?: boolean;
+  momentumDaily?: boolean;
+  momentumWeekly?: boolean;
+  momentumMonthly?: boolean;
   spyRatio?: boolean;
 }
 
@@ -136,6 +139,47 @@ function MACDSubChart({ data }: {
           <Tooltip
             contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
             formatter={(v: number, name: string) => [v != null ? v.toFixed(4) : '—', name]}
+            labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function MomentumSubChart({
+  data, label, color,
+}: {
+  data: { date: string; value: number | null }[];
+  label: string;
+  color: string;
+}) {
+  const valid = data.filter(d => d.value != null);
+  if (valid.length === 0) {
+    return <div className="text-[10px] text-gray-600 py-1">{label}: not enough data</div>;
+  }
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-3 mb-0.5 px-1">
+        <span className="text-[10px] font-semibold" style={{ color }}>{label}</span>
+        <span className="text-[9px] text-gray-600">Rate of Change — % vs N periods ago</span>
+      </div>
+      <ResponsiveContainer width="100%" height={70}>
+        <ComposedChart data={data} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+          <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+          <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={36}
+            tickFormatter={v => `${(v as number).toFixed(1)}%`} />
+          <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.5} />
+          <Bar dataKey="value" barSize={2}>
+            {data.map((entry, i) => (
+              <Cell key={i} fill={(entry.value ?? 0) >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.6} />
+            ))}
+          </Bar>
+          <Line type="monotone" dataKey="value" stroke={color} strokeWidth={1.5} dot={false} connectNulls={false} />
+          <Tooltip
+            contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+            formatter={(v: number) => [v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—', label]}
             labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
           />
         </ComposedChart>
@@ -268,6 +312,14 @@ export function PriceChart({
         hist:   macdResult.hist[i],
       }))
     : null;
+
+  // Momentum sub-charts (ROC 1d / 5d / 21d)
+  const momDailyVals   = toolsOverlay?.momentumDaily   ? computeMomentum(closes, 1)  : null;
+  const momWeeklyVals  = toolsOverlay?.momentumWeekly  ? computeMomentum(closes, 5)  : null;
+  const momMonthlyVals = toolsOverlay?.momentumMonthly ? computeMomentum(closes, 21) : null;
+  const momDailyData   = momDailyVals   ? data.map((d, i) => ({ date: d.date, value: momDailyVals[i]   })) : null;
+  const momWeeklyData  = momWeeklyVals  ? data.map((d, i) => ({ date: d.date, value: momWeeklyVals[i]  })) : null;
+  const momMonthlyData = momMonthlyVals ? data.map((d, i) => ({ date: d.date, value: momMonthlyVals[i] })) : null;
 
   // Selection stats
   let selStats: { leftVal: number; rightVal: number; pct: number } | null = null;
@@ -549,6 +601,9 @@ export function PriceChart({
       {/* Oscillator sub-charts */}
       {rsiData && <RSISubChart data={rsiData} />}
       {macdData && <MACDSubChart data={macdData} />}
+      {momDailyData   && <MomentumSubChart data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
+      {momWeeklyData  && <MomentumSubChart data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}
+      {momMonthlyData && <MomentumSubChart data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
 
       {enableDragSelect && data.length > 1 && !range && (
         <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to measure a period</p>

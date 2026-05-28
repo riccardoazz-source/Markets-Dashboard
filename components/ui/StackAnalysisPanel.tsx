@@ -5,7 +5,7 @@ import { CompareAsset } from '@/lib/types';
 import { CHART_COLORS } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
-  computeBollingerBands, computeFibLevels,
+  computeBollingerBands, computeFibLevels, computeMomentum,
 } from '@/lib/indicators';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import {
@@ -73,6 +73,13 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
   const macdData = useMemo(() => macdResult
     ? prices.map((p, i) => ({ date: p.date, macd: macdResult.macd[i], signal: macdResult.signal[i], hist: macdResult.hist[i] }))
     : [], [prices, macdResult]);
+
+  const momDailyVals   = useMemo(() => activeTools.momentumDaily   ? computeMomentum(closes, 1)  : null, [closes, activeTools.momentumDaily]);
+  const momWeeklyVals  = useMemo(() => activeTools.momentumWeekly  ? computeMomentum(closes, 5)  : null, [closes, activeTools.momentumWeekly]);
+  const momMonthlyVals = useMemo(() => activeTools.momentumMonthly ? computeMomentum(closes, 21) : null, [closes, activeTools.momentumMonthly]);
+  const momDailyData   = useMemo(() => momDailyVals   ? prices.map((p, i) => ({ date: p.date, value: momDailyVals[i]   })) : [], [prices, momDailyVals]);
+  const momWeeklyData  = useMemo(() => momWeeklyVals  ? prices.map((p, i) => ({ date: p.date, value: momWeeklyVals[i]  })) : [], [prices, momWeeklyVals]);
+  const momMonthlyData = useMemo(() => momMonthlyVals ? prices.map((p, i) => ({ date: p.date, value: momMonthlyVals[i] })) : [], [prices, momMonthlyVals]);
 
   if (!asset || !prices.length) return null;
 
@@ -233,6 +240,40 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
           </ResponsiveContainer>
         </div>
       )}
+
+      {/* Momentum sub-charts */}
+      {(['Daily', 'Weekly', 'Monthly'] as const).map(period => {
+        const dataMap = { Daily: momDailyData, Weekly: momWeeklyData, Monthly: momMonthlyData };
+        const labelMap = { Daily: 'Momentum Daily (ROC 1)', Weekly: 'Momentum Weekly (ROC 5)', Monthly: 'Momentum Monthly (ROC 21)' };
+        const keyMap = { Daily: 'momentumDaily', Weekly: 'momentumWeekly', Monthly: 'momentumMonthly' } as const;
+        const d = dataMap[period];
+        if (!activeTools[keyMap[period]] || !d.filter(x => x.value != null).length) return null;
+        return (
+          <div key={period} className="mt-2">
+            <p className="text-[10px] text-sky-400 font-semibold mb-1">{labelMap[period]}</p>
+            <ResponsiveContainer width="100%" height={70}>
+              <ComposedChart data={d} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+                <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+                <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={36}
+                  tickFormatter={v => `${(v as number).toFixed(1)}%`} />
+                <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.5} />
+                <Bar dataKey="value" barSize={2}>
+                  {d.map((entry, i) => (
+                    <Cell key={i} fill={(entry.value ?? 0) >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.6} />
+                  ))}
+                </Bar>
+                <Line type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={1.5} dot={false} connectNulls={false} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+                  formatter={(v: number) => [v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—', labelMap[period]]}
+                  labelFormatter={l => fmtD(l as string)}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      })}
 
       <ChartTools data={prices} activeTools={activeTools} onChange={onToolsChange} />
     </div>
