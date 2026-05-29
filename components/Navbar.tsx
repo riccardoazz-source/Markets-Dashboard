@@ -40,13 +40,13 @@ export function Navbar({ active, onSelect }: Props) {
           </div>
 
           {/* Desktop nav — hidden on mobile */}
-          <nav className="hidden sm:flex gap-0.5 flex-1 justify-end">
+          <nav className="hidden sm:flex gap-0.5 flex-1 justify-end overflow-x-auto scrollbar-hide">
             {SECTIONS.map(s => (
               <button
                 key={s.id}
                 onClick={() => onSelect(s.id)}
                 className={clsx(
-                  'px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-150 whitespace-nowrap',
+                  'px-2 py-1.5 text-xs lg:px-3 lg:text-sm font-medium rounded-md transition-all duration-150 whitespace-nowrap shrink-0',
                   active === s.id
                     ? 'bg-accent text-white'
                     : 'text-gray-400 hover:text-gray-100 hover:bg-border'
