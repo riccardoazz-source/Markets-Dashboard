@@ -393,10 +393,10 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'SHY',   name: 'US Treasury 1-3yr',       category: 'Bonds',      type: 'sector' },
   { symbol: 'IEF',   name: 'US Treasury 7-10yr',      category: 'Bonds',      type: 'sector' },
   { symbol: 'TLT',   name: 'US Treasury 20+yr',       category: 'Bonds',      type: 'sector' },
-  // EU Government Bonds — EUR-listed on Xetra (NAV in EUR)
-  { symbol: 'IBGS.DE',name: 'EU Govt Bond 1-3yr',     category: 'Bonds',      type: 'sector' },
-  { symbol: 'IBGM.DE',name: 'EU Govt Bond 3-7yr',     category: 'Bonds',      type: 'sector' },
-  { symbol: 'IBGL.DE',name: 'EU Govt Bond 15-30yr',   category: 'Bonds',      type: 'sector' },
+  // EU Government Bonds — EUR-listed on Euronext Amsterdam (NAV in EUR)
+  { symbol: 'IBGS.AS',name: 'EU Govt Bond 1-3yr',     category: 'Bonds',      type: 'sector' },
+  { symbol: 'IBGM.AS',name: 'EU Govt Bond 7-10yr',    category: 'Bonds',      type: 'sector' },
+  { symbol: 'IBGL.AS',name: 'EU Govt Bond 15-30yr',   category: 'Bonds',      type: 'sector' },
 ];
 
 // Currency metadata — flag emoji + ISO-3166 country code + full name, keyed by

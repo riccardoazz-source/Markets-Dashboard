@@ -127,9 +127,12 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
   useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); setDivData(null); }, [selected]);
 
-  // Fetch adjusted-price + dividend data for distributing ETFs
+  // Fetch adjusted-price + dividend data for distributing ETFs.
+  // Don't gate on live dividendYield — some LSE/Euronext listings omit it from
+  // the quote endpoint even though they distribute. The /api/stock response is
+  // the source of truth: divData is only set below when real dividend events exist.
   useEffect(() => {
-    if (!selected || !live[selected]?.dividendYield) return;
+    if (!selected) return;
     const params = customRange
       ? `symbol=${encodeURIComponent(selected)}&timeframe=${timeframe}&from=${customRange.from}&to=${customRange.to}`
       : `symbol=${encodeURIComponent(selected)}&timeframe=${timeframe}`;
@@ -141,7 +144,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
         if (adj.length > 0 || divs.length > 0) setDivData({ adjPrices: adj, dividends: divs });
       })
       .catch(() => {});
-  }, [selected, timeframe, customRange, live]);
+  }, [selected, timeframe, customRange]);
 
   // Merge static config with live data — always renders every sector
   const merged = SECTORS.map(s => ({
