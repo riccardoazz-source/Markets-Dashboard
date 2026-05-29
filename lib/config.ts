@@ -383,7 +383,11 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'BOTZ',  name: 'Robotics & Automation',   category: 'Industrial', type: 'sector' },
   { symbol: 'DRIV',  name: 'Electric Vehicles',       category: 'EV',         type: 'sector' },
   { symbol: 'XLB',   name: 'Materials',               category: 'Materials',  type: 'sector' },
-  { symbol: 'XLRE',  name: 'Real Estate',             category: 'Real Estate',type: 'sector' },
+  { symbol: 'XLRE',  name: 'Real Estate (US)',        category: 'Real Estate',type: 'sector' },
+  { symbol: 'IYR',   name: 'iShares US Real Estate',  category: 'Real Estate',type: 'sector' },
+  { symbol: 'IPRP.L',name: 'iShares EU Property Yield',category: 'Real Estate',type: 'sector' },
+  { symbol: 'IUKP.L',name: 'iShares UK Property',     category: 'Real Estate',type: 'sector' },
+  { symbol: 'BIZD',  name: 'BDC Income (VanEck)',     category: 'BDC',        type: 'sector' },
   { symbol: 'XLU',   name: 'Utilities',               category: 'Utilities',  type: 'sector' },
   // USD Treasury long-duration UCITS ETFs (listed on LSE — accumulating & distributing)
   { symbol: 'IBTL.L',name: 'US T-Bond 20+yr (Acc)',  category: 'Bonds',      type: 'sector' },
