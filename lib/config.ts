@@ -385,13 +385,18 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'XLB',   name: 'Materials',               category: 'Materials',  type: 'sector' },
   { symbol: 'XLRE',  name: 'Real Estate (US)',        category: 'Real Estate',type: 'sector' },
   { symbol: 'IYR',   name: 'iShares US Real Estate',  category: 'Real Estate',type: 'sector' },
-  { symbol: 'IPRP.L',name: 'iShares EU Property Yield',category: 'Real Estate',type: 'sector' },
+  { symbol: 'IPRP.AS',name: 'iShares EU Property Yield',category: 'Real Estate',type: 'sector' },
   { symbol: 'IUKP.L',name: 'iShares UK Property',     category: 'Real Estate',type: 'sector' },
   { symbol: 'BIZD',  name: 'BDC Income (VanEck)',     category: 'BDC',        type: 'sector' },
   { symbol: 'XLU',   name: 'Utilities',               category: 'Utilities',  type: 'sector' },
-  // USD Treasury long-duration UCITS ETFs (listed on LSE — accumulating & distributing)
-  { symbol: 'IBTL.L',name: 'US T-Bond 20+yr (Acc)',  category: 'Bonds',      type: 'sector' },
-  { symbol: 'IDTL.L',name: 'US T-Bond 20+yr (Dist)', category: 'Bonds',      type: 'sector' },
+  // US Treasuries — USD-listed on NYSE (NAV in USD)
+  { symbol: 'SHY',   name: 'US Treasury 1-3yr',       category: 'Bonds',      type: 'sector' },
+  { symbol: 'IEF',   name: 'US Treasury 7-10yr',      category: 'Bonds',      type: 'sector' },
+  { symbol: 'TLT',   name: 'US Treasury 20+yr',       category: 'Bonds',      type: 'sector' },
+  // EU Government Bonds — EUR-listed on Xetra (NAV in EUR)
+  { symbol: 'IBGS.DE',name: 'EU Govt Bond 1-3yr',     category: 'Bonds',      type: 'sector' },
+  { symbol: 'IBGM.DE',name: 'EU Govt Bond 3-7yr',     category: 'Bonds',      type: 'sector' },
+  { symbol: 'IBGL.DE',name: 'EU Govt Bond 15-30yr',   category: 'Bonds',      type: 'sector' },
 ];
 
 // Currency metadata — flag emoji + ISO-3166 country code + full name, keyed by
