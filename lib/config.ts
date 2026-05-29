@@ -325,8 +325,6 @@ export const INDEXES: AssetConfig[] = [
   { symbol: '^AXJO',     name: 'ASX 200',               category: 'Australia',      region: 'Asia',    type: 'index' },
   { symbol: '^GSPTSE',   name: 'TSX Composite',         category: 'Canada',         region: 'America', type: 'index' },
   { symbol: '^BVSP',     name: 'Bovespa',               category: 'Brazil',         region: 'America', type: 'index' },
-  { symbol: 'NANC',      name: 'Unusual Whales Democrat', category: 'Politics',     region: 'America', type: 'etf'   },
-  { symbol: 'GOP',       name: 'Unusual Whales Republican', category: 'Politics',   region: 'America', type: 'etf'   },
 ];
 
 export const COMMODITIES: AssetConfig[] = [
@@ -390,6 +388,8 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'IPRP.AS',name: 'iShares EU Property Yield',category: 'Real Estate',type: 'sector' },
   { symbol: 'IUKP.L',name: 'iShares UK Property',     category: 'Real Estate',type: 'sector' },
   { symbol: 'BIZD',  name: 'BDC Income (VanEck)',     category: 'BDC',        type: 'sector' },
+  { symbol: 'NANC',  name: 'Dem. Politicians (NANC)', category: 'Politics',   type: 'sector' },
+  { symbol: 'GOP',   name: 'Rep. Politicians (GOP)',  category: 'Politics',   type: 'sector' },
   { symbol: 'XLU',   name: 'Utilities',               category: 'Utilities',  type: 'sector' },
   // US Treasuries — USD-listed on NYSE (NAV in USD)
   { symbol: 'SHY',   name: 'US Treasury 1-3yr',       category: 'Bonds',      type: 'sector' },
