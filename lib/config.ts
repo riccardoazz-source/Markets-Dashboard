@@ -325,6 +325,8 @@ export const INDEXES: AssetConfig[] = [
   { symbol: '^AXJO',     name: 'ASX 200',               category: 'Australia',      region: 'Asia',    type: 'index' },
   { symbol: '^GSPTSE',   name: 'TSX Composite',         category: 'Canada',         region: 'America', type: 'index' },
   { symbol: '^BVSP',     name: 'Bovespa',               category: 'Brazil',         region: 'America', type: 'index' },
+  { symbol: 'NANC',      name: 'Unusual Whales Democrat', category: 'Politics',     region: 'America', type: 'etf'   },
+  { symbol: 'GOP',       name: 'Unusual Whales Republican', category: 'Politics',   region: 'America', type: 'etf'   },
 ];
 
 export const COMMODITIES: AssetConfig[] = [
