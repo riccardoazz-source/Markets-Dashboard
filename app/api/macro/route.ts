@@ -1439,6 +1439,15 @@ async function fetchMacroSeries(
       const pts = fred.length ? fred : dbn;
       return pts.map(p => ({ date: p.date, value: p.value / 1000 }));
     }
+    // CMRMTSPL: Real Manufacturing & Trade Sales in millions of chained $ → divide by 1000 for billions.
+    if (fredId === 'CMRMTSPL') {
+      const [fred, dbn] = await Promise.all([
+        fetchFRED('CMRMTSPL', fromDate, 8_000),
+        fetchDBnomicsFRED('CMRMTSPL', fromDate, 8_000),
+      ]);
+      const pts = fred.length ? fred : dbn;
+      return pts.map(p => ({ date: p.date, value: p.value / 1000 }));
+    }
     return [];
   }
 

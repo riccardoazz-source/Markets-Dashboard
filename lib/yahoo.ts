@@ -29,6 +29,10 @@ export interface YahooQuote {
   ytdChangePercent: number | null;
   mtdChangePercent: number | null;
   fiveYearChangePercent: number | null;
+  /** Annualized 5-year CAGR (%). Falls back to since-inception annualization for younger assets. */
+  fiveYearCagrPercent: number | null;
+  /** True when a full ≥5-year window of data backs fiveYearCagrPercent (no asterisk needed). */
+  fiveYearFull: boolean;
   trailingPE: number | null;
   forwardPE: number | null;
   marketCap: number | null;
@@ -73,6 +77,25 @@ function computeFiveYear(price: number, timestamps: number[], closes: (number | 
     }
   }
   return null;
+}
+
+// 5Y CAGR (annualized) + whether a full ≥5-year window of data exists.
+// Baseline = first valid close on/after 5 years ago. If the asset is younger
+// than 5y, that baseline is its inception, so the CAGR is annualized over the
+// actual (shorter) span and `full` is false → caller marks the figure with an
+// asterisk to signal "less than 5 years of data".
+function computeFiveYearCagr(price: number, timestamps: number[], closes: (number | null)[]): { cagr: number | null; full: boolean } {
+  const fiveYearsAgo = Math.floor((Date.now() - 5 * 365 * 86_400_000) / 1000);
+  for (let i = 0; i < timestamps.length; i++) {
+    const c = closes[i];
+    if (c != null && c > 0 && timestamps[i] >= fiveYearsAgo) {
+      const years = (Date.now() / 1000 - timestamps[i]) / (365.25 * 86_400);
+      if (years < 0.5 || price <= 0) return { cagr: null, full: false };
+      const cagr = (Math.pow(price / c, 1 / years) - 1) * 100;
+      return { cagr, full: years >= 4.9 };
+    }
+  }
+  return { cagr: null, full: false };
 }
 
 // 52-week reference: first valid close on/after 365 days ago.
@@ -421,6 +444,8 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
         (it.ytdReturn as number) != null ? (it.ytdReturn as number) * 100 : null,
       mtdChangePercent: null,
       fiveYearChangePercent: null,
+      fiveYearCagrPercent: null,
+      fiveYearFull: false,
       trailingPE: (it.trailingPE as number) ?? null,
       forwardPE: (it.forwardPE as number) ?? null,
       marketCap: (it.marketCap as number) ?? null,
@@ -465,6 +490,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
   const change = price - prev;
 
   const divYield = computeDivYieldFromEvents(result, price);
+  const fiveYrCagr = computeFiveYearCagr(price, timestamps, closes);
   return {
     symbol,
     name: (m.shortName as string) ?? (m.longName as string) ?? symbol,
@@ -479,6 +505,8 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     ytdChangePercent: computeYtd(price, timestamps, closes),
     mtdChangePercent: computeMtd(price, timestamps, closes),
     fiveYearChangePercent: computeFiveYear(price, timestamps, closes),
+    fiveYearCagrPercent: fiveYrCagr.cagr,
+    fiveYearFull: fiveYrCagr.full,
     trailingPE: null,
     forwardPE: null,
     marketCap: null,
@@ -540,6 +568,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
     }
     const changePercent = prev > 0 ? ((price - prev) / prev) * 100 : 0;
     const change = prev > 0 ? price - prev : 0;
+    const fiveYrCagr = computeFiveYearCagr(price, timestamps, closes);
 
     return {
       symbol,
@@ -555,6 +584,8 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       ytdChangePercent: computeYtd(price, timestamps, closes),
       mtdChangePercent: computeMtd(price, timestamps, closes),
       fiveYearChangePercent: computeFiveYear(price, timestamps, closes),
+      fiveYearCagrPercent: fiveYrCagr.cagr,
+      fiveYearFull: fiveYrCagr.full,
       trailingPE: null,
       forwardPE: null,
       marketCap: null,
@@ -622,6 +653,8 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
         ytdChangePercent: it.ytdReturn != null ? Number(it.ytdReturn) * 100 : null,
         mtdChangePercent: null,
         fiveYearChangePercent: null,
+        fiveYearCagrPercent: null,
+        fiveYearFull: false,
         trailingPE: it.trailingPE != null ? Number(it.trailingPE) : null,
         forwardPE:  it.forwardPE  != null ? Number(it.forwardPE)  : null,
         marketCap:  it.marketCap  != null ? Number(it.marketCap)  : null,
@@ -754,6 +787,8 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
             ytdChangePercent: null,
             mtdChangePercent: null,
             fiveYearChangePercent: null,
+            fiveYearCagrPercent: null,
+            fiveYearFull: false,
             trailingPE,
             forwardPE,
             marketCap: typeof marketCapRaw === 'number' ? marketCapRaw : null,

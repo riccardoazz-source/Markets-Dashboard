@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData, CryptoData } from '@/lib/types';
-import { formatPrice, formatPercent, formatMarketCap, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
+import { formatPrice, formatPercent, formatCagr, formatMarketCap, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -13,13 +13,14 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
-type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent';
+type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'change24hPercent',     label: 'Day' },
   { value: 'mtdChangePercent',     label: 'MTD' },
   { value: 'ytdChangePercent',     label: 'YTD' },
   { value: 'fiveYearChangePercent',label: '5Y' },
+  { value: 'fiveYearCagrPercent',  label: 'CAGR' },
 ];
 
 export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
@@ -229,6 +230,11 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 {coin.fiveYearChangePercent != null && (
                   <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.fiveYearChangePercent))}>
                     5Y: {formatPercent(coin.fiveYearChangePercent, 1)}
+                  </p>
+                )}
+                {coin.fiveYearCagrPercent != null && (
+                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.fiveYearCagrPercent))}>
+                    5Y CAGR: {formatCagr(coin.fiveYearCagrPercent, coin.fiveYearFull)}
                   </p>
                 )}
               </button>

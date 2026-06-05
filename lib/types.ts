@@ -15,6 +15,10 @@ export interface QuoteData {
   ytdChangePercent?: number | null;
   mtdChangePercent?: number | null;
   fiveYearChangePercent?: number | null;
+  /** Annualized 5-year CAGR (%). Annualized over actual span when <5y of data. */
+  fiveYearCagrPercent?: number | null;
+  /** True when ≥5y of data backs the CAGR; false → display an asterisk. */
+  fiveYearFull?: boolean;
   volume?: number | null;
   /** Trailing annual dividend yield as a decimal (e.g. 0.012 = 1.2%). Present and > 0 when the asset pays dividends. */
   dividendYield?: number | null;
@@ -51,6 +55,10 @@ export interface CryptoData {
   mtdChangePercent?: number | null;
   ytdChangePercent?: number | null;
   fiveYearChangePercent?: number | null;
+  /** Annualized 5-year CAGR (%). Annualized over actual span when <5y of data. */
+  fiveYearCagrPercent?: number | null;
+  /** True when ≥5y of data backs the CAGR; false → display an asterisk. */
+  fiveYearFull?: boolean;
   marketCap: number;
   volume24h: number;
   image?: string;

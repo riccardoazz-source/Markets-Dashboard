@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { INDEXES } from '@/lib/config';
 import { QuoteData, HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPrice, formatPercent, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, type DividendEvent } from '@/lib/utils';
+import { formatPrice, formatPercent, formatCagr, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, type DividendEvent } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -18,13 +18,14 @@ import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react'
 
 const REGIONS = ['All', 'America', 'EU', 'Asia', 'Global', 'EM'];
 
-type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent';
+type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'changePercent',         label: 'Day' },
   { value: 'mtdChangePercent',      label: 'MTD' },
   { value: 'ytdChangePercent',      label: 'YTD' },
   { value: 'fiveYearChangePercent', label: '5Y' },
+  { value: 'fiveYearCagrPercent',   label: 'CAGR' },
 ];
 
 export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
@@ -136,6 +137,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     if (key === 'changePercent') return q.changePercent ?? null;
     if (key === 'mtdChangePercent') return q.mtdChangePercent ?? null;
     if (key === 'ytdChangePercent') return q.ytdChangePercent ?? null;
+    if (key === 'fiveYearCagrPercent') return q.fiveYearCagrPercent ?? null;
     return q.fiveYearChangePercent ?? null;
   };
 
@@ -251,6 +253,11 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                     {q.fiveYearChangePercent != null && (
                       <p className={clsx('text-[10px] mt-0.5', colorForPercent(q.fiveYearChangePercent))}>
                         5Y: {formatPercent(q.fiveYearChangePercent, 1)}
+                      </p>
+                    )}
+                    {q.fiveYearCagrPercent != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(q.fiveYearCagrPercent))}>
+                        5Y CAGR: {formatCagr(q.fiveYearCagrPercent, q.fiveYearFull)}
                       </p>
                     )}
                   </>

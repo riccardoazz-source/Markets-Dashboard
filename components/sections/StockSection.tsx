@@ -182,13 +182,14 @@ function detectReportingFreq(eps: EarningsPoint[]): string {
 
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
-type StockSortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent';
+type StockSortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
 const WATCHLIST_SORT_OPTIONS: { value: StockSortKey; label: string }[] = [
   { value: 'changePercent',         label: 'Day' },
   { value: 'mtdChangePercent',      label: 'MTD' },
   { value: 'ytdChangePercent',      label: 'YTD' },
   { value: 'fiveYearChangePercent', label: '5Y' },
+  { value: 'fiveYearCagrPercent',   label: 'CAGR' },
 ];
 
 interface SearchHit { symbol: string; name: string; exchange: string; type: string }
@@ -824,6 +825,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       if (watchlistSort === 'changePercent') return q.changePercent ?? null;
       if (watchlistSort === 'mtdChangePercent') return q.mtdChangePercent ?? null;
       if (watchlistSort === 'ytdChangePercent') return q.ytdChangePercent ?? null;
+      if (watchlistSort === 'fiveYearCagrPercent') return q.fiveYearCagrPercent ?? null;
       return q.fiveYearChangePercent ?? null;
     };
     return [...watchlistSymbols].sort((a, b) => {
@@ -950,6 +952,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 const mtd = q?.mtdChangePercent ?? null;
                 const ytd = q?.ytdChangePercent ?? null;
                 const fiveYear = q?.fiveYearChangePercent ?? null;
+                const cagr = q?.fiveYearCagrPercent ?? null;
+                const cagrFull = q?.fiveYearFull ?? false;
                 const isSelected = selected?.symbol === sym;
                 return (
                   <button
@@ -992,7 +996,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                     {q?.price != null && (
                       <p className="text-sm font-bold text-white">{formatPrice(q.price, q.currency ?? 'USD')}</p>
                     )}
-                    {(mtd != null || ytd != null || fiveYear != null) && (
+                    {(mtd != null || ytd != null || fiveYear != null || cagr != null) && (
                       <div className="mt-1.5 pt-1.5 border-t border-border/40 space-y-0.5">
                         {mtd != null && (
                           <div className="flex items-center justify-between">
@@ -1015,6 +1019,14 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                             <span className="text-[9px] text-gray-600 uppercase tracking-wide">5Y</span>
                             <span className={clsx('text-[10px] font-semibold tabular-nums', fiveYear >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                               {fiveYear >= 0 ? '+' : ''}{fiveYear.toFixed(2)}%
+                            </span>
+                          </div>
+                        )}
+                        {cagr != null && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] text-gray-600 uppercase tracking-wide">5Y CAGR</span>
+                            <span className={clsx('text-[10px] font-semibold tabular-nums', cagr >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                              {cagr >= 0 ? '+' : ''}{cagr.toFixed(1)}%{cagrFull ? '' : '*'}
                             </span>
                           </div>
                         )}

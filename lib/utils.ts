@@ -22,6 +22,13 @@ export function formatPercent(value: number, decimals = 2): string {
   return `${sign}${value.toFixed(decimals)}%`;
 }
 
+// Format an annualized 5Y CAGR. A trailing asterisk marks figures backed by
+// less than 5 years of data (full === false), i.e. annualized since inception.
+export function formatCagr(value: number | null | undefined, full: boolean | undefined, decimals = 1): string {
+  if (value == null || !isFinite(value)) return '—';
+  return `${formatPercent(value, decimals)}${full ? '' : '*'}`;
+}
+
 export function formatNumber(value: number, decimals = 2): string {
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,

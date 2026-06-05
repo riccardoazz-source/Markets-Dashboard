@@ -23,7 +23,7 @@ export async function GET() {
       return NextResponse.json(
         SECTORS.map((s, i) => ({
           symbol: s.symbol, name: s.name, category: s.category,
-          price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null, fiveYearReturn: null,
+          price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null, fiveYearReturn: null, fiveYearCagr: null, fiveYearFull: false,
           high52w: null, low52w: null, dividendYield: null, rank: i + 1,
         }))
       );
@@ -41,6 +41,8 @@ export async function GET() {
         ytdReturn: q?.ytdChangePercent ?? null,
         mtdReturn: q?.mtdChangePercent ?? null,
         fiveYearReturn: q?.fiveYearChangePercent ?? null,
+        fiveYearCagr: q?.fiveYearCagrPercent ?? null,
+        fiveYearFull: q?.fiveYearFull ?? false,
         high52w: q?.high52w ?? null,
         low52w: q?.low52w ?? null,
         dividendYield: q?.dividendYield ?? null,

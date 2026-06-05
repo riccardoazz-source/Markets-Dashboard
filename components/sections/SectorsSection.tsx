@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { SECTORS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPercent, formatPrice, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, type DividendEvent } from '@/lib/utils';
+import { formatPercent, formatPrice, formatCagr, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, type DividendEvent } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -23,6 +23,8 @@ interface SectorLiveData {
   ytdReturn: number | null;
   mtdReturn: number | null;
   fiveYearReturn: number | null;
+  fiveYearCagr?: number | null;
+  fiveYearFull?: boolean;
   high52w: number | null;
   low52w: number | null;
   dividendYield?: number | null;
@@ -32,16 +34,18 @@ interface SectorLiveData {
 // Seed grid immediately from static config — never empty
 const INITIAL: SectorLiveData = {
   price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null, fiveYearReturn: null,
+  fiveYearCagr: null, fiveYearFull: false,
   high52w: null, low52w: null, dividendYield: null, currency: null,
 };
 
-type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn';
+type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn' | 'fiveYearCagr';
 
 const SORT_OPTIONS: { value: SectorSortKey; label: string }[] = [
   { value: 'changePercent',  label: 'Day' },
   { value: 'mtdReturn',      label: 'MTD' },
   { value: 'ytdReturn',      label: 'YTD' },
   { value: 'fiveYearReturn', label: '5Y' },
+  { value: 'fiveYearCagr',   label: 'CAGR' },
 ];
 
 // Distinct categories from the SECTORS config, plus an 'All' option.
@@ -74,6 +78,8 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
         ytdReturn: number | null;
         mtdReturn: number | null;
         fiveYearReturn: number | null;
+        fiveYearCagr: number | null;
+        fiveYearFull: boolean;
         high52w: number | null;
         low52w: number | null;
         dividendYield: number | null;
@@ -292,6 +298,11 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                   {sector.fiveYearReturn != null && (
                     <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.fiveYearReturn))}>
                       5Y: {formatPercent(sector.fiveYearReturn, 1)}
+                    </p>
+                  )}
+                  {sector.fiveYearCagr != null && (
+                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.fiveYearCagr))}>
+                      5Y CAGR: {formatCagr(sector.fiveYearCagr, sector.fiveYearFull)}
                     </p>
                   )}
                 </>

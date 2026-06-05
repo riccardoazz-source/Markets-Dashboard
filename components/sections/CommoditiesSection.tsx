@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { COMMODITIES } from '@/lib/config';
 import { QuoteData, HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPrice, formatPercent, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
+import { formatPrice, formatPercent, formatCagr, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -13,13 +13,14 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
-type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent';
+type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'changePercent',         label: 'Day' },
   { value: 'mtdChangePercent',      label: 'MTD' },
   { value: 'ytdChangePercent',      label: 'YTD' },
   { value: 'fiveYearChangePercent', label: '5Y' },
+  { value: 'fiveYearCagrPercent',   label: 'CAGR' },
 ];
 
 const COMMODITY_CATEGORIES = ['All', ...Array.from(new Set(COMMODITIES.map(c => c.category)))];
@@ -91,6 +92,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
     if (key === 'changePercent') return q.changePercent ?? null;
     if (key === 'mtdChangePercent') return q.mtdChangePercent ?? null;
     if (key === 'ytdChangePercent') return q.ytdChangePercent ?? null;
+    if (key === 'fiveYearCagrPercent') return q.fiveYearCagrPercent ?? null;
     return q.fiveYearChangePercent ?? null;
   };
 
@@ -198,6 +200,11 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                     {fiveYear != null && (
                       <p className={clsx('text-[10px] mt-0.5', colorForPercent(fiveYear))}>
                         5Y: {formatPercent(fiveYear, 1)}
+                      </p>
+                    )}
+                    {q.fiveYearCagrPercent != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(q.fiveYearCagrPercent))}>
+                        5Y CAGR: {formatCagr(q.fiveYearCagrPercent, q.fiveYearFull)}
                       </p>
                     )}
                   </>

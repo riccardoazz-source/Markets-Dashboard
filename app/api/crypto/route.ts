@@ -158,7 +158,7 @@ async function fetchFiveYearAnchors(ids: string[]): Promise<Map<string, number>>
 // Yahoo isn't rate-limited like CoinGecko's free tier, so it's the reliable source
 // when CoinGecko anchor fetches fail (which is most of the time on cold serverless
 // instances). One round-trip per coin instead of three.
-interface YahooAnchors { fiveY: number | null; ytd: number | null; mtd: number | null }
+interface YahooAnchors { fiveY: number | null; fiveYTs: number | null; ytd: number | null; mtd: number | null }
 const yahooAnchorCache = new Map<string, { anchors: YahooAnchors; day: string }>();
 
 async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
@@ -167,7 +167,7 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
   if (cached && cached.day === today) return cached.anchors;
 
   const symbol = CRYPTO_YAHOO_SYMBOLS[coinId];
-  const empty: YahooAnchors = { fiveY: null, ytd: null, mtd: null };
+  const empty: YahooAnchors = { fiveY: null, fiveYTs: null, ytd: null, mtd: null };
   if (!symbol) return empty;
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5y&interval=1d&includePrePost=false`;
@@ -196,15 +196,28 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
       }
       return null;
     };
+    // Same scan as findFirstValid, but also returns the bar's timestamp so the
+    // caller can annualize the 5Y CAGR over the actual data span (coins younger
+    // than 5y get a shorter span and an asterisk).
+    const findFirstValidTs = (fromTs: number): number | null => {
+      for (let i = 0; i < ts.length; i++) {
+        if (ts[i] < fromTs) continue;
+        const c = closes[i];
+        if (typeof c === 'number' && isFinite(c) && c > 0) return ts[i];
+      }
+      return null;
+    };
 
     const now = new Date();
     const year = now.getUTCFullYear();
     const jan1 = Math.floor(Date.UTC(year, 0, 1) / 1000);
     const monthStart = Math.floor(Date.UTC(year, now.getUTCMonth(), 1) / 1000);
     const fiveYearsAgo = Math.floor((Date.now() - 5 * 365 * 86_400_000) / 1000);
+    const fiveYTs = findFirstValidTs(fiveYearsAgo);
 
     const anchors: YahooAnchors = {
       fiveY: findFirstValid(fiveYearsAgo),
+      fiveYTs,
       ytd: findFirstValid(jan1),
       mtd: findFirstValid(monthStart),
     };
@@ -221,7 +234,7 @@ async function fetchYahooAnchorsAll(ids: string[]): Promise<Map<string, YahooAnc
   const map = new Map<string, YahooAnchors>();
   // Yahoo is fine with parallel — no rate limit at this volume (8 coins)
   const results = await Promise.all(
-    ids.map(id => fetchYahooCryptoAnchors(id).then(a => ({ id, a })).catch(() => ({ id, a: { fiveY: null, ytd: null, mtd: null } as YahooAnchors })))
+    ids.map(id => fetchYahooCryptoAnchors(id).then(a => ({ id, a })).catch(() => ({ id, a: { fiveY: null, fiveYTs: null, ytd: null, mtd: null } as YahooAnchors })))
   );
   for (const { id, a } of results) map.set(id, a);
   return map;
@@ -274,7 +287,7 @@ export async function GET(req: NextRequest) {
         const sym = (coin.symbol as string)?.toUpperCase();
         const currentPrice = coin.current_price as number;
         const id = coin.id as string;
-        const ya = yahooAnchors.get(id) ?? { fiveY: null, ytd: null, mtd: null };
+        const ya = yahooAnchors.get(id) ?? { fiveY: null, fiveYTs: null, ytd: null, mtd: null };
 
         // YTD: CoinGecko anchor first (precise Jan 1 UTC), Yahoo fallback (first
         // trading day ≥ Jan 1).
@@ -295,11 +308,29 @@ export async function GET(req: NextRequest) {
 
         // 5Y: CoinGecko anchor → Yahoo anchor. Yahoo is the reliable primary
         // because CoinGecko's /history endpoint is rate-limited on cold starts.
-        const fiveYearPrice = fiveYearAnchors.get(id) ?? ya.fiveY;
+        const cgFiveYear = fiveYearAnchors.get(id);
+        const fiveYearPrice = cgFiveYear ?? ya.fiveY;
         const fiveYearChangePercent =
           fiveYearPrice != null && currentPrice > 0
             ? ((currentPrice - fiveYearPrice) / fiveYearPrice) * 100
             : null;
+
+        // 5Y CAGR (annualized). The CoinGecko anchor is a true 5-years-ago price
+        // (≈5y span ⇒ full). The Yahoo anchor is the first available bar within
+        // the 5y window — for coins younger than 5y it's the inception bar, so we
+        // annualize over the real span and flag it as not-full (asterisk).
+        let fiveYearCagrPercent: number | null = null;
+        let fiveYearFull = false;
+        if (fiveYearPrice != null && fiveYearPrice > 0 && currentPrice > 0) {
+          let years = 5;
+          if (cgFiveYear == null && ya.fiveYTs != null) {
+            years = (Date.now() / 1000 - ya.fiveYTs) / (365.25 * 86_400);
+          }
+          if (years >= 0.5) {
+            fiveYearCagrPercent = (Math.pow(currentPrice / fiveYearPrice, 1 / years) - 1) * 100;
+            fiveYearFull = years >= 4.9;
+          }
+        }
         return {
           id: coin.id,
           symbol: sym,
@@ -312,6 +343,8 @@ export async function GET(req: NextRequest) {
           mtdChangePercent,
           ytdChangePercent,
           fiveYearChangePercent,
+          fiveYearCagrPercent,
+          fiveYearFull,
           marketCap: coin.market_cap,
           volume24h: coin.total_volume,
           image: coin.image,

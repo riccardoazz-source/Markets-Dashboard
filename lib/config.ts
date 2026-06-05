@@ -79,6 +79,10 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'INDPRO',   name: 'Industrial Production',  category: 'Growth',      unit: 'idx',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/INDPRO' } },
+  // CMRMTSPL is reported in millions of chained 2017 $ on FRED; the computed handler divides by 1000 → billions.
+  { id: 'CMRMTSPL', name: 'Real Mfg & Trade Sales', category: 'Growth',      unit: 'B$',
+    source: { type: 'computed', label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/CMRMTSPL' } },
   // Employment
   { id: 'UNRATE',   name: 'US Unemployment',        category: 'Employment',  unit: '%',
     source: { type: 'bls',     label: 'BLS',
