@@ -1,7 +1,7 @@
 import { AssetConfig } from './types';
 
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$' | '$';
-export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Sentiment' | 'Crypto' | 'Debt' | 'Market Value' | 'Recessions';
+export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Currency' | 'Sentiment' | 'Crypto' | 'Debt' | 'Market Value' | 'Recessions';
 
 // ---------- Source metadata ----------
 // Each MacroIndicator declares its primary data source.
@@ -83,6 +83,9 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'CMRMTSPL', name: 'Real Mfg & Trade Sales', category: 'Growth',      unit: 'B$',
     source: { type: 'computed', label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/CMRMTSPL' } },
+  { id: 'WEI',      name: 'Weekly Economic Index',  category: 'Growth',      unit: '%',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/WEI' } },
   // Employment
   { id: 'UNRATE',   name: 'US Unemployment',        category: 'Employment',  unit: '%',
     source: { type: 'bls',     label: 'BLS',
@@ -90,6 +93,9 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'PAYEMS',   name: 'Nonfarm Payrolls',       category: 'Employment',  unit: 'K',
     source: { type: 'bls',     label: 'BLS CES',
               url: 'https://www.bls.gov/ces/' } },
+  { id: 'JTSJOL',   name: 'Job Openings (JOLTS)',   category: 'Employment',  unit: 'K',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/JTSJOL' } },
   // Real Estate
   { id: 'HOUST',    name: 'Housing Starts',         category: 'Real Estate', unit: 'K',
     source: { type: 'fred',    label: 'FRED',
@@ -101,6 +107,10 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'M2SL',     name: 'M2 Money Stock',         category: 'Money',       unit: 'B$',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/M2SL' } },
+  // TOTBKCR: Bank Credit, All Commercial Banks — already in billions on FRED (no scaling).
+  { id: 'TOTBKCR',  name: 'Bank Credit (All Comm.)', category: 'Money',      unit: 'B$',
+    source: { type: 'fred',    label: 'FRED',
+              url: 'https://fred.stlouisfed.org/series/TOTBKCR' } },
   // WALCL is reported in millions on FRED; the computed handler divides by 1000 → billions.
   { id: 'WALCL',    name: 'Fed Balance Sheet',       category: 'Money',       unit: 'B$',
     source: { type: 'computed', label: 'FRED',
@@ -131,6 +141,11 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'yahoo_price', label: 'Yahoo Finance',
               url: 'https://finance.yahoo.com/quote/%5EVIX',
               symbol: '^VIX' } },
+  // Currency — ICE US Dollar Index via Yahoo Finance
+  { id: 'DXY',      name: 'US Dollar Index (DXY)',   category: 'Currency',    unit: 'idx',
+    source: { type: 'yahoo_price', label: 'Yahoo Finance',
+              url: 'https://finance.yahoo.com/quote/DX-Y.NYB',
+              symbol: 'DX-Y.NYB' } },
   // Crypto — computed server-side; bitbo.io charts are the visual reference
   { id: 'BTC_HALVING', name: 'Bitcoin Halvings',      category: 'Crypto',      unit: 'idx',
     source: { type: 'computed', label: 'Bitcoin halving schedule',
