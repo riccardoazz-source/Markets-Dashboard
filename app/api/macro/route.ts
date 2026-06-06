@@ -571,81 +571,119 @@ async function getBitcoinMinerRevenue(
 
 // ---------- Bitcoin Market Dominance (BTC_DOMINANCE) ----------
 // BTC market cap as % of total crypto market cap.
-// Primary: CoinGecko historical market cap series for both BTC and total crypto,
-// then computes dominance = btc_mcap / total_mcap × 100.
-// Fallback: single current-value point from CoinGecko /global endpoint.
-// bitbo.io (the visual reference) blocks server-side requests, so CoinGecko is used.
+//
+// CoinGecko's historical TOTAL market cap (/global/market_cap_chart) is a paid
+// endpoint, and bitbo.io (the visual reference) blocks server-side requests.
+// So the history is reconstructed from FREE endpoints only:
+//   1. Fetch the market-cap history of a basket of the largest coins via the
+//      free /coins/{id}/market_chart endpoint (BTC + the top alts/stablecoins).
+//   2. Per day: rawDominance = btcMcap / (sum of basket mcaps) × 100. The basket
+//      covers ~85-90% of the whole market, so this slightly overstates dominance.
+//   3. Anchor the series to reality: scale every point by s = currentDominance /
+//      rawDominance(latest), where currentDominance comes from the free /global
+//      endpoint. This pins the latest value to the true figure and applies the
+//      same coverage correction across history.
+// Fallback: a single current-value point from /global if the basket fetch fails.
+const DOMINANCE_BASKET = [
+  'bitcoin', 'ethereum', 'tether', 'ripple', 'binancecoin',
+  'solana', 'usd-coin', 'dogecoin', 'cardano', 'tron',
+];
+
+function dominanceDaysParam(fromDate?: string): string {
+  if (!fromDate) return 'max';
+  const ms = Date.now() - new Date(fromDate).getTime();
+  const d = Math.ceil(ms / 86_400_000) + 2;
+  if (!isFinite(d) || d <= 0 || d > 365 * 6) return 'max';
+  return String(d);
+}
+
+async function fetchCgMarketCaps(
+  id: string,
+  days: string,
+  timeoutMs = 8_000,
+): Promise<Map<string, number>> {
+  const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      next: { revalidate: 1800 },
+      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    });
+    if (!res.ok) { console.warn(`[btc-dominance] ${id} market_chart HTTP ${res.status}`); return new Map(); }
+    const j = await res.json() as { market_caps?: [number, number][] };
+    const map = new Map<string, number>();
+    for (const [ts, mc] of j.market_caps ?? []) {
+      if (!isFinite(mc) || mc <= 0) continue;
+      // Daily key; for sub-daily (recent ranges) the last point of the day wins.
+      map.set(new Date(ts).toISOString().slice(0, 10), mc);
+    }
+    return map;
+  } catch (e) {
+    console.error(`[btc-dominance] ${id} market_chart failed:`, (e as Error).message);
+    return new Map();
+  } finally { clearTimeout(t); }
+}
+
+async function fetchCurrentBtcDominance(timeoutMs = 4_000): Promise<number | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/global', {
+      signal: ctrl.signal,
+      next: { revalidate: 1800 },
+      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+    });
+    if (!res.ok) { console.warn(`[btc-dominance] /global HTTP ${res.status}`); return null; }
+    const j = await res.json() as { data?: { market_cap_percentage?: { btc?: number } } };
+    const dom = j?.data?.market_cap_percentage?.btc;
+    return dom != null && isFinite(dom) ? dom : null;
+  } catch (e) {
+    console.error('[btc-dominance] /global failed:', (e as Error).message);
+    return null;
+  } finally { clearTimeout(t); }
+}
+
 async function fetchBitcoinDominance(
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  const cgKey = process.env.COINGECKO_API_KEY ?? '';
-  const cgHeaders: Record<string, string> = { 'User-Agent': UA, 'Accept': 'application/json' };
-  if (cgKey) cgHeaders['x-cg-demo-api-key'] = cgKey;
-  const base = 'https://api.coingecko.com/api/v3';
+  const days = dominanceDaysParam(fromDate);
 
-  const cgFetch = async (url: string, ms: number): Promise<Response | null> => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), ms);
-    try {
-      return await fetch(url, { signal: ctrl.signal, headers: cgHeaders, cache: 'no-store' });
-    } catch (e) {
-      console.error(`[btc-dominance] ${url} failed:`, (e as Error).message);
-      return null;
-    } finally { clearTimeout(t); }
-  };
-
-  const [btcRes, totalRes] = await Promise.all([
-    cgFetch(`${base}/coins/bitcoin/market_chart?vs_currency=usd&days=max`, 8_000),
-    cgFetch(`${base}/global/market_cap_chart?days=max`, 8_000),
+  const [basketMaps, currentDom] = await Promise.all([
+    Promise.all(DOMINANCE_BASKET.map(id => fetchCgMarketCaps(id, days))),
+    fetchCurrentBtcDominance(),
   ]);
 
-  const btcMap   = new Map<string, number>();
-  const totalMap = new Map<string, number>();
+  const btcMap = basketMaps[0];
 
-  if (btcRes?.ok) {
-    const j = await btcRes.json() as { market_caps?: [number, number][] };
-    for (const [ts, mc] of j.market_caps ?? []) {
-      const d = new Date(ts).toISOString().slice(0, 10);
-      if (!fromDate || d >= fromDate) btcMap.set(d, mc);
-    }
-    console.log(`[btc-dominance] btc market caps: ${btcMap.size} pts`);
-  }
-
-  if (totalRes?.ok) {
-    const j = await totalRes.json() as { market_cap_chart?: { market_cap?: [number, number][] } };
-    for (const [ts, mc] of j.market_cap_chart?.market_cap ?? []) {
-      const d = new Date(ts).toISOString().slice(0, 10);
-      if (!fromDate || d >= fromDate) totalMap.set(d, mc);
-    }
-    console.log(`[btc-dominance] total market caps: ${totalMap.size} pts`);
-  }
-
-  if (btcMap.size > 0 && totalMap.size > 0) {
-    const out: { date: string; value: number }[] = [];
+  // Reconstruct dominance from the basket if BTC history loaded.
+  if (btcMap.size > 0) {
+    const raw: { date: string; value: number }[] = [];
     for (const [d, btcMc] of btcMap) {
-      const total = totalMap.get(d);
-      if (!total || total <= 0) continue;
+      if (fromDate && d < fromDate) continue;
+      let total = 0;
+      for (const m of basketMaps) { const v = m.get(d); if (v) total += v; }
+      if (total <= 0) continue;
       const dom = (btcMc / total) * 100;
-      if (isFinite(dom) && dom > 0 && dom < 100) out.push({ date: d, value: +dom.toFixed(2) });
+      if (isFinite(dom) && dom > 0 && dom <= 100) raw.push({ date: d, value: dom });
     }
-    if (out.length > 0) {
-      out.sort((a, b) => a.date.localeCompare(b.date));
-      console.log(`[btc-dominance] ${out.length} computed dominance pts`);
+    if (raw.length > 0) {
+      raw.sort((a, b) => a.date.localeCompare(b.date));
+      // Anchor latest point to the true current dominance from /global.
+      const last = raw[raw.length - 1].value;
+      const scale = currentDom != null && last > 0 ? currentDom / last : 1;
+      const out = raw.map(p => ({ date: p.date, value: +(p.value * scale).toFixed(2) }));
+      console.log(`[btc-dominance] ${out.length} reconstructed pts (scale ${scale.toFixed(3)})`);
       return out;
     }
   }
 
-  // Fallback: single current-value point from /global
-  console.warn('[btc-dominance] historical endpoints failed; trying /global for current value');
-  const glRes = await cgFetch(`${base}/global`, 4_000);
-  if (glRes?.ok) {
-    const j = await glRes.json() as { data?: { market_cap_percentage?: { btc?: number } } };
-    const dom = j?.data?.market_cap_percentage?.btc;
-    if (dom != null && isFinite(dom)) {
-      const today = new Date().toISOString().slice(0, 10);
-      console.log(`[btc-dominance] current ${dom.toFixed(2)}% from /global`);
-      return [{ date: today, value: +dom.toFixed(2) }];
-    }
+  // Fallback: single current-value point from /global.
+  if (currentDom != null) {
+    const today = new Date().toISOString().slice(0, 10);
+    console.warn(`[btc-dominance] basket failed; using current ${currentDom.toFixed(2)}% from /global`);
+    return [{ date: today, value: +currentDom.toFixed(2) }];
   }
 
   return [];
