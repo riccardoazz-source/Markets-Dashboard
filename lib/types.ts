@@ -117,4 +117,6 @@ export interface CompareAsset {
   /** IRR (annualized) treating dividends as cash distributions */
   irr?: number;
   dividends?: { date: string; amount: number }[];
+  /** True for synthetic spread series (assetA − assetB) built in Compare. */
+  isSpread?: boolean;
 }

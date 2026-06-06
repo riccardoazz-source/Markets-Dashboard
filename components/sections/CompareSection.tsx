@@ -12,7 +12,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { CompareChart } from '@/components/charts/CompareChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { X, Search, ChevronDown, ChevronUp, Layers } from 'lucide-react';
+import { X, Search, ChevronDown, ChevronUp, Layers, Minus, Plus } from 'lucide-react';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { StackAnalysisPanel, DEFAULT_TOOLS } from '@/components/ui/StackAnalysisPanel';
 import type { ActiveTools } from '@/components/ui/ChartTools';
@@ -63,6 +63,58 @@ const nameCacheRef: Record<string, string> = {};
 // stats cards. Included in correlation as 0/1 (point-biserial correlation).
 const RECESSION_SET = new Set(RECESSION_SERIES);
 
+// ── Spread series ───────────────────────────────────────────────────────────
+// A spread is a synthetic series defined by two of the compared assets: it is
+// (assetA − assetB) computed point-by-point on the SAME values the chart shows
+// (so in "% Change" mode it is the percentage-point outperformance of A over B,
+// and in "Absolute price" mode it is the raw price difference). It is added as a
+// new line and participates in the correlation matrix like any other series.
+const SPREAD_PREFIX = '__SPREAD__';
+const SPREAD_COLORS = ['#f472b6', '#facc15', '#22d3ee', '#a3e635', '#fb923c', '#c084fc'];
+const isSpreadSymbol = (s: string) => s.startsWith(SPREAD_PREFIX);
+const spreadSymbol = (a: string, b: string) => `${SPREAD_PREFIX}${a}__${b}`;
+
+// Difference of two aligned series, keyed by date (intersection only).
+function diffSeries(a: HistoricalPoint[], b: HistoricalPoint[]): HistoricalPoint[] {
+  const bMap = new Map(b.map(d => [d.date, d.close]));
+  const out: HistoricalPoint[] = [];
+  for (const d of a) {
+    const bv = bMap.get(d.date);
+    if (bv == null || !isFinite(d.close) || !isFinite(bv)) continue;
+    out.push({ date: d.date, close: d.close - bv });
+  }
+  return out;
+}
+
+// Build the synthetic spread assets from the already-aligned display assets.
+function buildSpreadAssets(
+  base: CompareAsset[],
+  spreads: { a: string; b: string }[],
+): CompareAsset[] {
+  const bySym = new Map(base.map(a => [a.symbol, a]));
+  const out: CompareAsset[] = [];
+  spreads.forEach((sp, idx) => {
+    const A = bySym.get(sp.a);
+    const B = bySym.get(sp.b);
+    if (!A || !B) return; // an underlying asset was removed
+    // Chart line: difference of the displayed (mode-aware) values.
+    const data = diffSeries(A.data, B.data);
+    if (data.length < 2) return;
+    // Raw difference (absolute units) for stats + correlation.
+    const rawData = A.rawData && B.rawData ? diffSeries(A.rawData, B.rawData) : data;
+    out.push({
+      symbol: spreadSymbol(sp.a, sp.b),
+      name: `${A.name} − ${B.name}`,
+      type: 'index', // plain monotone line (not stepped/crypto)
+      color: SPREAD_COLORS[idx % SPREAD_COLORS.length],
+      data,
+      rawData,
+      isSpread: true,
+    });
+  });
+  return out;
+}
+
 export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
@@ -82,6 +134,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [showStack, setShowStack] = useState(false);
   const [stackAssetIdx, setStackAssetIdx] = useState(0);
   const [stackTools, setStackTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  // Spread series (assetA − assetB), defined by symbol pairs.
+  const [spreads, setSpreads] = useState<{ a: string; b: string }[]>([]);
+  const [showSpreadPanel, setShowSpreadPanel] = useState(false);
+  const [spreadA, setSpreadA] = useState<string>('');
+  const [spreadB, setSpreadB] = useState<string>('');
   // Dual search: local config + remote Yahoo search
   const [search, setSearch] = useState('');
   const [remoteHits, setRemoteHits] = useState<SearchHit[]>([]);
@@ -282,6 +339,34 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     }
   }, [jumpTo]);
 
+  // Drop spreads whose underlying assets are no longer selected.
+  useEffect(() => {
+    setSpreads(prev => {
+      const next = prev.filter(s => selectedSymbols.includes(s.a) && selectedSymbols.includes(s.b));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectedSymbols]);
+
+  // Keep the A/B pickers pointing at valid, distinct selected symbols.
+  const spreadPickable = selectedSymbols.filter(s => !isSpreadSymbol(s));
+  useEffect(() => {
+    setSpreadA(prev => (prev && spreadPickable.includes(prev) ? prev : spreadPickable[0] ?? ''));
+    setSpreadB(prev => (prev && spreadPickable.includes(prev) ? prev : spreadPickable[1] ?? spreadPickable[0] ?? ''));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSymbols]);
+
+  const addSpread = () => {
+    if (!spreadA || !spreadB || spreadA === spreadB) return;
+    setSpreads(prev =>
+      prev.some(s => s.a === spreadA && s.b === spreadB) ? prev : [...prev, { a: spreadA, b: spreadB }]
+    );
+  };
+  const removeSpread = (a: string, b: string) =>
+    setSpreads(prev => prev.filter(s => !(s.a === a && s.b === b)));
+
+  const symbolName = (s: string) =>
+    nameCacheRef[s] ?? ALL_COMPARABLE_ASSETS.find(x => x.symbol === s)?.name ?? s;
+
   const addSymbol = (symbol: string, name?: string) => {
     if (selectedSymbols.includes(symbol) || selectedSymbols.length >= 8) return;
     if (name) nameCacheRef[symbol] = name;
@@ -396,10 +481,22 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     }
   }, [assets, timeframe, customRange, normalized]);
 
+  // Synthetic spread series, derived from the aligned display assets.
+  const spreadAssets = useMemo(
+    () => buildSpreadAssets(displayAssets, spreads),
+    [displayAssets, spreads],
+  );
+  // Everything that feeds the chart, stats cards and correlation matrix.
+  const allAssets = useMemo(
+    () => [...displayAssets, ...spreadAssets],
+    [displayAssets, spreadAssets],
+  );
+
   const safeStackIdx = Math.min(stackAssetIdx, Math.max(0, displayAssets.length - 1));
-  const mainChartAssets = showStack && displayAssets.length > 1
+  const mainChartAssets = (showStack && displayAssets.length > 1
     ? displayAssets.filter((_, i) => i !== safeStackIdx)
-    : displayAssets;
+    : displayAssets
+  ).concat(spreadAssets);
 
   const correl = useMemo(() => {
     try {
@@ -407,7 +504,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       // BTC_HALVING and FOMC_MEETINGS are excluded here and added below as 0/1
       // dummies (their raw series are event markers, not continuous values).
       const DUMMY_SET = new Set(['BTC_HALVING', 'FOMC_MEETINGS']);
-      const series: { symbol: string; data: HistoricalPoint[] }[] = displayAssets
+      const series: { symbol: string; data: HistoricalPoint[] }[] = allAssets
         .filter(a => !DUMMY_SET.has(a.symbol) && (a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
 
@@ -461,7 +558,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       console.error('[CompareSection] correlationMatrix error:', e);
       return { labels: [], matrix: [] as (number | null)[][], sampleCount: 0, alignedData: [] as CorrAlignedRow[] };
     }
-  }, [displayAssets]);
+  }, [allAssets]);
 
   return (
     <div className="space-y-4">
@@ -497,6 +594,16 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
             >
               <Layers size={12} />
               Stack
+            </button>
+            <button
+              onClick={() => setShowSpreadPanel(v => !v)}
+              disabled={selectedSymbols.length < 2}
+              title="Add a spread series (asset A − asset B) as a new line"
+              className={clsx('flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full transition-all border disabled:opacity-40 disabled:cursor-not-allowed',
+                showSpreadPanel || spreads.length > 0 ? 'border-pink-400 text-pink-400 bg-pink-400/10' : 'border-border text-gray-400 hover:text-gray-200')}
+            >
+              <Minus size={12} />
+              Spread{spreads.length > 0 ? ` (${spreads.length})` : ''}
             </button>
           </div>
           <TimeframeSelector
@@ -568,6 +675,63 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         )}
       </div>
 
+      {/* Spread builder */}
+      {(showSpreadPanel || spreads.length > 0) && (
+        <div className="rounded-xl border border-pink-400/25 bg-pink-400/[0.03] p-3 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Minus size={13} className="text-pink-400" />
+            <span className="text-xs font-semibold text-gray-200">Spread</span>
+            <span className="text-[10px] text-gray-500">= A − B over time, added as a new series</span>
+          </div>
+
+          {spreadPickable.length < 2 ? (
+            <p className="text-[11px] text-gray-500">Select at least two assets to build a spread.</p>
+          ) : (
+            <div className="flex items-end gap-2 flex-wrap">
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">A</span>
+                <select value={spreadA} onChange={e => setSpreadA(e.target.value)}
+                  className="bg-bg-input border border-border rounded-lg px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-border-light max-w-[10rem]">
+                  {spreadPickable.map(s => <option key={s} value={s}>{symbolName(s)}</option>)}
+                </select>
+              </label>
+              <span className="pb-2 text-gray-400 font-bold">−</span>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-500 uppercase tracking-wider">B</span>
+                <select value={spreadB} onChange={e => setSpreadB(e.target.value)}
+                  className="bg-bg-input border border-border rounded-lg px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-border-light max-w-[10rem]">
+                  {spreadPickable.map(s => <option key={s} value={s}>{symbolName(s)}</option>)}
+                </select>
+              </label>
+              <button onClick={addSpread}
+                disabled={!spreadA || !spreadB || spreadA === spreadB}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-pink-400/50 text-pink-400 hover:bg-pink-400/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                <Plus size={12} /> Add spread
+              </button>
+            </div>
+          )}
+
+          {spreads.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {spreads.map((s, i) => (
+                <div key={`${s.a}-${s.b}`} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+                  style={{ backgroundColor: SPREAD_COLORS[i % SPREAD_COLORS.length] + '22', border: `1px solid ${SPREAD_COLORS[i % SPREAD_COLORS.length]}66`, color: 'white' }}>
+                  <span style={{ color: SPREAD_COLORS[i % SPREAD_COLORS.length] }}>●</span>
+                  {symbolName(s.a)} − {symbolName(s.b)}
+                  <button onClick={() => removeSpread(s.a, s.b)} className="ml-1 opacity-70 hover:opacity-100"><X size={11} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!normalized && (
+            <p className="text-[10px] text-amber-400/70 leading-snug">
+              In <strong>Absolute price</strong> mode the spread is the raw price difference, so it only makes sense when A and B share the same unit (e.g. two indices in $). In <strong>% Change</strong> mode it is the percentage-point outperformance of A over B.
+            </p>
+          )}
+        </div>
+      )}
+
       {logScale && !normalized && (
         <p className="text-[10px] text-amber-400/80 bg-amber-400/5 border border-amber-400/20 rounded-lg px-3 py-1.5">
           Logarithmic scale active — equal percentage moves take equal vertical space. Ideal when one asset has returns many times larger than others (e.g. BTC vs gold).
@@ -602,33 +766,54 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               same window the chart displays (commonStart → today), and prefer
               total-return values to match the dashed line. */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {displayAssets.map((a, i) => RECESSION_SET.has(a.symbol) ? null : (
+            {allAssets.map(a => RECESSION_SET.has(a.symbol) ? null : (
               <div key={a.symbol} className="rounded-xl border p-3 bg-bg-card"
-                style={{ borderColor: CHART_COLORS[i % CHART_COLORS.length] + '66' }}>
+                style={{ borderColor: a.color + '66' }}>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
                   <p className="text-sm font-semibold text-gray-100 truncate">{a.name}</p>
-                  {a.totalReturnData && (
+                  {a.isSpread ? (
+                    <span className="ml-auto shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-pink-400/10 text-pink-400 border border-pink-400/20">SPREAD</span>
+                  ) : a.totalReturnData && (
                     <span className="ml-auto shrink-0 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-400/10 text-emerald-400 border border-emerald-400/20">DIV</span>
                   )}
                 </div>
-                {a.totalReturn != null && (
-                  <div>
-                    <p className="text-[10px] text-gray-500">Return ({customRange ? 'Custom' : timeframe})</p>
-                    <p className={clsx('text-base font-bold', colorForPercent(a.totalReturn))}>{formatPercent(a.totalReturn)}</p>
-                  </div>
-                )}
-                {a.cagr != null && (
-                  <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">CAGR</p>
-                    <p className={clsx('text-sm font-semibold', colorForPercent(a.cagr))}>{formatPercent(a.cagr)}</p>
-                  </div>
-                )}
-                {a.cagrWithDiv != null && (
-                  <div className="mt-1">
-                    <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
-                    <p className={clsx('text-sm font-semibold', colorForPercent(a.cagrWithDiv))}>{formatPercent(a.cagrWithDiv)}</p>
-                  </div>
+                {a.isSpread ? (() => {
+                  const last = a.data.length ? a.data[a.data.length - 1].close : null;
+                  return (
+                    <div>
+                      <p className="text-[10px] text-gray-500">Latest spread{normalized ? ' (pp)' : ''}</p>
+                      <p className={clsx('text-base font-bold', last != null ? colorForPercent(last) : 'text-gray-400')}>
+                        {last == null ? '—'
+                          : normalized ? formatPercent(last)
+                          : `${last >= 0 ? '+' : ''}${last.toFixed(2)}`}
+                      </p>
+                      {normalized && (
+                        <p className="mt-1 text-[10px] text-gray-600 leading-snug">A − B outperformance in percentage points</p>
+                      )}
+                    </div>
+                  );
+                })() : (
+                  <>
+                    {a.totalReturn != null && (
+                      <div>
+                        <p className="text-[10px] text-gray-500">Return ({customRange ? 'Custom' : timeframe})</p>
+                        <p className={clsx('text-base font-bold', colorForPercent(a.totalReturn))}>{formatPercent(a.totalReturn)}</p>
+                      </div>
+                    )}
+                    {a.cagr != null && (
+                      <div className="mt-1">
+                        <p className="text-[10px] text-gray-500">CAGR</p>
+                        <p className={clsx('text-sm font-semibold', colorForPercent(a.cagr))}>{formatPercent(a.cagr)}</p>
+                      </div>
+                    )}
+                    {a.cagrWithDiv != null && (
+                      <div className="mt-1">
+                        <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
+                        <p className={clsx('text-sm font-semibold', colorForPercent(a.cagrWithDiv))}>{formatPercent(a.cagrWithDiv)}</p>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             ))}
@@ -641,7 +826,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               matrix={correl.matrix}
               sampleCount={correl.sampleCount}
               alignedData={correl.alignedData}
-              names={Object.fromEntries(assets.map(a => [a.symbol, a.name]))}
+              names={Object.fromEntries(allAssets.map(a => [a.symbol, a.name]))}
             />
           )}
         </ChartErrorBoundary>

@@ -608,7 +608,7 @@ async function fetchCgMarketCaps(
   const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`;
   const once = async (): Promise<Response | null> => {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8_000);
+    const t = setTimeout(() => ctrl.abort(), 6_000);
     try {
       return await fetch(url, {
         signal: ctrl.signal, next: { revalidate: 1800 },
@@ -618,12 +618,8 @@ async function fetchCgMarketCaps(
   };
   let res = await once();
   if (res && !res.ok && (res.status === 429 || res.status >= 500)) {
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 2000));
     res = await once();
-    if (res && !res.ok && (res.status === 429 || res.status >= 500)) {
-      await new Promise(r => setTimeout(r, 3000));
-      res = await once();
-    }
   }
   if (!res?.ok) { console.warn(`[btc-dominance] ${id} market_chart HTTP ${res?.status ?? 'err'}`); return new Map(); }
   try {
@@ -710,7 +706,21 @@ async function fetchBitcoinDominance(
 
   const [btcMap, basketMaps, currentDom] = await Promise.all([
     fetchBtcMarketCapHistory(fromDate),
-    Promise.all(DOMINANCE_BASKET.map(id => fetchCgMarketCaps(id, days))),
+    // CoinGecko free tier 429s on bursts, so fetch the basket SEQUENTIALLY
+    // (the proven pattern in the crypto route) rather than in parallel. Bail
+    // early if the first coin returns nothing — that means CoinGecko is blocked
+    // for this invocation, so the rest would just burn the time budget too.
+    (async () => {
+      const maps: Map<string, number>[] = [];
+      const deadline = Date.now() + 16_000; // keep well under the 25s edge limit
+      for (let i = 0; i < DOMINANCE_BASKET.length; i++) {
+        const m = await fetchCgMarketCaps(DOMINANCE_BASKET[i], days);
+        maps.push(m);
+        if (i === 0 && m.size === 0) break;        // CoinGecko unavailable — stop
+        if (Date.now() > deadline) break;          // out of time budget — use what we have
+      }
+      return maps;
+    })(),
     fetchCurrentBtcDominance(),
   ]);
 
