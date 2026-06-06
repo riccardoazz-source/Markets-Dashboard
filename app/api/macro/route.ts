@@ -569,6 +569,88 @@ async function getBitcoinMinerRevenue(
   return revenue;
 }
 
+// ---------- Bitcoin Market Dominance (BTC_DOMINANCE) ----------
+// BTC market cap as % of total crypto market cap.
+// Primary: CoinGecko historical market cap series for both BTC and total crypto,
+// then computes dominance = btc_mcap / total_mcap × 100.
+// Fallback: single current-value point from CoinGecko /global endpoint.
+// bitbo.io (the visual reference) blocks server-side requests, so CoinGecko is used.
+async function fetchBitcoinDominance(
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  const cgKey = process.env.COINGECKO_API_KEY ?? '';
+  const cgHeaders: Record<string, string> = { 'User-Agent': UA, 'Accept': 'application/json' };
+  if (cgKey) cgHeaders['x-cg-demo-api-key'] = cgKey;
+  const base = 'https://api.coingecko.com/api/v3';
+
+  const cgFetch = async (url: string, ms: number): Promise<Response | null> => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    try {
+      return await fetch(url, { signal: ctrl.signal, headers: cgHeaders, cache: 'no-store' });
+    } catch (e) {
+      console.error(`[btc-dominance] ${url} failed:`, (e as Error).message);
+      return null;
+    } finally { clearTimeout(t); }
+  };
+
+  const [btcRes, totalRes] = await Promise.all([
+    cgFetch(`${base}/coins/bitcoin/market_chart?vs_currency=usd&days=max`, 8_000),
+    cgFetch(`${base}/global/market_cap_chart?days=max`, 8_000),
+  ]);
+
+  const btcMap   = new Map<string, number>();
+  const totalMap = new Map<string, number>();
+
+  if (btcRes?.ok) {
+    const j = await btcRes.json() as { market_caps?: [number, number][] };
+    for (const [ts, mc] of j.market_caps ?? []) {
+      const d = new Date(ts).toISOString().slice(0, 10);
+      if (!fromDate || d >= fromDate) btcMap.set(d, mc);
+    }
+    console.log(`[btc-dominance] btc market caps: ${btcMap.size} pts`);
+  }
+
+  if (totalRes?.ok) {
+    const j = await totalRes.json() as { market_cap_chart?: { market_cap?: [number, number][] } };
+    for (const [ts, mc] of j.market_cap_chart?.market_cap ?? []) {
+      const d = new Date(ts).toISOString().slice(0, 10);
+      if (!fromDate || d >= fromDate) totalMap.set(d, mc);
+    }
+    console.log(`[btc-dominance] total market caps: ${totalMap.size} pts`);
+  }
+
+  if (btcMap.size > 0 && totalMap.size > 0) {
+    const out: { date: string; value: number }[] = [];
+    for (const [d, btcMc] of btcMap) {
+      const total = totalMap.get(d);
+      if (!total || total <= 0) continue;
+      const dom = (btcMc / total) * 100;
+      if (isFinite(dom) && dom > 0 && dom < 100) out.push({ date: d, value: +dom.toFixed(2) });
+    }
+    if (out.length > 0) {
+      out.sort((a, b) => a.date.localeCompare(b.date));
+      console.log(`[btc-dominance] ${out.length} computed dominance pts`);
+      return out;
+    }
+  }
+
+  // Fallback: single current-value point from /global
+  console.warn('[btc-dominance] historical endpoints failed; trying /global for current value');
+  const glRes = await cgFetch(`${base}/global`, 4_000);
+  if (glRes?.ok) {
+    const j = await glRes.json() as { data?: { market_cap_percentage?: { btc?: number } } };
+    const dom = j?.data?.market_cap_percentage?.btc;
+    if (dom != null && isFinite(dom)) {
+      const today = new Date().toISOString().slice(0, 10);
+      console.log(`[btc-dominance] current ${dom.toFixed(2)}% from /global`);
+      return [{ date: today, value: +dom.toFixed(2) }];
+    }
+  }
+
+  return [];
+}
+
 // ---------- multpl.com valuation tables ----------
 // multpl.com blocks datacenter IPs (Vercel) on direct requests, so each
 // "by-month" table is fetched through the free r.jina.ai reader proxy, which
@@ -1417,6 +1499,7 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_MINED_MONTHLY')    return getBitcoinMinedMonthly(fromDate);
     if (fredId === 'BTC_MINER_REVENUE')    return getBitcoinMinerRevenue(fromDate);
     if (fredId === 'BTC_PRODUCTION_COST')  return fetchBitcoinProductionCost(fromDate);
+    if (fredId === 'BTC_DOMINANCE')        return fetchBitcoinDominance(fromDate);
     if (fredId === 'FOMC_MEETINGS') {
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;

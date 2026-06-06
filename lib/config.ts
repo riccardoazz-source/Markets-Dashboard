@@ -162,6 +162,9 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'BTC_PRODUCTION_COST', name: 'BTC Production Cost',  category: 'Crypto', unit: '$',
     source: { type: 'computed', label: 'Computed: network hashrate × 25 J/TH × $0.05/kWh (blockchain.info)',
               url: 'https://en.macromicro.me/series/8194/bitcoin-production-total-cost' } },
+  { id: 'BTC_DOMINANCE', name: 'BTC Market Dominance',     category: 'Crypto', unit: '%',
+    source: { type: 'computed', label: 'CoinGecko',
+              url: 'https://charts.bitbo.io/bitcoin-dominance/' } },
   // Debt — US federal debt and sustainability metrics
   { id: 'GFDEGDQ188S', name: 'Debt / GDP Ratio',     category: 'Debt',        unit: '%',
     source: { type: 'fred',    label: 'FRED',
