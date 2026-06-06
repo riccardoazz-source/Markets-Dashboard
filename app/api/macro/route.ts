@@ -572,21 +572,24 @@ async function getBitcoinMinerRevenue(
 // ---------- Bitcoin Market Dominance (BTC_DOMINANCE) ----------
 // BTC market cap as % of total crypto market cap.
 //
-// CoinGecko's historical TOTAL market cap (/global/market_cap_chart) is a paid
-// endpoint, and bitbo.io (the visual reference) blocks server-side requests.
-// So the history is reconstructed from FREE endpoints only:
-//   1. Fetch the market-cap history of a basket of the largest coins via the
-//      free /coins/{id}/market_chart endpoint (BTC + the top alts/stablecoins).
-//   2. Per day: rawDominance = btcMcap / (sum of basket mcaps) × 100. The basket
-//      covers ~85-90% of the whole market, so this slightly overstates dominance.
-//   3. Anchor the series to reality: scale every point by s = currentDominance /
-//      rawDominance(latest), where currentDominance comes from the free /global
-//      endpoint. This pins the latest value to the true figure and applies the
-//      same coverage correction across history.
-// Fallback: a single current-value point from /global if the basket fetch fails.
+// CoinGecko's historical TOTAL market cap (/global/market_cap_chart) is a PAID
+// endpoint, and bitbo.io (the visual reference) blocks server-side requests, so
+// the series is reconstructed from sources that work reliably from Vercel:
+//   1. BTC market cap history from blockchain.info (the same /charts API already
+//      used for hashrate — reliable from datacenter IPs, full daily history).
+//   2. A small basket of the largest alts/stablecoins from CoinGecko's free
+//      /coins/{id}/market_chart, fetched WITH retry/backoff (CoinGecko free tier
+//      rate-limits at 30/min and 429s on cold serverless if hammered in parallel).
+//   3. total(t) ≈ btc(t) + Σ basket(t);  rawDominance(t) = btc(t) / total(t) × 100.
+//      The basket covers most of the non-BTC market but not the long tail, so
+//      rawDominance runs a bit high.
+//   4. Anchor to reality: scale every point by s = currentDominance /
+//      rawDominance(latest). currentDominance comes from CoinLore (no key, not
+//      datacenter-blocked) with a CoinGecko /global fallback. This pins the latest
+//      value to the true figure and applies the same coverage correction to history.
+// Fallback: a single current-value point if the basket/BTC history is unavailable.
 const DOMINANCE_BASKET = [
-  'bitcoin', 'ethereum', 'tether', 'ripple', 'binancecoin',
-  'solana', 'usd-coin', 'dogecoin', 'cardano', 'tron',
+  'ethereum', 'tether', 'binancecoin', 'solana', 'ripple', 'usd-coin',
 ];
 
 function dominanceDaysParam(fromDate?: string): string {
@@ -597,52 +600,107 @@ function dominanceDaysParam(fromDate?: string): string {
   return String(d);
 }
 
+// CoinGecko free tier: 429s under load. Retry with backoff (mirrors crypto route).
 async function fetchCgMarketCaps(
   id: string,
   days: string,
-  timeoutMs = 8_000,
 ): Promise<Map<string, number>> {
   const url = `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=${days}`;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const once = async (): Promise<Response | null> => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8_000);
+    try {
+      return await fetch(url, {
+        signal: ctrl.signal, next: { revalidate: 1800 },
+        headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+      });
+    } catch { return null; } finally { clearTimeout(t); }
+  };
+  let res = await once();
+  if (res && !res.ok && (res.status === 429 || res.status >= 500)) {
+    await new Promise(r => setTimeout(r, 1500));
+    res = await once();
+    if (res && !res.ok && (res.status === 429 || res.status >= 500)) {
+      await new Promise(r => setTimeout(r, 3000));
+      res = await once();
+    }
+  }
+  if (!res?.ok) { console.warn(`[btc-dominance] ${id} market_chart HTTP ${res?.status ?? 'err'}`); return new Map(); }
   try {
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      next: { revalidate: 1800 },
-      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-    });
-    if (!res.ok) { console.warn(`[btc-dominance] ${id} market_chart HTTP ${res.status}`); return new Map(); }
     const j = await res.json() as { market_caps?: [number, number][] };
     const map = new Map<string, number>();
     for (const [ts, mc] of j.market_caps ?? []) {
       if (!isFinite(mc) || mc <= 0) continue;
-      // Daily key; for sub-daily (recent ranges) the last point of the day wins.
-      map.set(new Date(ts).toISOString().slice(0, 10), mc);
+      map.set(new Date(ts).toISOString().slice(0, 10), mc); // last point of a day wins
+    }
+    return map;
+  } catch { return new Map(); }
+}
+
+// BTC market cap history from blockchain.info (reliable from Vercel, full daily).
+async function fetchBtcMarketCapHistory(fromDate?: string): Promise<Map<string, number>> {
+  const url = 'https://api.blockchain.info/charts/market-cap?format=json&timespan=all&sampled=true&metadata=false&cors=true';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal, next: { revalidate: 1800 },
+      headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Origin': 'https://www.blockchain.com' },
+    });
+    if (!res.ok) { console.warn(`[btc-dominance] blockchain.info market-cap HTTP ${res.status}`); return new Map(); }
+    const j = await res.json() as { values?: { x: number; y: number }[] };
+    const map = new Map<string, number>();
+    for (const p of j.values ?? []) {
+      if (!isFinite(p.y) || p.y <= 0) continue;
+      const d = new Date(p.x * 1000).toISOString().slice(0, 10);
+      if (fromDate && d < fromDate) continue;
+      map.set(d, p.y);
     }
     return map;
   } catch (e) {
-    console.error(`[btc-dominance] ${id} market_chart failed:`, (e as Error).message);
+    console.error('[btc-dominance] blockchain.info market-cap failed:', (e as Error).message);
     return new Map();
   } finally { clearTimeout(t); }
 }
 
-async function fetchCurrentBtcDominance(timeoutMs = 4_000): Promise<number | null> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+// Current BTC dominance %. CoinLore (no key, not datacenter-blocked) → CoinGecko /global.
+async function fetchCurrentBtcDominance(): Promise<number | null> {
+  // CoinLore /global → array with `btc_d` (string percent).
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/global', {
-      signal: ctrl.signal,
-      next: { revalidate: 1800 },
-      headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-    });
-    if (!res.ok) { console.warn(`[btc-dominance] /global HTTP ${res.status}`); return null; }
-    const j = await res.json() as { data?: { market_cap_percentage?: { btc?: number } } };
-    const dom = j?.data?.market_cap_percentage?.btc;
-    return dom != null && isFinite(dom) ? dom : null;
-  } catch (e) {
-    console.error('[btc-dominance] /global failed:', (e as Error).message);
-    return null;
-  } finally { clearTimeout(t); }
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4_000);
+    try {
+      const res = await fetch('https://api.coinlore.net/api/global/', {
+        signal: ctrl.signal, next: { revalidate: 1800 },
+        headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+      });
+      if (res.ok) {
+        const j = await res.json() as Array<{ btc_d?: string | number }>;
+        const raw = j?.[0]?.btc_d;
+        const dom = typeof raw === 'number' ? raw : raw != null ? parseFloat(raw) : NaN;
+        if (isFinite(dom) && dom > 0 && dom < 100) return dom;
+      }
+    } finally { clearTimeout(t); }
+  } catch (e) { console.warn('[btc-dominance] CoinLore failed:', (e as Error).message); }
+
+  // Fallback: CoinGecko /global.
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4_000);
+    try {
+      const res = await fetch('https://api.coingecko.com/api/v3/global', {
+        signal: ctrl.signal, next: { revalidate: 1800 },
+        headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+      });
+      if (res.ok) {
+        const j = await res.json() as { data?: { market_cap_percentage?: { btc?: number } } };
+        const dom = j?.data?.market_cap_percentage?.btc;
+        if (dom != null && isFinite(dom)) return dom;
+      }
+    } finally { clearTimeout(t); }
+  } catch (e) { console.warn('[btc-dominance] CoinGecko /global failed:', (e as Error).message); }
+
+  return null;
 }
 
 async function fetchBitcoinDominance(
@@ -650,27 +708,26 @@ async function fetchBitcoinDominance(
 ): Promise<{ date: string; value: number }[]> {
   const days = dominanceDaysParam(fromDate);
 
-  const [basketMaps, currentDom] = await Promise.all([
+  const [btcMap, basketMaps, currentDom] = await Promise.all([
+    fetchBtcMarketCapHistory(fromDate),
     Promise.all(DOMINANCE_BASKET.map(id => fetchCgMarketCaps(id, days))),
     fetchCurrentBtcDominance(),
   ]);
 
-  const btcMap = basketMaps[0];
-
-  // Reconstruct dominance from the basket if BTC history loaded.
-  if (btcMap.size > 0) {
+  // Reconstruct dominance if we have BTC history and at least one basket coin.
+  const haveBasket = basketMaps.some(m => m.size > 0);
+  if (btcMap.size > 0 && haveBasket) {
     const raw: { date: string; value: number }[] = [];
     for (const [d, btcMc] of btcMap) {
       if (fromDate && d < fromDate) continue;
-      let total = 0;
+      let total = btcMc;
       for (const m of basketMaps) { const v = m.get(d); if (v) total += v; }
       if (total <= 0) continue;
       const dom = (btcMc / total) * 100;
       if (isFinite(dom) && dom > 0 && dom <= 100) raw.push({ date: d, value: dom });
     }
-    if (raw.length > 0) {
+    if (raw.length > 1) {
       raw.sort((a, b) => a.date.localeCompare(b.date));
-      // Anchor latest point to the true current dominance from /global.
       const last = raw[raw.length - 1].value;
       const scale = currentDom != null && last > 0 ? currentDom / last : 1;
       const out = raw.map(p => ({ date: p.date, value: +(p.value * scale).toFixed(2) }));
@@ -679,10 +736,10 @@ async function fetchBitcoinDominance(
     }
   }
 
-  // Fallback: single current-value point from /global.
+  // Fallback: single current-value point.
   if (currentDom != null) {
     const today = new Date().toISOString().slice(0, 10);
-    console.warn(`[btc-dominance] basket failed; using current ${currentDom.toFixed(2)}% from /global`);
+    console.warn(`[btc-dominance] reconstruction failed; using current ${currentDom.toFixed(2)}%`);
     return [{ date: today, value: +currentDom.toFixed(2) }];
   }
 
@@ -1834,10 +1891,19 @@ export async function GET(req: NextRequest) {
     const cached = getCached(key, TTL);
     if (cached) return NextResponse.json(cached, { headers: CACHE_HEADERS });
     try {
-      // Discontinued/quarterly series: ignore the timeframe filter so the chart
-      // still shows their (older) full history instead of an empty range.
+      // Discontinued/quarterly series: fetch the full history (ignore the
+      // timeframe filter) so sparse series always have data and a latest value.
       const pts = await fetchMacroSeries(id, WIDE_WINDOW_SERIES.has(id) ? undefined : from);
-      const data = pts.map(p => ({ date: p.date, close: p.value }));
+      // ...but if a timeframe was requested and that window actually contains
+      // enough points, narrow to it so the chart respects the selected timeframe
+      // instead of being stuck on MAX. Sparse/discontinued series (whose window
+      // would be near-empty) keep their full history via the >= 2 fallback.
+      let windowed = pts;
+      if (from && WIDE_WINDOW_SERIES.has(id)) {
+        const inWindow = pts.filter(p => p.date >= from);
+        if (inWindow.length >= 2) windowed = inWindow;
+      }
+      const data = windowed.map(p => ({ date: p.date, close: p.value }));
       if (data.length > 0) {
         cache.set(key, { data, ts: Date.now() });
       } else {
