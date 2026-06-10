@@ -702,84 +702,6 @@ async function fetchBitcoinDominance(
   return out;
 }
 
-// ---------- Bitcoin Realized Price (BTC_REALIZED_PRICE) ----------
-// Realized Price is a premium on-chain metric (sum of every UTXO valued at the
-// price when it last moved, ÷ supply) — it cannot be derived from spot prices.
-// The bitcoin.com charts API publishes on-chain models for free with no key and
-// no rate limit, so it is the only datacenter-reachable free source. The exact
-// endpoint name and field shape aren't documentable from here, so we probe a few
-// likely paths and parse the response shape flexibly.
-const REALIZED_PRICE_ENDPOINTS = [
-  'realized-price', 'bitcoin-realized-price', 'realised-price', 'realized-cap',
-];
-
-// Flexible point extractor: handles {data:[...]}/{result:[...]}/bare arrays whose
-// items are {date|time|timestamp|t|x, value|price|v|y} objects or [x, y] pairs.
-function parseChartPoints(json: unknown): { date: string; value: number }[] {
-  const root = json as Record<string, unknown> | unknown[];
-  const arr: unknown[] = Array.isArray(root)
-    ? root
-    : (root as Record<string, unknown>)?.data as unknown[]
-      ?? (root as Record<string, unknown>)?.result as unknown[]
-      ?? (root as Record<string, unknown>)?.values as unknown[]
-      ?? [];
-  if (!Array.isArray(arr)) return [];
-  const toDate = (raw: unknown): string | null => {
-    if (typeof raw === 'string') {
-      if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-      const n = Number(raw);
-      if (isFinite(n)) raw = n; else return null;
-    }
-    if (typeof raw === 'number' && isFinite(raw)) {
-      const ms = raw > 1e12 ? raw : raw * 1000; // seconds vs millis
-      const d = new Date(ms);
-      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-    }
-    return null;
-  };
-  const out: { date: string; value: number }[] = [];
-  for (const item of arr) {
-    let dRaw: unknown, vRaw: unknown;
-    if (Array.isArray(item)) { dRaw = item[0]; vRaw = item[1]; }
-    else if (item && typeof item === 'object') {
-      const o = item as Record<string, unknown>;
-      dRaw = o.date ?? o.time ?? o.timestamp ?? o.t ?? o.x ?? o.d;
-      vRaw = o.value ?? o.price ?? o.v ?? o.y ?? o.close;
-    }
-    const date = toDate(dRaw);
-    const value = typeof vRaw === 'number' ? vRaw : parseFloat(String(vRaw));
-    if (date && isFinite(value) && value > 0) out.push({ date, value });
-  }
-  out.sort((a, b) => a.date.localeCompare(b.date));
-  return out;
-}
-
-async function fetchBitcoinRealizedPrice(
-  fromDate?: string,
-): Promise<{ date: string; value: number }[]> {
-  for (const ep of REALIZED_PRICE_ENDPOINTS) {
-    const url = `https://charts.bitcoin.com/api/v1/charts/${ep}?timespan=all&interval=1d`;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 8_000);
-    try {
-      const res = await fetch(url, {
-        signal: ctrl.signal, next: { revalidate: 1800 },
-        headers: { 'User-Agent': UA, 'Accept': 'application/json' },
-      });
-      if (!res.ok) { console.warn(`[btc-realized] ${ep} HTTP ${res.status}`); continue; }
-      const pts = parseChartPoints(await res.json());
-      if (pts.length > 1) {
-        const windowed = fromDate ? pts.filter(p => p.date >= fromDate) : pts;
-        console.log(`[btc-realized] ${windowed.length} pts from ${ep}`);
-        return windowed.length > 1 ? windowed : pts;
-      }
-    } catch (e) {
-      console.error(`[btc-realized] ${ep} failed:`, (e as Error).message);
-    } finally { clearTimeout(t); }
-  }
-  console.warn('[btc-realized] no working endpoint found');
-  return [];
-}
 
 // ---------- multpl.com valuation tables ----------
 // multpl.com blocks datacenter IPs (Vercel) on direct requests, so each
@@ -1630,7 +1552,6 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_MINER_REVENUE')    return getBitcoinMinerRevenue(fromDate);
     if (fredId === 'BTC_PRODUCTION_COST')  return fetchBitcoinProductionCost(fromDate);
     if (fredId === 'BTC_DOMINANCE')        return fetchBitcoinDominance(fromDate);
-    if (fredId === 'BTC_REALIZED_PRICE')   return fetchBitcoinRealizedPrice(fromDate);
     if (fredId === 'FOMC_MEETINGS') {
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
