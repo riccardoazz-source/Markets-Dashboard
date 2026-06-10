@@ -702,6 +702,57 @@ async function fetchBitcoinDominance(
   return out;
 }
 
+// ---------- Bitcoin Realized Price (BTC_REALIZED_PRICE) ----------
+// Realized Price = Realized Cap / Circulating Supply. Both come from the free,
+// no-key Coin Metrics community API (CapRealUSD + SplyCur) — the same flagship
+// realized-cap series bitbo/Glassnode visualize. The community endpoint is
+// datacenter-reachable from Vercel and allows 10 req / 6s per IP (no key).
+async function fetchBitcoinRealizedPrice(
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  // BTC realized cap series begins mid-2010. Fetch from the requested window
+  // (or full history) directly via start_time so payloads stay small per timeframe.
+  const start = fromDate && fromDate > '2010-07-18' ? fromDate : '2010-07-18';
+  const base = 'https://community-api.coinmetrics.io/v4/timeseries/asset-metrics';
+  let url: string | null =
+    `${base}?assets=btc&metrics=CapRealUSD,SplyCur&frequency=1d&page_size=10000&start_time=${start}`;
+
+  const out: { date: string; value: number }[] = [];
+  const deadline = Date.now() + 14_000; // well under the 25s edge limit
+  let pages = 0;
+  while (url && pages < 4 && Date.now() < deadline) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8_000);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal, next: { revalidate: 1800 },
+        headers: { 'User-Agent': UA, 'Accept': 'application/json' },
+      });
+      if (!res.ok) { console.warn(`[btc-realized] Coin Metrics HTTP ${res.status}`); break; }
+      const j = await res.json() as {
+        data?: { time: string; CapRealUSD?: string; SplyCur?: string }[];
+        next_page_url?: string;
+      };
+      for (const d of j.data ?? []) {
+        const cap = parseFloat(d.CapRealUSD ?? '');
+        const sply = parseFloat(d.SplyCur ?? '');
+        if (!isFinite(cap) || !isFinite(sply) || sply <= 0) continue;
+        out.push({ date: d.time.slice(0, 10), value: +(cap / sply).toFixed(2) });
+      }
+      url = j.next_page_url ?? null;
+      pages++;
+    } catch (e) {
+      console.error('[btc-realized] failed:', (e as Error).message);
+      break;
+    } finally { clearTimeout(t); }
+  }
+
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  const windowed = fromDate ? out.filter(p => p.date >= fromDate) : out;
+  console.log(`[btc-realized] ${windowed.length} pts (${pages} page(s))`);
+  return windowed;
+}
+
 // ---------- multpl.com valuation tables ----------
 // multpl.com blocks datacenter IPs (Vercel) on direct requests, so each
 // "by-month" table is fetched through the free r.jina.ai reader proxy, which
@@ -1551,6 +1602,7 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_MINER_REVENUE')    return getBitcoinMinerRevenue(fromDate);
     if (fredId === 'BTC_PRODUCTION_COST')  return fetchBitcoinProductionCost(fromDate);
     if (fredId === 'BTC_DOMINANCE')        return fetchBitcoinDominance(fromDate);
+    if (fredId === 'BTC_REALIZED_PRICE')   return fetchBitcoinRealizedPrice(fromDate);
     if (fredId === 'FOMC_MEETINGS') {
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;

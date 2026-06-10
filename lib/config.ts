@@ -171,6 +171,12 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'BTC_DOMINANCE', name: 'BTC Market Dominance',     category: 'Crypto', unit: '%',
     source: { type: 'computed', label: 'CoinGecko',
               url: 'https://charts.bitbo.io/bitcoin-dominance/' } },
+  // Realized Price = realized cap ÷ circulating supply. Both from the free,
+  // no-key Coin Metrics community API (CapRealUSD + SplyCur) — the same flagship
+  // realized-cap series bitbo/Glassnode chart. Live, datacenter-reachable.
+  { id: 'BTC_REALIZED_PRICE', name: 'BTC Realized Price',  category: 'Crypto', unit: '$',
+    source: { type: 'computed', label: 'Computed: realized cap ÷ supply (Coin Metrics)',
+              url: 'https://charts.bitbo.io/realized-price/' } },
   // Debt — US federal debt and sustainability metrics
   { id: 'GFDEGDQ188S', name: 'Debt / GDP Ratio',     category: 'Debt',        unit: '%',
     source: { type: 'fred',    label: 'FRED',
