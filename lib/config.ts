@@ -48,6 +48,12 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'ECBDFR',   name: 'EU Interest Rate',      category: 'Rates',       unit: '%',
     source: { type: 'ecb',     label: 'ECB Data Portal',
               url: 'https://data.ecb.europa.eu/data/datasets/FM/FM.B.U2.EUR.4F.KR.DFR.LEV' } },
+  // Japan policy rate proxy — OECD "immediate" (overnight) call-money/interbank
+  // rate for Japan, monthly. Tracks the BoJ uncollateralized overnight call rate
+  // target. FRED (key) + DBnomics mirror; both reach this OECD-sourced series.
+  { id: 'IRSTCI01JPM156N', name: 'Japan Interest Rate', category: 'Rates',   unit: '%',
+    source: { type: 'fred',    label: 'FRED / OECD',
+              url: 'https://www.stat-search.boj.or.jp/ssi/mtshtml/ir01_d_1_en.html' } },
   { id: 'DGS10',    name: 'US 10Y Yield',          category: 'Rates',       unit: '%',
     source: { type: 'treasury',label: 'US Treasury',
               url: 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates' } },
