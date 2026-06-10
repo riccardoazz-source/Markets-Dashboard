@@ -703,24 +703,62 @@ async function fetchBitcoinDominance(
 }
 
 // ---------- Bitcoin Realized Price (BTC_REALIZED_PRICE) ----------
-// Realized Price = Realized Cap / Circulating Supply. Both come from the free,
-// no-key Coin Metrics community API (CapRealUSD + SplyCur) — the same flagship
-// realized-cap series bitbo/Glassnode visualize. The community endpoint is
-// datacenter-reachable from Vercel and allows 10 req / 6s per IP (no key).
+// Realized Price is a premium on-chain metric (sum of every UTXO valued at the
+// price when it last moved, ÷ supply) — it cannot be derived from spot prices.
+// The bitcoin.com charts API publishes on-chain models for free with no key and
+// no rate limit, so it is the only datacenter-reachable free source. The exact
+// endpoint name and field shape aren't documentable from here, so we probe a few
+// likely paths and parse the response shape flexibly.
+const REALIZED_PRICE_ENDPOINTS = [
+  'realized-price', 'bitcoin-realized-price', 'realised-price', 'realized-cap',
+];
+
+// Flexible point extractor: handles {data:[...]}/{result:[...]}/bare arrays whose
+// items are {date|time|timestamp|t|x, value|price|v|y} objects or [x, y] pairs.
+function parseChartPoints(json: unknown): { date: string; value: number }[] {
+  const root = json as Record<string, unknown> | unknown[];
+  const arr: unknown[] = Array.isArray(root)
+    ? root
+    : (root as Record<string, unknown>)?.data as unknown[]
+      ?? (root as Record<string, unknown>)?.result as unknown[]
+      ?? (root as Record<string, unknown>)?.values as unknown[]
+      ?? [];
+  if (!Array.isArray(arr)) return [];
+  const toDate = (raw: unknown): string | null => {
+    if (typeof raw === 'string') {
+      if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+      const n = Number(raw);
+      if (isFinite(n)) raw = n; else return null;
+    }
+    if (typeof raw === 'number' && isFinite(raw)) {
+      const ms = raw > 1e12 ? raw : raw * 1000; // seconds vs millis
+      const d = new Date(ms);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+    return null;
+  };
+  const out: { date: string; value: number }[] = [];
+  for (const item of arr) {
+    let dRaw: unknown, vRaw: unknown;
+    if (Array.isArray(item)) { dRaw = item[0]; vRaw = item[1]; }
+    else if (item && typeof item === 'object') {
+      const o = item as Record<string, unknown>;
+      dRaw = o.date ?? o.time ?? o.timestamp ?? o.t ?? o.x ?? o.d;
+      vRaw = o.value ?? o.price ?? o.v ?? o.y ?? o.close;
+    }
+    const date = toDate(dRaw);
+    const value = typeof vRaw === 'number' ? vRaw : parseFloat(String(vRaw));
+    if (date && isFinite(value) && value > 0) out.push({ date, value });
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return out;
+}
+
 async function fetchBitcoinRealizedPrice(
   fromDate?: string,
 ): Promise<{ date: string; value: number }[]> {
-  // BTC realized cap series begins mid-2010. Fetch from the requested window
-  // (or full history) directly via start_time so payloads stay small per timeframe.
-  const start = fromDate && fromDate > '2010-07-18' ? fromDate : '2010-07-18';
-  const base = 'https://community-api.coinmetrics.io/v4/timeseries/asset-metrics';
-  let url: string | null =
-    `${base}?assets=btc&metrics=CapRealUSD,SplyCur&frequency=1d&page_size=10000&start_time=${start}`;
-
-  const out: { date: string; value: number }[] = [];
-  const deadline = Date.now() + 14_000; // well under the 25s edge limit
-  let pages = 0;
-  while (url && pages < 4 && Date.now() < deadline) {
+  for (const ep of REALIZED_PRICE_ENDPOINTS) {
+    const url = `https://charts.bitcoin.com/api/v1/charts/${ep}?timespan=all&interval=1d`;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 8_000);
     try {
@@ -728,29 +766,19 @@ async function fetchBitcoinRealizedPrice(
         signal: ctrl.signal, next: { revalidate: 1800 },
         headers: { 'User-Agent': UA, 'Accept': 'application/json' },
       });
-      if (!res.ok) { console.warn(`[btc-realized] Coin Metrics HTTP ${res.status}`); break; }
-      const j = await res.json() as {
-        data?: { time: string; CapRealUSD?: string; SplyCur?: string }[];
-        next_page_url?: string;
-      };
-      for (const d of j.data ?? []) {
-        const cap = parseFloat(d.CapRealUSD ?? '');
-        const sply = parseFloat(d.SplyCur ?? '');
-        if (!isFinite(cap) || !isFinite(sply) || sply <= 0) continue;
-        out.push({ date: d.time.slice(0, 10), value: +(cap / sply).toFixed(2) });
+      if (!res.ok) { console.warn(`[btc-realized] ${ep} HTTP ${res.status}`); continue; }
+      const pts = parseChartPoints(await res.json());
+      if (pts.length > 1) {
+        const windowed = fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+        console.log(`[btc-realized] ${windowed.length} pts from ${ep}`);
+        return windowed.length > 1 ? windowed : pts;
       }
-      url = j.next_page_url ?? null;
-      pages++;
     } catch (e) {
-      console.error('[btc-realized] failed:', (e as Error).message);
-      break;
+      console.error(`[btc-realized] ${ep} failed:`, (e as Error).message);
     } finally { clearTimeout(t); }
   }
-
-  out.sort((a, b) => a.date.localeCompare(b.date));
-  const windowed = fromDate ? out.filter(p => p.date >= fromDate) : out;
-  console.log(`[btc-realized] ${windowed.length} pts (${pages} page(s))`);
-  return windowed;
+  console.warn('[btc-realized] no working endpoint found');
+  return [];
 }
 
 // ---------- multpl.com valuation tables ----------
