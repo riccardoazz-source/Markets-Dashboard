@@ -1,10 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine,
 } from 'recharts';
 import { MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEventCategory } from '@/lib/config';
 import { format, parseISO } from 'date-fns';
+import clsx from 'clsx';
 
 const CATEGORY_LABELS: Record<MarketEventCategory, string> = {
   financial:    'Financial Crisis',
@@ -15,8 +17,20 @@ const CATEGORY_LABELS: Record<MarketEventCategory, string> = {
   crypto:       'Crypto',
 };
 
+const CATEGORY_ORDER: MarketEventCategory[] = [
+  'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'crypto',
+];
+
 export function EventsChart({ height = 300 }: { height?: number }) {
+  const [activeCat, setActiveCat] = useState<MarketEventCategory | 'all'>('all');
+
   const today = new Date().toISOString().slice(0, 10);
+
+  // Events for the selected category, sorted newest-first for the list.
+  const visibleEvents = (activeCat === 'all'
+    ? MARKET_EVENTS
+    : MARKET_EVENTS.filter(e => e.category === activeCat)
+  ).slice().sort((a, b) => b.date.localeCompare(a.date));
 
   // Monthly axis from Jan 2000 → today
   const data: { date: string; v: number }[] = [];
@@ -39,11 +53,50 @@ export function EventsChart({ height = 300 }: { height?: number }) {
 
   const todaySnapped = snap(today);
 
-  // Stagger labels: alternate insideTop and insideBottom to reduce overlap
+  // Inline labels only when a single category is selected (few enough lines to read).
+  const showLabels = activeCat !== 'all' && visibleEvents.length <= 16;
   const positions = ['insideTop', 'insideBottom'] as const;
 
   return (
     <div>
+      {/* Category filter chips */}
+      <div className="flex gap-1.5 flex-wrap mb-2">
+        <button
+          onClick={() => setActiveCat('all')}
+          className={clsx(
+            'px-2.5 py-1 text-[11px] font-semibold rounded-full transition-all',
+            activeCat === 'all'
+              ? 'bg-accent text-white'
+              : 'text-gray-400 border border-border hover:text-gray-200 hover:border-border-light'
+          )}
+        >
+          All ({MARKET_EVENTS.length})
+        </button>
+        {CATEGORY_ORDER.map(cat => {
+          const count = MARKET_EVENTS.filter(e => e.category === cat).length;
+          const isActive = activeCat === cat;
+          return (
+            <button
+              key={cat}
+              onClick={() => setActiveCat(cat)}
+              className={clsx(
+                'px-2.5 py-1 text-[11px] font-semibold rounded-full transition-all border flex items-center gap-1.5',
+                isActive
+                  ? 'text-white border-transparent'
+                  : 'text-gray-400 border-border hover:text-gray-200 hover:border-border-light'
+              )}
+              style={isActive ? { backgroundColor: MARKET_EVENT_COLORS[cat] } : undefined}
+            >
+              <span
+                className="inline-block w-2 h-2 rounded-full"
+                style={{ backgroundColor: MARKET_EVENT_COLORS[cat] }}
+              />
+              {CATEGORY_LABELS[cat]} ({count})
+            </button>
+          );
+        })}
+      </div>
+
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={data} margin={{ top: 28, right: 14, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -65,9 +118,8 @@ export function EventsChart({ height = 300 }: { height?: number }) {
             label={{ value: 'Today', fill: '#9ca3af', fontSize: 9, position: 'insideTopLeft' }}
           />
 
-          {MARKET_EVENTS.map((evt, i) => {
+          {visibleEvents.map((evt, i) => {
             const color = MARKET_EVENT_COLORS[evt.category];
-            const pos = positions[i % 2];
             return (
               <ReferenceLine
                 key={`${evt.date}-${i}`}
@@ -75,27 +127,36 @@ export function EventsChart({ height = 300 }: { height?: number }) {
                 stroke={color}
                 strokeWidth={1.5}
                 strokeOpacity={0.85}
-                label={{
+                label={showLabels ? {
                   value: evt.label,
                   fill: color,
-                  fontSize: 8,
-                  position: pos,
-                }}
+                  fontSize: 9,
+                  position: positions[i % 2],
+                } : undefined}
               />
             );
           })}
         </LineChart>
       </ResponsiveContainer>
 
-      {/* Legend */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 px-2">
-        {(Object.entries(CATEGORY_LABELS) as [MarketEventCategory, string][]).map(([cat, label]) => (
-          <div key={cat} className="flex items-center gap-1">
+      {/* Event list — date, label and description so each line is identifiable */}
+      <div className="mt-3 border border-border rounded-lg divide-y divide-border max-h-72 overflow-y-auto">
+        {visibleEvents.map((evt, i) => (
+          <div key={`row-${evt.date}-${i}`} className="flex items-start gap-2.5 px-3 py-2">
             <span
-              className="inline-block w-3 h-0.5 rounded-full"
-              style={{ backgroundColor: MARKET_EVENT_COLORS[cat] }}
+              className="inline-block w-2.5 h-2.5 rounded-full mt-1 shrink-0"
+              style={{ backgroundColor: MARKET_EVENT_COLORS[evt.category] }}
             />
-            <span className="text-[10px] text-gray-500">{label}</span>
+            <div className="min-w-0">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-gray-200">{evt.label}</span>
+                <span className="text-[10px] text-gray-500 font-mono">
+                  {format(parseISO(evt.date), 'd MMM yyyy')}
+                </span>
+                <span className="text-[10px] text-gray-600">{CATEGORY_LABELS[evt.category]}</span>
+              </div>
+              <p className="text-[11px] text-gray-500 leading-snug mt-0.5">{evt.description}</p>
+            </div>
           </div>
         ))}
       </div>

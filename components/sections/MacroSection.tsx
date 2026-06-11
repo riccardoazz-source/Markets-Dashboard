@@ -484,7 +484,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </p>
           )}
 
-          {dataMsg && (
+          {dataMsg && !selIsEvents && !selIsFOMC && selected !== 'BTC_HALVING' && (
             <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
               ⚠ {dataMsg}
             </p>

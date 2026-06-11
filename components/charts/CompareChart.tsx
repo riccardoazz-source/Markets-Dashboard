@@ -624,6 +624,12 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               strokeWidth={1.5}
               strokeDasharray="4 3"
               strokeOpacity={0.75}
+              label={visibleEventItems.length <= 20 ? {
+                value: evt.label,
+                fill: MARKET_EVENT_COLORS[evt.category],
+                fontSize: 8,
+                position: i % 2 === 0 ? 'insideTopRight' : 'insideBottomRight',
+              } : undefined}
             />
           ))}
           {todaySnapped && (

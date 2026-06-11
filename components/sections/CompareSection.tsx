@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from 'react';
-import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES } from '@/lib/config';
+import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES, MARKET_EVENTS } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
@@ -406,7 +406,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       // First pass: find each asset's first date that falls within the TF window.
       // Recession assets and event overlays (BTC_HALVING, FOMC_MEETINGS) carry full
       // history and are excluded from commonStart so they don't constrain other assets.
-      const EVENT_OVERLAY = new Set([...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS']);
+      const EVENT_OVERLAY = new Set([...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS', 'MARKET_EVENTS']);
       const firstDates = assets
         .filter(a => !EVENT_OVERLAY.has(a.symbol))
         .map(a => {
@@ -503,7 +503,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       // USREC is included with its raw 0/1 values (point-biserial correlation).
       // BTC_HALVING and FOMC_MEETINGS are excluded here and added below as 0/1
       // dummies (their raw series are event markers, not continuous values).
-      const DUMMY_SET = new Set(['BTC_HALVING', 'FOMC_MEETINGS']);
+      const DUMMY_SET = new Set(['BTC_HALVING', 'FOMC_MEETINGS', 'MARKET_EVENTS']);
       const series: { symbol: string; data: HistoricalPoint[] }[] = allAssets
         .filter(a => !DUMMY_SET.has(a.symbol) && (a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
@@ -551,6 +551,14 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         const fomcMonthSet = new Set(FOMC_MEETING_DATES.map(d => d.slice(0, 7)));
         const fomcDummy = monthlyDummy(refMin, refMax, fomcMonthSet);
         if (fomcDummy.length > 1) series.push({ symbol: 'FOMC_MEETINGS', data: fomcDummy });
+      }
+
+      const eventsAsset = displayAssets.find(a => a.symbol === 'MARKET_EVENTS');
+      if (eventsAsset && refMin && refMax) {
+        // MARKET_EVENTS: 1 in every month that contains at least one curated event.
+        const eventMonthSet = new Set(MARKET_EVENTS.map(e => e.date.slice(0, 7)));
+        const eventDummy = monthlyDummy(refMin, refMax, eventMonthSet);
+        if (eventDummy.length > 1) series.push({ symbol: 'MARKET_EVENTS', data: eventDummy });
       }
 
       return correlationMatrix(series);
