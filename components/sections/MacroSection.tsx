@@ -88,7 +88,7 @@ function formatShortDate(dateStr: string): string {
 
 export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [mounted, setMounted] = useState(false);
-  const [sourcesConfig, setSourcesConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [] });
+  const [sourcesConfig, setSourcesConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [], customEvents: [] });
   const [btcNextHalvingDate, setBtcNextHalvingDate] = useState<string | null>(null);
   const [category, setCategory] = useState('All');
   const [data, setData] = useState<Record<string, MacroLatest>>({});

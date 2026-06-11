@@ -5,6 +5,7 @@ import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Chec
 import { MACRO_INDICATORS, INDEXES, CRYPTO_IDS, COMMODITIES, SECTORS, CURRENCY_GROUPS, ALL_COMPARABLE_ASSETS } from '@/lib/config';
 import { useGistData, AnalysisEntry, todayStr, makeId } from '@/lib/gist';
 import { AssetSearchInput } from '@/components/ui/AssetSearchInput';
+import { MarketEventsManager } from './MarketEventsManager';
 import {
   loadSourcesConfig, saveSourcesConfig, generateId, notifySourcesChanged,
   saveToHash, loadFromHash,
@@ -25,15 +26,15 @@ const SNAPSHOT_IDS = new Set([
 // these are policy tables that rarely change between updates).
 const HARDCODED_FALLBACK_IDS = new Set(['DFEDTARU', 'ECBDFR', 'FEDFUNDS']);
 // Event-calendar series: dates are in the source code, not fetched from an API.
-const EVENT_CALENDAR_IDS = new Set(['FOMC_MEETINGS', 'BTC_HALVING']);
+const EVENT_CALENDAR_IDS = new Set(['FOMC_MEETINGS', 'BTC_HALVING', 'MARKET_EVENTS']);
 
 interface DataTypeInfo { label: string; color: 'green' | 'blue' | 'amber' | 'gray' }
 
 function getDataType(id: string, sourceType: string): DataTypeInfo {
   if (EVENT_CALENDAR_IDS.has(id)) {
-    return id === 'BTC_HALVING'
-      ? { label: 'Dynamic (block height) + hardcoded past', color: 'amber' }
-      : { label: 'Event calendar — hardcoded 2000-2026, update yearly', color: 'amber' };
+    if (id === 'BTC_HALVING') return { label: 'Dynamic (block height) + hardcoded past', color: 'amber' };
+    if (id === 'MARKET_EVENTS') return { label: 'Curated + user-editable (see Market Events below)', color: 'amber' };
+    return { label: 'Event calendar — hardcoded 2000-2026, update yearly', color: 'amber' };
   }
   if (HARDCODED_FALLBACK_IDS.has(id)) return { label: 'Live + hardcoded fallback table', color: 'blue' };
   if (SNAPSHOT_IDS.has(id))          return { label: 'Live + snapshot fallback (2025-08)', color: 'blue' };
@@ -206,7 +207,7 @@ const BLANK_CUSTOM: Omit<CustomSource, 'id'> = { name: '', category: 'Growth', u
 // Group macro indicators by category for display
 const MACRO_CATEGORIES = [
   'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money',
-  'Commodities', 'Sentiment', 'Crypto', 'Debt', 'Market Value', 'Recessions',
+  'Commodities', 'Sentiment', 'Crypto', 'Debt', 'Market Value', 'Recessions', 'Events',
 ];
 
 const totalSources =
@@ -214,7 +215,7 @@ const totalSources =
   COMMODITIES.length + SECTORS.length;
 
 export function SourcesSection() {
-  const [config, setConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [] });
+  const [config, setConfig] = useState<SourcesConfig>({ overrides: {}, custom: [], hidden: [], customEvents: [] });
   const [statuses, setStatuses] = useState<Record<string, StatusInfo>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editUrl, setEditUrl] = useState('');
@@ -292,6 +293,7 @@ export function SourcesSection() {
           overrides: (typeof parsed.overrides === 'object' && parsed.overrides !== null) ? parsed.overrides as Record<string,string> : {},
           custom: Array.isArray(parsed.custom) ? parsed.custom : [],
           hidden: Array.isArray(parsed.hidden) ? parsed.hidden : [],
+          customEvents: Array.isArray(parsed.customEvents) ? parsed.customEvents : [],
         });
       } catch { /* invalid file */ }
     };
@@ -636,6 +638,9 @@ export function SourcesSection() {
           </div>
         )}
       </div>
+
+      {/* ── Market Events (editable per category) ────────────────────────── */}
+      <MarketEventsManager config={config} persist={persist} mounted={mounted} />
 
       {/* ── Non-macro asset sections (Indexes, FX, Crypto, Commodities, Sectors) ── */}
       <div className="rounded-xl border border-border bg-bg-card overflow-hidden">

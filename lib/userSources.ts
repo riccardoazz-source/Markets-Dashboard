@@ -3,6 +3,8 @@
 // completely new indicators can be added under "custom".
 // Built-in indicators can also be hidden from the Macro tab via "hidden".
 
+import { MARKET_EVENTS, type MarketEvent, type MarketEventCategory } from './config';
+
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$';
 
 export interface CustomSource {
@@ -13,6 +15,12 @@ export interface CustomSource {
   url: string;          // the URL the scraper will fetch
 }
 
+// User-added market event (Events macro category). Same shape as the built-in
+// MarketEvent plus an id so it can be edited/deleted from the Sources tab.
+export interface CustomMarketEvent extends MarketEvent {
+  id: string;
+}
+
 export interface SourcesConfig {
   // Per built-in indicator (keyed by MACRO_INDICATOR.id): override the fetch URL.
   // When set, /api/scrape?url=... is used instead of /api/macro.
@@ -21,10 +29,12 @@ export interface SourcesConfig {
   custom: CustomSource[];
   // IDs of built-in indicators hidden from the Macro tab.
   hidden: string[];
+  // User-added market events, merged with the built-in curated list.
+  customEvents: CustomMarketEvent[];
 }
 
 const KEY = 'mkt-sources-v2';
-const EMPTY: SourcesConfig = { overrides: {}, custom: [], hidden: [] };
+const EMPTY: SourcesConfig = { overrides: {}, custom: [], hidden: [], customEvents: [] };
 
 export function loadSourcesConfig(): SourcesConfig {
   if (typeof window === 'undefined') return EMPTY;
@@ -32,16 +42,28 @@ export function loadSourcesConfig(): SourcesConfig {
     const raw = localStorage.getItem(KEY);
     if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as Partial<SourcesConfig>;
-    // Backward-compat: older stored configs may lack `hidden`
+    // Backward-compat: older stored configs may lack newer fields
     return {
       overrides: parsed.overrides ?? {},
       custom: parsed.custom ?? [],
       hidden: parsed.hidden ?? [],
+      customEvents: parsed.customEvents ?? [],
     };
   } catch {
     return EMPTY;
   }
 }
+
+// Merge built-in curated events with the user's custom events, sorted by date.
+// Used by the Events chart and Compare overlay so manual additions show up
+// everywhere the curated list does.
+export function getMergedMarketEvents(cfg?: SourcesConfig): MarketEvent[] {
+  const c = cfg ?? loadSourcesConfig();
+  const merged: MarketEvent[] = [...MARKET_EVENTS, ...(c.customEvents ?? [])];
+  return merged.slice().sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export type { MarketEvent, MarketEventCategory };
 
 export function saveSourcesConfig(cfg: SourcesConfig): void {
   if (typeof window === 'undefined') return;
@@ -85,6 +107,7 @@ export function loadFromHash(): SourcesConfig | null {
         ? (parsed.overrides as Record<string, string>) : {},
       custom: Array.isArray(parsed.custom) ? parsed.custom : [],
       hidden: Array.isArray(parsed.hidden) ? parsed.hidden : [],
+      customEvents: Array.isArray(parsed.customEvents) ? parsed.customEvents : [],
     };
   } catch { return null; }
 }

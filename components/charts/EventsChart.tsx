@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine,
 } from 'recharts';
-import { MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEventCategory } from '@/lib/config';
+import { MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEventCategory, MarketEvent } from '@/lib/config';
+import { getMergedMarketEvents } from '@/lib/userSources';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
 
@@ -15,21 +16,31 @@ const CATEGORY_LABELS: Record<MarketEventCategory, string> = {
   pandemic:     'Pandemic',
   geopolitical: 'Geopolitical',
   crypto:       'Crypto',
+  personal:     'Personal',
 };
 
 const CATEGORY_ORDER: MarketEventCategory[] = [
-  'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'crypto',
+  'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'crypto', 'personal',
 ];
 
 export function EventsChart({ height = 300 }: { height?: number }) {
   const [activeCat, setActiveCat] = useState<MarketEventCategory | 'all'>('all');
+  // Built-in curated list + the user's custom events (from the Sources tab).
+  const [allEvents, setAllEvents] = useState<MarketEvent[]>(MARKET_EVENTS);
+
+  useEffect(() => {
+    const load = () => setAllEvents(getMergedMarketEvents());
+    load();
+    window.addEventListener('mkt-sources-changed', load);
+    return () => window.removeEventListener('mkt-sources-changed', load);
+  }, []);
 
   const today = new Date().toISOString().slice(0, 10);
 
   // Events for the selected category, sorted newest-first for the list.
   const visibleEvents = (activeCat === 'all'
-    ? MARKET_EVENTS
-    : MARKET_EVENTS.filter(e => e.category === activeCat)
+    ? allEvents
+    : allEvents.filter(e => e.category === activeCat)
   ).slice().sort((a, b) => b.date.localeCompare(a.date));
 
   // Monthly axis from Jan 2000 → today
@@ -70,10 +81,10 @@ export function EventsChart({ height = 300 }: { height?: number }) {
               : 'text-gray-400 border border-border hover:text-gray-200 hover:border-border-light'
           )}
         >
-          All ({MARKET_EVENTS.length})
+          All ({allEvents.length})
         </button>
         {CATEGORY_ORDER.map(cat => {
-          const count = MARKET_EVENTS.filter(e => e.category === cat).length;
+          const count = allEvents.filter(e => e.category === cat).length;
           const isActive = activeCat === cat;
           return (
             <button

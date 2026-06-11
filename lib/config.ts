@@ -38,7 +38,9 @@ export interface MacroIndicator {
 }
 
 // ---------- Market Events ----------
-export type MarketEventCategory = 'financial' | 'war' | 'terrorism' | 'pandemic' | 'geopolitical' | 'crypto';
+// 'personal' has no built-in events — it's reserved for the user's own dates
+// added from the Sources tab.
+export type MarketEventCategory = 'financial' | 'war' | 'terrorism' | 'pandemic' | 'geopolitical' | 'crypto' | 'personal';
 
 export interface MarketEvent {
   date: string;               // YYYY-MM-DD
@@ -54,6 +56,7 @@ export const MARKET_EVENT_COLORS: Record<MarketEventCategory, string> = {
   pandemic:    '#9333ea', // purple
   geopolitical:'#3b82f6', // blue
   crypto:      '#0891b2', // cyan
+  personal:    '#ec4899', // pink — user's own events
 };
 
 export const MARKET_EVENTS: MarketEvent[] = [

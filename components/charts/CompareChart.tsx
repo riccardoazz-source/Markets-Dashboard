@@ -1,11 +1,13 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
-import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES, MARKET_EVENTS, MARKET_EVENT_COLORS } from '@/lib/config';
+import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES, MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEvent } from '@/lib/config';
+import { getMergedMarketEvents } from '@/lib/userSources';
 import { HalvingChart } from './HalvingChart';
 import { FOMCChart } from './FOMCChart';
 import { EventsChart } from './EventsChart';
@@ -112,6 +114,14 @@ function axisProps(group: CompareAsset[], logScale: boolean): object {
 
 export function CompareChart({ assets, height = 340, logScale = false, percentMode = false, onSetRange }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
+  // Built-in curated events + the user's custom events (from the Sources tab).
+  const [mergedEvents, setMergedEvents] = useState<MarketEvent[]>(MARKET_EVENTS);
+  useEffect(() => {
+    const load = () => setMergedEvents(getMergedMarketEvents());
+    load();
+    window.addEventListener('mkt-sources-changed', load);
+    return () => window.removeEventListener('mkt-sources-changed', load);
+  }, []);
 
   if (!assets.length) return null;
 
@@ -218,7 +228,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   // Market events — snapped to nearest category date for rendering.
   const visibleEventItems = eventsAsset && allDates.length > 0
-    ? MARKET_EVENTS
+    ? mergedEvents
         .filter(e => e.date >= allDates[0] && e.date <= allDates[allDates.length - 1])
         .map(e => ({ ...e, snapped: snapToDates(e.date, allDates) }))
     : [];
