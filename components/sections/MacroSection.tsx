@@ -8,6 +8,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { HalvingChart } from '@/components/charts/HalvingChart';
 import { FOMCChart } from '@/components/charts/FOMCChart';
+import { EventsChart } from '@/components/charts/EventsChart';
 import { RecessionChart } from '@/components/charts/RecessionChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
@@ -17,7 +18,7 @@ import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2, Layers } from 'lucide-react';
 
-const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Currency', 'Sentiment', 'Crypto', 'Debt', 'Market Value', 'Recessions'];
+const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Currency', 'Sentiment', 'Crypto', 'Debt', 'Market Value', 'Recessions', 'Events'];
 
 const RECESSION_SET = new Set(RECESSION_SERIES);
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
@@ -261,6 +262,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const cagrData = selectedIndicator ? calculateCAGR(historical, timeframe) : null;
   const selIsRec = selected ? RECESSION_SET.has(selected) : false;
   const selIsFOMC = selected === 'FOMC_MEETINGS';
+  const selIsEvents = selected === 'MARKET_EVENTS';
 
   return (
     <div className="space-y-3">
@@ -489,7 +491,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           )}
 
           {/* Stats row */}
-          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && (
+          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsEvents && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <Stat label="Latest" value={formatMacroValue(data[selected].latest!.value, selectedIndicator.unit)} />
               {data[selected].prev && (
@@ -512,6 +514,8 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             <HalvingChart height={240} />
           ) : selIsFOMC ? (
             <FOMCChart height={240} />
+          ) : selIsEvents ? (
+            <EventsChart height={300} />
           ) : histLoading ? (
             <div className="flex items-center justify-center h-44">
               <LoadingSpinner size={28} />
@@ -548,10 +552,10 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </div>
           )}
 
-          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsEvents && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
-          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsEvents && (
             <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
           )}
           {selected && <ChartNotes chartId={selected} />}

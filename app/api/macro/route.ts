@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { MACRO_INDICATORS, FOMC_MEETING_DATES } from '@/lib/config';
+import { MACRO_INDICATORS, FOMC_MEETING_DATES, MARKET_EVENTS } from '@/lib/config';
 
 // Source map: look up MacroSource by indicator id for dispatch in fetchMacroSeries.
 const indicatorSourceMap = new Map(
@@ -64,6 +64,8 @@ const WIDE_WINDOW_SERIES = new Set([
   // BTC Dominance: full history from 2010 is interesting; also needed so the
   // scale factor is anchored to the most recent data point regardless of timeframe.
   'BTC_DOMINANCE',
+  // Events: full history needed to show all historical events on the timeline.
+  'MARKET_EVENTS',
 ]);
 
 // ---------- FRED API (preferred when FRED_API_KEY is set) ----------
@@ -1554,6 +1556,10 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_DOMINANCE')        return fetchBitcoinDominance(fromDate);
     if (fredId === 'FOMC_MEETINGS') {
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
+      return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+    }
+    if (fredId === 'MARKET_EVENTS') {
+      const pts = MARKET_EVENTS.map(e => ({ date: e.date, value: 1 }));
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
     }
     // WALCL: Fed total assets in millions on FRED → divide by 1000 for billions.

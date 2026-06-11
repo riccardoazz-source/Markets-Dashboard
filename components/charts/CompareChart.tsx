@@ -5,9 +5,10 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
-import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES } from '@/lib/config';
+import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES, MARKET_EVENTS, MARKET_EVENT_COLORS } from '@/lib/config';
 import { HalvingChart } from './HalvingChart';
 import { FOMCChart } from './FOMCChart';
+import { EventsChart } from './EventsChart';
 import { RecessionChart } from './RecessionChart';
 import { recessionIntervals } from '@/lib/utils';
 import { format, parseISO } from 'date-fns';
@@ -114,13 +115,15 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   if (!assets.length) return null;
 
-  // BTC_HALVING, FOMC_MEETINGS (vertical lines) and recession series (shaded bands)
+  // BTC_HALVING, FOMC_MEETINGS, MARKET_EVENTS (vertical lines) and recession series (shaded bands)
   // are not drawn as data lines — they overlay the plottable assets.
-  const halvingAsset = assets.find(a => a.symbol === 'BTC_HALVING');
-  const fomcAsset    = assets.find(a => a.symbol === 'FOMC_MEETINGS');
+  const halvingAsset  = assets.find(a => a.symbol === 'BTC_HALVING');
+  const fomcAsset     = assets.find(a => a.symbol === 'FOMC_MEETINGS');
+  const eventsAsset   = assets.find(a => a.symbol === 'MARKET_EVENTS');
   const recessionAssets = assets.filter(a => RECESSION_SET.has(a.symbol));
   const plottableAssets = assets.filter(
-    a => a.symbol !== 'BTC_HALVING' && a.symbol !== 'FOMC_MEETINGS' && !RECESSION_SET.has(a.symbol),
+    a => a.symbol !== 'BTC_HALVING' && a.symbol !== 'FOMC_MEETINGS' &&
+         a.symbol !== 'MARKET_EVENTS' && !RECESSION_SET.has(a.symbol),
   );
 
   // Nothing to draw a line against → show a dedicated standalone chart.
@@ -133,8 +136,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         />
       );
     }
-    if (halvingAsset) return <HalvingChart height={height} />;
-    if (fomcAsset)    return <FOMCChart height={height} />;
+    if (halvingAsset)  return <HalvingChart height={height} />;
+    if (fomcAsset)     return <FOMCChart height={height} />;
+    if (eventsAsset)   return <EventsChart height={height} />;
     return null;
   }
 
@@ -211,6 +215,13 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         });
       })()
     : null;
+
+  // Market events — snapped to nearest category date for rendering.
+  const visibleEventItems = eventsAsset && allDates.length > 0
+    ? MARKET_EVENTS
+        .filter(e => e.date >= allDates[0] && e.date <= allDates[allDates.length - 1])
+        .map(e => ({ ...e, snapped: snapToDates(e.date, allDates) }))
+    : [];
 
   // "Today" vertical marker — shown when the chart contains future-dated data
   // (e.g. Fed dot-plot projections). Snapped to nearest category date.
@@ -602,6 +613,17 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
                 value: FED_CHAIR_CHANGES.find(c => FOMC_MEETING_DATES.find(d => d > c.date) === item.original)?.name ?? '',
                 fill: '#ef4444', fontSize: 9, position: 'insideTopRight',
               } : undefined}
+            />
+          ))}
+          {visibleEventItems.map((evt, i) => (
+            <ReferenceLine
+              key={`event-${i}`}
+              yAxisId="left"
+              x={evt.snapped}
+              stroke={MARKET_EVENT_COLORS[evt.category]}
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+              strokeOpacity={0.75}
             />
           ))}
           {todaySnapped && (

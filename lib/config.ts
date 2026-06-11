@@ -1,7 +1,7 @@
 import { AssetConfig } from './types';
 
 export type MacroUnit = '%' | 'K' | 'idx' | 'B$' | '$';
-export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Currency' | 'Sentiment' | 'Crypto' | 'Debt' | 'Market Value' | 'Recessions';
+export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Currency' | 'Sentiment' | 'Crypto' | 'Debt' | 'Market Value' | 'Recessions' | 'Events';
 
 // ---------- Source metadata ----------
 // Each MacroIndicator declares its primary data source.
@@ -36,6 +36,81 @@ export interface MacroIndicator {
   unit: MacroUnit;
   source: MacroSource;
 }
+
+// ---------- Market Events ----------
+export type MarketEventCategory = 'financial' | 'war' | 'terrorism' | 'pandemic' | 'geopolitical' | 'crypto';
+
+export interface MarketEvent {
+  date: string;               // YYYY-MM-DD
+  label: string;              // Short display name for the chart line
+  description: string;        // Tooltip / longer description
+  category: MarketEventCategory;
+}
+
+export const MARKET_EVENT_COLORS: Record<MarketEventCategory, string> = {
+  financial:   '#dc2626', // red
+  war:         '#ea580c', // orange-red
+  terrorism:   '#f97316', // orange
+  pandemic:    '#9333ea', // purple
+  geopolitical:'#3b82f6', // blue
+  crypto:      '#0891b2', // cyan
+};
+
+export const MARKET_EVENTS: MarketEvent[] = [
+  // Financial crises / market shocks
+  { date: '2000-03-10', label: 'Dot-com Peak',          category: 'financial',    description: 'NASDAQ composite ATH — dot-com bubble peak before 78% crash' },
+  { date: '2001-09-17', label: '9/11 Markets Reopen',   category: 'financial',    description: 'NYSE reopens after 9/11; Dow falls 14.3% in a week' },
+  { date: '2007-08-09', label: 'GFC Begins',            category: 'financial',    description: 'BNP Paribas halts withdrawals — global financial crisis trigger' },
+  { date: '2008-03-17', label: 'Bear Stearns',          category: 'financial',    description: 'Bear Stearns emergency sale to JPMorgan ($2/share)' },
+  { date: '2008-09-15', label: 'Lehman Fails',          category: 'financial',    description: 'Lehman Brothers files Chapter 11 — largest bankruptcy in US history' },
+  { date: '2008-09-29', label: 'TARP Rejected',         category: 'financial',    description: 'US House rejects $700B bailout; Dow falls 778 pts (largest single-day drop at the time)' },
+  { date: '2010-04-27', label: 'Greece Junk',           category: 'financial',    description: 'S&P downgrades Greece to junk; EU sovereign debt crisis begins' },
+  { date: '2010-05-06', label: 'Flash Crash',           category: 'financial',    description: 'US markets flash crash — Dow briefly falls 1,000 pts in minutes' },
+  { date: '2011-08-05', label: 'US Downgrade',          category: 'financial',    description: 'S&P strips US AAA credit rating for the first time in history' },
+  { date: '2015-08-24', label: 'China Black Monday',    category: 'financial',    description: 'Shanghai Composite -8.5%; Dow opens -1,000 pts amid China growth fears' },
+  { date: '2018-02-05', label: 'VIX Volmageddon',       category: 'financial',    description: 'XIV/SVXY collapse — inverse-VIX ETPs wiped out; Dow -1,175 pts' },
+  { date: '2020-03-09', label: 'COVID Crash',           category: 'financial',    description: 'COVID + oil war trigger; Dow -2,014 pts — circuit breakers trip' },
+  { date: '2020-03-16', label: 'COVID Bottom Near',     category: 'financial',    description: 'Dow -2,997 pts (largest single-day point drop); S&P circuit breakers trigger' },
+  { date: '2020-03-23', label: 'COVID Low',             category: 'financial',    description: 'S&P 500 intraday low — 34% drawdown from Feb ATH; Fed pledges unlimited QE' },
+  { date: '2022-09-23', label: 'UK Gilt Crisis',        category: 'financial',    description: 'Truss mini-budget triggers gilts crash; BoE emergency bond buying' },
+  { date: '2023-03-10', label: 'SVB Collapse',          category: 'financial',    description: 'Silicon Valley Bank fails — largest US bank failure since 2008' },
+  { date: '2023-03-19', label: 'Credit Suisse',         category: 'financial',    description: 'Credit Suisse emergency rescue by UBS orchestrated by Swiss regulator' },
+  { date: '2024-08-05', label: 'Yen Carry Unwind',      category: 'financial',    description: 'Yen carry trade unwind; Nikkei -12.4% — worst day since 1987' },
+
+  // Pandemics
+  { date: '2003-04-02', label: 'SARS Peak',             category: 'pandemic',     description: 'SARS epidemic at peak; WHO issues global travel advisory' },
+  { date: '2020-01-30', label: 'COVID PHEIC',           category: 'pandemic',     description: 'WHO declares COVID-19 a Public Health Emergency of International Concern' },
+  { date: '2020-03-11', label: 'COVID Pandemic',        category: 'pandemic',     description: 'WHO officially declares COVID-19 a global pandemic' },
+
+  // Wars / military conflicts
+  { date: '2001-10-07', label: 'Afghanistan War',       category: 'war',          description: 'US launches Operation Enduring Freedom — Afghanistan War begins' },
+  { date: '2003-03-20', label: 'Iraq War',              category: 'war',          description: 'US-led coalition invades Iraq — Iraq War begins' },
+  { date: '2014-03-18', label: 'Crimea Annexed',        category: 'war',          description: 'Russia formally annexes Crimea from Ukraine' },
+  { date: '2022-02-24', label: 'Ukraine Invasion',      category: 'war',          description: 'Russia launches full-scale invasion of Ukraine; global energy and food shock' },
+  { date: '2023-10-07', label: 'Hamas Attack',          category: 'war',          description: 'Hamas attacks southern Israel; Israel-Gaza war begins' },
+
+  // Terrorism
+  { date: '2001-09-11', label: '9/11',                  category: 'terrorism',    description: '9/11 attacks — NYSE and NASDAQ closed for 4 trading days' },
+  { date: '2004-03-11', label: 'Madrid Bombings',       category: 'terrorism',    description: 'Madrid train bombings — 191 killed, 2,000 injured' },
+  { date: '2005-07-07', label: 'London 7/7',            category: 'terrorism',    description: 'London transport bombings — 52 killed; FTSE 100 initially drops ~200 pts' },
+  { date: '2015-11-13', label: 'Paris Attacks',         category: 'terrorism',    description: 'Paris attacks — 130 killed; European markets fall ~3% Monday open' },
+
+  // Geopolitical
+  { date: '2016-06-24', label: 'Brexit Vote',           category: 'geopolitical', description: 'UK votes to leave EU; sterling falls 8%, FTSE 250 -7%' },
+  { date: '2016-11-09', label: 'Trump Elected (2016)',  category: 'geopolitical', description: 'Donald Trump wins US presidential election; markets initially fall then rally' },
+  { date: '2018-03-22', label: 'US-China Tariffs',      category: 'geopolitical', description: 'Trump signs tariff order on $60B China goods — US-China trade war begins' },
+  { date: '2019-08-05', label: 'China Yuan Weakens',    category: 'geopolitical', description: 'China lets yuan fall past 7/USD; US labels China a currency manipulator; Dow -767' },
+  { date: '2020-11-04', label: 'Biden Elected',         category: 'geopolitical', description: 'Joe Biden wins US presidential election' },
+  { date: '2021-01-06', label: 'Capitol Storming',      category: 'geopolitical', description: 'US Capitol stormed during certification of 2020 election results' },
+  { date: '2024-11-06', label: 'Trump Elected (2024)',  category: 'geopolitical', description: 'Donald Trump wins 2024 US presidential election; Dow +1,508 pts day after' },
+  { date: '2025-04-02', label: 'Liberation Day',        category: 'geopolitical', description: 'Trump announces sweeping "Liberation Day" tariffs; S&P falls ~10% in 2 days' },
+
+  // Crypto-specific
+  { date: '2013-12-05', label: 'China Bans BTC',        category: 'crypto',       description: 'China bans financial institutions from handling Bitcoin; BTC falls 50%' },
+  { date: '2021-05-19', label: 'BTC Crash -50%',        category: 'crypto',       description: 'Bitcoin crashes 50% from ATH; China bans crypto mining' },
+  { date: '2022-05-09', label: 'LUNA Collapse',         category: 'crypto',       description: 'TerraUSD/LUNA collapse — $40B market cap wiped in days' },
+  { date: '2022-11-11', label: 'FTX Bankrupt',          category: 'crypto',       description: 'FTX files Chapter 11; Sam Bankman-Fried arrested; BTC -25% in a week' },
+];
 
 export const MACRO_INDICATORS: MacroIndicator[] = [
   // Rates
@@ -208,6 +283,10 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'multpl', label: 'multpl.com',
               url: 'https://www.multpl.com/s-p-500-price-to-book',
               slug: 's-p-500-price-to-book' } },
+  // Events — curated major global events (wars, crises, pandemics) rendered as vertical overlay lines.
+  { id: 'MARKET_EVENTS', name: 'Major Market Events', category: 'Events',    unit: 'idx',
+    source: { type: 'computed', label: 'Curated historical record',
+              url: 'https://en.wikipedia.org/wiki/List_of_stock_market_crashes_and_bear_markets' } },
   // Recessions — official NBER / OECD recession indicators. Binary 0/1 monthly
   // series: 1 = economy in recession. Rendered as shaded bands, not lines, so
   // they can be overlaid on any chart in Compare.
