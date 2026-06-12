@@ -1394,7 +1394,7 @@ const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
   { date: '2025-12-10', value: 3.50 },
   { date: '2026-01-28', value: 3.50 },
   { date: '2026-03-18', value: 3.50 },
-  { date: '2026-05-06', value: 3.50 },
+  { date: '2026-04-29', value: 3.50 },
   // 2026 projected meetings — rate held at current 3.50 (no cuts assumed, flat).
   { date: '2026-06-17', value: 3.50 },
   { date: '2026-07-29', value: 3.50 },

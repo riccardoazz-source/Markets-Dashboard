@@ -133,7 +133,8 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2022-02-24', label: 'Ukraine Invasion',      category: 'war',          description: 'Russia launches full-scale invasion of Ukraine; global energy and food shock' },
   { date: '2023-10-07', label: 'Hamas Attack',          category: 'war',          description: 'Hamas attacks southern Israel; Israel-Gaza war begins' },
   { date: '2024-04-13', label: 'Iran Strikes Israel',   category: 'war',          description: "Iran's first-ever direct missile/drone attack on Israel" },
-  { date: '2025-06-13', label: 'Israel-Iran War',       category: 'war',          description: 'Israel launches strikes on Iran nuclear/military sites; 12-day war begins' },
+  { date: '2025-06-13', label: '12-Day War',            category: 'war',          description: 'Israel strikes Iran nuclear/military sites; US joins; ceasefire 24 Jun 2025', source: 'https://en.wikipedia.org/wiki/Twelve-Day_War' },
+  { date: '2026-02-28', label: '2026 Iran War',         category: 'war',          description: 'US strikes Iran; Iran closes the Strait of Hormuz; WTI crude +66% ($67→$111)', source: 'https://en.wikipedia.org/wiki/2026_Iran_war' },
 
   // Terrorism
   { date: '2001-09-11', label: '9/11',                  category: 'terrorism',    description: '9/11 attacks — NYSE and NASDAQ closed for 4 trading days' },
@@ -168,6 +169,7 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2022-11-11', label: 'FTX Bankrupt',          category: 'crypto',       description: 'FTX files Chapter 11; Sam Bankman-Fried arrested; BTC -25% in a week' },
   { date: '2024-01-10', label: 'Spot BTC ETF',          category: 'crypto',       description: 'SEC approves the first US spot Bitcoin ETFs — trading begins next day' },
   { date: '2024-12-05', label: 'BTC Hits $100k',        category: 'crypto',       description: 'Bitcoin crosses $100,000 for the first time' },
+  { date: '2025-10-06', label: 'BTC ATH $126k',         category: 'crypto',       description: 'Bitcoin sets a record ~$126,000 — 2025 cycle all-time high', source: 'https://en.wikipedia.org/wiki/History_of_bitcoin' },
 
   // IPOs / market debuts — listing day on the primary exchange
   { date: '1980-12-12', label: 'Apple IPO',             category: 'ipo',          description: 'Apple lists on NASDAQ at $22/share — largest IPO since Ford (1956)' },
@@ -188,6 +190,7 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2021-11-10', label: 'Rivian IPO',            category: 'ipo',          description: 'Rivian raises ~$12B — largest US IPO since 2014 (~$66B valuation)' },
   { date: '2023-09-14', label: 'ARM IPO',               category: 'ipo',          description: 'Arm Holdings re-lists on NASDAQ (~$54B) — largest IPO of 2023' },
   { date: '2024-03-21', label: 'Reddit IPO',            category: 'ipo',          description: 'Reddit lists on NYSE at $34/share; jumps ~48% on debut' },
+  { date: '2026-06-12', label: 'SpaceX IPO',            category: 'ipo',          description: 'SpaceX lists on NASDAQ (SPCX) at $135/share, ~$1.77T — largest IPO in history', source: 'https://www.cnbc.com/2026/05/20/spacex-ipo-live-updates.html' },
 ];
 
 export const MACRO_INDICATORS: MacroIndicator[] = [
@@ -469,8 +472,8 @@ export const FOMC_MEETING_DATES: string[] = [
   // 2025
   '2025-01-29','2025-03-19','2025-05-07','2025-06-18','2025-07-30','2025-09-17','2025-10-29','2025-12-10',
   // 2026 — past meetings
-  '2026-01-28','2026-03-18','2026-05-06',
-  // 2026 — future projected meetings
+  '2026-01-28','2026-03-18','2026-04-29',
+  // 2026 — upcoming meetings
   '2026-06-17','2026-07-29','2026-09-16','2026-10-28','2026-12-09',
 ];
 
