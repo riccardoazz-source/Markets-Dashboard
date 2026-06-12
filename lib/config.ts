@@ -40,7 +40,7 @@ export interface MacroIndicator {
 // ---------- Market Events ----------
 // 'personal' has no built-in events — it's reserved for the user's own dates
 // added from the Sources tab.
-export type MarketEventCategory = 'financial' | 'war' | 'terrorism' | 'pandemic' | 'geopolitical' | 'crypto' | 'personal';
+export type MarketEventCategory = 'financial' | 'war' | 'terrorism' | 'pandemic' | 'geopolitical' | 'crypto' | 'ipo' | 'personal';
 
 export interface MarketEvent {
   date: string;               // YYYY-MM-DD
@@ -56,11 +56,15 @@ export const MARKET_EVENT_COLORS: Record<MarketEventCategory, string> = {
   pandemic:    '#9333ea', // purple
   geopolitical:'#3b82f6', // blue
   crypto:      '#0891b2', // cyan
+  ipo:         '#16a34a', // green — market debuts / listings
   personal:    '#ec4899', // pink — user's own events
 };
 
 export const MARKET_EVENTS: MarketEvent[] = [
   // Financial crises / market shocks
+  { date: '1987-10-19', label: 'Black Monday',          category: 'financial',    description: 'Largest one-day % crash in history — Dow -22.6% in a single session' },
+  { date: '1997-07-02', label: 'Asian Crisis',         category: 'financial',    description: 'Thai baht float triggers the Asian financial crisis; contagion across EM' },
+  { date: '1998-09-23', label: 'LTCM Bailout',          category: 'financial',    description: 'Fed-orchestrated rescue of hedge fund Long-Term Capital Management' },
   { date: '2000-03-10', label: 'Dot-com Peak',          category: 'financial',    description: 'NASDAQ composite ATH — dot-com bubble peak before 78% crash' },
   { date: '2001-09-17', label: '9/11 Markets Reopen',   category: 'financial',    description: 'NYSE reopens after 9/11; Dow falls 14.3% in a week' },
   { date: '2007-08-09', label: 'GFC Begins',            category: 'financial',    description: 'BNP Paribas halts withdrawals — global financial crisis trigger' },
@@ -75,34 +79,47 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2020-03-09', label: 'COVID Crash',           category: 'financial',    description: 'COVID + oil war trigger; Dow -2,014 pts — circuit breakers trip' },
   { date: '2020-03-16', label: 'COVID Bottom Near',     category: 'financial',    description: 'Dow -2,997 pts (largest single-day point drop); S&P circuit breakers trigger' },
   { date: '2020-03-23', label: 'COVID Low',             category: 'financial',    description: 'S&P 500 intraday low — 34% drawdown from Feb ATH; Fed pledges unlimited QE' },
+  { date: '2021-12-09', label: 'Evergrande Default',    category: 'financial',    description: 'Fitch declares China Evergrande in default — $300B property-debt crisis' },
   { date: '2022-09-23', label: 'UK Gilt Crisis',        category: 'financial',    description: 'Truss mini-budget triggers gilts crash; BoE emergency bond buying' },
   { date: '2023-03-10', label: 'SVB Collapse',          category: 'financial',    description: 'Silicon Valley Bank fails — largest US bank failure since 2008' },
   { date: '2023-03-19', label: 'Credit Suisse',         category: 'financial',    description: 'Credit Suisse emergency rescue by UBS orchestrated by Swiss regulator' },
+  { date: '2023-05-01', label: 'First Republic',        category: 'financial',    description: 'First Republic Bank seized and sold to JPMorgan — 2nd-largest US bank failure' },
   { date: '2024-08-05', label: 'Yen Carry Unwind',      category: 'financial',    description: 'Yen carry trade unwind; Nikkei -12.4% — worst day since 1987' },
 
   // Pandemics
   { date: '2003-04-02', label: 'SARS Peak',             category: 'pandemic',     description: 'SARS epidemic at peak; WHO issues global travel advisory' },
+  { date: '2009-06-11', label: 'H1N1 Pandemic',         category: 'pandemic',     description: 'WHO declares H1N1 swine flu a pandemic — first since 1968' },
+  { date: '2014-08-08', label: 'Ebola PHEIC',           category: 'pandemic',     description: 'WHO declares West African Ebola outbreak a global health emergency' },
   { date: '2020-01-30', label: 'COVID PHEIC',           category: 'pandemic',     description: 'WHO declares COVID-19 a Public Health Emergency of International Concern' },
   { date: '2020-03-11', label: 'COVID Pandemic',        category: 'pandemic',     description: 'WHO officially declares COVID-19 a global pandemic' },
+  { date: '2022-07-23', label: 'Mpox PHEIC',            category: 'pandemic',     description: 'WHO declares the multi-country mpox (monkeypox) outbreak a global emergency' },
 
   // Wars / military conflicts
   { date: '2001-10-07', label: 'Afghanistan War',       category: 'war',          description: 'US launches Operation Enduring Freedom — Afghanistan War begins' },
   { date: '2003-03-20', label: 'Iraq War',              category: 'war',          description: 'US-led coalition invades Iraq — Iraq War begins' },
+  { date: '2011-03-15', label: 'Syria War',             category: 'war',          description: 'Syrian civil war begins amid Arab Spring uprising' },
   { date: '2014-03-18', label: 'Crimea Annexed',        category: 'war',          description: 'Russia formally annexes Crimea from Ukraine' },
+  { date: '2021-08-15', label: 'Fall of Kabul',         category: 'war',          description: 'Taliban take Kabul as US completes withdrawal from Afghanistan' },
   { date: '2022-02-24', label: 'Ukraine Invasion',      category: 'war',          description: 'Russia launches full-scale invasion of Ukraine; global energy and food shock' },
   { date: '2023-10-07', label: 'Hamas Attack',          category: 'war',          description: 'Hamas attacks southern Israel; Israel-Gaza war begins' },
+  { date: '2024-04-13', label: 'Iran Strikes Israel',   category: 'war',          description: "Iran's first-ever direct missile/drone attack on Israel" },
+  { date: '2025-06-13', label: 'Israel-Iran War',       category: 'war',          description: 'Israel launches strikes on Iran nuclear/military sites; 12-day war begins' },
 
   // Terrorism
   { date: '2001-09-11', label: '9/11',                  category: 'terrorism',    description: '9/11 attacks — NYSE and NASDAQ closed for 4 trading days' },
   { date: '2004-03-11', label: 'Madrid Bombings',       category: 'terrorism',    description: 'Madrid train bombings — 191 killed, 2,000 injured' },
   { date: '2005-07-07', label: 'London 7/7',            category: 'terrorism',    description: 'London transport bombings — 52 killed; FTSE 100 initially drops ~200 pts' },
+  { date: '2008-11-26', label: 'Mumbai Attacks',        category: 'terrorism',    description: 'Coordinated attacks across Mumbai — 175 killed over 4 days' },
+  { date: '2013-04-15', label: 'Boston Marathon',       category: 'terrorism',    description: 'Boston Marathon bombing — 3 killed, hundreds injured' },
   { date: '2015-11-13', label: 'Paris Attacks',         category: 'terrorism',    description: 'Paris attacks — 130 killed; European markets fall ~3% Monday open' },
+  { date: '2016-07-14', label: 'Nice Attack',           category: 'terrorism',    description: 'Truck attack on Bastille Day crowd in Nice — 86 killed' },
 
   // Geopolitical
   { date: '2016-06-24', label: 'Brexit Vote',           category: 'geopolitical', description: 'UK votes to leave EU; sterling falls 8%, FTSE 250 -7%' },
   { date: '2016-11-09', label: 'Trump Elected (2016)',  category: 'geopolitical', description: 'Donald Trump wins US presidential election; markets initially fall then rally' },
   { date: '2018-03-22', label: 'US-China Tariffs',      category: 'geopolitical', description: 'Trump signs tariff order on $60B China goods — US-China trade war begins' },
   { date: '2019-08-05', label: 'China Yuan Weakens',    category: 'geopolitical', description: 'China lets yuan fall past 7/USD; US labels China a currency manipulator; Dow -767' },
+  { date: '2020-01-31', label: 'Brexit Day',            category: 'geopolitical', description: 'UK formally leaves the European Union after 47 years of membership' },
   { date: '2020-11-04', label: 'Biden Elected',         category: 'geopolitical', description: 'Joe Biden wins US presidential election' },
   { date: '2021-01-06', label: 'Capitol Storming',      category: 'geopolitical', description: 'US Capitol stormed during certification of 2020 election results' },
   { date: '2024-11-06', label: 'Trump Elected (2024)',  category: 'geopolitical', description: 'Donald Trump wins 2024 US presidential election; Dow +1,508 pts day after' },
@@ -110,9 +127,37 @@ export const MARKET_EVENTS: MarketEvent[] = [
 
   // Crypto-specific
   { date: '2013-12-05', label: 'China Bans BTC',        category: 'crypto',       description: 'China bans financial institutions from handling Bitcoin; BTC falls 50%' },
+  { date: '2014-02-24', label: 'Mt. Gox Collapse',      category: 'crypto',       description: 'Mt. Gox halts trading and collapses — ~850,000 BTC lost' },
+  { date: '2017-12-17', label: 'BTC Hits $20k',         category: 'crypto',       description: 'Bitcoin reaches ~$20,000 for the first time at the 2017 bull-run peak' },
+  { date: '2020-03-12', label: 'Crypto Black Thursday', category: 'crypto',       description: 'COVID crash — BTC -50% in a day to ~$3,800' },
   { date: '2021-05-19', label: 'BTC Crash -50%',        category: 'crypto',       description: 'Bitcoin crashes 50% from ATH; China bans crypto mining' },
+  { date: '2021-09-07', label: 'El Salvador BTC',       category: 'crypto',       description: 'El Salvador adopts Bitcoin as legal tender — a world first' },
+  { date: '2021-11-10', label: 'BTC ATH $69k',          category: 'crypto',       description: 'Bitcoin reaches its 2021 cycle all-time high of ~$69,000' },
   { date: '2022-05-09', label: 'LUNA Collapse',         category: 'crypto',       description: 'TerraUSD/LUNA collapse — $40B market cap wiped in days' },
+  { date: '2022-09-15', label: 'Ethereum Merge',        category: 'crypto',       description: 'Ethereum transitions to proof-of-stake — energy use drops ~99.9%' },
   { date: '2022-11-11', label: 'FTX Bankrupt',          category: 'crypto',       description: 'FTX files Chapter 11; Sam Bankman-Fried arrested; BTC -25% in a week' },
+  { date: '2024-01-10', label: 'Spot BTC ETF',          category: 'crypto',       description: 'SEC approves the first US spot Bitcoin ETFs — trading begins next day' },
+  { date: '2024-12-05', label: 'BTC Hits $100k',        category: 'crypto',       description: 'Bitcoin crosses $100,000 for the first time' },
+
+  // IPOs / market debuts — listing day on the primary exchange
+  { date: '1980-12-12', label: 'Apple IPO',             category: 'ipo',          description: 'Apple lists on NASDAQ at $22/share — largest IPO since Ford (1956)' },
+  { date: '1986-03-13', label: 'Microsoft IPO',         category: 'ipo',          description: 'Microsoft IPOs at $21/share, valuing the company at ~$777M' },
+  { date: '1997-05-15', label: 'Amazon IPO',            category: 'ipo',          description: 'Amazon lists on NASDAQ at $18/share (~$438M valuation)' },
+  { date: '1999-01-22', label: 'Nvidia IPO',            category: 'ipo',          description: 'Nvidia IPOs on NASDAQ at $12/share' },
+  { date: '2004-08-19', label: 'Google IPO',            category: 'ipo',          description: 'Google Dutch-auction IPO at $85/share — ~$23B valuation' },
+  { date: '2008-03-19', label: 'Visa IPO',              category: 'ipo',          description: 'Visa raises $17.9B — then the largest IPO in US history' },
+  { date: '2010-06-29', label: 'Tesla IPO',             category: 'ipo',          description: 'Tesla lists on NASDAQ at $17/share — first US automaker IPO since Ford' },
+  { date: '2012-05-18', label: 'Facebook IPO',          category: 'ipo',          description: 'Facebook IPOs at $38/share (~$104B) — botched NASDAQ debut' },
+  { date: '2014-09-19', label: 'Alibaba IPO',           category: 'ipo',          description: 'Alibaba raises $25B on NYSE — largest IPO in history at the time' },
+  { date: '2019-05-10', label: 'Uber IPO',              category: 'ipo',          description: 'Uber lists on NYSE at $45/share (~$82B); falls on debut' },
+  { date: '2019-12-11', label: 'Saudi Aramco IPO',      category: 'ipo',          description: 'Aramco lists on Tadawul — $25.6B raise, ~$1.7T valuation (largest ever)' },
+  { date: '2020-09-16', label: 'Snowflake IPO',         category: 'ipo',          description: 'Snowflake IPOs at $120/share — largest software IPO ever (~$33B)' },
+  { date: '2020-12-10', label: 'Airbnb IPO',            category: 'ipo',          description: 'Airbnb lists on NASDAQ; shares more than double on debut (~$100B)' },
+  { date: '2021-04-14', label: 'Coinbase Listing',      category: 'ipo',          description: 'Coinbase direct-lists on NASDAQ at a ~$86B opening valuation' },
+  { date: '2021-07-29', label: 'Robinhood IPO',         category: 'ipo',          description: 'Robinhood IPOs on NASDAQ at $38/share (~$32B)' },
+  { date: '2021-11-10', label: 'Rivian IPO',            category: 'ipo',          description: 'Rivian raises ~$12B — largest US IPO since 2014 (~$66B valuation)' },
+  { date: '2023-09-14', label: 'ARM IPO',               category: 'ipo',          description: 'Arm Holdings re-lists on NASDAQ (~$54B) — largest IPO of 2023' },
+  { date: '2024-03-21', label: 'Reddit IPO',            category: 'ipo',          description: 'Reddit lists on NYSE at $34/share; jumps ~48% on debut' },
 ];
 
 export const MACRO_INDICATORS: MacroIndicator[] = [
@@ -306,6 +351,9 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'EVENTS_CRYPTO',       name: 'Crypto Events',       category: 'Events', unit: 'idx',
     source: { type: 'computed', label: 'Curated historical record',
               url: 'https://en.wikipedia.org/wiki/History_of_bitcoin' } },
+  { id: 'EVENTS_IPO',          name: 'Major IPOs',          category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Curated historical record',
+              url: 'https://en.wikipedia.org/wiki/List_of_largest_IPOs' } },
   { id: 'EVENTS_PERSONAL',     name: 'Personal Events',     category: 'Events', unit: 'idx',
     source: { type: 'computed', label: 'User-defined (add from Sources tab)',
               url: 'https://en.wikipedia.org/wiki/Personal_timeline' } },
@@ -437,6 +485,7 @@ export const EVENT_INDICATOR_CATEGORY: Record<string, MarketEventCategory> = {
   'EVENTS_PANDEMIC':     'pandemic',
   'EVENTS_GEOPOLITICAL': 'geopolitical',
   'EVENTS_CRYPTO':       'crypto',
+  'EVENTS_IPO':          'ipo',
   'EVENTS_PERSONAL':     'personal',
 };
 

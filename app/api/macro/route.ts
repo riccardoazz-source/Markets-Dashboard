@@ -66,7 +66,7 @@ const WIDE_WINDOW_SERIES = new Set([
   'BTC_DOMINANCE',
   // Events: full history per category needed to show all historical events on the timeline.
   'EVENTS_FINANCIAL', 'EVENTS_WAR', 'EVENTS_TERRORISM', 'EVENTS_PANDEMIC',
-  'EVENTS_GEOPOLITICAL', 'EVENTS_CRYPTO', 'EVENTS_PERSONAL',
+  'EVENTS_GEOPOLITICAL', 'EVENTS_CRYPTO', 'EVENTS_IPO', 'EVENTS_PERSONAL',
 ]);
 
 // ---------- FRED API (preferred when FRED_API_KEY is set) ----------

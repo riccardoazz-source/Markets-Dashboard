@@ -15,11 +15,12 @@ const CATEGORY_LABELS: Record<MarketEventCategory, string> = {
   pandemic:     'Pandemic',
   geopolitical: 'Geopolitical',
   crypto:       'Crypto',
+  ipo:          'Major IPOs',
   personal:     'Personal',
 };
 
 const CATEGORY_ORDER: MarketEventCategory[] = [
-  'personal', 'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'crypto',
+  'personal', 'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'crypto', 'ipo',
 ];
 
 const BLANK_EVENT = { date: '', label: '', description: '' };

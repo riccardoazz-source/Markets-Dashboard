@@ -16,23 +16,35 @@ const CATEGORY_LABELS: Record<MarketEventCategory, string> = {
   pandemic:     'Pandemic',
   geopolitical: 'Geopolitical',
   crypto:       'Crypto',
+  ipo:          'Major IPOs',
   personal:     'Personal',
 };
 
 const CATEGORY_ORDER: MarketEventCategory[] = [
-  'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'crypto', 'personal',
+  'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'crypto', 'ipo', 'personal',
 ];
 
-// Shared monthly axis (Jan 2000 → today) used by every category panel.
-function buildAxis(): { date: string; v: number }[] {
+// Monthly axis from `startYear` → today. Each category panel builds its own axis
+// anchored ~1 year before its earliest event, so a category whose events all sit
+// in (say) 2013+ doesn't get a huge empty stretch back to 1980, while the IPO
+// panel can still reach back to Apple's 1980 listing.
+function buildAxis(startYear: number): { date: string; v: number }[] {
   const data: { date: string; v: number }[] = [];
-  const d = new Date(2000, 0, 1);
+  const d = new Date(startYear, 0, 1);
   const axisEnd = new Date();
   while (d <= axisEnd) {
     data.push({ date: format(d, 'yyyy-MM-dd'), v: 0 });
     d.setMonth(d.getMonth() + 1);
   }
   return data;
+}
+
+// Earliest sensible axis start for a set of events: 1 year before the first event,
+// clamped so empty categories still render a reasonable recent window.
+function axisStartYear(events: { date: string }[]): number {
+  if (events.length === 0) return new Date().getFullYear() - 5;
+  const earliest = events.reduce((min, e) => (e.date < min ? e.date : min), events[0].date);
+  return parseInt(earliest.slice(0, 4), 10) - 1;
 }
 
 function snapTo(axis: { date: string }[], target: string): string {
@@ -47,14 +59,14 @@ function snapTo(axis: { date: string }[], target: string): string {
 
 // One self-contained panel for a single category: chart + descriptive list.
 function CategoryPanel({
-  cat, events, axis, height,
+  cat, events, height,
 }: {
   cat: MarketEventCategory;
   events: MarketEvent[];
-  axis: { date: string; v: number }[];
   height: number;
 }) {
   const color = MARKET_EVENT_COLORS[cat];
+  const axis = buildAxis(axisStartYear(events));
   const today = new Date().toISOString().slice(0, 10);
   const todaySnapped = snapTo(axis, today);
   const sorted = events.slice().sort((a, b) => a.date.localeCompare(b.date));
@@ -152,7 +164,6 @@ export function EventsChart({ height = 200, category }: { height?: number; categ
     return () => window.removeEventListener('mkt-sources-changed', load);
   }, []);
 
-  const axis = buildAxis();
   const byCat = (cat: MarketEventCategory) => allEvents.filter(e => e.category === cat);
 
   // In "all" mode show every non-empty category panel; when a category is
@@ -165,10 +176,9 @@ export function EventsChart({ height = 200, category }: { height?: number; categ
 
   // When locked to a specific category, skip filter chips
   if (category) {
-    const axis = buildAxis();
     return (
       <div>
-        <CategoryPanel cat={category} events={byCat(category)} axis={axis} height={height} />
+        <CategoryPanel cat={category} events={byCat(category)} height={height} />
       </div>
     );
   }
@@ -216,7 +226,7 @@ export function EventsChart({ height = 200, category }: { height?: number; categ
       {/* One separate panel per category */}
       <div className="space-y-3">
         {categoriesToShow.map(cat => (
-          <CategoryPanel key={cat} cat={cat} events={byCat(cat)} axis={axis} height={panelHeight} />
+          <CategoryPanel key={cat} cat={cat} events={byCat(cat)} height={panelHeight} />
         ))}
       </div>
     </div>
