@@ -6,7 +6,7 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
-import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES, MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEvent } from '@/lib/config';
+import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES, MARKET_EVENTS, MARKET_EVENT_COLORS, EVENT_INDICATOR_CATEGORY, MarketEvent } from '@/lib/config';
 import { getMergedMarketEvents } from '@/lib/userSources';
 import { HalvingChart } from './HalvingChart';
 import { FOMCChart } from './FOMCChart';
@@ -125,15 +125,15 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   if (!assets.length) return null;
 
-  // BTC_HALVING, FOMC_MEETINGS, MARKET_EVENTS (vertical lines) and recession series (shaded bands)
+  // BTC_HALVING, FOMC_MEETINGS, per-category EVENTS_* (vertical lines) and recession series (shaded bands)
   // are not drawn as data lines — they overlay the plottable assets.
-  const halvingAsset  = assets.find(a => a.symbol === 'BTC_HALVING');
-  const fomcAsset     = assets.find(a => a.symbol === 'FOMC_MEETINGS');
-  const eventsAsset   = assets.find(a => a.symbol === 'MARKET_EVENTS');
+  const halvingAsset    = assets.find(a => a.symbol === 'BTC_HALVING');
+  const fomcAsset       = assets.find(a => a.symbol === 'FOMC_MEETINGS');
+  const eventCatAssets  = assets.filter(a => !!EVENT_INDICATOR_CATEGORY[a.symbol]);
   const recessionAssets = assets.filter(a => RECESSION_SET.has(a.symbol));
   const plottableAssets = assets.filter(
     a => a.symbol !== 'BTC_HALVING' && a.symbol !== 'FOMC_MEETINGS' &&
-         a.symbol !== 'MARKET_EVENTS' && !RECESSION_SET.has(a.symbol),
+         !EVENT_INDICATOR_CATEGORY[a.symbol] && !RECESSION_SET.has(a.symbol),
   );
 
   // Nothing to draw a line against → show a dedicated standalone chart.
@@ -148,7 +148,10 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     }
     if (halvingAsset)  return <HalvingChart height={height} />;
     if (fomcAsset)     return <FOMCChart height={height} />;
-    if (eventsAsset)   return <EventsChart height={height} />;
+    if (eventCatAssets.length > 0) {
+      const firstCat = EVENT_INDICATOR_CATEGORY[eventCatAssets[0].symbol];
+      return <EventsChart height={height} category={firstCat} />;
+    }
     return null;
   }
 
@@ -226,10 +229,12 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       })()
     : null;
 
-  // Market events — snapped to nearest category date for rendering.
-  const visibleEventItems = eventsAsset && allDates.length > 0
+  // Market events — one entry per selected event category, snapped to nearest category date.
+  // Uses mergedEvents (built-in + user custom) filtered to only categories that are selected.
+  const selectedEventCats = new Set(eventCatAssets.map(a => EVENT_INDICATOR_CATEGORY[a.symbol]));
+  const visibleEventItems = eventCatAssets.length > 0 && allDates.length > 0
     ? mergedEvents
-        .filter(e => e.date >= allDates[0] && e.date <= allDates[allDates.length - 1])
+        .filter(e => selectedEventCats.has(e.category) && e.date >= allDates[0] && e.date <= allDates[allDates.length - 1])
         .map(e => ({ ...e, snapped: snapToDates(e.date, allDates) }))
     : [];
 
@@ -357,6 +362,10 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   if (fomcAsset) {
     legendItems.push({ key: 'FOMC_MEETINGS', name: 'FOMC Meetings', color: '#3b82f6', dashed: true });
   }
+  eventCatAssets.forEach(a => {
+    const cat = EVENT_INDICATOR_CATEGORY[a.symbol];
+    legendItems.push({ key: a.symbol, name: a.name, color: MARKET_EVENT_COLORS[cat], dashed: true });
+  });
 
   const selStats = range
     ? plottableAssets.map(a => {
@@ -486,6 +495,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       {fomcAsset && visibleFomcDates !== null && visibleFomcDates.length === 0 && (
         <div className="mb-3 rounded-lg border border-blue-400/30 bg-blue-400/10 px-4 py-3">
           <p className="text-sm font-semibold text-blue-300">🏛 No FOMC meetings in this time range</p>
+        </div>
+      )}
+      {eventCatAssets.length > 0 && visibleEventItems.length === 0 && (
+        <div className="mb-3 rounded-lg border border-gray-500/30 bg-gray-500/10 px-4 py-3">
+          <p className="text-sm font-semibold text-gray-300">No events in this time range</p>
+          <p className="mt-0.5 text-xs text-gray-400/80">
+            Switch to a longer timeframe or MAX to see historical events overlaid.
+          </p>
         </div>
       )}
 

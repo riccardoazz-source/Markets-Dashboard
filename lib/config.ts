@@ -143,7 +143,7 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/T10Y2Y' } },
   // FOMC meeting dates — rendered as vertical reference lines (event overlay, not a data series)
-  { id: 'FOMC_MEETINGS', name: 'FOMC Meeting Dates', category: 'Rates',      unit: 'idx',
+  { id: 'FOMC_MEETINGS', name: 'FOMC Meeting Dates', category: 'Events',     unit: 'idx',
     source: { type: 'computed', label: 'Federal Reserve',
               url: 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm' } },
   // Inflation
@@ -231,7 +231,7 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
               url: 'https://finance.yahoo.com/quote/DX-Y.NYB',
               symbol: 'DX-Y.NYB' } },
   // Crypto — computed server-side; bitbo.io charts are the visual reference
-  { id: 'BTC_HALVING', name: 'Bitcoin Halvings',      category: 'Crypto',      unit: 'idx',
+  { id: 'BTC_HALVING', name: 'Bitcoin Halvings',      category: 'Events',      unit: 'idx',
     source: { type: 'computed', label: 'Bitcoin halving schedule',
               url: 'https://charts.bitbo.io/halving-progress/' } },
   { id: 'BTC_RSI',  name: 'Bitcoin Monthly RSI',     category: 'Crypto',      unit: 'idx',
@@ -286,10 +286,29 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'multpl', label: 'multpl.com',
               url: 'https://www.multpl.com/s-p-500-price-to-book',
               slug: 's-p-500-price-to-book' } },
-  // Events — curated major global events (wars, crises, pandemics) rendered as vertical overlay lines.
-  { id: 'MARKET_EVENTS', name: 'Major Market Events', category: 'Events',    unit: 'idx',
+  // Events — per-category event calendars rendered as vertical overlay lines.
+  // Each category is an independent indicator card with its own chart and Compare overlay.
+  { id: 'EVENTS_FINANCIAL',    name: 'Financial Crises',    category: 'Events', unit: 'idx',
     source: { type: 'computed', label: 'Curated historical record',
               url: 'https://en.wikipedia.org/wiki/List_of_stock_market_crashes_and_bear_markets' } },
+  { id: 'EVENTS_WAR',          name: 'Wars & Conflicts',    category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Curated historical record',
+              url: 'https://en.wikipedia.org/wiki/List_of_wars_and_anthropogenic_disasters_by_death_toll' } },
+  { id: 'EVENTS_TERRORISM',    name: 'Terrorism',           category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Curated historical record',
+              url: 'https://en.wikipedia.org/wiki/List_of_terrorist_incidents' } },
+  { id: 'EVENTS_PANDEMIC',     name: 'Pandemics',           category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Curated historical record',
+              url: 'https://en.wikipedia.org/wiki/List_of_epidemics_and_pandemics' } },
+  { id: 'EVENTS_GEOPOLITICAL', name: 'Geopolitical Events', category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Curated historical record',
+              url: 'https://en.wikipedia.org/wiki/Geopolitics' } },
+  { id: 'EVENTS_CRYPTO',       name: 'Crypto Events',       category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Curated historical record',
+              url: 'https://en.wikipedia.org/wiki/History_of_bitcoin' } },
+  { id: 'EVENTS_PERSONAL',     name: 'Personal Events',     category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'User-defined (add from Sources tab)',
+              url: 'https://en.wikipedia.org/wiki/Personal_timeline' } },
   // Recessions — official NBER / OECD recession indicators. Binary 0/1 monthly
   // series: 1 = economy in recession. Rendered as shaded bands, not lines, so
   // they can be overlaid on any chart in Compare.
@@ -408,6 +427,18 @@ export const BTC_HALVING_DATES: string[] = [
   '2020-05-11', // 3rd: 12.5 → 6.25 BTC
   '2024-04-20', // 4th: 6.25 → 3.125 BTC
 ];
+
+// Maps each per-category event indicator ID to its MarketEventCategory.
+// Used by MacroSection, CompareChart, CompareSection to identify event overlays.
+export const EVENT_INDICATOR_CATEGORY: Record<string, MarketEventCategory> = {
+  'EVENTS_FINANCIAL':    'financial',
+  'EVENTS_WAR':          'war',
+  'EVENTS_TERRORISM':    'terrorism',
+  'EVENTS_PANDEMIC':     'pandemic',
+  'EVENTS_GEOPOLITICAL': 'geopolitical',
+  'EVENTS_CRYPTO':       'crypto',
+  'EVENTS_PERSONAL':     'personal',
+};
 
 // Pure stock-market indices — Yahoo Finance native index symbols where they
 // exist. MSCI World and MSCI EM IMI do not have reliable free price-index

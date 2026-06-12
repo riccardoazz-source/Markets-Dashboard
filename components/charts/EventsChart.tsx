@@ -138,9 +138,10 @@ function CategoryPanel({
   );
 }
 
-export function EventsChart({ height = 200 }: { height?: number }) {
-  // 'all' shows every category as its own separate panel (divided, not crammed).
-  const [activeCat, setActiveCat] = useState<MarketEventCategory | 'all'>('all');
+export function EventsChart({ height = 200, category }: { height?: number; category?: MarketEventCategory }) {
+  // When `category` is provided, show only that category's panel (used by per-indicator cards).
+  // When undefined, show filter chips and all non-empty categories.
+  const [activeCat, setActiveCat] = useState<MarketEventCategory | 'all'>(category ?? 'all');
   // Built-in curated list + the user's custom events (from the Sources tab).
   const [allEvents, setAllEvents] = useState<MarketEvent[]>(MARKET_EVENTS);
 
@@ -161,6 +162,16 @@ export function EventsChart({ height = 200 }: { height?: number }) {
     : [activeCat];
 
   const panelHeight = activeCat === 'all' ? height : Math.round(height * 1.4);
+
+  // When locked to a specific category, skip filter chips
+  if (category) {
+    const axis = buildAxis();
+    return (
+      <div>
+        <CategoryPanel cat={category} events={byCat(category)} axis={axis} height={height} />
+      </div>
+    );
+  }
 
   return (
     <div>

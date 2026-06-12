@@ -26,14 +26,19 @@ const SNAPSHOT_IDS = new Set([
 // these are policy tables that rarely change between updates).
 const HARDCODED_FALLBACK_IDS = new Set(['DFEDTARU', 'ECBDFR', 'FEDFUNDS']);
 // Event-calendar series: dates are in the source code, not fetched from an API.
-const EVENT_CALENDAR_IDS = new Set(['FOMC_MEETINGS', 'BTC_HALVING', 'MARKET_EVENTS']);
+const EVENT_CALENDAR_IDS = new Set([
+  'FOMC_MEETINGS', 'BTC_HALVING',
+  'EVENTS_FINANCIAL', 'EVENTS_WAR', 'EVENTS_TERRORISM', 'EVENTS_PANDEMIC',
+  'EVENTS_GEOPOLITICAL', 'EVENTS_CRYPTO', 'EVENTS_PERSONAL',
+]);
 
 interface DataTypeInfo { label: string; color: 'green' | 'blue' | 'amber' | 'gray' }
 
 function getDataType(id: string, sourceType: string): DataTypeInfo {
   if (EVENT_CALENDAR_IDS.has(id)) {
     if (id === 'BTC_HALVING') return { label: 'Dynamic (block height) + hardcoded past', color: 'amber' };
-    if (id === 'MARKET_EVENTS') return { label: 'Curated + user-editable (see Market Events below)', color: 'amber' };
+    if (id === 'EVENTS_PERSONAL') return { label: 'User-defined — add from Market Events below', color: 'amber' };
+    if (id.startsWith('EVENTS_')) return { label: 'Curated + user-editable (see Market Events below)', color: 'amber' };
     return { label: 'Event calendar — hardcoded 2000-2026, update yearly', color: 'amber' };
   }
   if (HARDCODED_FALLBACK_IDS.has(id)) return { label: 'Live + hardcoded fallback table', color: 'blue' };

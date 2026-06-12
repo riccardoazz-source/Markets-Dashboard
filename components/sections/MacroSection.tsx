@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES, BTC_HALVING_DATES } from '@/lib/config';
+import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES, BTC_HALVING_DATES, EVENT_INDICATOR_CATEGORY, MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEventCategory } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { getTimeframeStart, calculateCAGR, formatPercent, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
@@ -21,6 +21,7 @@ import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2, Layers } from 'lucid
 const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Currency', 'Sentiment', 'Crypto', 'Debt', 'Market Value', 'Recessions', 'Events'];
 
 const RECESSION_SET = new Set(RECESSION_SERIES);
+const EVENT_CAT_IDS = new Set(Object.keys(EVENT_INDICATOR_CATEGORY));
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface MacroLatest {
@@ -262,7 +263,8 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const cagrData = selectedIndicator ? calculateCAGR(historical, timeframe) : null;
   const selIsRec = selected ? RECESSION_SET.has(selected) : false;
   const selIsFOMC = selected === 'FOMC_MEETINGS';
-  const selIsEvents = selected === 'MARKET_EVENTS';
+  const selIsEvents = selected ? EVENT_CAT_IDS.has(selected) : false;
+  const selEventCategory = selected ? (EVENT_INDICATOR_CATEGORY[selected] as MarketEventCategory | undefined) : undefined;
 
   return (
     <div className="space-y-3">
@@ -309,9 +311,10 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           const snap = statusGist[ind.id];
           const isRec = RECESSION_SET.has(ind.id);
           const isFOMC = ind.id === 'FOMC_MEETINGS';
+          const isEventCat = EVENT_CAT_IDS.has(ind.id);
           // Overlay series (recession bands, halving/meeting markers) behave differently
           // from normal indicators — flag them so they are easy to spot.
-          const isSpecial = isRec || ind.id === 'BTC_HALVING' || isFOMC;
+          const isSpecial = isRec || ind.id === 'BTC_HALVING' || isFOMC || isEventCat;
 
           return (
             <button key={ind.id}
@@ -347,7 +350,37 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               </div>
               <p className="text-sm font-semibold text-gray-100 leading-snug mb-2 pr-3">{ind.name}</p>
 
-              {latest ? (
+              {isEventCat ? (
+                (() => {
+                  const cat = EVENT_INDICATOR_CATEGORY[ind.id] as MarketEventCategory;
+                  const color = MARKET_EVENT_COLORS[cat];
+                  const builtins = MARKET_EVENTS.filter(e => e.category === cat);
+                  const customCount = mounted ? (sourcesConfig.customEvents ?? []).filter(e => e.category === cat).length : 0;
+                  const total = builtins.length + customCount;
+                  const lastEvt = builtins[builtins.length - 1];
+                  const fmt = (d: string) => {
+                    try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); }
+                    catch { return d; }
+                  };
+                  return (
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                        <p className="text-lg font-bold text-gray-100">{total}</p>
+                        <p className="text-xs text-gray-500">events</p>
+                      </div>
+                      {lastEvt ? (
+                        <>
+                          <p className="text-[10px] text-gray-500">Last</p>
+                          <p className="text-xs font-semibold text-gray-300">{fmt(lastEvt.date)}</p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-gray-600 italic">Add in Sources tab</p>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : latest ? (
                 <>
                   {isFOMC ? (
                     (() => {
@@ -515,7 +548,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           ) : selIsFOMC ? (
             <FOMCChart height={240} />
           ) : selIsEvents ? (
-            <EventsChart height={300} />
+            <EventsChart height={300} category={selEventCategory} />
           ) : histLoading ? (
             <div className="flex items-center justify-center h-44">
               <LoadingSpinner size={28} />
