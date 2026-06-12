@@ -47,7 +47,37 @@ export interface MarketEvent {
   label: string;              // Short display name for the chart line
   description: string;        // Tooltip / longer description
   category: MarketEventCategory;
+  source?: string;            // Verifiable reference URL (REQUIRED for every NEW event — see EVENTS.md)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVENT INCLUSION BAR — "strict / landmark only". Read this before adding ANY
+// event. Full update protocol (verify → preview → approve → commit) is in
+// EVENTS.md at the repo root. Two hard rules:
+//   1. VERIFY: every date must be confirmed against a reputable source at
+//      add-time and carry a `source` URL. If a concrete date can't be verified,
+//      DO NOT add it — report "can't verify" instead of guessing.
+//   2. QUALIFY: the event must clear its category bar below. When unsure, leave
+//      it out. Curated history is a highlight reel, not a log.
+//
+//   financial    Systemic crises or broad-market single-day shocks (index
+//                crash / circuit breaker, systemic-institution failure,
+//                sovereign or credit shock). Not routine corrections.
+//   war          Outbreak of a major armed conflict with global/market impact,
+//                or a decisive escalation. Not individual battles/strikes.
+//   terrorism    Mass-casualty attacks with market or geopolitical significance.
+//   pandemic     WHO-level declarations (PHEIC / pandemic) or epidemic peaks of
+//                global impact.
+//   geopolitical Elections, referendums or policy shocks that moved markets
+//                materially (major-economy leadership change, trade-war
+//                milestone, landmark vote).
+//   crypto       Protocol-level milestones, top-exchange/stablecoin failures,
+//                landmark regulatory or adoption firsts, or major cycle ATHs.
+//   ipo          COMPLETED listings only. Raise ≥ ~$2B OR a landmark debut
+//                (first-of-kind, mega-cap, cultural milestone). Never private
+//                or merely rumored companies.
+//   personal     User-defined. No bar — the user owns this category.
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const MARKET_EVENT_COLORS: Record<MarketEventCategory, string> = {
   financial:   '#dc2626', // red
