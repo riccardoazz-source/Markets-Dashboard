@@ -36,9 +36,10 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
     [prices],
   );
 
-  const sma20Vals  = activeTools.sma20    ? computeSMA(closes, 20)               : null;
-  const sma50Vals  = activeTools.sma50    ? computeSMA(closes, 50)               : null;
-  const sma200Vals = activeTools.sma200   ? computeSMA(closes, 200)              : null;
+  const sma20Vals   = activeTools.sma20    ? computeSMA(closes, 20)               : null;
+  const sma50Vals   = activeTools.sma50    ? computeSMA(closes, 50)               : null;
+  const sma200Vals  = activeTools.sma200   ? computeSMA(closes, 200)              : null;
+  const sma200wVals = activeTools.sma200w  ? computeSMA(closes, 1000)             : null;
   const ema20Vals  = activeTools.ema20    ? computeEMA(closes, 20)               : null;
   const ema100Vals = activeTools.ema100   ? computeEMA(closes, 100)              : null;
   const bands      = activeTools.bollinger ? computeBollingerBands(closes, 20, 2) : null;
@@ -47,15 +48,16 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
   const chartData = useMemo(() => prices.map((p, i) => ({
     date: p.date,
     price: p.close,
-    sma20:  sma20Vals?.[i]  ?? null,
-    sma50:  sma50Vals?.[i]  ?? null,
-    sma200: sma200Vals?.[i] ?? null,
-    ema20:  ema20Vals?.[i]   ?? null,
-    ema100: ema100Vals?.[i]  ?? null,
+    sma20:   sma20Vals?.[i]   ?? null,
+    sma50:   sma50Vals?.[i]   ?? null,
+    sma200:  sma200Vals?.[i]  ?? null,
+    sma200w: sma200wVals?.[i] ?? null,
+    ema20:   ema20Vals?.[i]   ?? null,
+    ema100:  ema100Vals?.[i]  ?? null,
     bbLo:   bands ? (bands.lower[i]  ?? null) : null,
     bbHi:   bands ? (bands.upper[i]  ?? null) : null,
     bbMid:  bands ? (bands.middle[i] ?? null) : null,
-  })), [prices, sma20Vals, sma50Vals, sma200Vals, ema20Vals, ema100Vals, bands]);
+  })), [prices, sma20Vals, sma50Vals, sma200Vals, sma200wVals, ema20Vals, ema100Vals, bands]);
 
   const rsiVals = useMemo(
     () => activeTools.rsi ? computeRSI(closes) : null,
@@ -110,13 +112,14 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
 
       {/* Price chart with overlays */}
       <div className="space-y-1">
-        {(activeTools.sma20 || activeTools.sma50 || activeTools.sma200 || activeTools.ema20 || activeTools.ema100 || activeTools.bollinger) && (
+        {(activeTools.sma20 || activeTools.sma50 || activeTools.sma200 || activeTools.sma200w || activeTools.ema20 || activeTools.ema100 || activeTools.bollinger) && (
           <div className="flex items-center gap-3 px-1 flex-wrap text-[10px]">
-            {activeTools.sma20   && <span className="flex items-center gap-1 text-cyan-400"><span className="inline-block w-5 border-t-2 border-cyan-400" />SMA 20</span>}
-            {activeTools.sma50   && <span className="flex items-center gap-1 text-amber-400"><span className="inline-block w-5 border-t-2 border-amber-400" />SMA 50</span>}
-            {activeTools.sma200  && <span className="flex items-center gap-1 text-purple-400"><span className="inline-block w-5 border-t-2 border-purple-400" />SMA 200</span>}
-            {activeTools.ema20   && <span className="flex items-center gap-1 text-pink-400"><span className="inline-block w-5 border-t-2 border-dashed border-pink-400" />EMA 20</span>}
-            {activeTools.ema100  && <span className="flex items-center gap-1 text-pink-400"><span className="inline-block w-5 border-t-2 border-dotted border-pink-400" />EMA 100</span>}
+            {activeTools.sma20    && <span className="flex items-center gap-1 text-cyan-400"><span className="inline-block w-5 border-t-2 border-cyan-400" />SMA 20</span>}
+            {activeTools.sma50    && <span className="flex items-center gap-1 text-amber-400"><span className="inline-block w-5 border-t-2 border-amber-400" />SMA 50</span>}
+            {activeTools.sma200   && <span className="flex items-center gap-1 text-purple-400"><span className="inline-block w-5 border-t-2 border-purple-400" />SMA 200</span>}
+            {activeTools.sma200w  && <span className="flex items-center gap-1 text-yellow-400"><span className="inline-block w-5 border-t-2 border-yellow-400" />SMA 200W</span>}
+            {activeTools.ema20    && <span className="flex items-center gap-1 text-pink-400"><span className="inline-block w-5 border-t-2 border-dashed border-pink-400" />EMA 20</span>}
+            {activeTools.ema100   && <span className="flex items-center gap-1 text-pink-400"><span className="inline-block w-5 border-t-2 border-dotted border-pink-400" />EMA 100</span>}
             {activeTools.bollinger && <span className="flex items-center gap-1 text-yellow-400/70"><span className="inline-block w-5 border-t border-yellow-400/70" />BB 20,2σ</span>}
           </div>
         )}
@@ -174,9 +177,10 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
             )}
             {normalized && <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="3 3" strokeOpacity={0.4} />}
             <Line type="monotone" dataKey="price" stroke={color} strokeWidth={1.5} dot={false} connectNulls={false} name={normalized ? '% Change' : 'Price'} />
-            {activeTools.sma20  && <Line type="monotone" dataKey="sma20"  stroke="#22d3ee" strokeWidth={1} dot={false} connectNulls={false} legendType="none" />}
-            {activeTools.sma50  && <Line type="monotone" dataKey="sma50"  stroke="#fbbf24" strokeWidth={1} dot={false} connectNulls={false} legendType="none" />}
-            {activeTools.sma200 && <Line type="monotone" dataKey="sma200" stroke="#a78bfa" strokeWidth={1} dot={false} connectNulls={false} legendType="none" />}
+            {activeTools.sma20   && <Line type="monotone" dataKey="sma20"   stroke="#22d3ee" strokeWidth={1}   dot={false} connectNulls={false} legendType="none" />}
+            {activeTools.sma50   && <Line type="monotone" dataKey="sma50"   stroke="#fbbf24" strokeWidth={1}   dot={false} connectNulls={false} legendType="none" />}
+            {activeTools.sma200  && <Line type="monotone" dataKey="sma200"  stroke="#a78bfa" strokeWidth={1}   dot={false} connectNulls={false} legendType="none" />}
+            {activeTools.sma200w && <Line type="monotone" dataKey="sma200w" stroke="#d97706" strokeWidth={1.5} dot={false} connectNulls={false} legendType="none" />}
             {activeTools.ema20  && <Line type="monotone" dataKey="ema20"  stroke="#f472b6" strokeWidth={1} strokeDasharray="4 2" dot={false} connectNulls={false} legendType="none" />}
             {activeTools.ema100 && <Line type="monotone" dataKey="ema100" stroke="#ec4899" strokeWidth={1} strokeDasharray="6 3" dot={false} connectNulls={false} legendType="none" />}
             {fibLevels?.map(lvl => (

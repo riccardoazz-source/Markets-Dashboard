@@ -222,6 +222,7 @@ interface DualChartToolsOverlay {
   bollinger?: boolean;
   fib?: boolean;
   spyRatio?: boolean;
+  sma200w?: boolean;
 }
 
 function DualChart({
@@ -319,23 +320,25 @@ function DualChart({
   const toolCloses = prices.map(p => p.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
 
   // Moving-average / band / level overlays (all on the price axis)
-  const sma20Vals  = toolsOverlay?.sma20  ? computeSMA(toolCloses, 20)  : null;
-  const sma50Vals  = toolsOverlay?.sma50  ? computeSMA(toolCloses, 50)  : null;
-  const sma200Vals = toolsOverlay?.sma200 ? computeSMA(toolCloses, 200) : null;
+  const sma20Vals   = toolsOverlay?.sma20   ? computeSMA(toolCloses, 20)   : null;
+  const sma50Vals   = toolsOverlay?.sma50   ? computeSMA(toolCloses, 50)   : null;
+  const sma200Vals  = toolsOverlay?.sma200  ? computeSMA(toolCloses, 200)  : null;
+  const sma200wVals = toolsOverlay?.sma200w ? computeSMA(toolCloses, 1000) : null;
   const ema20Vals  = toolsOverlay?.ema20  ? computeEMA(toolCloses, 20)  : null;
   const bands      = toolsOverlay?.bollinger ? computeBollingerBands(toolCloses, 20, 2) : null;
   const fibLevels  = toolsOverlay?.fib ? computeFibLevels(toolCloses) : null;
   const overlayByDate = new Map<string, {
-    sma20: number | null; sma50: number | null; sma200: number | null;
+    sma20: number | null; sma50: number | null; sma200: number | null; sma200w: number | null;
     ema20: number | null; bbRange: [number, number] | null;
   }>();
-  if (sma20Vals || sma50Vals || sma200Vals || ema20Vals || bands) {
+  if (sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema20Vals || bands) {
     prices.forEach((p, i) => {
       overlayByDate.set(p.date, {
-        sma20:  sma20Vals?.[i]  ?? null,
-        sma50:  sma50Vals?.[i]  ?? null,
-        sma200: sma200Vals?.[i] ?? null,
-        ema20:  ema20Vals?.[i]  ?? null,
+        sma20:   sma20Vals?.[i]   ?? null,
+        sma50:   sma50Vals?.[i]   ?? null,
+        sma200:  sma200Vals?.[i]  ?? null,
+        sma200w: sma200wVals?.[i] ?? null,
+        ema20:   ema20Vals?.[i]   ?? null,
         bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
           ? [bands.lower[i] as number, bands.upper[i] as number]
           : null,
@@ -365,8 +368,9 @@ function DualChart({
     profit: profMap.get(date) ?? null,
     pe: peMap.get(date) ?? null,
     sma20:  overlayByDate.get(date)?.sma20  ?? null,
-    sma50:  overlayByDate.get(date)?.sma50  ?? null,
-    sma200: overlayByDate.get(date)?.sma200 ?? null,
+    sma50:   overlayByDate.get(date)?.sma50   ?? null,
+    sma200:  overlayByDate.get(date)?.sma200  ?? null,
+    sma200w: overlayByDate.get(date)?.sma200w ?? null,
     ema20:  overlayByDate.get(date)?.ema20  ?? null,
     bbRange: overlayByDate.get(date)?.bbRange ?? null,
     spy: showSpy ? (spyByDate.get(date) ?? null) : null,
@@ -417,7 +421,7 @@ function DualChart({
           </div>
         </div>
       )}
-      {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
+      {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w ||
         toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
           {showSpy && (
@@ -438,6 +442,11 @@ function DualChart({
           {toolsOverlay?.sma200 && (
             <span className="flex items-center gap-1 text-[10px] text-purple-400">
               <span className="inline-block w-5 border-t-2 border-purple-400" />SMA 200
+            </span>
+          )}
+          {toolsOverlay?.sma200w && (
+            <span className="flex items-center gap-1 text-[10px] text-yellow-500">
+              <span className="inline-block w-5 border-t-2 border-yellow-500" />SMA 200W
             </span>
           )}
           {toolsOverlay?.ema20 && (
@@ -503,9 +512,10 @@ function DualChart({
             if (name === 'eps') return [`${value.toFixed(2)} ${currency}`, props.payload?.epsIsAnnual ? 'EPS (annual)' : 'EPS (quarterly)'];
             if (name === 'revenue') return [`${formatBig(value)} ${currency}`, props.payload?.revIsAnnual ? 'Revenue (annual)' : 'Revenue (quarterly)'];
             if (name === 'pe') return [`${value.toFixed(1)}x`, 'P/E (TTM)'];
-            if (name === 'sma20')  return [value != null ? formatPrice(value, currency) : '—', 'SMA 20'];
-            if (name === 'sma50')  return [value != null ? formatPrice(value, currency) : '—', 'SMA 50'];
-            if (name === 'sma200') return [value != null ? formatPrice(value, currency) : '—', 'SMA 200'];
+            if (name === 'sma20')   return [value != null ? formatPrice(value, currency) : '—', 'SMA 20'];
+            if (name === 'sma50')   return [value != null ? formatPrice(value, currency) : '—', 'SMA 50'];
+            if (name === 'sma200')  return [value != null ? formatPrice(value, currency) : '—', 'SMA 200'];
+            if (name === 'sma200w') return [value != null ? formatPrice(value, currency) : '—', 'SMA 200W'];
             if (name === 'ema20')  return [value != null ? formatPrice(value, currency) : '—', 'EMA 20'];
             if (name === 'spy')    return [value != null ? formatPrice(value, currency) : '—', 'vs SPY (benchmark)'];
             if (name === 'bbRange') {
@@ -564,6 +574,10 @@ function DualChart({
         {toolsOverlay?.sma200 && (
           <Line yAxisId="price" type="monotone" dataKey="sma200" stroke="#a855f7"
             strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="sma200" />
+        )}
+        {toolsOverlay?.sma200w && (
+          <Line yAxisId="price" type="monotone" dataKey="sma200w" stroke="#d97706"
+            strokeWidth={2} dot={false} activeDot={false} connectNulls={false} name="sma200w" />
         )}
         {toolsOverlay?.ema20 && (
           <Line yAxisId="price" type="monotone" dataKey="ema20" stroke="#f472b6"

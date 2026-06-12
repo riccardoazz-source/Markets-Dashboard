@@ -16,6 +16,7 @@ export interface ActiveTools {
   sma20: boolean;
   sma50: boolean;
   sma200: boolean;
+  sma200w: boolean;
   ema20: boolean;
   ema100: boolean;
   bollinger: boolean;
@@ -30,7 +31,7 @@ export interface ActiveTools {
 
 export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
-  sma20: false, sma50: false, sma200: false, ema20: false, ema100: false,
+  sma20: false, sma50: false, sma200: false, sma200w: false, ema20: false, ema100: false,
   bollinger: false, fib: false, rsi: false, macd: false,
   momentumDaily: false, momentumWeekly: false, momentumMonthly: false,
   spyRatio: false,
@@ -93,10 +94,11 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
   // Pre-compute all indicator current values once per data change
   const iv = useMemo(() => {
     if (closes.length === 0) return null;
-    const sma50arr  = n >= 50  ? computeSMA(closes, 50)  : null;
-    const sma200arr = n >= 200 ? computeSMA(closes, 200) : null;
-    const sma50val  = sma50arr  ? last(sma50arr)  : null;
-    const sma200val = sma200arr ? last(sma200arr) : null;
+    const sma50arr   = n >= 50   ? computeSMA(closes, 50)   : null;
+    const sma200arr  = n >= 200  ? computeSMA(closes, 200)  : null;
+    const sma200warr = n >= 1000 ? computeSMA(closes, 1000) : null;
+    const sma50val   = sma50arr  ? last(sma50arr)  : null;
+    const sma200val  = sma200arr ? last(sma200arr) : null;
     const bbands    = n >= 20  ? computeBollingerBands(closes, 20, 2) : null;
     const macdOut   = n >= 34  ? computeMACD(closes) : null;
     return {
@@ -105,6 +107,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
       ema100:  n >= 100 ? last(computeEMA(closes, 100))  : null,
       sma50:   sma50val,
       sma200:  sma200val,
+      sma200w: sma200warr ? last(sma200warr) : null,
       cross:   sma50val != null && sma200val != null
                  ? (sma50val > sma200val ? 'golden' : 'death') as 'golden' | 'death'
                  : null,
@@ -163,7 +166,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                 <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={n < 20}  />
                 <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={n < 100} />
                 <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={n < 50}  />
-                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={n < 200} />
+                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={n < 200}  />
+                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={n < 1000} />
                 <Divider />
                 <ToolChip active={activeTools.bollinger} onToggle={() => toggle('bollinger')} label="Bollinger" color="teal"   disabled={n < 20} />
                 <ToolChip active={activeTools.fib}       onToggle={() => toggle('fib')}       label="Fibonacci" color="yellow" disabled={n < 2}  />
@@ -210,6 +214,9 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                   )}
                   {activeTools.sma200 && iv.sma200 != null && (
                     <Res label="SMA 200" value={iv.sma200.toFixed(decimals)} color="text-purple-400" />
+                  )}
+                  {activeTools.sma200w && iv.sma200w != null && (
+                    <Res label="SMA 200W" value={iv.sma200w.toFixed(decimals)} color="text-yellow-400" />
                   )}
 
                   {/* Golden / Death Cross badge */}
