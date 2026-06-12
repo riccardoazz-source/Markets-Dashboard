@@ -40,7 +40,7 @@ export interface MacroIndicator {
 // ---------- Market Events ----------
 // 'personal' has no built-in events — it's reserved for the user's own dates
 // added from the Sources tab.
-export type MarketEventCategory = 'financial' | 'war' | 'terrorism' | 'pandemic' | 'geopolitical' | 'crypto' | 'ipo' | 'personal';
+export type MarketEventCategory = 'financial' | 'war' | 'terrorism' | 'pandemic' | 'geopolitical' | 'elections' | 'crypto' | 'ipo' | 'personal';
 
 export interface MarketEvent {
   date: string;               // YYYY-MM-DD
@@ -68,9 +68,11 @@ export interface MarketEvent {
 //   terrorism    Mass-casualty attacks with market or geopolitical significance.
 //   pandemic     WHO-level declarations (PHEIC / pandemic) or epidemic peaks of
 //                global impact.
-//   geopolitical Elections, referendums or policy shocks that moved markets
-//                materially (major-economy leadership change, trade-war
-//                milestone, landmark vote).
+//   geopolitical Referendums, treaties, leadership changes or policy shocks of
+//                landmark, era-defining significance (Cold War turning points,
+//                EU formation, trade-war milestones). Not routine politics.
+//   elections    US presidential elections only — one entry per election on
+//                Election Day (first Tuesday of November). Pure calendar facts.
 //   crypto       Protocol-level milestones, top-exchange/stablecoin failures,
 //                landmark regulatory or adoption firsts, or major cycle ATHs.
 //   ipo          COMPLETED listings only. Raise ≥ ~$2B OR a landmark debut
@@ -85,6 +87,7 @@ export const MARKET_EVENT_COLORS: Record<MarketEventCategory, string> = {
   terrorism:   '#f97316', // orange
   pandemic:    '#9333ea', // purple
   geopolitical:'#3b82f6', // blue
+  elections:   '#f59e0b', // amber — US presidential elections
   crypto:      '#0891b2', // cyan
   ipo:         '#16a34a', // green — market debuts / listings
   personal:    '#ec4899', // pink — user's own events
@@ -92,7 +95,12 @@ export const MARKET_EVENT_COLORS: Record<MarketEventCategory, string> = {
 
 export const MARKET_EVENTS: MarketEvent[] = [
   // Financial crises / market shocks
+  { date: '1971-08-15', label: 'Nixon Shock',           category: 'financial',    description: 'US ends gold convertibility of the dollar — Bretton Woods collapses', source: 'https://en.wikipedia.org/wiki/Nixon_shock' },
+  { date: '1973-10-17', label: 'OPEC Oil Embargo',      category: 'financial',    description: 'Arab oil embargo quadruples crude prices; stagflation; Dow -45% over 2 years', source: 'https://en.wikipedia.org/wiki/1973_oil_crisis' },
+  { date: '1979-10-06', label: 'Volcker Shock',         category: 'financial',    description: 'Fed switches to money-supply targeting; rates head toward 20% to break inflation', source: 'https://en.wikipedia.org/wiki/Volcker_shock' },
   { date: '1987-10-19', label: 'Black Monday',          category: 'financial',    description: 'Largest one-day % crash in history — Dow -22.6% in a single session' },
+  { date: '1994-12-20', label: 'Mexico Peso Crisis',    category: 'financial',    description: 'Tequila crisis — peso devaluation triggers emerging-market contagion', source: 'https://en.wikipedia.org/wiki/Mexican_peso_crisis' },
+  { date: '1998-08-17', label: 'Russia Default',        category: 'financial',    description: 'Russia defaults on domestic debt and devalues the ruble; triggers LTCM collapse', source: 'https://en.wikipedia.org/wiki/1998_Russian_financial_crisis' },
   { date: '1997-07-02', label: 'Asian Crisis',         category: 'financial',    description: 'Thai baht float triggers the Asian financial crisis; contagion across EM' },
   { date: '1998-09-23', label: 'LTCM Bailout',          category: 'financial',    description: 'Fed-orchestrated rescue of hedge fund Long-Term Capital Management' },
   { date: '2000-03-10', label: 'Dot-com Peak',          category: 'financial',    description: 'NASDAQ composite ATH — dot-com bubble peak before 78% crash' },
@@ -117,6 +125,7 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2024-08-05', label: 'Yen Carry Unwind',      category: 'financial',    description: 'Yen carry trade unwind; Nikkei -12.4% — worst day since 1987' },
 
   // Pandemics
+  { date: '1981-06-05', label: 'HIV/AIDS Recognized',   category: 'pandemic',     description: 'CDC reports the first AIDS cases — start of a pandemic that has killed 40M+', source: 'https://en.wikipedia.org/wiki/History_of_HIV/AIDS' },
   { date: '2003-04-02', label: 'SARS Peak',             category: 'pandemic',     description: 'SARS epidemic at peak; WHO issues global travel advisory' },
   { date: '2009-06-11', label: 'H1N1 Pandemic',         category: 'pandemic',     description: 'WHO declares H1N1 swine flu a pandemic — first since 1968' },
   { date: '2014-08-08', label: 'Ebola PHEIC',           category: 'pandemic',     description: 'WHO declares West African Ebola outbreak a global health emergency' },
@@ -125,6 +134,13 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2022-07-23', label: 'Mpox PHEIC',            category: 'pandemic',     description: 'WHO declares the multi-country mpox (monkeypox) outbreak a global emergency' },
 
   // Wars / military conflicts
+  { date: '1973-10-06', label: 'Yom Kippur War',        category: 'war',          description: 'Egypt and Syria attack Israel; war triggers the OPEC oil embargo', source: 'https://en.wikipedia.org/wiki/Yom_Kippur_War' },
+  { date: '1975-04-30', label: 'Fall of Saigon',        category: 'war',          description: 'North Vietnam captures Saigon — end of the Vietnam War', source: 'https://en.wikipedia.org/wiki/Fall_of_Saigon' },
+  { date: '1979-12-24', label: 'USSR Invades Afghanistan', category: 'war',       description: 'Soviet invasion begins a 10-year war; Cold War tensions spike', source: 'https://en.wikipedia.org/wiki/Soviet%E2%80%93Afghan_War' },
+  { date: '1980-09-22', label: 'Iran-Iraq War',         category: 'war',          description: 'Iraq invades Iran — 8-year Gulf war; major oil disruption', source: 'https://en.wikipedia.org/wiki/Iran%E2%80%93Iraq_War' },
+  { date: '1990-08-02', label: 'Iraq Invades Kuwait',   category: 'war',          description: 'Iraq invades Kuwait — oil shock; sets up the Gulf War', source: 'https://en.wikipedia.org/wiki/Invasion_of_Kuwait' },
+  { date: '1991-01-17', label: 'Desert Storm',          category: 'war',          description: 'US-led coalition launches the Gulf War air campaign; markets rally', source: 'https://en.wikipedia.org/wiki/Gulf_War' },
+  { date: '1999-03-24', label: 'NATO Strikes Kosovo',   category: 'war',          description: 'NATO begins a 78-day bombing campaign against Yugoslavia', source: 'https://en.wikipedia.org/wiki/NATO_bombing_of_Yugoslavia' },
   { date: '2001-10-07', label: 'Afghanistan War',       category: 'war',          description: 'US launches Operation Enduring Freedom — Afghanistan War begins' },
   { date: '2003-03-20', label: 'Iraq War',              category: 'war',          description: 'US-led coalition invades Iraq — Iraq War begins' },
   { date: '2011-03-15', label: 'Syria War',             category: 'war',          description: 'Syrian civil war begins amid Arab Spring uprising' },
@@ -137,6 +153,12 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2026-02-28', label: '2026 Iran War',         category: 'war',          description: 'US strikes Iran; Iran closes the Strait of Hormuz; WTI crude +66% ($67→$111)', source: 'https://en.wikipedia.org/wiki/2026_Iran_war' },
 
   // Terrorism
+  { date: '1972-09-05', label: 'Munich Massacre',       category: 'terrorism',    description: '11 Israeli Olympic athletes taken hostage and killed in Munich', source: 'https://en.wikipedia.org/wiki/Munich_massacre' },
+  { date: '1988-12-21', label: 'Lockerbie Bombing',     category: 'terrorism',    description: 'Pan Am Flight 103 destroyed over Scotland — 270 killed', source: 'https://en.wikipedia.org/wiki/Pan_Am_Flight_103' },
+  { date: '1993-02-26', label: 'WTC Bombing (1st)',     category: 'terrorism',    description: 'Truck bomb at the World Trade Center — first al-Qaeda-linked US attack', source: 'https://en.wikipedia.org/wiki/1993_World_Trade_Center_bombing' },
+  { date: '1995-03-20', label: 'Tokyo Sarin Attack',    category: 'terrorism',    description: 'Aum Shinrikyo releases sarin on the Tokyo subway — 13 killed', source: 'https://en.wikipedia.org/wiki/Tokyo_subway_sarin_attack' },
+  { date: '1995-04-19', label: 'Oklahoma City Bombing', category: 'terrorism',    description: 'Truck bomb destroys a federal building — 168 killed; worst US domestic attack', source: 'https://en.wikipedia.org/wiki/Oklahoma_City_bombing' },
+  { date: '1998-08-07', label: 'US Embassy Bombings',   category: 'terrorism',    description: 'Al-Qaeda bombs US embassies in Kenya and Tanzania — 224 killed', source: 'https://en.wikipedia.org/wiki/1998_United_States_embassy_bombings' },
   { date: '2001-09-11', label: '9/11',                  category: 'terrorism',    description: '9/11 attacks — NYSE and NASDAQ closed for 4 trading days' },
   { date: '2004-03-11', label: 'Madrid Bombings',       category: 'terrorism',    description: 'Madrid train bombings — 191 killed, 2,000 injured' },
   { date: '2005-07-07', label: 'London 7/7',            category: 'terrorism',    description: 'London transport bombings — 52 killed; FTSE 100 initially drops ~200 pts' },
@@ -146,15 +168,38 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2016-07-14', label: 'Nice Attack',           category: 'terrorism',    description: 'Truck attack on Bastille Day crowd in Nice — 86 killed' },
 
   // Geopolitical
+  { date: '1972-02-21', label: 'Nixon Visits China',    category: 'geopolitical', description: 'Nixon visits China — landmark opening of US-China relations', source: 'https://en.wikipedia.org/wiki/1972_Nixon_visit_to_China' },
+  { date: '1974-08-09', label: 'Nixon Resigns',         category: 'geopolitical', description: 'First US presidential resignation, over the Watergate scandal', source: 'https://en.wikipedia.org/wiki/Watergate_scandal' },
+  { date: '1979-11-04', label: 'Iran Hostage Crisis',   category: 'geopolitical', description: 'US embassy in Tehran seized — 444-day hostage crisis; oil/dollar shock', source: 'https://en.wikipedia.org/wiki/Iran_hostage_crisis' },
+  { date: '1989-06-04', label: 'Tiananmen Square',      category: 'geopolitical', description: "Beijing crushes pro-democracy protests; reshapes the West's China relations", source: 'https://en.wikipedia.org/wiki/1989_Tiananmen_Square_protests_and_massacre' },
+  { date: '1989-11-09', label: 'Berlin Wall Falls',     category: 'geopolitical', description: 'Fall of the Berlin Wall — the symbolic end of the Cold War', source: 'https://en.wikipedia.org/wiki/Fall_of_the_Berlin_Wall' },
+  { date: '1991-12-26', label: 'USSR Dissolves',        category: 'geopolitical', description: 'Soviet Union formally dissolved — largest geopolitical shift since WWII', source: 'https://en.wikipedia.org/wiki/Dissolution_of_the_Soviet_Union' },
+  { date: '1992-02-07', label: 'Maastricht Treaty',     category: 'geopolitical', description: 'Treaty signed creating the European Union and the path to the euro', source: 'https://en.wikipedia.org/wiki/Maastricht_Treaty' },
+  { date: '1994-04-27', label: 'End of Apartheid',      category: 'geopolitical', description: "South Africa's first multiracial election; Mandela elected president", source: 'https://en.wikipedia.org/wiki/1994_South_African_general_election' },
+  { date: '1997-07-01', label: 'Hong Kong Handover',    category: 'geopolitical', description: 'UK transfers sovereignty of Hong Kong to China', source: 'https://en.wikipedia.org/wiki/Transfer_of_sovereignty_over_Hong_Kong' },
+  { date: '1999-01-01', label: 'Euro Launched',         category: 'geopolitical', description: 'The euro is introduced as an accounting currency in 11 countries', source: 'https://en.wikipedia.org/wiki/History_of_the_euro' },
   { date: '2016-06-24', label: 'Brexit Vote',           category: 'geopolitical', description: 'UK votes to leave EU; sterling falls 8%, FTSE 250 -7%' },
-  { date: '2016-11-09', label: 'Trump Elected (2016)',  category: 'geopolitical', description: 'Donald Trump wins US presidential election; markets initially fall then rally' },
   { date: '2018-03-22', label: 'US-China Tariffs',      category: 'geopolitical', description: 'Trump signs tariff order on $60B China goods — US-China trade war begins' },
   { date: '2019-08-05', label: 'China Yuan Weakens',    category: 'geopolitical', description: 'China lets yuan fall past 7/USD; US labels China a currency manipulator; Dow -767' },
   { date: '2020-01-31', label: 'Brexit Day',            category: 'geopolitical', description: 'UK formally leaves the European Union after 47 years of membership' },
-  { date: '2020-11-04', label: 'Biden Elected',         category: 'geopolitical', description: 'Joe Biden wins US presidential election' },
   { date: '2021-01-06', label: 'Capitol Storming',      category: 'geopolitical', description: 'US Capitol stormed during certification of 2020 election results' },
-  { date: '2024-11-06', label: 'Trump Elected (2024)',  category: 'geopolitical', description: 'Donald Trump wins 2024 US presidential election; Dow +1,508 pts day after' },
   { date: '2025-04-02', label: 'Liberation Day',        category: 'geopolitical', description: 'Trump announces sweeping "Liberation Day" tariffs; S&P falls ~10% in 2 days' },
+
+  // US presidential elections — Election Day (first Tuesday of November)
+  { date: '1972-11-07', label: 'Nixon Re-elected',      category: 'elections',    description: 'Richard Nixon (R) defeats George McGovern in a landslide', source: 'https://en.wikipedia.org/wiki/1972_United_States_presidential_election' },
+  { date: '1976-11-02', label: 'Carter Elected',        category: 'elections',    description: 'Jimmy Carter (D) defeats incumbent Gerald Ford', source: 'https://en.wikipedia.org/wiki/1976_United_States_presidential_election' },
+  { date: '1980-11-04', label: 'Reagan Elected',        category: 'elections',    description: 'Ronald Reagan (R) defeats incumbent Jimmy Carter', source: 'https://en.wikipedia.org/wiki/1980_United_States_presidential_election' },
+  { date: '1984-11-06', label: 'Reagan Re-elected',     category: 'elections',    description: 'Ronald Reagan (R) defeats Walter Mondale in a 49-state landslide', source: 'https://en.wikipedia.org/wiki/1984_United_States_presidential_election' },
+  { date: '1988-11-08', label: 'Bush Sr Elected',       category: 'elections',    description: 'George H. W. Bush (R) defeats Michael Dukakis', source: 'https://en.wikipedia.org/wiki/1988_United_States_presidential_election' },
+  { date: '1992-11-03', label: 'Clinton Elected',       category: 'elections',    description: 'Bill Clinton (D) defeats incumbent George H. W. Bush', source: 'https://en.wikipedia.org/wiki/1992_United_States_presidential_election' },
+  { date: '1996-11-05', label: 'Clinton Re-elected',    category: 'elections',    description: 'Bill Clinton (D) defeats Bob Dole', source: 'https://en.wikipedia.org/wiki/1996_United_States_presidential_election' },
+  { date: '2000-11-07', label: 'Bush Jr Elected',       category: 'elections',    description: 'George W. Bush (R) defeats Al Gore after a contested Florida recount', source: 'https://en.wikipedia.org/wiki/2000_United_States_presidential_election' },
+  { date: '2004-11-02', label: 'Bush Jr Re-elected',    category: 'elections',    description: 'George W. Bush (R) defeats John Kerry', source: 'https://en.wikipedia.org/wiki/2004_United_States_presidential_election' },
+  { date: '2008-11-04', label: 'Obama Elected',         category: 'elections',    description: 'Barack Obama (D) defeats John McCain — first Black US president', source: 'https://en.wikipedia.org/wiki/2008_United_States_presidential_election' },
+  { date: '2012-11-06', label: 'Obama Re-elected',      category: 'elections',    description: 'Barack Obama (D) defeats Mitt Romney', source: 'https://en.wikipedia.org/wiki/2012_United_States_presidential_election' },
+  { date: '2016-11-08', label: 'Trump Elected (2016)',  category: 'elections',    description: 'Donald Trump (R) defeats Hillary Clinton', source: 'https://en.wikipedia.org/wiki/2016_United_States_presidential_election' },
+  { date: '2020-11-03', label: 'Biden Elected',         category: 'elections',    description: 'Joe Biden (D) defeats incumbent Donald Trump', source: 'https://en.wikipedia.org/wiki/2020_United_States_presidential_election' },
+  { date: '2024-11-05', label: 'Trump Elected (2024)',  category: 'elections',    description: 'Donald Trump (R) defeats Kamala Harris', source: 'https://en.wikipedia.org/wiki/2024_United_States_presidential_election' },
 
   // Crypto-specific
   { date: '2013-12-05', label: 'China Bans BTC',        category: 'crypto',       description: 'China bans financial institutions from handling Bitcoin; BTC falls 50%' },
@@ -381,6 +426,9 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'EVENTS_GEOPOLITICAL', name: 'Geopolitical Events', category: 'Events', unit: 'idx',
     source: { type: 'computed', label: 'Curated historical record',
               url: 'https://en.wikipedia.org/wiki/Geopolitics' } },
+  { id: 'EVENTS_ELECTIONS',    name: 'US Elections',        category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Curated historical record',
+              url: 'https://en.wikipedia.org/wiki/List_of_United_States_presidential_elections' } },
   { id: 'EVENTS_CRYPTO',       name: 'Crypto Events',       category: 'Events', unit: 'idx',
     source: { type: 'computed', label: 'Curated historical record',
               url: 'https://en.wikipedia.org/wiki/History_of_bitcoin' } },
@@ -517,6 +565,7 @@ export const EVENT_INDICATOR_CATEGORY: Record<string, MarketEventCategory> = {
   'EVENTS_TERRORISM':    'terrorism',
   'EVENTS_PANDEMIC':     'pandemic',
   'EVENTS_GEOPOLITICAL': 'geopolitical',
+  'EVENTS_ELECTIONS':    'elections',
   'EVENTS_CRYPTO':       'crypto',
   'EVENTS_IPO':          'ipo',
   'EVENTS_PERSONAL':     'personal',

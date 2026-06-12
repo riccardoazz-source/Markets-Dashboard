@@ -6,7 +6,7 @@ import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
   CHART_COLORS, getTimeframeStart, buildTotalReturnSeries, computeAssetIRR,
-  correlationMatrix, extendToToday, CorrAlignedRow,
+  correlationMatrix, extendToToday, CorrAlignedRow, pearson,
 } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { CompareChart } from '@/components/charts/CompareChart';
@@ -62,6 +62,13 @@ const nameCacheRef: Record<string, string> = {};
 // Recession series render as shaded bands, not data lines — excluded from
 // stats cards. Included in correlation as 0/1 (point-biserial correlation).
 const RECESSION_SET = new Set(RECESSION_SERIES);
+
+// Binary indicators (recessions, halvings, FOMC meetings, per-category event
+// calendars) that must be correlated against an asset's RETURNS rather than its
+// price level — see the correlation post-processing in the `correl` memo.
+const INDICATOR_CORR_IDS = new Set<string>([
+  'USREC', 'BTC_HALVING', 'FOMC_MEETINGS', ...Object.keys(EVENT_INDICATOR_CATEGORY),
+]);
 
 // ── Spread series ───────────────────────────────────────────────────────────
 // A spread is a synthetic series defined by two of the compared assets: it is
@@ -566,7 +573,45 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         }
       }
 
-      return correlationMatrix(series);
+      const base = correlationMatrix(series);
+
+      // ── Dummy / event indicators: correlate against RETURNS, not levels ──────
+      // A sparse 0/1 event series vs a trending price LEVEL is ~0 by construction
+      // (the classic dummy-variable mistake): events scattered across decades sit
+      // at every price level, so Spearman-on-levels finds no monotone link. The
+      // meaningful question is whether the asset MOVES in event months — i.e. the
+      // point-biserial correlation between the 0/1 dummy and the asset's
+      // month-over-month return. For any pair involving an indicator we recompute
+      // Pearson with the non-dummy side converted to returns (dummies stay 0/1, so
+      // dummy-vs-dummy stays a phi coefficient). Pure asset-vs-asset pairs keep the
+      // existing level-based Spearman.
+      const { labels, alignedData } = base;
+      if (alignedData.length > 2 && labels.some(l => INDICATOR_CORR_IDS.has(l))) {
+        const n = labels.length;
+        const isDummy = labels.map(l => INDICATOR_CORR_IDS.has(l));
+        // Column j across periods (aligned monthly levels / 0-1 values).
+        const col = (j: number) => alignedData.map(r => r.values[j]);
+        // Month-over-month return of a level series (first period → NaN).
+        const toReturns = (v: number[]) =>
+          v.map((x, i) => (i === 0 || v[i - 1] === 0 ? NaN : x / v[i - 1] - 1));
+        const matrix = base.matrix.map(r => r.slice());
+        for (let i = 0; i < n; i++) {
+          for (let j = i + 1; j < n; j++) {
+            if (!isDummy[i] && !isDummy[j]) continue; // keep level Spearman
+            const ai = isDummy[i] ? col(i) : toReturns(col(i));
+            const aj = isDummy[j] ? col(j) : toReturns(col(j));
+            const xs: number[] = [], ys: number[] = [];
+            for (let p = 0; p < ai.length; p++) {
+              if (isFinite(ai[p]) && isFinite(aj[p])) { xs.push(ai[p]); ys.push(aj[p]); }
+            }
+            const c = pearson(xs, ys);
+            matrix[i][j] = c;
+            matrix[j][i] = c;
+          }
+        }
+        return { ...base, matrix };
+      }
+      return base;
     } catch (e) {
       console.error('[CompareSection] correlationMatrix error:', e);
       return { labels: [], matrix: [] as (number | null)[][], sampleCount: 0, alignedData: [] as CorrAlignedRow[] };
@@ -840,6 +885,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               sampleCount={correl.sampleCount}
               alignedData={correl.alignedData}
               names={Object.fromEntries(allAssets.map(a => [a.symbol, a.name]))}
+              hasIndicators={correl.labels.some(l => INDICATOR_CORR_IDS.has(l))}
             />
           )}
         </ChartErrorBoundary>
@@ -886,13 +932,14 @@ function corrStrength(v: number): { label: string; bg: string; text: string } {
 }
 
 function CorrelationMatrix({
-  labels, matrix, sampleCount, alignedData, names,
+  labels, matrix, sampleCount, alignedData, names, hasIndicators,
 }: {
   labels: string[];
   matrix: (number | null)[][];
   sampleCount: number;
   alignedData: CorrAlignedRow[];
   names: Record<string, string>;
+  hasIndicators?: boolean;
 }) {
   const [showData, setShowData] = useState(false);
 
@@ -907,6 +954,13 @@ function CorrelationMatrix({
           <p className="text-[10px] text-gray-500 mt-0.5">
             {sampleCount} periods · green = positive, red = negative
           </p>
+          {hasIndicators && (
+            <p className="text-[10px] text-gray-500 mt-1 max-w-xl leading-snug">
+              Event &amp; recession indicators (dates, halvings, FOMC, recessions) are 0/1 dummies,
+              correlated against each asset&apos;s <strong>period return</strong> — i.e. whether the asset
+              moved in months when the event occurred — not its price level.
+            </p>
+          )}
         </div>
         {/* Legend */}
         <div className="flex flex-col gap-1 text-[10px]">

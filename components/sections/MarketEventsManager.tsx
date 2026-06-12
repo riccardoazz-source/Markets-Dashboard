@@ -14,13 +14,14 @@ const CATEGORY_LABELS: Record<MarketEventCategory, string> = {
   terrorism:    'Terrorism',
   pandemic:     'Pandemic',
   geopolitical: 'Geopolitical',
+  elections:    'US Elections',
   crypto:       'Crypto',
   ipo:          'Major IPOs',
   personal:     'Personal',
 };
 
 const CATEGORY_ORDER: MarketEventCategory[] = [
-  'personal', 'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'crypto', 'ipo',
+  'personal', 'financial', 'war', 'terrorism', 'pandemic', 'geopolitical', 'elections', 'crypto', 'ipo',
 ];
 
 const BLANK_EVENT = { date: '', label: '', description: '' };
