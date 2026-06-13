@@ -45,7 +45,7 @@ interface Props {
   decimals?: number;
 }
 
-function computeStats(closes: number[]) {
+function computeStats(closes: number[], avgDPB: number) {
   if (closes.length < 2) return null;
   const avg = closes.reduce((s, v) => s + v, 0) / closes.length;
   const variance = closes.reduce((s, v) => s + (v - avg) ** 2, 0) / closes.length;
@@ -62,7 +62,10 @@ function computeStats(closes: number[]) {
   if (logReturns.length > 1) {
     const lrMean = logReturns.reduce((s, v) => s + v, 0) / logReturns.length;
     const lrVar = logReturns.reduce((s, v) => s + (v - lrMean) ** 2, 0) / (logReturns.length - 1);
-    annualVol = Math.sqrt(lrVar * 252) * 100;
+    // Annualize by the actual number of bars per year for this data's cadence.
+    // Daily equity → 365.25/1.4 ≈ 261, crypto → 365, monthly → 12, quarterly → 4.
+    const barsPerYear = 365.25 / avgDPB;
+    annualVol = Math.sqrt(lrVar * barsPerYear) * 100;
   }
 
   let maxDrawdown = 0, peak = closes[0];
@@ -89,12 +92,12 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
     () => data.map(d => d.close).filter((c): c is number => typeof c === 'number' && isFinite(c)),
     [data],
   );
-  const stats = useMemo(() => computeStats(closes), [closes]);
   const n = closes.length;
 
   // Scale all indicator periods to the data's real-world time granularity.
   // Equity: ~1.4 cal days/bar. Crypto: ~1.0 (trades 7d/wk). Monthly FRED: ~30.
   const avgDPB = useMemo(() => avgCalendarDaysPerBar(data.map(d => d.date)), [data]);
+  const stats = useMemo(() => computeStats(closes, avgDPB), [closes, avgDPB]);
   const P = useMemo(() => computeIndicatorPeriods(avgDPB), [avgDPB]);
 
   // Pre-compute all indicator current values once per data change

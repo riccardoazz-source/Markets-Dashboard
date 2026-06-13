@@ -4,20 +4,27 @@
  */
 
 /**
- * Average calendar days between consecutive data points (samples last 50 gaps).
- * Returns ~1 for crypto (trades every day), ~1.4 for equities (weekends excluded),
- * ~7 for weekly data, ~30 for monthly FRED series, etc.
+ * Average calendar days represented by one bar, measured over the most recent
+ * window (total elapsed span ÷ number of intervals).
+ *
+ * Using span/intervals — rather than averaging individual gaps with a hard
+ * cutoff — makes this correct for ANY cadence:
+ *   crypto (trades 7d/wk)   → ~1.0    weekly  → ~7
+ *   equities (weekends off) → ~1.4    monthly → ~30
+ *   quarterly (GDP)         → ~91     annual  → ~365
+ *
+ * The previous per-gap `< 45 days` filter silently dropped every
+ * quarterly/annual gap, collapsing those series to 1.0 (treated as daily) and
+ * mis-scaling every indicator on them. Averaging the span avoids that and is
+ * naturally robust to weekend/holiday gaps.
  */
 export function avgCalendarDaysPerBar(dates: string[]): number {
-  if (dates.length < 5) return 1;
-  const n = Math.min(dates.length - 1, 50);
-  const start = Math.max(0, dates.length - 1 - n);
-  let total = 0, count = 0;
-  for (let i = start; i < start + n; i++) {
-    const days = (new Date(dates[i + 1]).getTime() - new Date(dates[i]).getTime()) / 86_400_000;
-    if (days > 0 && days < 45) { total += days; count++; }
-  }
-  return count > 0 ? total / count : 1;
+  if (dates.length < 3) return 1;
+  const k = Math.min(dates.length - 1, 60);
+  const last = new Date(dates[dates.length - 1]).getTime();
+  const first = new Date(dates[dates.length - 1 - k]).getTime();
+  const span = (last - first) / 86_400_000;
+  return span > 0 ? span / k : 1;
 }
 
 /**
