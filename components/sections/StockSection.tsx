@@ -24,7 +24,7 @@ import {
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
-import { Search, X, BarChart2 } from 'lucide-react';
+import { Search, X, BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
 
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
@@ -984,7 +984,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                         : 'border-border bg-bg-card hover:border-accent/40',
                     )}
                   >
-                    <div className="flex items-center justify-between mb-0.5">
+                    {/* Top row: symbol + currency badge */}
+                    <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-1 min-w-0">
                         <span className="text-xs font-bold text-gray-100 font-mono">{sym}</span>
                         {q?.currency && (
@@ -993,57 +994,33 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {q?.dividendYield != null && q.dividendYield > 0 && (
-                          <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
-                            DIV
-                          </span>
-                        )}
-                        {change != null && (
-                          <span className={clsx('text-[10px] font-bold tabular-nums', change >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                            {change >= 0 ? '+' : ''}{change.toFixed(2)}%
-                          </span>
-                        )}
-                      </div>
+                      {q?.dividendYield != null && q.dividendYield > 0 && (
+                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none shrink-0">
+                          DIV
+                        </span>
+                      )}
                     </div>
-                    {q?.name && <p className="text-[10px] text-gray-500 truncate mb-1">{q.name}</p>}
-                    {q?.price != null && (
-                      <p className="text-sm font-bold text-white">{formatPrice(q.price, q.currency ?? 'USD')}</p>
-                    )}
-                    {(mtd != null || ytd != null || fiveYear != null || cagr != null) && (
-                      <div className="mt-1.5 pt-1.5 border-t border-border/40 space-y-0.5">
-                        {mtd != null && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9px] text-gray-600 uppercase tracking-wide">MTD</span>
-                            <span className={clsx('text-[10px] font-semibold tabular-nums', mtd >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                              {mtd >= 0 ? '+' : ''}{mtd.toFixed(2)}%
-                            </span>
+                    {/* Company name */}
+                    {q?.name && <p className="text-[10px] text-gray-500 truncate mb-1.5">{q.name}</p>}
+                    {q?.price != null ? (
+                      <>
+                        <p className="text-lg font-bold text-white tabular-nums">{formatPrice(q.price, q.currency ?? 'USD')}</p>
+                        {change != null && (
+                          <div className={clsx('flex items-center gap-1 mt-0.5 text-sm font-bold', change >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                            {change >= 0 ? <TrendingUp size={12}/> : <TrendingDown size={12}/>}
+                            {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+                            <span className="text-[10px] font-medium opacity-70">day</span>
                           </div>
                         )}
-                        {ytd != null && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9px] text-gray-600 uppercase tracking-wide">YTD</span>
-                            <span className={clsx('text-[10px] font-semibold tabular-nums', ytd >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                              {ytd >= 0 ? '+' : ''}{ytd.toFixed(2)}%
-                            </span>
-                          </div>
-                        )}
-                        {fiveYear != null && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9px] text-gray-600 uppercase tracking-wide">5Y</span>
-                            <span className={clsx('text-[10px] font-semibold tabular-nums', fiveYear >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                              {fiveYear >= 0 ? '+' : ''}{fiveYear.toFixed(2)}%
-                            </span>
-                          </div>
-                        )}
-                        {cagr != null && (
-                          <div className="flex items-center justify-between">
-                            <span className="text-[9px] text-gray-600 uppercase tracking-wide">5Y CAGR</span>
-                            <span className={clsx('text-[10px] font-semibold tabular-nums', cagr >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                              {cagr >= 0 ? '+' : ''}{cagr.toFixed(1)}%{cagrFull ? '' : '*'}
-                            </span>
-                          </div>
-                        )}
+                        {mtd != null && <p className={clsx('text-[10px] mt-0.5', mtd >= 0 ? 'text-emerald-400' : 'text-red-400')}>MTD: {mtd >= 0 ? '+' : ''}{mtd.toFixed(1)}%</p>}
+                        {ytd != null && <p className={clsx('text-[10px] mt-0.5', ytd >= 0 ? 'text-emerald-400' : 'text-red-400')}>YTD: {ytd >= 0 ? '+' : ''}{ytd.toFixed(1)}%</p>}
+                        {fiveYear != null && <p className={clsx('text-[10px] mt-0.5', fiveYear >= 0 ? 'text-emerald-400' : 'text-red-400')}>5Y: {fiveYear >= 0 ? '+' : ''}{fiveYear.toFixed(1)}%</p>}
+                        {cagr != null && <p className={clsx('text-[10px] mt-0.5', cagr >= 0 ? 'text-emerald-400' : 'text-red-400')}>5Y CAGR: {cagr >= 0 ? '+' : ''}{cagr.toFixed(1)}%{cagrFull ? '' : '*'}</p>}
+                      </>
+                    ) : (
+                      <div className="mt-2 space-y-1.5">
+                        <div className="h-5 bg-border rounded animate-pulse w-16" />
+                        <div className="h-3 bg-border rounded animate-pulse w-12" />
                       </div>
                     )}
                     {!q && <p className="text-[10px] text-gray-600 animate-pulse">Loading…</p>}
