@@ -167,7 +167,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                 <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={n < 100} />
                 <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={n < 50}  />
                 <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={n < 200}  />
-                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={n < 1000} />
+                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={n < 1000} title={n < 1000 ? 'Needs ~4y of data — switch to a longer timeframe (5Y / MAX)' : undefined} />
                 <Divider />
                 <ToolChip active={activeTools.bollinger} onToggle={() => toggle('bollinger')} label="Bollinger" color="teal"   disabled={n < 20} />
                 <ToolChip active={activeTools.fib}       onToggle={() => toggle('fib')}       label="Fibonacci" color="yellow" disabled={n < 2}  />
@@ -362,20 +362,21 @@ const COLOR_MAP = {
 type ColorKey = keyof typeof COLOR_MAP;
 
 function ToolChip({
-  active, onToggle, label, color, disabled = false,
+  active, onToggle, label, color, disabled = false, title,
 }: {
   active: boolean; onToggle: () => void;
-  label: string; color: ColorKey; disabled?: boolean;
+  label: string; color: ColorKey; disabled?: boolean; title?: string;
 }) {
   const c = COLOR_MAP[color];
   return (
     <button
       onClick={disabled ? undefined : onToggle}
       disabled={disabled}
+      title={title}
       className={clsx(
         'px-2 py-0.5 rounded-md border text-[11px] font-semibold transition-all whitespace-nowrap',
         disabled
-          ? 'border-border text-gray-700 opacity-40 cursor-not-allowed'
+          ? 'border-dashed border-border text-gray-500 opacity-70 cursor-not-allowed'
           : active
             ? `${c.bg} ${c.border} ${c.text}`
             : 'border-border text-gray-500 hover:text-gray-300 hover:border-border-light',
