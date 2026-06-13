@@ -22,12 +22,49 @@ export function avgCalendarDaysPerBar(dates: string[]): number {
 
 /**
  * Convert a calendar-day duration to a bar count given the data's granularity.
+ * @internal — prefer computeIndicatorPeriods() which handles all indicators at once.
  * e.g. 1400 calendar days (200 weeks) on daily crypto data (1 day/bar) → 1400 bars.
  *      1400 calendar days on daily equity data (1.4 days/bar) → 1000 bars.
  *      1400 calendar days on weekly data (7 days/bar) → 200 bars.
  */
 export function barsForCalDays(calendarDays: number, avgDPB: number): number {
   return Math.max(2, Math.round(calendarDays / avgDPB));
+}
+
+/**
+ * Scaled periods (in bars) for all standard chart indicators, adapted to the
+ * data's granularity. Each indicator is defined by a real-world calendar span:
+ *
+ *   "SMA 20"  = 20 trading days × 1.4 cal/trading = 28 cal days
+ *   "SMA 200W"= 200 weeks × 7                     = 1400 cal days
+ *   "RSI 14"  = 14 trading days × 1.4             = 20 cal days
+ *   …
+ *
+ * A chip is considered feasible (not disabled) only if its computed period
+ * is ≥ its minBars. Returns both the period to pass to computeXXX and a
+ * boolean `ok` that drives the disabled prop.
+ */
+export function computeIndicatorPeriods(avgDPB: number) {
+  // p(calendarDays, minBars) → { period, ok: period >= minBars && period >= 2 }
+  const p = (calDays: number, minBars: number) => {
+    const period = barsForCalDays(calDays, avgDPB);
+    return { period, ok: period >= Math.max(minBars, 2) };
+  };
+  return {
+    sma20:    p(28,   3),    // 20 trading days
+    sma50:    p(70,   3),    // 50 trading days
+    sma200:   p(280,  3),    // 200 trading days
+    sma200w:  p(1400, 3),    // 200 calendar weeks
+    ema20:    p(28,   3),    // 20 trading days
+    ema100:   p(140,  3),    // 100 trading days
+    boll:     p(28,   10),   // 20 trading days; min 10 for meaningful variance
+    rsi:      p(20,   10),   // 14 trading days
+    macdFast: p(17,   3),    // 12 trading days
+    macdSlow: p(36,   5),    // 26 trading days
+    macdSig:  p(13,   3),    // 9 trading days
+    momWeek:  { period: Math.max(1, Math.round(7  / avgDPB)), ok: true },
+    momMonth: { period: Math.max(1, Math.round(30 / avgDPB)), ok: true },
+  };
 }
 
 /** Sliding-window Simple Moving Average — O(n). */
@@ -148,17 +185,22 @@ export function computeMomentum(closes: number[], period: number): (number | nul
   });
 }
 
-/** MACD (12, 26, 9). Returns three arrays of length = closes.length. */
-export function computeMACD(closes: number[]): {
+/** MACD (default 12/26/9 trading days, auto-scaled via barsForCalDays). Returns three arrays of length = closes.length. */
+export function computeMACD(
+  closes: number[],
+  fast = 12,
+  slow = 26,
+  signal = 9,
+): {
   macd: (number | null)[];
   signal: (number | null)[];
   hist: (number | null)[];
 } {
-  const ema12 = computeEMA(closes, 12);
-  const ema26 = computeEMA(closes, 26);
+  const emaFast = computeEMA(closes, fast);
+  const emaSlow = computeEMA(closes, slow);
 
-  const macd: (number | null)[] = ema12.map((v, i) =>
-    v != null && ema26[i] != null ? v - ema26[i]! : null,
+  const macd: (number | null)[] = emaFast.map((v, i) =>
+    v != null && emaSlow[i] != null ? v - emaSlow[i]! : null,
   );
 
   const startIdx = macd.findIndex(v => v !== null);
@@ -167,17 +209,16 @@ export function computeMACD(closes: number[]): {
     return { macd, signal: empty, hist: empty };
   }
 
-  // 9-period EMA of the contiguous MACD slice
   const macdSlice = macd.slice(startIdx) as number[];
-  const signalSlice = computeEMA(macdSlice, 9);
+  const signalSlice = computeEMA(macdSlice, signal);
 
-  const signal: (number | null)[] = macd.map((_, i) =>
+  const sig: (number | null)[] = macd.map((_, i) =>
     i < startIdx ? null : signalSlice[i - startIdx],
   );
 
   const hist: (number | null)[] = macd.map((v, i) =>
-    v != null && signal[i] != null ? v - signal[i]! : null,
+    v != null && sig[i] != null ? v - sig[i]! : null,
   );
 
-  return { macd, signal, hist };
+  return { macd, signal: sig, hist };
 }

@@ -16,7 +16,7 @@ import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useCh
 import { useGistData } from '@/lib/gist';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
-  avgCalendarDaysPerBar, barsForCalDays,
+  avgCalendarDaysPerBar, computeIndicatorPeriods,
   computeBollingerBands, computeFibLevels,
 } from '@/lib/indicators';
 import {
@@ -319,16 +319,15 @@ function DualChart({
   ])).sort();
   // Tool overlay computations (on price series)
   const toolCloses = prices.map(p => p.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
-  const avgDPB    = avgCalendarDaysPerBar(prices.map(p => p.date));
-  const P_SMA200W = barsForCalDays(1400, avgDPB); // 200 calendar weeks
+  const P = computeIndicatorPeriods(avgCalendarDaysPerBar(prices.map(p => p.date)));
 
   // Moving-average / band / level overlays (all on the price axis)
-  const sma20Vals   = toolsOverlay?.sma20   ? computeSMA(toolCloses, 20)        : null;
-  const sma50Vals   = toolsOverlay?.sma50   ? computeSMA(toolCloses, 50)        : null;
-  const sma200Vals  = toolsOverlay?.sma200  ? computeSMA(toolCloses, 200)       : null;
-  const sma200wVals = toolsOverlay?.sma200w ? computeSMA(toolCloses, P_SMA200W) : null;
-  const ema20Vals  = toolsOverlay?.ema20  ? computeEMA(toolCloses, 20)  : null;
-  const bands      = toolsOverlay?.bollinger ? computeBollingerBands(toolCloses, 20, 2) : null;
+  const sma20Vals   = toolsOverlay?.sma20   && P.sma20.ok   ? computeSMA(toolCloses, P.sma20.period)   : null;
+  const sma50Vals   = toolsOverlay?.sma50   && P.sma50.ok   ? computeSMA(toolCloses, P.sma50.period)   : null;
+  const sma200Vals  = toolsOverlay?.sma200  && P.sma200.ok  ? computeSMA(toolCloses, P.sma200.period)  : null;
+  const sma200wVals = toolsOverlay?.sma200w && P.sma200w.ok ? computeSMA(toolCloses, P.sma200w.period) : null;
+  const ema20Vals  = toolsOverlay?.ema20  && P.ema20.ok ? computeEMA(toolCloses, P.ema20.period) : null;
+  const bands      = toolsOverlay?.bollinger && P.boll.ok ? computeBollingerBands(toolCloses, P.boll.period, 2) : null;
   const fibLevels  = toolsOverlay?.fib ? computeFibLevels(toolCloses) : null;
   const overlayByDate = new Map<string, {
     sma20: number | null; sma50: number | null; sma200: number | null; sma200w: number | null;

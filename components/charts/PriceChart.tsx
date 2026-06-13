@@ -13,7 +13,7 @@ import { spyBenchmarkSeries } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  avgCalendarDaysPerBar, barsForCalDays,
+  avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 
 interface ToolsOverlay {
@@ -250,21 +250,18 @@ export function PriceChart({
     : null;
   const toolStdDev = toolVariance != null ? Math.sqrt(toolVariance) : null;
 
-  // Detect data granularity for calendar-based period scaling
-  const avgDPB    = avgCalendarDaysPerBar(data.map(d => d.date));
-  const P_SMA200W = barsForCalDays(1400, avgDPB); // 200 calendar weeks
-  const P_MOM_W   = Math.max(1, Math.round(7  / avgDPB));
-  const P_MOM_M   = Math.max(1, Math.round(30 / avgDPB));
+  // Scale all indicator periods to the data's real-world time granularity
+  const P = computeIndicatorPeriods(avgCalendarDaysPerBar(data.map(d => d.date)));
 
   // Moving-average / band / level series
-  const sma20Vals   = toolsOverlay?.sma20   ? computeSMA(closes, 20)        : null;
-  const sma50Vals   = toolsOverlay?.sma50   ? computeSMA(closes, 50)        : null;
-  const sma200Vals  = toolsOverlay?.sma200  ? computeSMA(closes, 200)       : null;
-  const sma200wVals = toolsOverlay?.sma200w ? computeSMA(closes, P_SMA200W) : null;
-  const ema20Vals  = toolsOverlay?.ema20  ? computeEMA(closes, 20)  : null;
-  const ema100Vals = toolsOverlay?.ema100 ? computeEMA(closes, 100) : null;
-  const bands      = toolsOverlay?.bollinger ? computeBollingerBands(closes, 20, 2) : null;
-  const fibLevels  = toolsOverlay?.fib ? computeFibLevels(closes) : null;
+  const sma20Vals   = toolsOverlay?.sma20   && P.sma20.ok   ? computeSMA(closes, P.sma20.period)              : null;
+  const sma50Vals   = toolsOverlay?.sma50   && P.sma50.ok   ? computeSMA(closes, P.sma50.period)              : null;
+  const sma200Vals  = toolsOverlay?.sma200  && P.sma200.ok  ? computeSMA(closes, P.sma200.period)             : null;
+  const sma200wVals = toolsOverlay?.sma200w && P.sma200w.ok ? computeSMA(closes, P.sma200w.period)            : null;
+  const ema20Vals   = toolsOverlay?.ema20   && P.ema20.ok   ? computeEMA(closes, P.ema20.period)              : null;
+  const ema100Vals  = toolsOverlay?.ema100  && P.ema100.ok  ? computeEMA(closes, P.ema100.period)             : null;
+  const bands       = toolsOverlay?.bollinger && P.boll.ok  ? computeBollingerBands(closes, P.boll.period, 2) : null;
+  const fibLevels   = toolsOverlay?.fib ? computeFibLevels(closes) : null;
 
   // vs SPY benchmark line — rebased to the asset's first price.
   const spyLine = spyActive && spyData.length > 0
@@ -309,11 +306,13 @@ export function PriceChart({
     : data;
 
   // RSI data for sub-chart
-  const rsiVals = toolsOverlay?.rsi ? computeRSI(closes) : null;
+  const rsiVals = toolsOverlay?.rsi && P.rsi.ok ? computeRSI(closes, P.rsi.period) : null;
   const rsiData = rsiVals ? data.map((d, i) => ({ date: d.date, rsi: rsiVals[i] })) : null;
 
   // MACD data for sub-chart
-  const macdResult = toolsOverlay?.macd ? computeMACD(closes) : null;
+  const macdResult = toolsOverlay?.macd && P.macdSlow.ok
+    ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period)
+    : null;
   const macdData = macdResult
     ? data.map((d, i) => ({
         date: d.date,
@@ -323,10 +322,10 @@ export function PriceChart({
       }))
     : null;
 
-  // Momentum sub-charts (ROC 1d / 1wk / 1mo — periods scaled to data granularity)
-  const momDailyVals   = toolsOverlay?.momentumDaily   ? computeMomentum(closes, 1)       : null;
-  const momWeeklyVals  = toolsOverlay?.momentumWeekly  ? computeMomentum(closes, P_MOM_W) : null;
-  const momMonthlyVals = toolsOverlay?.momentumMonthly ? computeMomentum(closes, P_MOM_M) : null;
+  // Momentum sub-charts (periods scaled to data granularity)
+  const momDailyVals   = toolsOverlay?.momentumDaily   ? computeMomentum(closes, 1)                  : null;
+  const momWeeklyVals  = toolsOverlay?.momentumWeekly  ? computeMomentum(closes, P.momWeek.period)  : null;
+  const momMonthlyVals = toolsOverlay?.momentumMonthly ? computeMomentum(closes, P.momMonth.period) : null;
   const momDailyData   = momDailyVals   ? data.map((d, i) => ({ date: d.date, value: momDailyVals[i]   })) : null;
   const momWeeklyData  = momWeeklyVals  ? data.map((d, i) => ({ date: d.date, value: momWeeklyVals[i]  })) : null;
   const momMonthlyData = momMonthlyVals ? data.map((d, i) => ({ date: d.date, value: momMonthlyVals[i] })) : null;

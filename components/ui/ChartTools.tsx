@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  avgCalendarDaysPerBar, barsForCalDays,
+  avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 
 export interface ActiveTools {
@@ -92,31 +92,26 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
   const stats = useMemo(() => computeStats(closes), [closes]);
   const n = closes.length;
 
-  // Detect data granularity so we can scale calendar-based periods correctly.
-  // Equity: ~1.4 cal days/bar (no weekends). Crypto: ~1 cal day/bar (trades 7d/wk).
-  // Weekly macro: ~7. Monthly FRED: ~30.
-  const dates = useMemo(() => data.map(d => d.date), [data]);
-  const avgDPB = useMemo(() => avgCalendarDaysPerBar(dates), [dates]);
-  // SMA 200W = 200 calendar weeks = 1400 calendar days
-  const P_SMA200W = useMemo(() => barsForCalDays(1400, avgDPB), [avgDPB]);
-  // Momentum weekly = 1 calendar week = 7 days; monthly ≈ 30 calendar days
-  const P_MOM_W   = useMemo(() => Math.max(1, Math.round(7  / avgDPB)), [avgDPB]);
-  const P_MOM_M   = useMemo(() => Math.max(1, Math.round(30 / avgDPB)), [avgDPB]);
+  // Scale all indicator periods to the data's real-world time granularity.
+  // Equity: ~1.4 cal days/bar. Crypto: ~1.0 (trades 7d/wk). Monthly FRED: ~30.
+  const avgDPB = useMemo(() => avgCalendarDaysPerBar(data.map(d => d.date)), [data]);
+  const P = useMemo(() => computeIndicatorPeriods(avgDPB), [avgDPB]);
 
   // Pre-compute all indicator current values once per data change
   const iv = useMemo(() => {
     if (closes.length === 0) return null;
-    const sma50arr    = n >= 50         ? computeSMA(closes, 50)         : null;
-    const sma200arr   = n >= 200        ? computeSMA(closes, 200)        : null;
-    const sma200warr  = n >= P_SMA200W  ? computeSMA(closes, P_SMA200W) : null;
-    const sma50val    = sma50arr  ? last(sma50arr)  : null;
-    const sma200val   = sma200arr ? last(sma200arr) : null;
-    const bbands      = n >= 20   ? computeBollingerBands(closes, 20, 2) : null;
-    const macdOut     = n >= 34   ? computeMACD(closes) : null;
+    const sma50arr   = P.sma50.ok && n >= P.sma50.period   ? computeSMA(closes, P.sma50.period)   : null;
+    const sma200arr  = P.sma200.ok && n >= P.sma200.period  ? computeSMA(closes, P.sma200.period)  : null;
+    const sma200warr = P.sma200w.ok && n >= P.sma200w.period ? computeSMA(closes, P.sma200w.period) : null;
+    const sma50val   = sma50arr  ? last(sma50arr)  : null;
+    const sma200val  = sma200arr ? last(sma200arr) : null;
+    const bbands     = P.boll.ok && n >= P.boll.period ? computeBollingerBands(closes, P.boll.period, 2) : null;
+    const macdOk     = P.macdSlow.ok && n >= (P.macdSlow.period + P.macdSig.period);
+    const macdOut    = macdOk ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period) : null;
     return {
-      sma20:   n >= 20  ? last(computeSMA(closes, 20))  : null,
-      ema20:   n >= 20  ? last(computeEMA(closes, 20))   : null,
-      ema100:  n >= 100 ? last(computeEMA(closes, 100))  : null,
+      sma20:   P.sma20.ok && n >= P.sma20.period   ? last(computeSMA(closes, P.sma20.period))   : null,
+      ema20:   P.ema20.ok && n >= P.ema20.period   ? last(computeEMA(closes, P.ema20.period))   : null,
+      ema100:  P.ema100.ok && n >= P.ema100.period  ? last(computeEMA(closes, P.ema100.period))  : null,
       sma50:   sma50val,
       sma200:  sma200val,
       sma200w: sma200warr ? last(sma200warr) : null,
@@ -125,16 +120,16 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                  : null,
       bbUpper: bbands ? last(bbands.upper) : null,
       bbLower: bbands ? last(bbands.lower) : null,
-      rsi:           n >= 15      ? last(computeRSI(closes, 14))           : null,
-      macd:          macdOut      ? last(macdOut.macd)                      : null,
-      signal:        macdOut      ? last(macdOut.signal)                    : null,
-      hist:          macdOut      ? last(macdOut.hist)                      : null,
-      fibs:          n >= 2       ? computeFibLevels(closes)                : null,
-      momentumDaily: n >= 2       ? last(computeMomentum(closes, 1))        : null,
-      momentumWeekly:  n >= P_MOM_W ? last(computeMomentum(closes, P_MOM_W)) : null,
-      momentumMonthly: n >= P_MOM_M ? last(computeMomentum(closes, P_MOM_M)) : null,
+      rsi:    P.rsi.ok && n >= P.rsi.period ? last(computeRSI(closes, P.rsi.period)) : null,
+      macd:   macdOut ? last(macdOut.macd)   : null,
+      signal: macdOut ? last(macdOut.signal) : null,
+      hist:   macdOut ? last(macdOut.hist)   : null,
+      fibs:   n >= 2  ? computeFibLevels(closes) : null,
+      momentumDaily:   n >= 2            ? last(computeMomentum(closes, 1))              : null,
+      momentumWeekly:  n >= P.momWeek.period  ? last(computeMomentum(closes, P.momWeek.period))  : null,
+      momentumMonthly: n >= P.momMonth.period ? last(computeMomentum(closes, P.momMonth.period)) : null,
     };
-  }, [closes, n, P_SMA200W, P_MOM_W, P_MOM_M]);
+  }, [closes, n, P]);
 
   const toggle = (key: keyof ActiveTools) =>
     onChange({ ...activeTools, [key]: !activeTools[key] });
@@ -174,22 +169,22 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                 <ToolChip active={activeTools.stdDev}  onToggle={() => toggle('stdDev')}  label="Std Dev"  color="sky"    />
                 <ToolChip active={activeTools.minMax}  onToggle={() => toggle('minMax')}  label="Min/Max"  color="violet" />
                 <Divider />
-                <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={n < 20}  />
-                <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={n < 20}  />
-                <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={n < 100} />
-                <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={n < 50}  />
-                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={n < 200}  />
-                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={n < P_SMA200W} title={n < P_SMA200W ? 'Needs ~4y of data — switch to a longer timeframe (5Y / MAX)' : undefined} />
+                <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={!P.sma20.ok   || n < P.sma20.period}   />
+                <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={!P.ema20.ok   || n < P.ema20.period}   />
+                <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={!P.ema100.ok  || n < P.ema100.period}  />
+                <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={!P.sma50.ok   || n < P.sma50.period}   />
+                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={!P.sma200.ok  || n < P.sma200.period}  />
+                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={!P.sma200w.ok || n < P.sma200w.period} title={!P.sma200w.ok || n < P.sma200w.period ? 'Needs ~4y of data — switch to a longer timeframe (5Y / MAX)' : undefined} />
                 <Divider />
-                <ToolChip active={activeTools.bollinger} onToggle={() => toggle('bollinger')} label="Bollinger" color="teal"   disabled={n < 20} />
-                <ToolChip active={activeTools.fib}       onToggle={() => toggle('fib')}       label="Fibonacci" color="yellow" disabled={n < 2}  />
+                <ToolChip active={activeTools.bollinger} onToggle={() => toggle('bollinger')} label="Bollinger" color="teal"   disabled={!P.boll.ok || n < P.boll.period} />
+                <ToolChip active={activeTools.fib}       onToggle={() => toggle('fib')}       label="Fibonacci" color="yellow" disabled={n < 2} />
                 <Divider />
-                <ToolChip active={activeTools.rsi}  onToggle={() => toggle('rsi')}  label="RSI 14" color="indigo" disabled={n < 15} />
-                <ToolChip active={activeTools.macd} onToggle={() => toggle('macd')} label="MACD"   color="green"  disabled={n < 34} />
+                <ToolChip active={activeTools.rsi}  onToggle={() => toggle('rsi')}  label="RSI 14" color="indigo" disabled={!P.rsi.ok || n < P.rsi.period} />
+                <ToolChip active={activeTools.macd} onToggle={() => toggle('macd')} label="MACD"   color="green"  disabled={!P.macdSlow.ok || n < (P.macdSlow.period + P.macdSig.period)} />
                 <Divider />
-                <ToolChip active={activeTools.momentumDaily}   onToggle={() => toggle('momentumDaily')}   label="Mom. Daily"   color="sky"    disabled={n < 2}  />
-                <ToolChip active={activeTools.momentumWeekly}  onToggle={() => toggle('momentumWeekly')}  label="Mom. Weekly"  color="sky"    disabled={n < 6}  />
-                <ToolChip active={activeTools.momentumMonthly} onToggle={() => toggle('momentumMonthly')} label="Mom. Monthly" color="sky"    disabled={n < 22} />
+                <ToolChip active={activeTools.momentumDaily}   onToggle={() => toggle('momentumDaily')}   label="Mom. Daily"   color="sky" disabled={n < 2} />
+                <ToolChip active={activeTools.momentumWeekly}  onToggle={() => toggle('momentumWeekly')}  label="Mom. Weekly"  color="sky" disabled={n < P.momWeek.period}  />
+                <ToolChip active={activeTools.momentumMonthly} onToggle={() => toggle('momentumMonthly')} label="Mom. Monthly" color="sky" disabled={n < P.momMonth.period} />
               </div>
 
               {/* ── Results strip — visible when any tool is active ──────── */}
