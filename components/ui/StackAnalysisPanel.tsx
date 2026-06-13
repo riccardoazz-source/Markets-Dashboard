@@ -6,6 +6,7 @@ import { CHART_COLORS } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
+  avgCalendarDaysPerBar, barsForCalDays,
 } from '@/lib/indicators';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import {
@@ -36,10 +37,15 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
     [prices],
   );
 
+  const avgDPB    = useMemo(() => avgCalendarDaysPerBar(prices.map(p => p.date)), [prices]);
+  const P_SMA200W = useMemo(() => barsForCalDays(1400, avgDPB), [avgDPB]);
+  const P_MOM_W   = useMemo(() => Math.max(1, Math.round(7  / avgDPB)), [avgDPB]);
+  const P_MOM_M   = useMemo(() => Math.max(1, Math.round(30 / avgDPB)), [avgDPB]);
+
   const sma20Vals   = activeTools.sma20    ? computeSMA(closes, 20)               : null;
   const sma50Vals   = activeTools.sma50    ? computeSMA(closes, 50)               : null;
   const sma200Vals  = activeTools.sma200   ? computeSMA(closes, 200)              : null;
-  const sma200wVals = activeTools.sma200w  ? computeSMA(closes, 1000)             : null;
+  const sma200wVals = activeTools.sma200w  ? computeSMA(closes, P_SMA200W)        : null;
   const ema20Vals  = activeTools.ema20    ? computeEMA(closes, 20)               : null;
   const ema100Vals = activeTools.ema100   ? computeEMA(closes, 100)              : null;
   const bands      = activeTools.bollinger ? computeBollingerBands(closes, 20, 2) : null;
@@ -76,9 +82,9 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
     ? prices.map((p, i) => ({ date: p.date, macd: macdResult.macd[i], signal: macdResult.signal[i], hist: macdResult.hist[i] }))
     : [], [prices, macdResult]);
 
-  const momDailyVals   = useMemo(() => activeTools.momentumDaily   ? computeMomentum(closes, 1)  : null, [closes, activeTools.momentumDaily]);
-  const momWeeklyVals  = useMemo(() => activeTools.momentumWeekly  ? computeMomentum(closes, 5)  : null, [closes, activeTools.momentumWeekly]);
-  const momMonthlyVals = useMemo(() => activeTools.momentumMonthly ? computeMomentum(closes, 21) : null, [closes, activeTools.momentumMonthly]);
+  const momDailyVals   = useMemo(() => activeTools.momentumDaily   ? computeMomentum(closes, 1)       : null, [closes, activeTools.momentumDaily]);
+  const momWeeklyVals  = useMemo(() => activeTools.momentumWeekly  ? computeMomentum(closes, P_MOM_W) : null, [closes, activeTools.momentumWeekly, P_MOM_W]);
+  const momMonthlyVals = useMemo(() => activeTools.momentumMonthly ? computeMomentum(closes, P_MOM_M) : null, [closes, activeTools.momentumMonthly, P_MOM_M]);
   const momDailyData   = useMemo(() => momDailyVals   ? prices.map((p, i) => ({ date: p.date, value: momDailyVals[i]   })) : [], [prices, momDailyVals]);
   const momWeeklyData  = useMemo(() => momWeeklyVals  ? prices.map((p, i) => ({ date: p.date, value: momWeeklyVals[i]  })) : [], [prices, momWeeklyVals]);
   const momMonthlyData = useMemo(() => momMonthlyVals ? prices.map((p, i) => ({ date: p.date, value: momMonthlyVals[i] })) : [], [prices, momMonthlyVals]);

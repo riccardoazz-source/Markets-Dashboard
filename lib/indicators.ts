@@ -3,6 +3,33 @@
  * All functions return arrays of the same length as the input (nulls where not enough history).
  */
 
+/**
+ * Average calendar days between consecutive data points (samples last 50 gaps).
+ * Returns ~1 for crypto (trades every day), ~1.4 for equities (weekends excluded),
+ * ~7 for weekly data, ~30 for monthly FRED series, etc.
+ */
+export function avgCalendarDaysPerBar(dates: string[]): number {
+  if (dates.length < 5) return 1;
+  const n = Math.min(dates.length - 1, 50);
+  const start = Math.max(0, dates.length - 1 - n);
+  let total = 0, count = 0;
+  for (let i = start; i < start + n; i++) {
+    const days = (new Date(dates[i + 1]).getTime() - new Date(dates[i]).getTime()) / 86_400_000;
+    if (days > 0 && days < 45) { total += days; count++; }
+  }
+  return count > 0 ? total / count : 1;
+}
+
+/**
+ * Convert a calendar-day duration to a bar count given the data's granularity.
+ * e.g. 1400 calendar days (200 weeks) on daily crypto data (1 day/bar) → 1400 bars.
+ *      1400 calendar days on daily equity data (1.4 days/bar) → 1000 bars.
+ *      1400 calendar days on weekly data (7 days/bar) → 200 bars.
+ */
+export function barsForCalDays(calendarDays: number, avgDPB: number): number {
+  return Math.max(2, Math.round(calendarDays / avgDPB));
+}
+
 /** Sliding-window Simple Moving Average — O(n). */
 export function computeSMA(closes: number[], period: number): (number | null)[] {
   const result: (number | null)[] = [];

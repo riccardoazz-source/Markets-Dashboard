@@ -16,6 +16,7 @@ import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useCh
 import { useGistData } from '@/lib/gist';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
+  avgCalendarDaysPerBar, barsForCalDays,
   computeBollingerBands, computeFibLevels,
 } from '@/lib/indicators';
 import {
@@ -318,12 +319,14 @@ function DualChart({
   ])).sort();
   // Tool overlay computations (on price series)
   const toolCloses = prices.map(p => p.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
+  const avgDPB    = avgCalendarDaysPerBar(prices.map(p => p.date));
+  const P_SMA200W = barsForCalDays(1400, avgDPB); // 200 calendar weeks
 
   // Moving-average / band / level overlays (all on the price axis)
-  const sma20Vals   = toolsOverlay?.sma20   ? computeSMA(toolCloses, 20)   : null;
-  const sma50Vals   = toolsOverlay?.sma50   ? computeSMA(toolCloses, 50)   : null;
-  const sma200Vals  = toolsOverlay?.sma200  ? computeSMA(toolCloses, 200)  : null;
-  const sma200wVals = toolsOverlay?.sma200w ? computeSMA(toolCloses, 1000) : null;
+  const sma20Vals   = toolsOverlay?.sma20   ? computeSMA(toolCloses, 20)        : null;
+  const sma50Vals   = toolsOverlay?.sma50   ? computeSMA(toolCloses, 50)        : null;
+  const sma200Vals  = toolsOverlay?.sma200  ? computeSMA(toolCloses, 200)       : null;
+  const sma200wVals = toolsOverlay?.sma200w ? computeSMA(toolCloses, P_SMA200W) : null;
   const ema20Vals  = toolsOverlay?.ema20  ? computeEMA(toolCloses, 20)  : null;
   const bands      = toolsOverlay?.bollinger ? computeBollingerBands(toolCloses, 20, 2) : null;
   const fibLevels  = toolsOverlay?.fib ? computeFibLevels(toolCloses) : null;
