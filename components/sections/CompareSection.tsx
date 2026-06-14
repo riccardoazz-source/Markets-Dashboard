@@ -60,14 +60,8 @@ interface SearchHit { symbol: string; name: string; exchange: string; type: stri
 const nameCacheRef: Record<string, string> = {};
 
 // Recession series render as shaded bands, not data lines — excluded from
-// stats cards. Included in correlation as 0/1 (point-biserial correlation).
-// For each (indicator, regular-asset) pair, the cell shows avg asset return in
-// event months vs non-event months — more useful than r for sparse dummies.
-interface EventImpact {
-  eventAvg: number;  // mean month-over-month return in event months
-  baseAvg:  number;  // mean return in all other months
-  n:        number;  // number of event months in the current aligned window
-}
+// stats cards. Included in correlation as a 0/1 series correlated with the
+// asset's monthly returns (point-biserial correlation) — same r as any pair.
 
 const RECESSION_SET = new Set(RECESSION_SERIES);
 
@@ -612,43 +606,12 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         }
       }
 
-      // ── Event impact: avg return in event months vs non-event months ──────────
-      // For sparse dummies a low |r| (e.g. -0.17) can be highly significant but
-      // looks like "weak". The impact stats — "crisis months: −3.2% / normal: +0.8%"
-      // — communicate the actual effect size in a more intuitive way.
-      // When n=0 (no events in current window) we surface that directly so the
-      // user knows to switch to a longer timeframe (e.g. MAX) for event analysis.
-      const impactMap = new Map<string, EventImpact>();
-      if (alignedData.length > 0) {
-        const avg = (arr: number[]) =>
-          arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : NaN;
-        const toRet = (v: number[]) =>
-          v.map((x, i) => (i === 0 || v[i - 1] === 0 ? NaN : x / v[i - 1] - 1));
-        for (let i = 0; i < labels.length; i++) {
-          if (!INDICATOR_CORR_IDS.has(labels[i])) continue;
-          const dummyCol = alignedData.map(r => r.values[i]);
-          for (let j = 0; j < labels.length; j++) {
-            if (INDICATOR_CORR_IDS.has(labels[j])) continue;
-            const levelCol = alignedData.map(r => r.values[j]);
-            const retCol = toRet(levelCol);
-            const eR: number[] = [], bR: number[] = [];
-            for (let p = 0; p < dummyCol.length; p++) {
-              if (!isFinite(retCol[p])) continue;
-              (dummyCol[p] === 1 ? eR : bR).push(retCol[p]);
-            }
-            const impact: EventImpact = { eventAvg: avg(eR), baseAvg: avg(bR), n: eR.length };
-            impactMap.set(`${labels[i]}:${labels[j]}`, impact);
-            impactMap.set(`${labels[j]}:${labels[i]}`, impact);
-          }
-        }
-      }
-
-      return { ...base, matrix: finalMatrix, eventImpact: impactMap };
+      return { ...base, matrix: finalMatrix };
     } catch (e) {
       console.error('[CompareSection] correlationMatrix error:', e);
       return {
         labels: [], matrix: [] as (number | null)[][], sampleCount: 0,
-        alignedData: [] as CorrAlignedRow[], eventImpact: new Map<string, EventImpact>(),
+        alignedData: [] as CorrAlignedRow[],
       };
     }
   }, [allAssets]);
@@ -921,7 +884,6 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               alignedData={correl.alignedData}
               names={Object.fromEntries(allAssets.map(a => [a.symbol, a.name]))}
               hasIndicators={correl.labels.some(l => INDICATOR_CORR_IDS.has(l))}
-              eventImpact={correl.eventImpact}
             />
           )}
         </ChartErrorBoundary>
@@ -968,7 +930,7 @@ function corrStrength(v: number): { label: string; bg: string; text: string } {
 }
 
 function CorrelationMatrix({
-  labels, matrix, sampleCount, alignedData, names, hasIndicators, eventImpact,
+  labels, matrix, sampleCount, alignedData, names, hasIndicators,
 }: {
   labels: string[];
   matrix: (number | null)[][];
@@ -976,7 +938,6 @@ function CorrelationMatrix({
   alignedData: CorrAlignedRow[];
   names: Record<string, string>;
   hasIndicators?: boolean;
-  eventImpact?: Map<string, EventImpact>;
 }) {
   const [showData, setShowData] = useState(false);
 
@@ -993,9 +954,9 @@ function CorrelationMatrix({
           </p>
           {hasIndicators && (
             <p className="text-[10px] text-gray-500 mt-1 max-w-xl leading-snug">
-              Event/indicator cells show <strong>Δ avg return</strong> (event months vs normal) + r.
-              Sparse events give low |r| even for large effects — the Δ is more informative.
-              &ldquo;No events in range&rdquo; → switch to <strong>MAX</strong> timeframe.
+              Event rows (halvings, FOMC, …) are a <strong>0/1 series</strong> — 1 in months with the
+              event — correlated with each asset&rsquo;s monthly returns (point-biserial r).
+              Sparse events are noisy: a dash means no events in the current window → try <strong>MAX</strong>.
             </p>
           )}
         </div>
@@ -1055,53 +1016,16 @@ function CorrelationMatrix({
                 <td className="text-gray-300 font-medium pr-2 py-1 whitespace-nowrap text-[11px]">{names[row] ?? row}</td>
                 {labels.map((col, j) => {
                   const v = matrix[i]?.[j];
-                  const impact = i !== j ? eventImpact?.get(`${row}:${col}`) : undefined;
 
-                  // Impact cell: for (indicator × asset) pairs, show avg return in
-                  // event months vs non-event months instead of a raw r value.
-                  if (impact !== undefined) {
-                    const { eventAvg, baseAvg, n } = impact;
-                    if (n === 0) {
-                      return (
-                        <td key={col} className="text-center px-2 py-1.5 rounded"
-                          style={{ backgroundColor: '#1a1d2e', minWidth: 90 }}>
-                          <span className="text-[9px] text-gray-600 leading-snug block">No events<br/>in range</span>
-                          <span className="text-[8px] text-gray-700 block mt-0.5">Use MAX ↑</span>
-                        </td>
-                      );
-                    }
-                    const delta = isFinite(eventAvg) && isFinite(baseAvg) ? (eventAvg - baseAvg) * 100 : NaN;
-                    const fmtPct = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(1)}%`;
-                    const deltaColor = isFinite(delta) ? (delta < 0 ? '#f87171' : '#34d399') : '#6b7280';
-                    const { bg } = v != null ? corrStrength(v) : { bg: '#1f2233' };
-                    return (
-                      <td key={col} className="text-center px-2 py-1.5 rounded align-top"
-                        style={{ backgroundColor: bg, minWidth: 90 }}>
-                        {isFinite(delta) ? (
-                          <>
-                            <span className="block font-mono text-[11px] font-semibold tabular-nums" style={{ color: deltaColor }}>
-                              {fmtPct(delta)}
-                            </span>
-                            <span className="block text-[9px] text-gray-400 leading-none mt-0.5">
-                              {isFinite(eventAvg) ? fmtPct(eventAvg * 100) : '—'} / {isFinite(baseAvg) ? fmtPct(baseAvg * 100) : '—'}
-                            </span>
-                            <span className="block text-[8px] text-gray-600 leading-none mt-0.5">
-                              n={n} · r={v != null ? v.toFixed(2) : '—'}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-[10px] text-gray-600">—</span>
-                        )}
-                      </td>
-                    );
-                  }
-
-                  // Standard cell
-                  const { bg, text } = v != null ? corrStrength(v) : { bg: '#1f2233', text: '#6b7280' };
+                  // Every cell shows the same thing: the correlation r. For
+                  // event×asset pairs that's the point-biserial r (halving/FOMC/…
+                  // as a 0/1 series correlated with the asset's monthly returns),
+                  // computed in the matrix above — identical treatment to any pair.
+                  const { bg, text } = v != null && isFinite(v) ? corrStrength(v) : { bg: '#1f2233', text: '#6b7280' };
                   return (
                     <td key={col} className="text-center font-mono text-[11px] tabular-nums px-2 py-1.5 rounded"
                       style={{ backgroundColor: bg, color: text, minWidth: 60 }}>
-                      {i === j ? '1.00' : (v == null ? '—' : v.toFixed(2))}
+                      {i === j ? '1.00' : (v == null || !isFinite(v) ? '—' : v.toFixed(2))}
                     </td>
                   );
                 })}
