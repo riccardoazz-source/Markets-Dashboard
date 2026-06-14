@@ -1,4 +1,5 @@
 import { ChartPoint } from './stooq';
+import { computeSMA, avgCalendarDaysPerBar, computeIndicatorPeriods } from './indicators';
 
 export interface YahooMeta {
   price: number;
@@ -39,6 +40,30 @@ export interface YahooQuote {
   volume: number | null;
   /** Trailing annual dividend yield as a decimal (e.g. 0.012 = 1.2%). Null when no dividend. */
   dividendYield: number | null;
+  /** Latest 200-week SMA (≈1400 calendar days, cadence-scaled). Null when <~4y of data. */
+  sma200w: number | null;
+}
+
+// Latest 200-week SMA. The period (1400 calendar days = 200 weeks) is scaled to
+// the data's real granularity via computeIndicatorPeriods, so equities (1.4
+// cal-days/bar) use ~1000 bars while crypto (1.0) uses ~1400. Returns null when
+// there isn't enough history (e.g. assets younger than ~4 years).
+function computeSma200w(timestamps: number[], closes: (number | null)[]): number | null {
+  const dates: string[] = [];
+  const vals: number[] = [];
+  for (let i = 0; i < closes.length; i++) {
+    const c = closes[i];
+    if (c != null && c > 0 && timestamps[i] != null) {
+      dates.push(new Date(timestamps[i] * 1000).toISOString().slice(0, 10));
+      vals.push(c);
+    }
+  }
+  if (vals.length < 3) return null;
+  const P = computeIndicatorPeriods(avgCalendarDaysPerBar(dates));
+  if (!P.sma200w.ok || vals.length < P.sma200w.period) return null;
+  const sma = computeSMA(vals, P.sma200w.period);
+  for (let i = sma.length - 1; i >= 0; i--) if (sma[i] != null) return sma[i];
+  return null;
 }
 
 // YTD reference: first valid close on/after Jan 1 of the current year.
@@ -453,6 +478,7 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
       dividendYield: (it.trailingAnnualDividendYield as number) > 0
         ? (it.trailingAnnualDividendYield as number)
         : null,
+      sma200w: null, // v7 batch carries no historical closes
     }));
   } catch (e) {
     console.error('[yahoo-v7] fetch failed:', (e as Error).message);
@@ -512,6 +538,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     marketCap: null,
     volume: (m.regularMarketVolume as number) ?? null,
     dividendYield: divYield,
+    sma200w: computeSma200w(timestamps, closes),
   };
 }
 
@@ -591,6 +618,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       marketCap: null,
       volume: (m.regularMarketVolume as number) ?? null,
       dividendYield: computeDivYieldFromEvents(result, price),
+      sma200w: computeSma200w(timestamps, closes),
     };
   } catch {
     return null;
@@ -661,6 +689,7 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
         volume:     it.regularMarketVolume != null ? Number(it.regularMarketVolume) : null,
         dividendYield: it.trailingAnnualDividendYield != null && Number(it.trailingAnnualDividendYield) > 0
           ? Number(it.trailingAnnualDividendYield) : null,
+        sma200w: null, // v7 batch carries no historical closes
       };
     }).filter(q => q.price > 0);
   } catch { /* try next host */ }
@@ -794,6 +823,7 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
             marketCap: typeof marketCapRaw === 'number' ? marketCapRaw : null,
             volume: null,
             dividendYield: null,
+            sma200w: null, // quoteSummary backfill carries no historical closes
           } satisfies YahooQuote,
         };
       }));

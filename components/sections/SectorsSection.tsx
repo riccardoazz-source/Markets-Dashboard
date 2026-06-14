@@ -13,6 +13,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
+import { Sma200wLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -28,6 +29,7 @@ interface SectorLiveData {
   high52w: number | null;
   low52w: number | null;
   dividendYield?: number | null;
+  sma200w?: number | null;
   currency?: string | null;
 }
 
@@ -35,7 +37,7 @@ interface SectorLiveData {
 const INITIAL: SectorLiveData = {
   price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null, fiveYearReturn: null,
   fiveYearCagr: null, fiveYearFull: false,
-  high52w: null, low52w: null, dividendYield: null, currency: null,
+  high52w: null, low52w: null, dividendYield: null, sma200w: null, currency: null,
 };
 
 type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn' | 'fiveYearCagr';
@@ -83,6 +85,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
         high52w: number | null;
         low52w: number | null;
         dividendYield: number | null;
+        sma200w: number | null;
       }>;
       if (Array.isArray(data) && data.length > 0) {
         const map: Record<string, SectorLiveData> = {};
@@ -178,6 +181,10 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     .map((s, i) => ({ ...s, rank: i + 1 }));
 
   const selectedSector = merged.find(s => s.symbol === selected);
+
+  // When any chart tool is toggled, show the overlay-capable PriceChart instead
+  // of the dividend dual-line chart (which can't draw SMA/EMA/Bollinger lines).
+  const anyToolActive = Object.values(activeTools).some(Boolean);
 
   // Dual-line chart data: price vs total return, normalized to 0% at period start
   const divChartData = useMemo(() => {
@@ -305,6 +312,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                       5Y CAGR: {formatCagr(sector.fiveYearCagr, sector.fiveYearFull)}
                     </p>
                   )}
+                  <Sma200wLine price={sector.price} sma200w={sector.sma200w} currency={sector.currency} />
                 </>
               ) : (
                 <div className="mt-2 space-y-1.5">
@@ -378,7 +386,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           </div>
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
-          ) : divChartData ? (
+          ) : divChartData && !anyToolActive ? (
             <DualLineDragChart data={divChartData} onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           ) : (
             <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools}

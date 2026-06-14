@@ -22,6 +22,8 @@ export interface QuoteData {
   volume?: number | null;
   /** Trailing annual dividend yield as a decimal (e.g. 0.012 = 1.2%). Present and > 0 when the asset pays dividends. */
   dividendYield?: number | null;
+  /** Latest 200-week SMA (cadence-scaled). Null when <~4y of data. */
+  sma200w?: number | null;
 }
 
 export interface HistoricalPoint {
@@ -59,6 +61,8 @@ export interface CryptoData {
   fiveYearCagrPercent?: number | null;
   /** True when ≥5y of data backs the CAGR; false → display an asterisk. */
   fiveYearFull?: boolean;
+  /** Latest 200-week SMA (cadence-scaled). Null when <~4y of data. */
+  sma200w?: number | null;
   marketCap: number;
   volume24h: number;
   image?: string;

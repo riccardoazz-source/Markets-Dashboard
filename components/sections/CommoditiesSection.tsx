@@ -10,6 +10,7 @@ import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { Sma200wLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -207,6 +208,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                         5Y CAGR: {formatCagr(q.fiveYearCagrPercent, q.fiveYearFull)}
                       </p>
                     )}
+                    <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                   </>
                 ) : (
                   <p className="text-xs text-gray-600">Loading…</p>

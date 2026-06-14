@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
+import { computeSMA, avgCalendarDaysPerBar, computeIndicatorPeriods } from '@/lib/indicators';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -158,7 +159,7 @@ async function fetchFiveYearAnchors(ids: string[]): Promise<Map<string, number>>
 // Yahoo isn't rate-limited like CoinGecko's free tier, so it's the reliable source
 // when CoinGecko anchor fetches fail (which is most of the time on cold serverless
 // instances). One round-trip per coin instead of three.
-interface YahooAnchors { fiveY: number | null; fiveYTs: number | null; ytd: number | null; mtd: number | null }
+interface YahooAnchors { fiveY: number | null; fiveYTs: number | null; ytd: number | null; mtd: number | null; sma200w: number | null }
 const yahooAnchorCache = new Map<string, { anchors: YahooAnchors; day: string }>();
 
 async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
@@ -167,7 +168,7 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
   if (cached && cached.day === today) return cached.anchors;
 
   const symbol = CRYPTO_YAHOO_SYMBOLS[coinId];
-  const empty: YahooAnchors = { fiveY: null, fiveYTs: null, ytd: null, mtd: null };
+  const empty: YahooAnchors = { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null };
   if (!symbol) return empty;
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5y&interval=1d&includePrePost=false`;
@@ -215,11 +216,35 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
     const fiveYearsAgo = Math.floor((Date.now() - 5 * 365 * 86_400_000) / 1000);
     const fiveYTs = findFirstValidTs(fiveYearsAgo);
 
+    // 200-week SMA (crypto trades 7d/wk → ~1.0 cal-days/bar → ~1400 bars).
+    let sma200w: number | null = null;
+    {
+      const dates: string[] = [];
+      const vals: number[] = [];
+      for (let i = 0; i < ts.length; i++) {
+        const c = closes[i];
+        if (typeof c === 'number' && isFinite(c) && c > 0) {
+          dates.push(new Date(ts[i] * 1000).toISOString().slice(0, 10));
+          vals.push(c);
+        }
+      }
+      if (vals.length >= 3) {
+        const P = computeIndicatorPeriods(avgCalendarDaysPerBar(dates));
+        if (P.sma200w.ok && vals.length >= P.sma200w.period) {
+          const smaArr = computeSMA(vals, P.sma200w.period);
+          for (let i = smaArr.length - 1; i >= 0; i--) {
+            if (smaArr[i] != null) { sma200w = smaArr[i]; break; }
+          }
+        }
+      }
+    }
+
     const anchors: YahooAnchors = {
       fiveY: findFirstValid(fiveYearsAgo),
       fiveYTs,
       ytd: findFirstValid(jan1),
       mtd: findFirstValid(monthStart),
+      sma200w,
     };
     yahooAnchorCache.set(coinId, { anchors, day: today });
     return anchors;
@@ -234,7 +259,7 @@ async function fetchYahooAnchorsAll(ids: string[]): Promise<Map<string, YahooAnc
   const map = new Map<string, YahooAnchors>();
   // Yahoo is fine with parallel — no rate limit at this volume (8 coins)
   const results = await Promise.all(
-    ids.map(id => fetchYahooCryptoAnchors(id).then(a => ({ id, a })).catch(() => ({ id, a: { fiveY: null, fiveYTs: null, ytd: null, mtd: null } as YahooAnchors })))
+    ids.map(id => fetchYahooCryptoAnchors(id).then(a => ({ id, a })).catch(() => ({ id, a: { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null } as YahooAnchors })))
   );
   for (const { id, a } of results) map.set(id, a);
   return map;
@@ -287,7 +312,7 @@ export async function GET(req: NextRequest) {
         const sym = (coin.symbol as string)?.toUpperCase();
         const currentPrice = coin.current_price as number;
         const id = coin.id as string;
-        const ya = yahooAnchors.get(id) ?? { fiveY: null, fiveYTs: null, ytd: null, mtd: null };
+        const ya = yahooAnchors.get(id) ?? { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null };
 
         // YTD: CoinGecko anchor first (precise Jan 1 UTC), Yahoo fallback (first
         // trading day ≥ Jan 1).
@@ -345,6 +370,7 @@ export async function GET(req: NextRequest) {
           fiveYearChangePercent,
           fiveYearCagrPercent,
           fiveYearFull,
+          sma200w: ya.sma200w,
           marketCap: coin.market_cap,
           volume24h: coin.total_volume,
           image: coin.image,

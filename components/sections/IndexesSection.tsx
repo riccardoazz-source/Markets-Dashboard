@@ -13,6 +13,7 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
+import { Sma200wLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -155,6 +156,9 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   const selectedConfig = INDEXES.find(i => i.symbol === selected);
   const selectedQuote = selected ? quotes[selected] : null;
 
+  // Tools draw on the overlay-capable PriceChart, not the dividend dual-line chart.
+  const anyToolActive = Object.values(activeTools).some(Boolean);
+
   return (
     <div className="space-y-3">
       {/* Count chip */}
@@ -260,6 +264,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                         5Y CAGR: {formatCagr(q.fiveYearCagrPercent, q.fiveYearFull)}
                       </p>
                     )}
+                    <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                   </>
                 ) : (
                   <p className="text-xs text-gray-600">Loading…</p>
@@ -338,7 +343,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
-          ) : divChartData ? (
+          ) : divChartData && !anyToolActive ? (
             <DualLineDragChart data={divChartData} onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           ) : (
             <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools}

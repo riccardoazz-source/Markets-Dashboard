@@ -12,6 +12,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
+import { Sma200wLine } from '@/components/ui/Sma200wLine';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { useGistData } from '@/lib/gist';
 import {
@@ -1018,6 +1019,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                         {ytd != null && <p className={clsx('text-[10px] mt-0.5', ytd >= 0 ? 'text-emerald-400' : 'text-red-400')}>YTD: {ytd >= 0 ? '+' : ''}{ytd.toFixed(1)}%</p>}
                         {fiveYear != null && <p className={clsx('text-[10px] mt-0.5', fiveYear >= 0 ? 'text-emerald-400' : 'text-red-400')}>5Y: {fiveYear >= 0 ? '+' : ''}{fiveYear.toFixed(1)}%</p>}
                         {cagr != null && <p className={clsx('text-[10px] mt-0.5', cagr >= 0 ? 'text-emerald-400' : 'text-red-400')}>5Y CAGR: {cagr >= 0 ? '+' : ''}{cagr.toFixed(1)}%{cagrFull ? '' : '*'}</p>}
+                        <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                       </>
                     ) : (
                       <div className="mt-2 space-y-1.5">
