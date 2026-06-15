@@ -12,7 +12,7 @@ import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartToo
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Sma200wLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
-import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
 type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
@@ -319,89 +319,6 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           {selected && <ChartNotes chartId={`crypto:${selected}`} />}
         </div>
       )}
-
-      {/* Bitcoin network fundamentals — independent of the selected coin */}
-      <HashratePanel />
-    </div>
-  );
-}
-
-const HASHRATE_RANGES: { value: string; label: string }[] = [
-  { value: '1y',  label: '1Y' },
-  { value: '2y',  label: '2Y' },
-  { value: '3y',  label: '3Y' },
-  { value: 'all', label: 'MAX' },
-];
-
-/**
- * Bitcoin network hashrate (total mining power) over time, in EH/s.
- * Self-contained: own range selector + fetch, sourced from mempool.space.
- */
-function HashratePanel() {
-  const [range, setRange] = useState('3y');
-  const [points, setPoints] = useState<HistoricalPoint[]>([]);
-  const [current, setCurrent] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    fetch(`/api/crypto?mode=hashrate&range=${range}`)
-      .then(r => r.json())
-      .then((d: { points?: HistoricalPoint[]; current?: number | null }) => {
-        if (cancelled) return;
-        setPoints(Array.isArray(d.points) ? d.points : []);
-        setCurrent(d.current ?? null);
-      })
-      .catch(() => { if (!cancelled) { setPoints([]); setCurrent(null); } })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [range]);
-
-  const latest = current ?? (points.length ? points[points.length - 1].close : null);
-
-  return (
-    <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
-      <div className="flex items-start justify-between gap-2 flex-wrap">
-        <div>
-          <h3 className="text-base font-bold text-white flex items-center gap-1.5">
-            <Activity size={15} className="text-orange-400" />
-            Bitcoin Network Hashrate
-          </h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Total mining power securing the Bitcoin network
-          </p>
-        </div>
-        {latest != null && (
-          <p className="text-xl font-bold text-orange-400 tabular-nums whitespace-nowrap">
-            {latest.toFixed(1)} <span className="text-xs text-gray-500 font-medium">EH/s</span>
-          </p>
-        )}
-      </div>
-
-      <div className="flex gap-1 bg-bg-input rounded-lg p-1 w-fit">
-        {HASHRATE_RANGES.map(r => (
-          <button key={r.value} onClick={() => setRange(r.value)}
-            className={clsx('px-2.5 py-1 text-xs font-semibold rounded-md transition-all',
-              range === r.value ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}>
-            {r.label}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
-      ) : points.length > 0 ? (
-        <PriceChart data={points} color="#fb923c" height={200} isCurrency={false} label="EH/s" />
-      ) : (
-        <p className="text-[11px] text-gray-600 italic py-8 text-center">
-          Hashrate data unavailable right now — try again shortly.
-        </p>
-      )}
-
-      <p className="text-[10px] text-gray-600">
-        Source: mempool.space · EH/s = exahashes per second (10¹⁸ hashes/s)
-      </p>
     </div>
   );
 }

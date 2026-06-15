@@ -423,48 +423,5 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  if (mode === 'hashrate') {
-    // Bitcoin network hashrate history from mempool.space (free, no key).
-    // avgHashrate is in H/s; we expose it in EH/s (1 EH/s = 1e18 H/s).
-    const rangeRaw = (req.nextUrl.searchParams.get('range') ?? '3y').toLowerCase();
-    const valid = new Set(['1m', '3m', '6m', '1y', '2y', '3y', 'all']);
-    const period = valid.has(rangeRaw) ? rangeRaw : '3y';
-
-    const key = `btc-hashrate:${period}`;
-    const cached = getCached(key, HIST_TTL);
-    if (cached) return NextResponse.json(cached);
-
-    try {
-      const res = await fetchCG(`https://mempool.space/api/v1/mining/hashrate/${period}`, 12_000);
-      if (!res.ok) throw new Error(`mempool: ${res.status}`);
-      const raw = await res.json() as {
-        hashrates?: { timestamp: number; avgHashrate: number }[];
-        currentHashrate?: number;
-      };
-
-      const points = (raw.hashrates ?? [])
-        .filter(h => typeof h.avgHashrate === 'number' && isFinite(h.avgHashrate) && h.avgHashrate > 0)
-        .map(h => ({ date: new Date(h.timestamp * 1000).toISOString().slice(0, 10), close: h.avgHashrate / 1e18 }));
-
-      // Dedupe by date (mempool can emit multiple samples per day), keep last, sort.
-      const unique = Array.from(
-        points.reduce((m, d) => { m.set(d.date, d); return m; }, new Map<string, { date: string; close: number }>()).values()
-      ).sort((a, b) => a.date.localeCompare(b.date));
-
-      if (unique.length === 0) throw new Error('mempool returned no hashrate points');
-
-      const current = typeof raw.currentHashrate === 'number' && isFinite(raw.currentHashrate)
-        ? raw.currentHashrate / 1e18
-        : unique[unique.length - 1].close;
-
-      const payload = { unit: 'EH/s', current, points: unique };
-      setCached(key, payload);
-      return NextResponse.json(payload);
-    } catch (err) {
-      console.error('crypto hashrate error', period, err);
-      return NextResponse.json({ error: 'Failed to fetch hashrate' }, { status: 500 });
-    }
-  }
-
   return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
 }

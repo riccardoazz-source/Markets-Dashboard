@@ -51,7 +51,7 @@ function getFredApiKey(): string {
 // For these, fetch the full history so the card still shows the last available
 // value, and charts show the complete series regardless of the timeframe picked.
 const WIDE_WINDOW_SERIES = new Set([
-  'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING', 'BTC_PRODUCTION_COST',
+  'DRCLACBS', 'DRALACBN', 'DRCRELEXFACBS', 'BOGZ1FA673065500Q', 'BTC_HALVING', 'BTC_PRODUCTION_COST', 'BTC_HASHRATE',
   'GFDEGDQ188S', 'GFDEBTN', 'A939RC0A052NBEA',
   // Recession indicators — bands are only useful with full history.
   'USREC', 'SAHMREALTIME',
@@ -488,6 +488,44 @@ async function fetchBitcoinProductionCost(
     return out;
   } catch (e) {
     console.error('[btc-cost] failed:', (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// ---------- Bitcoin network hashrate (EH/s) ----------
+// Same blockchain.info chart used by the production-cost estimate; here we
+// expose the raw network hashrate (already in EH/s) as its own indicator.
+async function fetchBitcoinHashrate(
+  fromDate?: string,
+): Promise<{ date: string; value: number }[]> {
+  const url = 'https://api.blockchain.info/charts/hash-rate?format=json&timespan=all&sampled=true&metadata=false&cors=true';
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Origin': 'https://www.blockchain.com' },
+    });
+    if (!res.ok) { console.error(`[btc-hashrate] blockchain.info HTTP ${res.status}`); return []; }
+    const json = await res.json() as { values?: { x: number; y: number }[] };
+    const raw = json?.values ?? [];
+    if (!raw.length) { console.warn('[btc-hashrate] no data'); return []; }
+
+    const out: { date: string; value: number }[] = [];
+    for (const pt of raw) {
+      const date = new Date(pt.x * 1000).toISOString().slice(0, 10);
+      if (fromDate && date < fromDate) continue;
+      const hashEH = pt.y; // already EH/s
+      if (!isFinite(hashEH) || hashEH <= 0) continue;
+      out.push({ date, value: hashEH });
+    }
+    out.sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`[btc-hashrate] ${out.length} pts`);
+    return out;
+  } catch (e) {
+    console.error('[btc-hashrate] failed:', (e as Error).message);
     return [];
   } finally {
     clearTimeout(t);
@@ -1554,6 +1592,7 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_MINED_MONTHLY')    return getBitcoinMinedMonthly(fromDate);
     if (fredId === 'BTC_MINER_REVENUE')    return getBitcoinMinerRevenue(fromDate);
     if (fredId === 'BTC_PRODUCTION_COST')  return fetchBitcoinProductionCost(fromDate);
+    if (fredId === 'BTC_HASHRATE')         return fetchBitcoinHashrate(fromDate);
     if (fredId === 'BTC_DOMINANCE')        return fetchBitcoinDominance(fromDate);
     if (fredId === 'FOMC_MEETINGS') {
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));

@@ -1,6 +1,6 @@
 import { AssetConfig } from './types';
 
-export type MacroUnit = '%' | 'K' | 'idx' | 'B$' | '$';
+export type MacroUnit = '%' | 'K' | 'idx' | 'B$' | '$' | 'EH/s';
 export type MacroCategory = 'Rates' | 'Employment' | 'Inflation' | 'Growth' | 'Real Estate' | 'Money' | 'Commodities' | 'Currency' | 'Sentiment' | 'Crypto' | 'Debt' | 'Market Value' | 'Recessions' | 'Events';
 
 // ---------- Source metadata ----------
@@ -375,6 +375,9 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'BTC_DOMINANCE', name: 'BTC Market Dominance',     category: 'Crypto', unit: '%',
     source: { type: 'computed', label: 'CoinGecko',
               url: 'https://charts.bitbo.io/bitcoin-dominance/' } },
+  { id: 'BTC_HASHRATE', name: 'Bitcoin Network Hashrate', category: 'Crypto', unit: 'EH/s',
+    source: { type: 'computed', label: 'Network hashrate in EH/s (blockchain.info)',
+              url: 'https://www.blockchain.com/explorer/charts/hash-rate' } },
   // Debt — US federal debt and sustainability metrics
   { id: 'GFDEGDQ188S', name: 'Debt / GDP Ratio',     category: 'Debt',        unit: '%',
     source: { type: 'fred',    label: 'FRED',

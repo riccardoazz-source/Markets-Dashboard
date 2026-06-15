@@ -56,6 +56,7 @@ function formatMacroValue(value: number, unit: MacroUnit): string {
     if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
     return `$${value.toFixed(0)}`;
   }
+  if (unit === 'EH/s') return `${value >= 1 ? value.toFixed(1) : value.toFixed(4)} EH/s`;
   return value.toFixed(1);
 }
 
@@ -71,6 +72,7 @@ function formatMacroChange(change: number, unit: MacroUnit): string {
     if (Math.abs(change) >= 1_000) return `${sign}$${(change / 1_000).toFixed(0)}K`;
     return `${sign}$${change.toFixed(0)}`;
   }
+  if (unit === 'EH/s') return `${sign}${change.toFixed(1)} EH/s`;
   return `${sign}${change.toFixed(2)}`;
 }
 
