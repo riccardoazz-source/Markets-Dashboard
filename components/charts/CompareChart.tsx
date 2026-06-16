@@ -202,6 +202,13 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         })
     : [];
 
+  // Chair nomination date lines — shown as red dashed markers when FOMC overlay is active.
+  const visibleNomDates = fomcAsset && allDates.length > 0
+    ? FED_CHAIR_CHANGES
+        .filter(c => c.date >= allDates[0] && c.date <= allDates[allDates.length - 1])
+        .map(c => ({ snapped: snapToDates(c.date, allDates), original: c.date, name: c.name }))
+    : [];
+
   // FOMC meeting date lines — snapped to categories. Always rendered (even
   // dense MAX-timeframe views with ~100 meetings); the dashed lines stay subtle
   // enough that they don't dominate the chart, and hiding them was confusing
@@ -630,18 +637,30 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               label={{ value: '⚡', fill: '#f59e0b', fontSize: 12, position: 'top' }}
             />
           ))}
+          {visibleNomDates.map(item => (
+            <ReferenceLine
+              key={`nom-${item.original}`}
+              yAxisId="left"
+              x={item.snapped}
+              stroke="#ef4444"
+              strokeWidth={1.5}
+              strokeDasharray="6 2"
+              strokeOpacity={0.65}
+              label={{ value: `← ${item.name} nom.`, fill: '#ef4444', fontSize: 8, position: 'insideTopLeft' }}
+            />
+          ))}
           {visibleFomcDates && visibleFomcDates.map((item, i) => (
             <ReferenceLine
               key={`fomc-${i}`}
               yAxisId="left"
               x={item.snapped}
-              stroke={item.isChairChange ? '#ef4444' : '#3b82f6'}
+              stroke={item.isChairChange ? '#f97316' : '#3b82f6'}
               strokeWidth={item.isChairChange ? 1.5 : 1}
               strokeDasharray={item.isChairChange ? '4 2' : '3 3'}
               strokeOpacity={item.isChairChange ? 0.85 : 0.6}
               label={item.isChairChange ? {
-                value: FED_CHAIR_CHANGES.find(c => (c.firstMeeting ?? FOMC_MEETING_DATES.find(d => d > c.date)) === item.original)?.name ?? '',
-                fill: '#ef4444', fontSize: 9, position: 'insideTopRight',
+                value: `↑ ${FED_CHAIR_CHANGES.find(c => (c.firstMeeting ?? FOMC_MEETING_DATES.find(d => d > c.date)) === item.original)?.name ?? ''} 1st`,
+                fill: '#f97316', fontSize: 9, position: 'insideTopRight',
               } : undefined}
             />
           ))}

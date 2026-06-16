@@ -535,8 +535,7 @@ export const FOMC_MEETING_DATES: string[] = [
 // `date`         = date the president publicly nominated this chair (market-moving event).
 //                  For pre-modern chairs (pre-1970) this is the took-office date since
 //                  nomination records are less precise.
-// `firstMeeting` = date of the chair's first FOMC statement as chair (post-2000 only;
-//                  for earlier chairs these dates predate the FOMC_MEETING_DATES array).
+// `firstMeeting` = date of the chair's first FOMC statement as chair.
 // Source: https://en.wikipedia.org/wiki/Chair_of_the_Federal_Reserve
 export const FED_CHAIR_CHANGES: { date: string; name: string; firstMeeting?: string }[] = [
   { date: '1914-08-10', name: 'Hamlin' },        // Charles S. Hamlin — took office
@@ -548,14 +547,15 @@ export const FED_CHAIR_CHANGES: { date: string; name: string; firstMeeting?: str
   { date: '1934-11-15', name: 'Eccles' },        // Marriner S. Eccles — took office
   { date: '1948-04-15', name: 'McCabe' },        // Thomas B. McCabe — took office
   { date: '1951-04-02', name: 'Martin' },        // William McChesney Martin Jr. — took office
-  { date: '1969-12-18', name: 'Burns' },         // Arthur F. Burns — nominated by Nixon 18 Dec 1969; confirmed 31 Jan 1970
-  { date: '1978-01-21', name: 'Miller' },        // G. William Miller — nominated by Carter 21 Jan 1978; took office 8 Mar 1978
-  { date: '1979-07-25', name: 'Volcker' },       // Paul Volcker — nominated by Carter 25 Jul 1979; took office 6 Aug 1979
-  { date: '1987-06-02', name: 'Greenspan' },     // Alan Greenspan — nominated by Reagan 2 Jun 1987; confirmed 11 Aug 1987
-  { date: '2005-10-24', name: 'Bernanke', firstMeeting: '2006-03-28' },  // nominated by Bush Jr. 24 Oct 2005; took office 1 Feb 2006; 1st mtg 27–28 Mar 2006
-  { date: '2013-10-09', name: 'Yellen',   firstMeeting: '2014-03-19' },  // nominated by Obama 9 Oct 2013; took office 3 Feb 2014; 1st mtg 18–19 Mar 2014
-  { date: '2017-11-02', name: 'Powell',   firstMeeting: '2018-03-21' },  // nominated by Trump 2 Nov 2017; took office 5 Feb 2018; 1st mtg 20–21 Mar 2018
-  { date: '2026-05-22', name: 'Warsh',    firstMeeting: '2026-06-17' },  // Kevin Warsh — took office 22 May 2026; 1st mtg 17 Jun 2026
+  { date: '1969-12-18', name: 'Burns',      firstMeeting: '1970-02-10' },  // nominated by Nixon 18 Dec 1969; confirmed 31 Jan 1970; 1st mtg 10 Feb 1970
+  { date: '1978-01-21', name: 'Miller',     firstMeeting: '1978-03-21' },  // nominated by Carter 21 Jan 1978; took office 8 Mar 1978; 1st mtg 21 Mar 1978
+  { date: '1979-07-25', name: 'Volcker',    firstMeeting: '1979-08-14' },  // nominated by Carter 25 Jul 1979; took office 6 Aug 1979; 1st mtg 14 Aug 1979
+  { date: '1987-06-02', name: 'Greenspan',  firstMeeting: '1987-09-22' },  // nominated by Reagan 2 Jun 1987; confirmed 11 Aug 1987; 1st regular mtg 22 Sep 1987
+  { date: '2005-10-24', name: 'Bernanke',   firstMeeting: '2006-03-28' },  // nominated by Bush Jr. 24 Oct 2005; took office 1 Feb 2006; 1st mtg 27–28 Mar 2006
+  { date: '2013-10-09', name: 'Yellen',     firstMeeting: '2014-03-19' },  // nominated by Obama 9 Oct 2013; took office 3 Feb 2014; 1st mtg 18–19 Mar 2014
+  { date: '2017-11-02', name: 'Powell',     firstMeeting: '2018-03-21' },  // nominated by Trump 2 Nov 2017; took office 5 Feb 2018; 1st mtg 20–21 Mar 2018
+  { date: '2021-11-22', name: 'Powell (2nd)', firstMeeting: '2022-06-15' }, // renominated by Biden 22 Nov 2021; confirmed 12 May 2022; 2nd-term 1st mtg 15 Jun 2022
+  { date: '2026-05-22', name: 'Warsh',      firstMeeting: '2026-06-17' },  // Kevin Warsh — took office 22 May 2026; 1st mtg 17 Jun 2026
 ];
 
 // Bitcoin halving dates (exported so UI components can render them as reference lines).
