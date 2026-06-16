@@ -93,22 +93,43 @@ export function FOMCChart({ height = 240 }: { height?: number }) {
           );
         })}
 
-        {/* Fed chair change markers — red vertical line at take-office date */}
+        {/* Fed chair nomination markers — red dashed line at nomination date */}
         {FED_CHAIR_CHANGES
           .filter(c => c.date >= data[0]?.date && c.date <= data[data.length - 1]?.date)
           .map(c => (
             <ReferenceLine
-              key={`chair-${c.date}`}
+              key={`chair-nom-${c.date}`}
               x={snap(c.date)}
               stroke="#ef4444"
               strokeWidth={2}
               strokeDasharray="5 2"
               strokeOpacity={0.9}
               label={{
-                value: `← ${c.name}`,
+                value: `← ${c.name} nom.`,
                 fill: '#ef4444',
                 fontSize: 9,
                 position: 'insideTopLeft',
+                fontWeight: 'bold',
+              }}
+            />
+          ))}
+
+        {/* Fed chair first-meeting markers — orange line at first FOMC meeting */}
+        {FED_CHAIR_CHANGES
+          .filter(c => c.firstMeeting && c.firstMeeting >= data[0]?.date && c.firstMeeting <= data[data.length - 1]?.date)
+          .map(c => (
+            <ReferenceLine
+              key={`chair-1st-${c.firstMeeting}`}
+              x={snap(c.firstMeeting!)}
+              stroke="#f97316"
+              strokeWidth={1.5}
+              strokeDasharray="3 3"
+              strokeOpacity={0.85}
+              label={{
+                value: `↑ ${c.name} 1st`,
+                fill: '#f97316',
+                fontSize: 9,
+                position: 'insideTopRight',
                 fontWeight: 'bold',
               }}
             />

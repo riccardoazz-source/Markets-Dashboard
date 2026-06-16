@@ -207,10 +207,13 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   // enough that they don't dominate the chart, and hiding them was confusing
   // because users couldn't tell the dates were loaded at all.
   //
-  // The first FOMC meeting after each Fed chair change date is rendered in red
-  // so users can see at a glance when monetary policy transitioned to a new chair.
+  // The first FOMC meeting under each new Fed chair is rendered in red.
+  // Uses the explicit firstMeeting date when set; falls back to first FOMC date
+  // after the nomination/took-office date (covers pre-2000 chairs).
   const chairChangeFirstMeetings = new Set(
-    FED_CHAIR_CHANGES.map(c => FOMC_MEETING_DATES.find(d => d > c.date)).filter(Boolean) as string[]
+    FED_CHAIR_CHANGES
+      .map(c => c.firstMeeting ?? FOMC_MEETING_DATES.find(d => d > c.date))
+      .filter(Boolean) as string[]
   );
 
   const visibleFomcDates = fomcAsset && allDates.length > 0
@@ -637,7 +640,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               strokeDasharray={item.isChairChange ? '4 2' : '3 3'}
               strokeOpacity={item.isChairChange ? 0.85 : 0.6}
               label={item.isChairChange ? {
-                value: FED_CHAIR_CHANGES.find(c => FOMC_MEETING_DATES.find(d => d > c.date) === item.original)?.name ?? '',
+                value: FED_CHAIR_CHANGES.find(c => (c.firstMeeting ?? FOMC_MEETING_DATES.find(d => d > c.date)) === item.original)?.name ?? '',
                 fill: '#ef4444', fontSize: 9, position: 'insideTopRight',
               } : undefined}
             />
