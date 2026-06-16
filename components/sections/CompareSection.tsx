@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from 'react';
-import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES, MARKET_EVENTS, EVENT_INDICATOR_CATEGORY } from '@/lib/config';
+import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, EVENT_INDICATOR_CATEGORY } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
@@ -69,7 +69,7 @@ const RECESSION_SET = new Set(RECESSION_SERIES);
 // calendars) that must be correlated against an asset's RETURNS rather than its
 // price level — see the correlation post-processing in the `correl` memo.
 const INDICATOR_CORR_IDS = new Set<string>([
-  'USREC', 'BTC_HALVING', 'FOMC_MEETINGS', ...Object.keys(EVENT_INDICATOR_CATEGORY),
+  'USREC', 'BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', ...Object.keys(EVENT_INDICATOR_CATEGORY),
 ]);
 
 // ── Spread series ───────────────────────────────────────────────────────────
@@ -416,7 +416,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       // Recession assets and event overlays (BTC_HALVING, FOMC_MEETINGS, EVENTS_*) carry full
       // history and are excluded from commonStart so they don't constrain other assets.
       const EVENT_OVERLAY = new Set([
-        ...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS',
+        ...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS',
         ...Object.keys(EVENT_INDICATOR_CATEGORY),
       ]);
       const firstDates = assets
@@ -515,7 +515,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       // USREC is included with its raw 0/1 values (point-biserial correlation).
       // BTC_HALVING, FOMC_MEETINGS and EVENTS_* are excluded here and added below as 0/1
       // dummies (their raw series are event markers, not continuous values).
-      const DUMMY_SET = new Set(['BTC_HALVING', 'FOMC_MEETINGS', ...Object.keys(EVENT_INDICATOR_CATEGORY)]);
+      const DUMMY_SET = new Set(['BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', ...Object.keys(EVENT_INDICATOR_CATEGORY)]);
       const series: { symbol: string; data: HistoricalPoint[] }[] = allAssets
         .filter(a => !DUMMY_SET.has(a.symbol) && (a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
@@ -563,6 +563,16 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         const fomcMonthSet = new Set(FOMC_MEETING_DATES.map(d => d.slice(0, 7)));
         const fomcDummy = monthlyDummy(refMin, refMax, fomcMonthSet);
         if (fomcDummy.length > 1) series.push({ symbol: 'FOMC_MEETINGS', data: fomcDummy });
+      }
+
+      const fedChairsAsset = displayAssets.find(a => a.symbol === 'FED_CHAIRS');
+      if (fedChairsAsset && refMin && refMax) {
+        // FED_CHAIRS: 1 in every month with a chair nomination or first meeting.
+        const chairMonths = new Set(
+          FED_CHAIR_CHANGES.flatMap(c => c.firstMeeting ? [c.date.slice(0, 7), c.firstMeeting.slice(0, 7)] : [c.date.slice(0, 7)])
+        );
+        const chairDummy = monthlyDummy(refMin, refMax, chairMonths);
+        if (chairDummy.length > 1) series.push({ symbol: 'FED_CHAIRS', data: chairDummy });
       }
 
       // EVENTS_* per-category: 1 in every month containing at least one event of that category.

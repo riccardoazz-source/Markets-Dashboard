@@ -6,10 +6,11 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
-import { BTC_HALVING_DATES, FOMC_MEETING_DATES, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES, MARKET_EVENTS, MARKET_EVENT_COLORS, EVENT_INDICATOR_CATEGORY, MarketEvent } from '@/lib/config';
+import { BTC_HALVING_DATES, FOMC_MEETING_DATES, FOMC_DOT_PLOT_SET, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES, MARKET_EVENTS, MARKET_EVENT_COLORS, EVENT_INDICATOR_CATEGORY, MarketEvent } from '@/lib/config';
 import { getMergedMarketEvents } from '@/lib/userSources';
 import { HalvingChart } from './HalvingChart';
 import { FOMCChart } from './FOMCChart';
+import { FedChairsChart } from './FedChairsChart';
 import { EventsChart } from './EventsChart';
 import { RecessionChart } from './RecessionChart';
 import { recessionIntervals } from '@/lib/utils';
@@ -129,10 +130,11 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   // are not drawn as data lines — they overlay the plottable assets.
   const halvingAsset    = assets.find(a => a.symbol === 'BTC_HALVING');
   const fomcAsset       = assets.find(a => a.symbol === 'FOMC_MEETINGS');
+  const fedChairsAsset  = assets.find(a => a.symbol === 'FED_CHAIRS');
   const eventCatAssets  = assets.filter(a => !!EVENT_INDICATOR_CATEGORY[a.symbol]);
   const recessionAssets = assets.filter(a => RECESSION_SET.has(a.symbol));
   const plottableAssets = assets.filter(
-    a => a.symbol !== 'BTC_HALVING' && a.symbol !== 'FOMC_MEETINGS' &&
+    a => a.symbol !== 'BTC_HALVING' && a.symbol !== 'FOMC_MEETINGS' && a.symbol !== 'FED_CHAIRS' &&
          !EVENT_INDICATOR_CATEGORY[a.symbol] && !RECESSION_SET.has(a.symbol),
   );
 
@@ -148,6 +150,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     }
     if (halvingAsset)  return <HalvingChart height={height} />;
     if (fomcAsset)     return <FOMCChart height={height} />;
+    if (fedChairsAsset) return <FedChairsChart height={height} />;
     if (eventCatAssets.length > 0) {
       const firstCat = EVENT_INDICATOR_CATEGORY[eventCatAssets[0].symbol];
       return <EventsChart height={height} category={firstCat} />;
@@ -202,27 +205,22 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         })
     : [];
 
-  // Chair nomination date lines — shown as red dashed markers when FOMC overlay is active.
-  const visibleNomDates = fomcAsset && allDates.length > 0
+  // Fed chair lines (FED_CHAIRS overlay) — nomination (red dashed) + first meeting (orange).
+  const visibleNomDates = fedChairsAsset && allDates.length > 0
     ? FED_CHAIR_CHANGES
         .filter(c => c.date >= allDates[0] && c.date <= allDates[allDates.length - 1])
         .map(c => ({ snapped: snapToDates(c.date, allDates), original: c.date, name: c.name }))
     : [];
+  const visibleFirstMeetings = fedChairsAsset && allDates.length > 0
+    ? FED_CHAIR_CHANGES
+        .filter(c => c.firstMeeting && c.firstMeeting >= allDates[0] && c.firstMeeting <= allDates[allDates.length - 1])
+        .map(c => ({ snapped: snapToDates(c.firstMeeting!, allDates), original: c.firstMeeting!, name: c.name }))
+    : [];
 
   // FOMC meeting date lines — snapped to categories. Always rendered (even
   // dense MAX-timeframe views with ~100 meetings); the dashed lines stay subtle
-  // enough that they don't dominate the chart, and hiding them was confusing
-  // because users couldn't tell the dates were loaded at all.
-  //
-  // The first FOMC meeting under each new Fed chair is rendered in red.
-  // Uses the explicit firstMeeting date when set; falls back to first FOMC date
-  // after the nomination/took-office date (covers pre-2000 chairs).
-  const chairChangeFirstMeetings = new Set(
-    FED_CHAIR_CHANGES
-      .map(c => c.firstMeeting ?? FOMC_MEETING_DATES.find(d => d > c.date))
-      .filter(Boolean) as string[]
-  );
-
+  // enough that they don't dominate the chart. Meetings that publish a Summary
+  // of Economic Projections (the "dot plot") are highlighted in violet.
   const visibleFomcDates = fomcAsset && allDates.length > 0
     ? (() => {
         const lo = allDates[0], hi = allDates[allDates.length - 1];
@@ -234,7 +232,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
             const diff = Math.abs(parseISO(a).getTime() - tt);
             if (diff < bestDiff) { bestDiff = diff; best = a; }
           }
-          return { snapped: best, original: d, isChairChange: chairChangeFirstMeetings.has(d) };
+          return { snapped: best, original: d, isDotPlot: FOMC_DOT_PLOT_SET.has(d) };
         });
       })()
     : null;
@@ -371,6 +369,11 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   }
   if (fomcAsset) {
     legendItems.push({ key: 'FOMC_MEETINGS', name: 'FOMC Meetings', color: '#3b82f6', dashed: true });
+    legendItems.push({ key: 'FOMC_DOT_PLOT', name: 'Dot Plot (SEP)', color: '#a855f7', dashed: true });
+  }
+  if (fedChairsAsset) {
+    legendItems.push({ key: 'FED_CHAIRS_NOM', name: 'Chair nomination', color: '#ef4444', dashed: true });
+    legendItems.push({ key: 'FED_CHAIRS_1ST', name: 'Chair 1st meeting', color: '#f97316', dashed: true });
   }
   eventCatAssets.forEach(a => {
     const cat = EVENT_INDICATOR_CATEGORY[a.symbol];
@@ -643,10 +646,22 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               yAxisId="left"
               x={item.snapped}
               stroke="#ef4444"
-              strokeWidth={1.5}
+              strokeWidth={1.75}
               strokeDasharray="6 2"
-              strokeOpacity={0.65}
+              strokeOpacity={0.85}
               label={{ value: `← ${item.name} nom.`, fill: '#ef4444', fontSize: 8, position: 'insideTopLeft' }}
+            />
+          ))}
+          {visibleFirstMeetings.map(item => (
+            <ReferenceLine
+              key={`first-${item.original}`}
+              yAxisId="left"
+              x={item.snapped}
+              stroke="#f97316"
+              strokeWidth={1.5}
+              strokeDasharray="4 2"
+              strokeOpacity={0.85}
+              label={{ value: `↑ ${item.name} 1st`, fill: '#f97316', fontSize: 8, position: 'insideTopRight' }}
             />
           ))}
           {visibleFomcDates && visibleFomcDates.map((item, i) => (
@@ -654,14 +669,10 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               key={`fomc-${i}`}
               yAxisId="left"
               x={item.snapped}
-              stroke={item.isChairChange ? '#f97316' : '#3b82f6'}
-              strokeWidth={item.isChairChange ? 1.5 : 1}
-              strokeDasharray={item.isChairChange ? '4 2' : '3 3'}
-              strokeOpacity={item.isChairChange ? 0.85 : 0.6}
-              label={item.isChairChange ? {
-                value: `↑ ${FED_CHAIR_CHANGES.find(c => (c.firstMeeting ?? FOMC_MEETING_DATES.find(d => d > c.date)) === item.original)?.name ?? ''} 1st`,
-                fill: '#f97316', fontSize: 9, position: 'insideTopRight',
-              } : undefined}
+              stroke={item.isDotPlot ? '#a855f7' : '#3b82f6'}
+              strokeWidth={item.isDotPlot ? 1.5 : 1}
+              strokeDasharray={item.isDotPlot ? '4 2' : '3 3'}
+              strokeOpacity={item.isDotPlot ? 0.85 : 0.55}
             />
           ))}
           {visibleEventItems.map((evt, i) => (

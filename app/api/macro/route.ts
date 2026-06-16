@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { MACRO_INDICATORS, FOMC_MEETING_DATES, MARKET_EVENTS, MarketEventCategory } from '@/lib/config';
+import { MACRO_INDICATORS, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, MarketEventCategory } from '@/lib/config';
 
 // Source map: look up MacroSource by indicator id for dispatch in fetchMacroSeries.
 const indicatorSourceMap = new Map(
@@ -56,7 +56,7 @@ const WIDE_WINDOW_SERIES = new Set([
   // Recession indicators — bands are only useful with full history.
   'USREC', 'SAHMREALTIME',
   // Rates — full history needed to see yield curve inversions, negative ECB rates, etc.
-  'T10Y2Y', 'ECBDFR', 'FOMC_MEETINGS',
+  'T10Y2Y', 'ECBDFR', 'FOMC_MEETINGS', 'FED_CHAIRS',
   // Market Value: Shiller history ends ~2023 and the multpl annual tables are
   // small. Always fetch full history so the card has a latest value (the
   // 18-month list-mode window would otherwise exclude all Shiller data).
@@ -1596,6 +1596,16 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_DOMINANCE')        return fetchBitcoinDominance(fromDate);
     if (fredId === 'FOMC_MEETINGS') {
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
+      return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+    }
+    if (fredId === 'FED_CHAIRS') {
+      // Marker series: one point at each chair's nomination date and first meeting.
+      const dates = new Set<string>();
+      for (const c of FED_CHAIR_CHANGES) {
+        dates.add(c.date);
+        if (c.firstMeeting) dates.add(c.firstMeeting);
+      }
+      const pts = Array.from(dates).sort().map(d => ({ date: d, value: 1 }));
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
     }
     if (fredId.startsWith('EVENTS_')) {

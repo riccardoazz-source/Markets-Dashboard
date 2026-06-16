@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES, BTC_HALVING_DATES, EVENT_INDICATOR_CATEGORY, MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEventCategory } from '@/lib/config';
+import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, BTC_HALVING_DATES, EVENT_INDICATOR_CATEGORY, MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEventCategory } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { getTimeframeStart, calculateCAGR, formatPercent, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { HalvingChart } from '@/components/charts/HalvingChart';
 import { FOMCChart } from '@/components/charts/FOMCChart';
+import { FedChairsChart } from '@/components/charts/FedChairsChart';
 import { EventsChart } from '@/components/charts/EventsChart';
 import { RecessionChart } from '@/components/charts/RecessionChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -265,6 +266,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const cagrData = selectedIndicator ? calculateCAGR(historical, timeframe) : null;
   const selIsRec = selected ? RECESSION_SET.has(selected) : false;
   const selIsFOMC = selected === 'FOMC_MEETINGS';
+  const selIsFedChairs = selected === 'FED_CHAIRS';
   const selIsEvents = selected ? EVENT_CAT_IDS.has(selected) : false;
   const selEventCategory = selected ? (EVENT_INDICATOR_CATEGORY[selected] as MarketEventCategory | undefined) : undefined;
 
@@ -313,10 +315,11 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           const snap = statusGist[ind.id];
           const isRec = RECESSION_SET.has(ind.id);
           const isFOMC = ind.id === 'FOMC_MEETINGS';
+          const isFedChairs = ind.id === 'FED_CHAIRS';
           const isEventCat = EVENT_CAT_IDS.has(ind.id);
           // Overlay series (recession bands, halving/meeting markers) behave differently
           // from normal indicators — flag them so they are easy to spot.
-          const isSpecial = isRec || ind.id === 'BTC_HALVING' || isFOMC || isEventCat;
+          const isSpecial = isRec || ind.id === 'BTC_HALVING' || isFOMC || isFedChairs || isEventCat;
 
           return (
             <button key={ind.id}
@@ -401,6 +404,24 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                           <p className="text-sm font-bold text-gray-100">{lastMeeting ? fmt(lastMeeting) : '—'}</p>
                           <p className="text-xs text-gray-500 mt-1">Next</p>
                           <p className="text-sm font-bold text-blue-300">{nextMeeting ? fmt(nextMeeting) : '—'}</p>
+                        </div>
+                      );
+                    })()
+                  ) : isFedChairs ? (
+                    (() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const past = FED_CHAIR_CHANGES.filter(c => c.date <= today);
+                      const current = past[past.length - 1];
+                      const fmt = (d: string) => {
+                        try { return new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); }
+                        catch { return d; }
+                      };
+                      return (
+                        <div className="space-y-0.5">
+                          <p className="text-xs text-gray-500">Current chair</p>
+                          <p className="text-sm font-bold text-gray-100">{current ? current.name : '—'}</p>
+                          <p className="text-xs text-gray-500 mt-1">Nominated</p>
+                          <p className="text-sm font-bold text-red-300">{current ? fmt(current.date) : '—'}</p>
                         </div>
                       );
                     })()
@@ -519,14 +540,14 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </p>
           )}
 
-          {dataMsg && !selIsEvents && !selIsFOMC && selected !== 'BTC_HALVING' && (
+          {dataMsg && !selIsEvents && !selIsFOMC && !selIsFedChairs && selected !== 'BTC_HALVING' && (
             <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
               ⚠ {dataMsg}
             </p>
           )}
 
           {/* Stats row */}
-          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsEvents && (
+          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsEvents && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <Stat label="Latest" value={formatMacroValue(data[selected].latest!.value, selectedIndicator.unit)} />
               {data[selected].prev && (
@@ -549,6 +570,8 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             <HalvingChart height={240} />
           ) : selIsFOMC ? (
             <FOMCChart height={240} />
+          ) : selIsFedChairs ? (
+            <FedChairsChart height={240} />
           ) : selIsEvents ? (
             <EventsChart height={300} category={selEventCategory} />
           ) : histLoading ? (
@@ -587,10 +610,10 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </div>
           )}
 
-          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsEvents && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsEvents && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
-          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsEvents && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsEvents && (
             <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
           )}
           {selected && <ChartNotes chartId={selected} />}
