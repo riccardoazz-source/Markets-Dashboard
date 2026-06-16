@@ -268,6 +268,12 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'T10Y2Y',   name: '10Y–2Y Spread',          category: 'Rates',       unit: '%',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/T10Y2Y' } },
+  // Longer-run median dot from the FOMC Summary of Economic Projections (dot plot):
+  // the Fed's estimate of the neutral fed funds rate. One value per SEP meeting
+  // since 2012 — tracks how the Committee's long-run rate view shifts over time.
+  { id: 'FEDTARMDLR', name: 'Fed Long-Run Rate (Dot Plot)', category: 'Rates', unit: '%',
+    source: { type: 'fred',    label: 'FRED / FOMC SEP',
+              url: 'https://fred.stlouisfed.org/series/FEDTARMDLR' } },
   // FOMC meeting dates — rendered as vertical reference lines (event overlay, not a data series).
   // Meetings that publish a Summary of Economic Projections (the "dot plot") are highlighted.
   { id: 'FOMC_MEETINGS', name: 'FOMC Meeting Dates', category: 'Events',     unit: 'idx',
