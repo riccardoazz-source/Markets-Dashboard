@@ -48,42 +48,93 @@ export function HalvingChart({ height = 240 }: { height?: number }) {
     return best;
   };
 
+  // Block subsidy after each halving: 50 → 25 → 12.5 → 6.25 → 3.125 …
+  const fmt = (s: string) => { try { return format(parseISO(s), 'd MMM yyyy'); } catch { return s; } };
+  const rewardAfter = (i: number) => 50 / Math.pow(2, i + 1); // reward after the (i+1)-th halving
+  const halvingRows = BTC_HALVING_DATES.map((date, i) => ({
+    date,
+    n: i + 1,
+    from: 50 / Math.pow(2, i),
+    to: rewardAfter(i),
+    estimated: false,
+  }));
+  const nextN = BTC_HALVING_DATES.length + 1;
+  const nextRow = {
+    date: nextDate,
+    n: nextN,
+    from: 50 / Math.pow(2, BTC_HALVING_DATES.length),
+    to: 50 / Math.pow(2, BTC_HALVING_DATES.length + 1),
+    estimated: true,
+  };
+  const listRows = [nextRow, ...halvingRows.slice().reverse()]; // next first, then newest → oldest
+
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} margin={{ top: 26, right: 14, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-        <XAxis
-          dataKey="date"
-          tickFormatter={v => { try { return format(parseISO(v as string), 'yyyy'); } catch { return v as string; } }}
-          tick={{ fill: '#6b7280', fontSize: 11 }}
-          axisLine={false} tickLine={false} minTickGap={36}
-        />
-        <YAxis hide domain={[0, 1]} />
-        <Line dataKey="v" stroke="transparent" dot={false} isAnimationActive={false} />
-
-        {/* Past halvings — solid amber */}
-        {BTC_HALVING_DATES.map(hd => (
-          <ReferenceLine
-            key={hd}
-            x={snap(hd)}
-            stroke="#f59e0b"
-            strokeWidth={2}
-            label={{ value: `⚡ ${format(parseISO(hd), "MMM ''yy")}`, fill: '#f59e0b', fontSize: 10, position: 'insideTop' }}
+    <div className="border border-border rounded-lg overflow-hidden">
+      <ResponsiveContainer width="100%" height={height}>
+        <LineChart data={data} margin={{ top: 26, right: 14, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+          <XAxis
+            dataKey="date"
+            tickFormatter={v => { try { return format(parseISO(v as string), 'yyyy'); } catch { return v as string; } }}
+            tick={{ fill: '#6b7280', fontSize: 11 }}
+            axisLine={false} tickLine={false} minTickGap={36}
           />
-        ))}
+          <YAxis hide domain={[0, 1]} />
+          <Line dataKey="v" stroke="transparent" dot={false} isAnimationActive={false} />
 
-        {/* Estimated next halving — dashed amber */}
-        {data.length > 0 && (
-          <ReferenceLine
-            x={snap(nextDate)}
-            stroke="#f59e0b"
-            strokeWidth={1.5}
-            strokeDasharray="6 3"
-            strokeOpacity={0.65}
-            label={{ value: `⚡ ~${format(parseISO(nextDate), "MMM ''yy")} (est.)`, fill: '#f59e0b', fontSize: 10, position: 'insideTop' }}
-          />
-        )}
-      </LineChart>
-    </ResponsiveContainer>
+          {/* Past halvings — solid amber */}
+          {BTC_HALVING_DATES.map(hd => (
+            <ReferenceLine
+              key={hd}
+              x={snap(hd)}
+              stroke="#f59e0b"
+              strokeWidth={2}
+              label={{ value: `⚡ ${format(parseISO(hd), "MMM ''yy")}`, fill: '#f59e0b', fontSize: 10, position: 'insideTop' }}
+            />
+          ))}
+
+          {/* Estimated next halving — dashed amber */}
+          {data.length > 0 && (
+            <ReferenceLine
+              x={snap(nextDate)}
+              stroke="#f59e0b"
+              strokeWidth={1.5}
+              strokeDasharray="6 3"
+              strokeOpacity={0.65}
+              label={{ value: `⚡ ~${format(parseISO(nextDate), "MMM ''yy")} (est.)`, fill: '#f59e0b', fontSize: 10, position: 'insideTop' }}
+            />
+          )}
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* Halving list — date + block-reward change */}
+      <div className="border-t border-border">
+        <div className="px-3 py-2 bg-bg-input/50 border-b border-border flex items-center gap-2">
+          <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} />
+          <span className="text-xs font-semibold text-gray-200">Bitcoin Halvings</span>
+          <span className="text-[10px] text-gray-500 bg-bg px-1.5 py-0.5 rounded-full border border-border">
+            {BTC_HALVING_DATES.length}
+          </span>
+        </div>
+        <div className="divide-y divide-border">
+          {listRows.map(r => (
+            <div key={`halv-row-${r.n}`} className="flex items-start gap-2.5 px-3 py-2">
+              <span className="inline-block w-2 h-2 rounded-full mt-1 shrink-0" style={{ backgroundColor: '#f59e0b' }} />
+              <div className="min-w-0">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-gray-200">
+                    Halving #{r.n}{r.estimated && <span className="text-amber-400/80 font-normal"> (est.)</span>}
+                  </span>
+                  <span className="text-[10px] text-gray-500 font-mono">{fmt(r.date)}</span>
+                </div>
+                <p className="text-[11px] text-gray-500 leading-snug mt-0.5">
+                  Block reward {r.from} → <span className="text-amber-400/90">{r.to}</span> BTC
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
