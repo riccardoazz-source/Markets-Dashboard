@@ -246,19 +246,28 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       })()
     : null;
 
+  const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
   const visibleMonthlyMarkers = monthlyMarkersAsset && allDates.length > 0
     ? (() => {
         const lo = allDates[0], hi = allDates[allDates.length - 1];
-        const result: string[] = [];
+        const seen = new Set<string>();
+        const result: { snapped: string; label: string }[] = [];
         const [y0s, m0s] = lo.slice(0, 7).split('-').map(Number);
         const [y1s, m1s] = hi.slice(0, 7).split('-').map(Number);
         let y = y0s, m = m0s;
         while (y < y1s || (y === y1s && m <= m1s)) {
           const d = `${y}-${String(m).padStart(2, '0')}-01`;
-          if (d >= lo && d <= hi) result.push(snapToDates(d, allDates));
+          if (d >= lo && d <= hi) {
+            const snapped = snapToDates(d, allDates);
+            if (!seen.has(snapped)) {
+              seen.add(snapped);
+              result.push({ snapped, label: `${MONTH_ABBR[m - 1]} ${y}` });
+            }
+          }
           m++; if (m > 12) { m = 1; y++; }
         }
-        return [...new Set(result)];
+        return result;
       })()
     : [];
 
@@ -267,12 +276,16 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         const lo = allDates[0], hi = allDates[allDates.length - 1];
         const y0 = parseInt(lo.slice(0, 4), 10);
         const y1 = parseInt(hi.slice(0, 4), 10);
-        const result: string[] = [];
+        const seen = new Set<string>();
+        const result: { snapped: string; year: string }[] = [];
         for (let y = y0; y <= y1; y++) {
           const d = `${y}-01-01`;
-          if (d >= lo && d <= hi) result.push(snapToDates(d, allDates));
+          if (d >= lo && d <= hi) {
+            const snapped = snapToDates(d, allDates);
+            if (!seen.has(snapped)) { seen.add(snapped); result.push({ snapped, year: String(y) }); }
+          }
         }
-        return [...new Set(result)];
+        return result;
       })()
     : [];
 
@@ -720,24 +733,28 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               strokeOpacity={item.isDotPlot ? 0.85 : 0.55}
             />
           ))}
-          {visibleMonthlyMarkers.map((d, i) => (
+          {visibleMonthlyMarkers.map((item, i) => (
             <ReferenceLine
               key={`monthly-${i}`}
               yAxisId="left"
-              x={d}
-              stroke="#1f2937"
+              x={item.snapped}
+              stroke="#1e2233"
               strokeWidth={1}
-              strokeOpacity={0.7}
+              strokeOpacity={0.85}
+              label={visibleMonthlyMarkers.length <= 30
+                ? { value: item.label, fill: '#4b5563', fontSize: 8, position: 'insideTopLeft', fontWeight: 'normal' }
+                : undefined}
             />
           ))}
-          {visibleYearlyMarkers.map((d, i) => (
+          {visibleYearlyMarkers.map((item, i) => (
             <ReferenceLine
               key={`yearly-${i}`}
               yAxisId="left"
-              x={d}
+              x={item.snapped}
               stroke="#374151"
               strokeWidth={1.5}
               strokeOpacity={0.9}
+              label={{ value: item.year, fill: '#9ca3af', fontSize: 9, position: 'insideTopLeft', fontWeight: 'bold' }}
             />
           ))}
           {visibleEventItems.map((evt, i) => (
