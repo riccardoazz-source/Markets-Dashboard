@@ -267,6 +267,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const selIsRec = selected ? RECESSION_SET.has(selected) : false;
   const selIsFOMC = selected === 'FOMC_MEETINGS';
   const selIsFedChairs = selected === 'FED_CHAIRS';
+  const selIsGridMarker = selected === 'MONTHLY_MARKERS' || selected === 'YEARLY_MARKERS';
   const selIsEvents = selected ? EVENT_CAT_IDS.has(selected) : false;
   const selEventCategory = selected ? (EVENT_INDICATOR_CATEGORY[selected] as MarketEventCategory | undefined) : undefined;
 
@@ -319,7 +320,8 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           const isEventCat = EVENT_CAT_IDS.has(ind.id);
           // Overlay series (recession bands, halving/meeting markers) behave differently
           // from normal indicators — flag them so they are easy to spot.
-          const isSpecial = isRec || ind.id === 'BTC_HALVING' || isFOMC || isFedChairs || isEventCat;
+          const isSpecial = isRec || ind.id === 'BTC_HALVING' || isFOMC || isFedChairs || isEventCat
+            || ind.id === 'MONTHLY_MARKERS' || ind.id === 'YEARLY_MARKERS';
 
           return (
             <button key={ind.id}
@@ -425,6 +427,14 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                         </div>
                       );
                     })()
+                  ) : ind.id === 'MONTHLY_MARKERS' || ind.id === 'YEARLY_MARKERS' ? (
+                    <div className="space-y-0.5">
+                      <p className="text-lg font-bold text-gray-100">
+                        {ind.id === 'MONTHLY_MARKERS' ? 'Monthly' : 'Yearly'}
+                      </p>
+                      <p className="text-xs text-gray-500">grid overlay</p>
+                      <p className="text-[10px] text-gray-600">1970 → today</p>
+                    </div>
                   ) : ind.id === 'BTC_HALVING' ? (
                     (() => {
                       const today = new Date().toISOString().slice(0, 10);
@@ -540,14 +550,14 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </p>
           )}
 
-          {dataMsg && !selIsEvents && !selIsFOMC && !selIsFedChairs && selected !== 'BTC_HALVING' && (
+          {dataMsg && !selIsEvents && !selIsFOMC && !selIsFedChairs && !selIsGridMarker && selected !== 'BTC_HALVING' && (
             <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
               ⚠ {dataMsg}
             </p>
           )}
 
           {/* Stats row */}
-          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsEvents && (
+          {data[selected]?.latest && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsGridMarker && !selIsEvents && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <Stat label="Latest" value={formatMacroValue(data[selected].latest!.value, selectedIndicator.unit)} />
               {data[selected].prev && (
@@ -572,6 +582,18 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             <FOMCChart height={240} />
           ) : selIsFedChairs ? (
             <FedChairsChart height={240} />
+          ) : selIsGridMarker ? (
+            <div className="border border-border rounded-lg px-4 py-6 text-center text-sm text-gray-500">
+              <p className="font-semibold text-gray-300 mb-1">
+                {selected === 'MONTHLY_MARKERS' ? 'Monthly Grid' : 'Yearly Grid'}
+              </p>
+              <p className="text-xs">
+                {selected === 'MONTHLY_MARKERS'
+                  ? 'Draws a vertical line on the 1st of every month since Jan 1970.'
+                  : 'Draws a vertical line on Jan 1st of every year since 1970.'}
+              </p>
+              <p className="text-[11px] text-gray-600 mt-2">Add to Compare to see the grid lines on any chart.</p>
+            </div>
           ) : selIsEvents ? (
             <EventsChart height={300} category={selEventCategory} />
           ) : histLoading ? (
@@ -610,10 +632,10 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </div>
           )}
 
-          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsEvents && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsGridMarker && !selIsEvents && (
             <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
           )}
-          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsEvents && (
+          {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsGridMarker && !selIsEvents && (
             <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
           )}
           {selected && <ChartNotes chartId={selected} />}

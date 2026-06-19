@@ -57,7 +57,7 @@ const WIDE_WINDOW_SERIES = new Set([
   'USREC', 'SAHMREALTIME',
   // Rates — full history needed to see yield curve inversions, negative ECB rates, etc.
   // FEDTARMDLR (long-run dot) is sparse — one point per SEP meeting; full history from 2012.
-  'T10Y2Y', 'ECBDFR', 'FOMC_MEETINGS', 'FED_CHAIRS', 'FEDTARMDLR',
+  'T10Y2Y', 'ECBDFR', 'FOMC_MEETINGS', 'FED_CHAIRS', 'FEDTARMDLR', 'MONTHLY_MARKERS', 'YEARLY_MARKERS',
   // Market Value: Shiller history ends ~2023 and the multpl annual tables are
   // small. Always fetch full history so the card has a latest value (the
   // 18-month list-mode window would otherwise exclude all Shiller data).
@@ -1607,6 +1607,24 @@ async function fetchMacroSeries(
         if (c.firstMeeting) dates.add(c.firstMeeting);
       }
       const pts = Array.from(dates).sort().map(d => ({ date: d, value: 1 }));
+      return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+    }
+    if (fredId === 'MONTHLY_MARKERS') {
+      const pts: { date: string; value: number }[] = [];
+      const now = new Date();
+      let y = 1970, m = 1;
+      while (y < now.getFullYear() || (y === now.getFullYear() && m <= now.getMonth() + 1)) {
+        pts.push({ date: `${y}-${String(m).padStart(2, '0')}-01`, value: 1 });
+        m++; if (m > 12) { m = 1; y++; }
+      }
+      return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+    }
+    if (fredId === 'YEARLY_MARKERS') {
+      const now = new Date();
+      const pts: { date: string; value: number }[] = [];
+      for (let y = 1970; y <= now.getFullYear(); y++) {
+        pts.push({ date: `${y}-01-01`, value: 1 });
+      }
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
     }
     if (fredId.startsWith('EVENTS_')) {

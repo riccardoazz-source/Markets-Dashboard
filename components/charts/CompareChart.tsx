@@ -131,10 +131,13 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   const halvingAsset    = assets.find(a => a.symbol === 'BTC_HALVING');
   const fomcAsset       = assets.find(a => a.symbol === 'FOMC_MEETINGS');
   const fedChairsAsset  = assets.find(a => a.symbol === 'FED_CHAIRS');
+  const monthlyMarkersAsset = assets.find(a => a.symbol === 'MONTHLY_MARKERS');
+  const yearlyMarkersAsset  = assets.find(a => a.symbol === 'YEARLY_MARKERS');
   const eventCatAssets  = assets.filter(a => !!EVENT_INDICATOR_CATEGORY[a.symbol]);
   const recessionAssets = assets.filter(a => RECESSION_SET.has(a.symbol));
   const plottableAssets = assets.filter(
     a => a.symbol !== 'BTC_HALVING' && a.symbol !== 'FOMC_MEETINGS' && a.symbol !== 'FED_CHAIRS' &&
+         a.symbol !== 'MONTHLY_MARKERS' && a.symbol !== 'YEARLY_MARKERS' &&
          !EVENT_INDICATOR_CATEGORY[a.symbol] && !RECESSION_SET.has(a.symbol),
   );
 
@@ -151,6 +154,12 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     if (halvingAsset)  return <HalvingChart height={height} />;
     if (fomcAsset)     return <FOMCChart height={height} />;
     if (fedChairsAsset) return <FedChairsChart height={height} />;
+    if (monthlyMarkersAsset && !yearlyMarkersAsset) {
+      return <div className="flex items-center justify-center h-48 text-gray-500 text-sm border border-border rounded-lg">Add other assets to see monthly grid lines.</div>;
+    }
+    if (yearlyMarkersAsset && !monthlyMarkersAsset) {
+      return <div className="flex items-center justify-center h-48 text-gray-500 text-sm border border-border rounded-lg">Add other assets to see yearly grid lines.</div>;
+    }
     if (eventCatAssets.length > 0) {
       const firstCat = EVENT_INDICATOR_CATEGORY[eventCatAssets[0].symbol];
       return <EventsChart height={height} category={firstCat} />;
@@ -236,6 +245,36 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         });
       })()
     : null;
+
+  const visibleMonthlyMarkers = monthlyMarkersAsset && allDates.length > 0
+    ? (() => {
+        const lo = allDates[0], hi = allDates[allDates.length - 1];
+        const result: string[] = [];
+        const [y0s, m0s] = lo.slice(0, 7).split('-').map(Number);
+        const [y1s, m1s] = hi.slice(0, 7).split('-').map(Number);
+        let y = y0s, m = m0s;
+        while (y < y1s || (y === y1s && m <= m1s)) {
+          const d = `${y}-${String(m).padStart(2, '0')}-01`;
+          if (d >= lo && d <= hi) result.push(snapToDates(d, allDates));
+          m++; if (m > 12) { m = 1; y++; }
+        }
+        return [...new Set(result)];
+      })()
+    : [];
+
+  const visibleYearlyMarkers = yearlyMarkersAsset && allDates.length > 0
+    ? (() => {
+        const lo = allDates[0], hi = allDates[allDates.length - 1];
+        const y0 = parseInt(lo.slice(0, 4), 10);
+        const y1 = parseInt(hi.slice(0, 4), 10);
+        const result: string[] = [];
+        for (let y = y0; y <= y1; y++) {
+          const d = `${y}-01-01`;
+          if (d >= lo && d <= hi) result.push(snapToDates(d, allDates));
+        }
+        return [...new Set(result)];
+      })()
+    : [];
 
   // Market events — one entry per selected event category, snapped to nearest category date.
   // Uses mergedEvents (built-in + user custom) filtered to only categories that are selected.
@@ -374,6 +413,12 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   if (fedChairsAsset) {
     legendItems.push({ key: 'FED_CHAIRS_NOM', name: 'Chair nomination', color: '#ef4444', dashed: true });
     legendItems.push({ key: 'FED_CHAIRS_1ST', name: 'Chair 1st meeting', color: '#f97316', dashed: true });
+  }
+  if (monthlyMarkersAsset) {
+    legendItems.push({ key: 'MONTHLY_MARKERS', name: 'Monthly Grid', color: '#374151', dashed: true });
+  }
+  if (yearlyMarkersAsset) {
+    legendItems.push({ key: 'YEARLY_MARKERS', name: 'Yearly Grid', color: '#6b7280', dashed: false });
   }
   eventCatAssets.forEach(a => {
     const cat = EVENT_INDICATOR_CATEGORY[a.symbol];
@@ -673,6 +718,26 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               strokeWidth={item.isDotPlot ? 1.5 : 1}
               strokeDasharray={item.isDotPlot ? '4 2' : '3 3'}
               strokeOpacity={item.isDotPlot ? 0.85 : 0.55}
+            />
+          ))}
+          {visibleMonthlyMarkers.map((d, i) => (
+            <ReferenceLine
+              key={`monthly-${i}`}
+              yAxisId="left"
+              x={d}
+              stroke="#1f2937"
+              strokeWidth={1}
+              strokeOpacity={0.7}
+            />
+          ))}
+          {visibleYearlyMarkers.map((d, i) => (
+            <ReferenceLine
+              key={`yearly-${i}`}
+              yAxisId="left"
+              x={d}
+              stroke="#374151"
+              strokeWidth={1.5}
+              strokeOpacity={0.9}
             />
           ))}
           {visibleEventItems.map((evt, i) => (

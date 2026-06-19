@@ -69,7 +69,7 @@ const RECESSION_SET = new Set(RECESSION_SERIES);
 // calendars) that must be correlated against an asset's RETURNS rather than its
 // price level — see the correlation post-processing in the `correl` memo.
 const INDICATOR_CORR_IDS = new Set<string>([
-  'USREC', 'BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', ...Object.keys(EVENT_INDICATOR_CATEGORY),
+  'USREC', 'BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', 'MONTHLY_MARKERS', 'YEARLY_MARKERS', ...Object.keys(EVENT_INDICATOR_CATEGORY),
 ]);
 
 // ── Spread series ───────────────────────────────────────────────────────────
@@ -416,7 +416,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       // Recession assets and event overlays (BTC_HALVING, FOMC_MEETINGS, EVENTS_*) carry full
       // history and are excluded from commonStart so they don't constrain other assets.
       const EVENT_OVERLAY = new Set([
-        ...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS',
+        ...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', 'MONTHLY_MARKERS', 'YEARLY_MARKERS',
         ...Object.keys(EVENT_INDICATOR_CATEGORY),
       ]);
       const firstDates = assets
@@ -515,7 +515,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       // USREC is included with its raw 0/1 values (point-biserial correlation).
       // BTC_HALVING, FOMC_MEETINGS and EVENTS_* are excluded here and added below as 0/1
       // dummies (their raw series are event markers, not continuous values).
-      const DUMMY_SET = new Set(['BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', ...Object.keys(EVENT_INDICATOR_CATEGORY)]);
+      const DUMMY_SET = new Set(['BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', 'MONTHLY_MARKERS', 'YEARLY_MARKERS', ...Object.keys(EVENT_INDICATOR_CATEGORY)]);
       const series: { symbol: string; data: HistoricalPoint[] }[] = allAssets
         .filter(a => !DUMMY_SET.has(a.symbol) && (a.rawData ?? a.data).length > 1)
         .map(a => ({ symbol: a.symbol, data: a.rawData ?? a.data }));
@@ -573,6 +573,23 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         );
         const chairDummy = monthlyDummy(refMin, refMax, chairMonths);
         if (chairDummy.length > 1) series.push({ symbol: 'FED_CHAIRS', data: chairDummy });
+      }
+
+      const monthlyMarkersAssetCorr = displayAssets.find(a => a.symbol === 'MONTHLY_MARKERS');
+      if (monthlyMarkersAssetCorr) {
+        // MONTHLY_MARKERS: every month is value=1 — no variance, correlation undefined. Skip.
+        // Do not push to series.
+      }
+
+      const yearlyMarkersAssetCorr = displayAssets.find(a => a.symbol === 'YEARLY_MARKERS');
+      if (yearlyMarkersAssetCorr && refMin && refMax) {
+        // YEARLY_MARKERS: 1 in January of each year, 0 otherwise.
+        const janMonths = new Set<string>();
+        const y0 = parseInt(refMin.slice(0, 4), 10);
+        const y1 = parseInt(refMax.slice(0, 4), 10);
+        for (let y = y0; y <= y1; y++) janMonths.add(`${y}-01`);
+        const yearlyDummy = monthlyDummy(refMin, refMax, janMonths);
+        if (yearlyDummy.length > 1) series.push({ symbol: 'YEARLY_MARKERS', data: yearlyDummy });
       }
 
       // EVENTS_* per-category: 1 in every month containing at least one event of that category.

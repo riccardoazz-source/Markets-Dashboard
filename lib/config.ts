@@ -283,6 +283,14 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'FED_CHAIRS', name: 'Fed Chairs', category: 'Events',     unit: 'idx',
     source: { type: 'computed', label: 'Federal Reserve — chair nomination + first meeting',
               url: 'https://en.wikipedia.org/wiki/Chair_of_the_Federal_Reserve' } },
+  // Monthly grid markers — auto-generated, one point per month since 1970.
+  { id: 'MONTHLY_MARKERS', name: 'Monthly Grid', category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Generated — 1st of every month since Jan 1970',
+              url: '' } },
+  // Yearly grid markers — auto-generated, one point per year since 1970.
+  { id: 'YEARLY_MARKERS', name: 'Yearly Grid', category: 'Events', unit: 'idx',
+    source: { type: 'computed', label: 'Generated — 1st of every year since 1970',
+              url: '' } },
   // Inflation
   { id: 'CPIAUCSL', name: 'CPI (All Items)',        category: 'Inflation',   unit: 'idx',
     source: { type: 'bls',     label: 'BLS',
