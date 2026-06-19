@@ -246,13 +246,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       })()
     : null;
 
-  const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const MONTH_ABBR   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const MONTH_LETTER = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 
   const visibleMonthlyMarkers = monthlyMarkersAsset && allDates.length > 0
     ? (() => {
         const lo = allDates[0], hi = allDates[allDates.length - 1];
         const seen = new Set<string>();
-        const result: { snapped: string; label: string }[] = [];
+        const result: { snapped: string; full: string; letter: string }[] = [];
         const [y0s, m0s] = lo.slice(0, 7).split('-').map(Number);
         const [y1s, m1s] = hi.slice(0, 7).split('-').map(Number);
         let y = y0s, m = m0s;
@@ -262,7 +263,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
             const snapped = snapToDates(d, allDates);
             if (!seen.has(snapped)) {
               seen.add(snapped);
-              result.push({ snapped, label: `${MONTH_ABBR[m - 1]} ${y}` });
+              result.push({ snapped, full: `${MONTH_ABBR[m - 1]} ${y}`, letter: MONTH_LETTER[m - 1] });
             }
           }
           m++; if (m > 12) { m = 1; y++; }
@@ -733,19 +734,27 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               strokeOpacity={item.isDotPlot ? 0.85 : 0.55}
             />
           ))}
-          {visibleMonthlyMarkers.map((item, i) => (
-            <ReferenceLine
-              key={`monthly-${i}`}
-              yAxisId="left"
-              x={item.snapped}
-              stroke="#1e2233"
-              strokeWidth={1}
-              strokeOpacity={0.85}
-              label={visibleMonthlyMarkers.length <= 30
-                ? { value: item.label, fill: '#4b5563', fontSize: 8, position: 'insideTopLeft', fontWeight: 'normal' }
-                : undefined}
-            />
-          ))}
+          {visibleMonthlyMarkers.map((item, i) => {
+            // Zoomed-in (≤ 30 months): full "Jan 2025". Longer spans: single
+            // letter J/F/M… so you can still tell which month each line is, up
+            // to a density where even letters would overlap (then no label).
+            const monthLabel = visibleMonthlyMarkers.length <= 30
+              ? { value: item.full, fill: '#6b7280', fontSize: 8, position: 'insideTopLeft' as const }
+              : visibleMonthlyMarkers.length <= 160
+                ? { value: item.letter, fill: '#4b5563', fontSize: 8, position: 'insideTop' as const }
+                : undefined;
+            return (
+              <ReferenceLine
+                key={`monthly-${i}`}
+                yAxisId="left"
+                x={item.snapped}
+                stroke="#1e2233"
+                strokeWidth={1}
+                strokeOpacity={0.85}
+                label={monthLabel}
+              />
+            );
+          })}
           {visibleYearlyMarkers.map((item, i) => (
             <ReferenceLine
               key={`yearly-${i}`}
