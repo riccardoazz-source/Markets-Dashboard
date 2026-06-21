@@ -88,16 +88,29 @@ function pctColor(v: number | null): string {
   return 'text-gray-500';
 }
 
-// Compares last month's pace vs the 3-month average monthly pace.
-// Positive = accelerating (more money flowing in recently than average pace).
-function accelArrow(r1m: number | null, r3m: number | null): { arrow: string; color: string } | null {
-  if (r1m == null || r3m == null) return null;
-  const diff = r1m - r3m / 3;
-  if (diff > 5)  return { arrow: '↑↑', color: 'text-green-300' };
-  if (diff > 1)  return { arrow: '↑',  color: 'text-green-500' };
-  if (diff < -5) return { arrow: '↓↓', color: 'text-red-300'   };
-  if (diff < -1) return { arrow: '↓',  color: 'text-red-500'   };
-  return           { arrow: '→',  color: 'text-gray-500'  };
+// Rank delta: positive = asset moved UP in the 1M ranking vs 3M ranking.
+// Computed after sorting all items by each metric, so this is called at render time.
+function accelArrow(rankDelta: number | null): { arrow: string; color: string } | null {
+  if (rankDelta == null) return null;
+  if (rankDelta >= 12) return { arrow: '↑↑', color: 'text-green-300' };
+  if (rankDelta >= 4)  return { arrow: '↑',  color: 'text-green-500' };
+  if (rankDelta <= -12)return { arrow: '↓↓', color: 'text-red-300'   };
+  if (rankDelta <= -4) return { arrow: '↓',  color: 'text-red-500'   };
+  return                      { arrow: '→',  color: 'text-gray-500'  };
+}
+
+function buildRankDeltas(items: RotationItem[]): Map<string, number> {
+  const withData = items.filter(i => i.r1m != null && i.r3m != null);
+  const by3m = [...withData].sort((a, b) => (b.r3m ?? -Infinity) - (a.r3m ?? -Infinity));
+  const by1m = [...withData].sort((a, b) => (b.r1m ?? -Infinity) - (a.r1m ?? -Infinity));
+  const rank3m = new Map(by3m.map((it, i) => [it.symbol, i]));
+  const rank1m = new Map(by1m.map((it, i) => [it.symbol, i]));
+  const out = new Map<string, number>();
+  for (const it of withData) {
+    // positive delta = better 1M rank than 3M rank → accelerating
+    out.set(it.symbol, (rank3m.get(it.symbol) ?? 0) - (rank1m.get(it.symbol) ?? 0));
+  }
+  return out;
 }
 
 export function RotationSection() {
@@ -229,6 +242,9 @@ export function RotationSection() {
     (getPct(b, sortBy) ?? -Infinity) - (getPct(a, sortBy) ?? -Infinity)
   );
 
+  // Rank deltas computed across ALL items (not just filtered) so the signal is global
+  const rankDeltas = rollingLoading ? new Map<string, number>() : buildRankDeltas(items);
+
   const toggleSymbol = (symbol: string) => {
     userHasToggled.current = true;
     setSelectedSymbols(prev => {
@@ -329,7 +345,7 @@ export function RotationSection() {
                   const isSelected = selectedSymbols.has(item.symbol);
                   const dotColor   = GROUP_COLORS[item.group];
                   const rowColor   = colorMap.get(item.symbol);
-                  const accel      = accelArrow(item.r1m, item.r3m);
+                  const accel      = accelArrow(rankDeltas.get(item.symbol) ?? null);
                   return (
                     <tr
                       key={item.symbol}
