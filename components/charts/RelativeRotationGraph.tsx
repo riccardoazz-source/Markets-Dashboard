@@ -143,7 +143,7 @@ export function RelativeRotationGraph({ assets, tailWeeks = 8, height = 500 }: R
             })}
 
             {/* Current position dot */}
-            <circle cx={svgCx} cy={svgCy} r={7} fill={asset.color} fillOpacity={0.9} />
+            <circle cx={svgCx} cy={svgCy} r={5} fill={asset.color} fillOpacity={0.9} />
 
             {/* Label */}
             <text
