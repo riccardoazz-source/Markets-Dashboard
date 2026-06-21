@@ -11,6 +11,7 @@ import { CompareSection } from '@/components/sections/CompareSection';
 import { MacroSection } from '@/components/sections/MacroSection';
 import { StockSection } from '@/components/sections/StockSection';
 import { SourcesSection } from '@/components/sections/SourcesSection';
+import { RotationSection } from '@/components/sections/RotationSection';
 import { SectionNotesPanel } from '@/components/ui/SectionNotesPanel';
 import { isNotesSection, type NotesSection } from '@/lib/sectionNotes';
 
@@ -23,6 +24,7 @@ const SECTION_LABELS: Record<Section, string> = {
   macro:       'Macro Indicators',
   stock:       'Stocks',
   compare:     'Asset Comparison',
+  rotation:    'Capital Rotation',
   sources:     'Data Sources',
 };
 
@@ -35,6 +37,7 @@ const SECTION_DESCRIPTIONS: Record<Section, string> = {
   macro:       'Key macroeconomic indicators from the Federal Reserve (FRED)',
   stock:       'Search any stock by ticker or ISIN — price, total return with dividends, CAGR & IRR',
   compare:     'Normalized performance, dividend-adjusted CAGR, IRR and correlation between any combination of assets',
+  rotation:    'Relative Rotation Graph — see which asset classes are gaining or losing relative momentum vs a benchmark',
   sources:     'Reference table of every data source feeding this dashboard',
 };
 
@@ -83,6 +86,7 @@ export default function Home() {
         {section === 'macro'       && <MacroSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'stock'       && <StockSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'compare'     && <CompareSection jumpTo={jumpTarget} />}
+        {section === 'rotation'    && <RotationSection />}
         {section === 'sources'     && <SourcesSection />}
       </main>
 
