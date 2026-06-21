@@ -1,325 +1,419 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import clsx from 'clsx';
+import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
+import { QuoteData, CryptoData } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { RelativeRotationGraph, type RRGAssetData } from '@/components/charts/RelativeRotationGraph';
+import { RotationChart, ChartAsset } from '@/components/charts/RotationChart';
 
-const BENCHMARK = { symbol: '^GSPC', name: 'S&P 500' };
-
-const ASSET_GROUPS = [
-  {
-    key: 'sectors',
-    label: 'US Sectors',
-    assets: [
-      { symbol: 'XLK',  name: 'Tech',     color: '#3b82f6' },
-      { symbol: 'XLF',  name: 'Finance',  color: '#10b981' },
-      { symbol: 'XLE',  name: 'Energy',   color: '#f59e0b' },
-      { symbol: 'XLV',  name: 'Health',   color: '#a855f7' },
-      { symbol: 'XLI',  name: 'Indust.',  color: '#8b5cf6' },
-      { symbol: 'XLU',  name: 'Utils.',   color: '#ec4899' },
-      { symbol: 'XLY',  name: 'Discret.', color: '#f97316' },
-      { symbol: 'XLP',  name: 'Staples',  color: '#14b8a6' },
-      { symbol: 'XLRE', name: 'Real Est.',color: '#ef4444' },
-      { symbol: 'XLB',  name: 'Matls.',   color: '#84cc16' },
-      { symbol: 'XLC',  name: 'Telecom',  color: '#06b6d4' },
-    ],
-  },
-  {
-    key: 'indexes',
-    label: 'Global Indexes',
-    assets: [
-      { symbol: '^NDX',      name: 'Nasdaq',    color: '#818cf8' },
-      { symbol: '^RUT',      name: 'Russell',   color: '#4ade80' },
-      { symbol: '^STOXX50E', name: 'EuroStoxx', color: '#34d399' },
-      { symbol: '^N225',     name: 'Nikkei',    color: '#fb7185' },
-      { symbol: 'EEM',       name: 'Em.Mkts',   color: '#fbbf24' },
-      { symbol: '^FTSE',     name: 'FTSE',      color: '#f472b6' },
-      { symbol: 'EWZ',       name: 'Brazil',    color: '#38bdf8' },
-    ],
-  },
-  {
-    key: 'crypto',
-    label: 'Crypto',
-    assets: [
-      { symbol: 'BTC-USD',  name: 'BTC',  color: '#fb923c' },
-      { symbol: 'ETH-USD',  name: 'ETH',  color: '#7c3aed' },
-      { symbol: 'SOL-USD',  name: 'SOL',  color: '#c084fc' },
-      { symbol: 'BNB-USD',  name: 'BNB',  color: '#ca8a04' },
-      { symbol: 'XRP-USD',  name: 'XRP',  color: '#60a5fa' },
-      { symbol: 'ADA-USD',  name: 'ADA',  color: '#2dd4bf' },
-    ],
-  },
-] as const;
-
-type GroupKey = typeof ASSET_GROUPS[number]['key'];
-type AssetEntry = { symbol: string; name: string; color: string; group: GroupKey };
-
-const ALL_ASSETS: AssetEntry[] = ASSET_GROUPS.flatMap(g =>
-  g.assets.map(a => ({ ...a, group: g.key }))
-);
-const ALL_SYMBOLS = ALL_ASSETS.map(a => a.symbol);
-
-const TAIL_OPTIONS = [4, 8, 13] as const;
-type TailWeeks = typeof TAIL_OPTIONS[number];
-
-function sma(arr: number[], period: number): (number | null)[] {
-  return arr.map((_, i) => {
-    if (i < period - 1) return null;
-    const slice = arr.slice(i - period + 1, i + 1);
-    return slice.reduce((a, b) => a + b, 0) / period;
-  });
+interface RotationItem {
+  symbol: string;
+  name: string;
+  subCategory: string;
+  group: 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors';
+  price: number | null;
+  currency: string;
+  dayPct: number | null;
+  mtdPct: number | null;
+  ytdPct: number | null;
+  fiveYPct: number | null;
 }
 
-function toWeekly(daily: { date: string; close: number }[]): { date: string; close: number }[] {
-  const map = new Map<string, { date: string; close: number }>();
-  for (const pt of daily) {
-    const d = new Date(pt.date);
-    const jan4 = new Date(d.getFullYear(), 0, 4);
-    const startOfWeek = new Date(jan4);
-    startOfWeek.setDate(jan4.getDate() - (jan4.getDay() || 7) + 1);
-    const weekNum = Math.ceil((((d.getTime() - startOfWeek.getTime()) / 86400000) + 1) / 7);
-    const key = `${d.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
-    map.set(key, pt);
-  }
-  return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
-}
+type SortKey = 'day' | 'mtd' | 'ytd' | '5y';
+type GroupFilter = 'all' | 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors';
+type ChartTimeframe = '1M' | '3M' | '6M' | '1Y';
 
-function computeRRG(
-  assetWeekly: { date: string; close: number }[],
-  benchmarkWeekly: { date: string; close: number }[],
-): { date: string; rsRatio: number; rsMomentum: number }[] {
-  const benchMap = new Map(benchmarkWeekly.map(p => [p.date, p.close]));
-  const aligned = assetWeekly
-    .filter(p => benchMap.has(p.date) && (benchMap.get(p.date) ?? 0) > 0)
-    .map(p => ({ date: p.date, rs: p.close / benchMap.get(p.date)! }));
-
-  if (aligned.length < 15) return [];
-
-  const rsValues = aligned.map(p => p.rs);
-  const sma10 = sma(rsValues, 10);
-  const rsRatioValues = rsValues.map((rs, i) => {
-    const s = sma10[i];
-    if (s === null || s === 0) return null;
-    return 100 * (rs / s);
-  });
-
-  const validRatios = rsRatioValues.map(v => v ?? 0);
-  const sma4 = sma(validRatios, 4);
-
-  const result: { date: string; rsRatio: number; rsMomentum: number }[] = [];
-  for (let i = 0; i < aligned.length; i++) {
-    const rsRatio = rsRatioValues[i];
-    const s4 = sma4[i];
-    if (rsRatio === null || s4 === null || s4 === 0 || i < 13) continue;
-    result.push({
-      date: aligned[i].date,
-      rsRatio,
-      rsMomentum: 100 * (rsRatio / s4),
-    });
-  }
-  return result;
-}
-
-const QUADRANT_LEGEND = [
-  { label: 'Leading',   desc: 'Strong RS, rising momentum',  color: '#16a34a' },
-  { label: 'Weakening', desc: 'Strong RS, falling momentum', color: '#d97706' },
-  { label: 'Lagging',   desc: 'Weak RS, falling momentum',   color: '#dc2626' },
-  { label: 'Improving', desc: 'Weak RS, rising momentum',    color: '#1d4ed8' },
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'day',  label: 'Day' },
+  { value: 'mtd',  label: 'MTD' },
+  { value: 'ytd',  label: 'YTD' },
+  { value: '5y',   label: '5Y' },
 ];
 
+const GROUP_FILTERS: { value: GroupFilter; label: string }[] = [
+  { value: 'all',          label: 'All' },
+  { value: 'Indexes',      label: 'Indexes' },
+  { value: 'Crypto',       label: 'Crypto' },
+  { value: 'Commodities',  label: 'Commodities' },
+  { value: 'Sectors',      label: 'Sectors' },
+];
+
+const CHART_TF_OPTIONS: ChartTimeframe[] = ['1M', '3M', '6M', '1Y'];
+
+const GROUP_COLORS: Record<RotationItem['group'], string> = {
+  Indexes:     '#3b82f6',
+  Crypto:      '#f97316',
+  Commodities: '#f59e0b',
+  Sectors:     '#8b5cf6',
+};
+
+const CHART_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+  '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#a855f7',
+];
+
+function getPct(item: RotationItem, key: SortKey): number | null {
+  switch (key) {
+    case 'day':  return item.dayPct;
+    case 'mtd':  return item.mtdPct;
+    case 'ytd':  return item.ytdPct;
+    case '5y':   return item.fiveYPct;
+  }
+}
+
+function fmtPct(v: number | null): string {
+  if (v == null) return '—';
+  return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+}
+
+function pctColor(v: number | null): string {
+  if (v == null) return 'text-gray-500';
+  if (v > 0) return 'text-green-400';
+  if (v < 0) return 'text-red-400';
+  return 'text-gray-500';
+}
+
 export function RotationSection() {
-  const [tailWeeks, setTailWeeks] = useState<TailWeeks>(8);
+  const [items, setItems] = useState<RotationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [allRrgData, setAllRrgData] = useState<Map<string, RRGAssetData>>(new Map());
-  const [activeSymbols, setActiveSymbols] = useState<Set<string>>(new Set(ALL_SYMBOLS));
+  const [sortBy, setSortBy] = useState<SortKey>('ytd');
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
+  const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
+  const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('3M');
+  const userHasToggled = useRef(false);
 
   useEffect(() => {
-    const controller = new AbortController();
-    const { signal } = controller;
+    let cancelled = false;
 
     const run = async () => {
       setLoading(true);
       setError(false);
       try {
-        const fetchOne = (sym: string) =>
-          fetch(`/api/historical?symbol=${encodeURIComponent(sym)}&timeframe=2Y`, { signal })
-            .then(r => r.ok ? (r.json() as Promise<{ date: string; close: number }[]>) : Promise.resolve([]));
+        const indexSymbols = INDEXES.map(i => i.symbol);
+        const commSymbols = COMMODITIES.map(c => c.symbol);
 
-        const [benchmarkDaily, ...assetDailys] = await Promise.all(
-          [BENCHMARK.symbol, ...ALL_SYMBOLS].map(fetchOne)
+        const [quotesRes, cryptoRes, sectorsRes] = await Promise.all([
+          fetch(`/api/quotes?symbols=${[...indexSymbols, ...commSymbols].join(',')}`),
+          fetch('/api/crypto?mode=markets'),
+          fetch('/api/sectors'),
+        ]);
+
+        const quotes: QuoteData[] = await quotesRes.json();
+        const cryptos: CryptoData[] = await cryptoRes.json();
+        const sectors = await sectorsRes.json() as Array<{
+          symbol: string;
+          name: string;
+          category: string;
+          price: number | null;
+          currency: string;
+          changePercent: number | null;
+          mtdReturn: number | null;
+          ytdReturn: number | null;
+          fiveYearReturn: number | null;
+        }>;
+
+        if (cancelled) return;
+
+        const quoteMap = new Map<string, QuoteData>(quotes.map(q => [q.symbol, q]));
+
+        const indexItems: RotationItem[] = INDEXES.map(idx => {
+          const q = quoteMap.get(idx.symbol);
+          return {
+            symbol: idx.symbol,
+            name: idx.name,
+            subCategory: idx.category,
+            group: 'Indexes',
+            price: q?.price ?? null,
+            currency: q?.currency ?? 'USD',
+            dayPct: q?.changePercent ?? null,
+            mtdPct: q?.mtdChangePercent ?? null,
+            ytdPct: q?.ytdChangePercent ?? null,
+            fiveYPct: q?.fiveYearChangePercent ?? null,
+          };
+        });
+
+        const commItems: RotationItem[] = COMMODITIES.map(c => {
+          const q = quoteMap.get(c.symbol);
+          return {
+            symbol: c.symbol,
+            name: c.name,
+            subCategory: c.category,
+            group: 'Commodities',
+            price: q?.price ?? null,
+            currency: q?.currency ?? 'USD',
+            dayPct: q?.changePercent ?? null,
+            mtdPct: q?.mtdChangePercent ?? null,
+            ytdPct: q?.ytdChangePercent ?? null,
+            fiveYPct: q?.fiveYearChangePercent ?? null,
+          };
+        });
+
+        const cryptoSymbolMap = new Map<string, CryptoData>(
+          cryptos.map(c => [c.symbol.toUpperCase(), c])
         );
 
-        if (signal.aborted) return;
+        const cryptoItems: RotationItem[] = CRYPTO_IDS.map(entry => {
+          const c = cryptoSymbolMap.get(entry.symbol.toUpperCase());
+          const yahooSymbol = CRYPTO_YAHOO_SYMBOLS[entry.id] ?? `${entry.symbol}-USD`;
+          return {
+            symbol: yahooSymbol,
+            name: entry.name,
+            subCategory: 'Crypto',
+            group: 'Crypto',
+            price: c?.price ?? null,
+            currency: 'USD',
+            dayPct: c?.change24hPercent ?? null,
+            mtdPct: c?.mtdChangePercent ?? null,
+            ytdPct: c?.ytdChangePercent ?? null,
+            fiveYPct: c?.fiveYearChangePercent ?? null,
+          };
+        });
 
-        const benchmarkWeekly = toWeekly(benchmarkDaily);
-        const map = new Map<string, RRGAssetData>();
+        const sectorItems: RotationItem[] = sectors.map(s => ({
+          symbol: s.symbol,
+          name: s.name,
+          subCategory: s.category,
+          group: 'Sectors',
+          price: s.price,
+          currency: s.currency ?? 'USD',
+          dayPct: s.changePercent,
+          mtdPct: s.mtdReturn,
+          ytdPct: s.ytdReturn,
+          fiveYPct: s.fiveYearReturn,
+        }));
 
-        for (let i = 0; i < ALL_ASSETS.length; i++) {
-          const asset = ALL_ASSETS[i];
-          const weekly = toWeekly(assetDailys[i]);
-          const positions = computeRRG(weekly, benchmarkWeekly);
-          if (positions.length > 0) {
-            map.set(asset.symbol, {
-              symbol: asset.symbol,
-              name: asset.name,
-              color: asset.color,
-              positions,
-            });
-          }
+        const allItems = [...indexItems, ...commItems, ...cryptoItems, ...sectorItems];
+        setItems(allItems);
+
+        if (!userHasToggled.current) {
+          const sorted = [...allItems].sort((a, b) => {
+            const va = getPct(a, 'ytd') ?? -Infinity;
+            const vb = getPct(b, 'ytd') ?? -Infinity;
+            return vb - va;
+          });
+          const top5 = new Set(sorted.slice(0, 5).map(i => i.symbol));
+          setSelectedSymbols(top5);
         }
-
-        setAllRrgData(map);
       } catch (err) {
-        if (signal.aborted) return;
-        console.error(err);
-        setError(true);
+        if (!cancelled) {
+          console.error(err);
+          setError(true);
+        }
       } finally {
-        if (!signal.aborted) setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     run();
-    return () => controller.abort();
+    return () => { cancelled = true; };
   }, []);
 
-  const toggleGroup = (groupKey: GroupKey) => {
-    const group = ASSET_GROUPS.find(g => g.key === groupKey)!;
-    const groupSymbols = group.assets.map(a => a.symbol);
-    const allActive = groupSymbols.every(s => activeSymbols.has(s));
-    setActiveSymbols(prev => {
-      const next = new Set(prev);
-      if (allActive) groupSymbols.forEach(s => next.delete(s));
-      else groupSymbols.forEach(s => next.add(s));
-      return next;
-    });
-  };
+  const filteredItems = groupFilter === 'all'
+    ? items
+    : items.filter(i => i.group === groupFilter);
 
-  const toggleAsset = (symbol: string) => {
-    setActiveSymbols(prev => {
+  const sortedItems = [...filteredItems].sort((a, b) => {
+    const va = getPct(a, sortBy) ?? -Infinity;
+    const vb = getPct(b, sortBy) ?? -Infinity;
+    return vb - va;
+  });
+
+  const toggleSymbol = (symbol: string) => {
+    userHasToggled.current = true;
+    setSelectedSymbols(prev => {
       const next = new Set(prev);
       if (next.has(symbol)) next.delete(symbol);
-      else next.add(symbol);
+      else if (next.size < 10) next.add(symbol);
       return next;
     });
   };
 
-  const visibleAssets = [...allRrgData.values()].filter(a => activeSymbols.has(a.symbol));
+  const colorMap = new Map<string, string>();
+  let colorIdx = 0;
+  for (const sym of selectedSymbols) {
+    colorMap.set(sym, CHART_COLORS[colorIdx % CHART_COLORS.length]);
+    colorIdx++;
+  }
+
+  const chartAssets: ChartAsset[] = Array.from(selectedSymbols)
+    .map(sym => {
+      const item = items.find(i => i.symbol === sym);
+      return item
+        ? { symbol: sym, name: item.name, color: colorMap.get(sym) ?? '#3b82f6' }
+        : null;
+    })
+    .filter((a): a is ChartAsset => a !== null);
 
   return (
     <div className="space-y-4">
-      {/* Controls row */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        {/* Tail length */}
         <div className="flex gap-1 bg-bg-input rounded-lg p-1">
-          {TAIL_OPTIONS.map(w => (
+          {SORT_OPTIONS.map(opt => (
             <button
-              key={w}
-              onClick={() => setTailWeeks(w)}
+              key={opt.value}
+              onClick={() => setSortBy(opt.value)}
               className={clsx(
                 'px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
-                tailWeeks === w ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100'
+                sortBy === opt.value
+                  ? 'bg-accent text-white'
+                  : 'text-gray-400 hover:text-gray-100 hover:bg-border'
               )}
             >
-              {w}w
+              {opt.label}
             </button>
           ))}
         </div>
-        <span className="text-xs text-gray-500">
-          vs <span className="text-gray-300 font-medium">{BENCHMARK.name}</span>
-        </span>
-      </div>
-
-      {/* Group + asset toggles */}
-      <div className="space-y-2">
-        {ASSET_GROUPS.map(group => {
-          const groupSymbols = group.assets.map(a => a.symbol);
-          const activeCount = groupSymbols.filter(s => activeSymbols.has(s)).length;
-          const allOn = activeCount === groupSymbols.length;
-          const someOn = activeCount > 0 && !allOn;
-
-          return (
-            <div key={group.key} className="flex items-center gap-2 flex-wrap">
-              {/* Group toggle button */}
-              <button
-                onClick={() => toggleGroup(group.key as GroupKey)}
-                className={clsx(
-                  'px-2.5 py-1 text-xs font-semibold rounded-md border transition-all shrink-0',
-                  allOn
-                    ? 'border-gray-500 bg-gray-700 text-gray-200'
-                    : someOn
-                    ? 'border-gray-600 bg-gray-800 text-gray-400'
-                    : 'border-gray-700 bg-transparent text-gray-600'
-                )}
-              >
-                {group.label}
-              </button>
-
-              {/* Individual asset pills */}
-              <div className="flex gap-1 flex-wrap">
-                {group.assets.map(asset => {
-                  const isActive = activeSymbols.has(asset.symbol);
-                  const hasData = allRrgData.has(asset.symbol);
-                  return (
-                    <button
-                      key={asset.symbol}
-                      onClick={() => toggleAsset(asset.symbol)}
-                      disabled={loading || !hasData}
-                      className={clsx(
-                        'px-2 py-0.5 text-[11px] font-semibold rounded-full border transition-all',
-                        isActive
-                          ? 'text-gray-900'
-                          : 'bg-transparent text-gray-500 border-gray-700 hover:border-gray-500',
-                        (!loading && !hasData) && 'opacity-30 cursor-not-allowed'
-                      )}
-                      style={isActive ? { background: asset.color, borderColor: asset.color } : {}}
-                    >
-                      {asset.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Chart area */}
-      <div className="rounded-xl border border-border bg-bg-card p-4">
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <LoadingSpinner size={32} />
-          </div>
-        ) : error ? (
-          <div className="flex items-center justify-center h-64">
-            <p className="text-sm text-gray-500">Failed to load data. Please try again.</p>
-          </div>
-        ) : visibleAssets.length === 0 ? (
-          <div className="flex items-center justify-center h-64">
-            <p className="text-sm text-gray-500">Select at least one asset above.</p>
-          </div>
-        ) : (
-          <div className="w-full max-w-2xl mx-auto">
-            <RelativeRotationGraph assets={visibleAssets} tailWeeks={tailWeeks} height={520} />
-          </div>
-        )}
-      </div>
-
-      {/* Quadrant legend */}
-      {!loading && !error && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {QUADRANT_LEGEND.map(q => (
-            <div key={q.label} className="rounded-lg border border-border bg-bg-card px-3 py-2 flex items-start gap-2">
-              <span className="mt-0.5 shrink-0 w-2.5 h-2.5 rounded-full" style={{ background: q.color }} />
-              <div>
-                <p className="text-xs font-semibold text-gray-200">{q.label}</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">{q.desc}</p>
-              </div>
-            </div>
+        <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+          {GROUP_FILTERS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setGroupFilter(opt.value)}
+              className={clsx(
+                'px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
+                groupFilter === opt.value
+                  ? 'bg-accent text-white'
+                  : 'text-gray-400 hover:text-gray-100 hover:bg-border'
+              )}
+            >
+              {opt.label}
+            </button>
           ))}
         </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-40">
+          <LoadingSpinner size={32} />
+        </div>
+      ) : error ? (
+        <div className="flex items-center justify-center h-40">
+          <p className="text-sm text-gray-500">Failed to load data. Please try again.</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-bg-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="w-8 px-3 py-2 text-left text-[10px] font-medium text-gray-600">#</th>
+                  <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-600">Name</th>
+                  <th className={clsx(
+                    'px-3 py-2 text-right text-[10px] font-medium hidden sm:table-cell',
+                    sortBy === 'day' ? 'text-accent' : 'text-gray-600'
+                  )}>Day</th>
+                  <th className={clsx(
+                    'px-3 py-2 text-right text-[10px] font-medium',
+                    sortBy === 'mtd' ? 'text-accent' : 'text-gray-600'
+                  )}>MTD</th>
+                  <th className={clsx(
+                    'px-3 py-2 text-right text-[10px] font-medium',
+                    sortBy === 'ytd' ? 'text-accent' : 'text-gray-600'
+                  )}>YTD</th>
+                  <th className={clsx(
+                    'px-3 py-2 text-right text-[10px] font-medium hidden sm:table-cell',
+                    sortBy === '5y' ? 'text-accent' : 'text-gray-600'
+                  )}>5Y</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {sortedItems.map((item, idx) => {
+                  const isSelected = selectedSymbols.has(item.symbol);
+                  const dotColor = GROUP_COLORS[item.group];
+                  const rowColor = colorMap.get(item.symbol);
+                  return (
+                    <tr
+                      key={item.symbol}
+                      onClick={() => toggleSymbol(item.symbol)}
+                      className={clsx(
+                        'cursor-pointer transition-colors hover:bg-border/30',
+                        isSelected ? 'bg-accent/10' : ''
+                      )}
+                    >
+                      <td className="px-3 py-2 text-[11px] text-gray-600 tabular-nums w-8">
+                        {idx + 1}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isSelected && rowColor ? (
+                            <span
+                              className="shrink-0 w-2 h-2 rounded-full"
+                              style={{ background: rowColor }}
+                            />
+                          ) : (
+                            <span
+                              className="shrink-0 w-2 h-2 rounded-full opacity-40"
+                              style={{ background: dotColor }}
+                            />
+                          )}
+                          <span className="truncate text-xs font-medium text-gray-200">
+                            {item.name}
+                          </span>
+                          <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-border text-gray-500 leading-none">
+                            {item.subCategory}
+                          </span>
+                        </div>
+                      </td>
+                      <td className={clsx(
+                        'px-3 py-2 text-right text-xs tabular-nums hidden sm:table-cell',
+                        sortBy === 'day' ? `font-bold ${pctColor(item.dayPct)}` : pctColor(item.dayPct)
+                      )}>
+                        {fmtPct(item.dayPct)}
+                      </td>
+                      <td className={clsx(
+                        'px-3 py-2 text-right text-xs tabular-nums',
+                        sortBy === 'mtd' ? `font-bold ${pctColor(item.mtdPct)}` : pctColor(item.mtdPct)
+                      )}>
+                        {fmtPct(item.mtdPct)}
+                      </td>
+                      <td className={clsx(
+                        'px-3 py-2 text-right text-xs tabular-nums',
+                        sortBy === 'ytd' ? `font-bold ${pctColor(item.ytdPct)}` : pctColor(item.ytdPct)
+                      )}>
+                        {fmtPct(item.ytdPct)}
+                      </td>
+                      <td className={clsx(
+                        'px-3 py-2 text-right text-xs tabular-nums hidden sm:table-cell',
+                        sortBy === '5y' ? `font-bold ${pctColor(item.fiveYPct)}` : pctColor(item.fiveYPct)
+                      )}>
+                        {fmtPct(item.fiveYPct)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
+
+      <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-xs text-gray-400 font-medium">
+            {selectedSymbols.size === 0
+              ? 'Click rows to add assets to chart'
+              : `${selectedSymbols.size} asset${selectedSymbols.size !== 1 ? 's' : ''} selected`}
+          </p>
+          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+            {CHART_TF_OPTIONS.map(tf => (
+              <button
+                key={tf}
+                onClick={() => setChartTimeframe(tf)}
+                className={clsx(
+                  'px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
+                  chartTimeframe === tf
+                    ? 'bg-accent text-white'
+                    : 'text-gray-400 hover:text-gray-100 hover:bg-border'
+                )}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+        </div>
+        <RotationChart assets={chartAssets} timeframe={chartTimeframe} />
+      </div>
     </div>
   );
 }
