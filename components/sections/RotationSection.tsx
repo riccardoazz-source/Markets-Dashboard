@@ -99,6 +99,18 @@ function accelArrow(rankDelta: number | null): { arrow: string; color: string } 
   return                      { arrow: '→',  color: 'text-gray-500'  };
 }
 
+// 1Y-return percentile across the universe (1 = biggest 1Y gainer). A high percentile
+// means the big move has largely already happened → late-stage, crowded, crash-prone.
+// A low percentile on an accelerating asset = the run is still young (the sweet spot).
+function buildExtensionPctile(items: RotationItem[]): Map<string, number> {
+  const withData = items.filter(i => i.r1y != null);
+  const sorted = [...withData].sort((a, b) => (a.r1y ?? 0) - (b.r1y ?? 0));
+  const n = sorted.length;
+  const out = new Map<string, number>();
+  sorted.forEach((it, i) => out.set(it.symbol, n > 1 ? i / (n - 1) : 0));
+  return out;
+}
+
 function buildRankDeltas(items: RotationItem[]): Map<string, number> {
   const withData = items.filter(i => i.r1m != null && i.r3m != null);
   const by3m = [...withData].sort((a, b) => (b.r3m ?? -Infinity) - (a.r3m ?? -Infinity));
@@ -246,15 +258,23 @@ export function RotationSection() {
   const r1mSorted = items.map(i => i.r1m).filter((v): v is number => v != null).sort((a, b) => a - b);
   const medianR1m = r1mSorted.length ? r1mSorted[Math.floor(r1mSorted.length / 2)] : 0;
 
+  // Extension: how far an asset already is into its 1Y move. Top 20% = "already ran".
+  const extPctile = rollingLoading ? new Map<string, number>() : buildExtensionPctile(items);
+  const EXTENDED_CUTOFF = 0.8;
+
   // "Accelerating" = climbing the leaderboard (rank-delta ≥4) AND real upward momentum
-  // (positive 1M return that's above the median). The momentum gate filters out flat
-  // assets — e.g. bonds creeping from −1% to +2% — that climb the ranking on noise alone.
-  const filteredItems = accelOnly
-    ? groupFiltered.filter(i =>
-        (rankDeltas.get(i.symbol) ?? -Infinity) >= 4 &&
-        i.r1m != null && i.r1m > 0 && i.r1m >= medianR1m
-      )
-    : groupFiltered;
+  // (positive 1M return above the median). The momentum gate drops flat assets — e.g.
+  // bonds creeping from −1% to +2% — that climb the ranking on noise alone.
+  const accelBase = groupFiltered.filter(i =>
+    (rankDeltas.get(i.symbol) ?? -Infinity) >= 4 &&
+    i.r1m != null && i.r1m > 0 && i.r1m >= medianR1m
+  );
+  // Extension guard: drop names already in the top 20% of 1Y gains — the move is mature
+  // and crowded there, exactly the "buy the top then it crashes" trap to avoid.
+  const accelEarly = accelBase.filter(i => (extPctile.get(i.symbol) ?? 0) < EXTENDED_CUTOFF);
+  const hiddenExtended = accelBase.length - accelEarly.length;
+
+  const filteredItems = accelOnly ? accelEarly : groupFiltered;
 
   const sortedItems = accelOnly
     ? [...filteredItems].sort((a, b) =>
@@ -352,9 +372,16 @@ export function RotationSection() {
 
       {/* Accelerating mode explainer */}
       {accelOnly && !rollingLoading && (
-        <p className="text-[11px] text-green-400/80">
-          Showing assets <span className="font-semibold">climbing the leaderboard with real momentum</span> — moving up the 1M ranking vs 3M and posting above-median 1M gains. These are where capital is starting to rotate, before the move is obvious.
-        </p>
+        <div className="space-y-1">
+          <p className="text-[11px] text-green-400/80">
+            <span className="font-semibold">Early-stage rotation</span> — assets climbing the 1M ranking vs 3M with above-median momentum, whose 1-year run is <span className="font-semibold">not yet extended</span>. The spot to look before the move is obvious.
+          </p>
+          {hiddenExtended > 0 && (
+            <p className="text-[11px] text-amber-400/80">
+              ⚠️ {hiddenExtended} accelerating name{hiddenExtended !== 1 ? 's' : ''} hidden as already extended (top 20% of 1-yr gains — the move is mature and crowded there).
+            </p>
+          )}
+        </div>
       )}
 
       {/* Table */}
@@ -397,6 +424,9 @@ export function RotationSection() {
                   const dotColor   = GROUP_COLORS[item.group];
                   const rowColor   = colorMap.get(item.symbol);
                   const accel      = accelArrow(rankDeltas.get(item.symbol) ?? null);
+                  // In accel mode, flag the freshest names: still in the bottom half of
+                  // 1Y gains, so the run is genuinely young, not a late blow-off.
+                  const isFresh    = accelOnly && (extPctile.get(item.symbol) ?? 1) < 0.5;
                   return (
                     <tr
                       key={item.symbol}
@@ -417,6 +447,11 @@ export function RotationSection() {
                           <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-border text-gray-500 leading-none hidden sm:inline">
                             {item.subCategory}
                           </span>
+                          {isFresh && (
+                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-300 leading-none" title="Run still young — bottom half of 1-year gains">
+                              🌱 early
+                            </span>
+                          )}
                           {accel && !rollingLoading && (
                             <span className={clsx('shrink-0 text-[10px] font-bold leading-none', accel.color)}>
                               {accel.arrow}
