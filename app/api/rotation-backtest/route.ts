@@ -64,10 +64,10 @@ function retBetween(history: Hist, startStr: string, endStr: string): number | n
 function fmt(d: Date): string { return d.toISOString().slice(0, 10); }
 
 const SCENARIOS: { key: string; label: string; days: number }[] = [
-  { key: '24m', label: '2 anni fa',  days: 730 },
-  { key: '18m', label: '18 mesi fa', days: 547 },
-  { key: '12m', label: '1 anno fa',  days: 365 },
-  { key: '6m',  label: '6 mesi fa',  days: 183 },
+  { key: '24m', label: '2 years ago',  days: 730 },
+  { key: '18m', label: '18 months ago', days: 547 },
+  { key: '12m', label: '1 year ago',   days: 365 },
+  { key: '6m',  label: '6 months ago', days: 183 },
 ];
 
 // Run the EXACT live "Accelerating" model as of a past date, using only data up

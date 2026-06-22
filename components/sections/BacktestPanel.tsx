@@ -35,7 +35,7 @@ function pctColor(v: number | null): string {
   return 'text-gray-500';
 }
 function fmtDate(s: string): string {
-  return new Date(s).toLocaleDateString('it-IT', { month: 'short', year: 'numeric' });
+  return new Date(s).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
 
 export function BacktestPanel() {
@@ -67,9 +67,9 @@ export function BacktestPanel() {
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-sm font-semibold text-gray-200">🔬 Backtest — macchina del tempo</h3>
+          <h3 className="text-sm font-semibold text-gray-200">🔬 Backtest — time machine</h3>
           <p className="text-[11px] text-gray-500 max-w-xl">
-            Torna indietro nel tempo, fa girare il modello con i <span className="font-medium">soli dati di allora</span>, e mostra cosa avrebbe consigliato di comprare — e quanto avrebbe reso da allora a oggi.
+            Go back in time, run the model with <span className="font-medium">only the data available then</span>, and see what it would have flagged — and how much it would have returned from that date to today.
           </p>
         </div>
         {!data && (
@@ -78,7 +78,7 @@ export function BacktestPanel() {
             disabled={loading}
             className={clsx('shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg bg-accent text-white transition-all', loading && 'opacity-50 cursor-not-allowed')}
           >
-            {loading ? 'Calcolo…' : '▶ Esegui backtest'}
+            {loading ? 'Computing…' : '▶ Run backtest'}
           </button>
         )}
       </div>
@@ -86,10 +86,10 @@ export function BacktestPanel() {
       {loading && (
         <div className="flex flex-col items-center justify-center h-40 gap-2">
           <LoadingSpinner size={28} />
-          <span className="text-[11px] text-gray-500">Scarico ~3 anni di storia per tutti gli asset…</span>
+          <span className="text-[11px] text-gray-500">Loading ~3 years of history for all assets…</span>
         </div>
       )}
-      {error && <p className="text-sm text-gray-500">Backtest non riuscito. Riprova.</p>}
+      {error && <p className="text-sm text-gray-500">Backtest failed. Please try again.</p>}
 
       {data && scenario && (
         <>
@@ -113,31 +113,31 @@ export function BacktestPanel() {
           <div className={clsx('rounded-lg border p-3', scenario.basketFwd == null ? 'border-border bg-bg-input' : beat ? 'border-green-500/40 bg-green-500/10' : 'border-red-500/40 bg-red-500/10')}>
             <p className={clsx('text-sm font-semibold', scenario.basketFwd == null ? 'text-gray-300' : beat ? 'text-green-300' : 'text-red-300')}>
               {scenario.basketFwd == null
-                ? 'Dati insufficienti per questo periodo'
+                ? 'Insufficient data for this period'
                 : beat
-                  ? '✓ Il modello avrebbe avuto ragione'
-                  : '✗ Il modello NON avrebbe battuto l’S&P 500'}
+                  ? '✓ The model would have been right'
+                  : '✗ The model would NOT have beaten the S&P 500'}
             </p>
             {scenario.basketFwd != null && (
               <p className="text-xs text-gray-300 mt-1 leading-relaxed">
-                Le scelte di <span className="font-medium">{fmtDate(scenario.asOf)}</span> avrebbero reso{' '}
+                Picks from <span className="font-medium">{fmtDate(scenario.asOf)}</span> would have returned{' '}
                 <span className={clsx('font-bold', pctColor(scenario.basketFwd))}>{fmtPct(scenario.basketFwd)}</span>{' '}
-                da allora a oggi, contro{' '}
-                <span className={clsx('font-bold', pctColor(scenario.spxFwd))}>{fmtPct(scenario.spxFwd)}</span> dell’S&P 500 e{' '}
-                <span className={clsx('font-bold', pctColor(scenario.universeFwd))}>{fmtPct(scenario.universeFwd)}</span> della media di tutti gli asset.
+                from then to today, vs{' '}
+                <span className={clsx('font-bold', pctColor(scenario.spxFwd))}>{fmtPct(scenario.spxFwd)}</span> for the S&P 500 and{' '}
+                <span className={clsx('font-bold', pctColor(scenario.universeFwd))}>{fmtPct(scenario.universeFwd)}</span> for the equal-weight universe.
               </p>
             )}
             {scenario.nPicks > 0 && (
               <p className="text-[11px] text-gray-400 mt-1">
-                {scenario.nBeatSpx}/{scenario.nPicks} scelte hanno battuto l’S&P 500.
+                {scenario.nBeatSpx}/{scenario.nPicks} picks beat the S&P 500.
               </p>
             )}
           </div>
 
-          {/* Picks */}
+          {/* Picks table */}
           {scenario.picks.length === 0 ? (
             <p className="text-xs text-gray-500">
-              Il modello non avrebbe selezionato nulla a {fmtDate(scenario.asOf)} — nessun asset passava i gate. (A volte la cosa giusta è non comprare.)
+              The model would have selected nothing as of {fmtDate(scenario.asOf)} — no asset passed all gates. (Sometimes the right call is to stay out.)
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -145,9 +145,9 @@ export function BacktestPanel() {
                 <thead>
                   <tr className="border-b border-border text-[10px] text-gray-600">
                     <th className="px-2 py-1.5 text-left w-6">#</th>
-                    <th className="px-2 py-1.5 text-left">Avrebbe comprato</th>
-                    <th className="px-2 py-1.5 text-right">1M allora</th>
-                    <th className="px-2 py-1.5 text-right">Da allora → oggi</th>
+                    <th className="px-2 py-1.5 text-left">Would have bought</th>
+                    <th className="px-2 py-1.5 text-right">1M then</th>
+                    <th className="px-2 py-1.5 text-right">Return since</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -176,7 +176,7 @@ export function BacktestPanel() {
           )}
 
           <p className="text-[10px] text-gray-600 leading-relaxed">
-            Caveat onesti: universo = i 71 asset che abbiamo <span className="italic">oggi</span> in config (survivorship bias), prezzi di chiusura, nessun costo/tassa/slippage, ribilanciamento perfetto. ~3 anni di storia = pochi cicli. È un'indicazione della bontà del segnale, non una garanzia di rendimenti futuri.
+            Honest caveats: universe = the {71} assets currently in config (survivorship bias), closing prices, no costs/taxes/slippage, perfect rebalance. ~3 years of history = few cycles. This is a signal quality check, not a guarantee of future returns.
           </p>
         </>
       )}
