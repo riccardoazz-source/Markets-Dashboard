@@ -431,6 +431,13 @@ export function RotationSection() {
                   // In accel mode, flag the freshest names: still in the bottom half of
                   // 1Y gains, so the run is genuinely young, not a late blow-off.
                   const isFresh    = accelOnly && (extPctile.get(item.symbol) ?? 1) < 0.5;
+                  // Rebound vs trend: if the acceleration sits on a deeply negative 6M or
+                  // 1Y base, it's a bounce off oversold (riskier) rather than a confirmed
+                  // uptrend. Solid = up across every horizon.
+                  const isRebound  = accelOnly &&
+                    ((item.r6m != null && item.r6m < 0) || (item.r1y != null && item.r1y < 0));
+                  const isSolid    = accelOnly && !isRebound &&
+                    item.r6m != null && item.r6m > 0 && item.r1y != null && item.r1y > 0;
                   return (
                     <tr
                       key={item.symbol}
@@ -454,6 +461,16 @@ export function RotationSection() {
                           {isFresh && (
                             <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-300 leading-none" title="Run still young — bottom half of 1-year gains">
                               🌱 early
+                            </span>
+                          )}
+                          {isRebound && (
+                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 leading-none" title="Accelerating off a negative 6M/1Y base — a bounce off oversold, riskier than a confirmed trend">
+                              ↩ rebound
+                            </span>
+                          )}
+                          {isSolid && (
+                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-300 leading-none" title="Up across every horizon — a confirmed trend, not just a bounce">
+                              ✓ trend
                             </span>
                           )}
                           {accel && !rollingLoading && (
