@@ -71,8 +71,8 @@ export interface MarketEvent {
 //   geopolitical Referendums, treaties, leadership changes or policy shocks of
 //                landmark, era-defining significance (Cold War turning points,
 //                EU formation, trade-war milestones). Not routine politics.
-//   elections    US presidential elections only — one entry per election on
-//                Election Day (first Tuesday of November). Pure calendar facts.
+//   elections    US presidential and midterm elections — Election Day (first
+//                Tuesday after the first Monday in November). Pure calendar facts.
 //   crypto       Protocol-level milestones, top-exchange/stablecoin failures,
 //                landmark regulatory or adoption firsts, or major cycle ATHs.
 //   ipo          COMPLETED listings only. Raise ≥ ~$2B OR a landmark debut
@@ -188,7 +188,7 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2021-01-06', label: 'Capitol Storming',      category: 'geopolitical', description: 'US Capitol stormed during certification of 2020 election results' },
   { date: '2025-04-02', label: 'Liberation Day',        category: 'geopolitical', description: 'Trump announces sweeping "Liberation Day" tariffs; S&P falls ~10% in 2 days' },
 
-  // US presidential elections — Election Day (first Tuesday of November)
+  // US presidential elections — Election Day (first Tuesday after the first Monday in November)
   { date: '1972-11-07', label: 'Nixon Re-elected',      category: 'elections',    description: 'Richard Nixon (R) defeats George McGovern in a landslide', source: 'https://en.wikipedia.org/wiki/1972_United_States_presidential_election' },
   { date: '1976-11-02', label: 'Carter Elected',        category: 'elections',    description: 'Jimmy Carter (D) defeats incumbent Gerald Ford', source: 'https://en.wikipedia.org/wiki/1976_United_States_presidential_election' },
   { date: '1980-11-04', label: 'Reagan Elected',        category: 'elections',    description: 'Ronald Reagan (R) defeats incumbent Jimmy Carter', source: 'https://en.wikipedia.org/wiki/1980_United_States_presidential_election' },
@@ -203,6 +203,23 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2016-11-08', label: 'Trump Elected (2016)',  category: 'elections',    description: 'Donald Trump (R) defeats Hillary Clinton', source: 'https://en.wikipedia.org/wiki/2016_United_States_presidential_election' },
   { date: '2020-11-03', label: 'Biden Elected',         category: 'elections',    description: 'Joe Biden (D) defeats incumbent Donald Trump', source: 'https://en.wikipedia.org/wiki/2020_United_States_presidential_election' },
   { date: '2024-11-05', label: 'Trump Elected (2024)',  category: 'elections',    description: 'Donald Trump (R) defeats Kamala Harris', source: 'https://en.wikipedia.org/wiki/2024_United_States_presidential_election' },
+
+  // US midterm elections — held every 2 years between presidential elections
+  { date: '1970-11-03', label: 'Midterms 1970',         category: 'elections',    description: 'Dems gain 12 Senate seats; Nixon pushes "silent majority" theme amid Vietnam', source: 'https://en.wikipedia.org/wiki/1970_United_States_elections' },
+  { date: '1974-11-05', label: 'Midterms 1974',         category: 'elections',    description: 'Post-Watergate wave: Dems gain 49 House and 4 Senate seats', source: 'https://en.wikipedia.org/wiki/1974_United_States_elections' },
+  { date: '1978-11-07', label: 'Midterms 1978',         category: 'elections',    description: 'Reps gain 15 House seats; Carter presidency weakening amid inflation', source: 'https://en.wikipedia.org/wiki/1978_United_States_elections' },
+  { date: '1982-11-02', label: 'Midterms 1982',         category: 'elections',    description: 'Recession backlash: Dems gain 26 House seats against Reagan', source: 'https://en.wikipedia.org/wiki/1982_United_States_elections' },
+  { date: '1986-11-04', label: 'Midterms 1986',         category: 'elections',    description: 'Dems retake Senate (+8 seats); Iran-Contra scandal emerges', source: 'https://en.wikipedia.org/wiki/1986_United_States_elections' },
+  { date: '1990-11-06', label: 'Midterms 1990',         category: 'elections',    description: 'Dems gain 7 House and 1 Senate seat; Gulf War buildup begins', source: 'https://en.wikipedia.org/wiki/1990_United_States_elections' },
+  { date: '1994-11-08', label: 'Midterms 1994',         category: 'elections',    description: '"Republican Revolution": Reps gain 54 House and 8 Senate seats — Gingrich becomes Speaker', source: 'https://en.wikipedia.org/wiki/1994_United_States_elections' },
+  { date: '1998-11-03', label: 'Midterms 1998',         category: 'elections',    description: 'Dems gain 5 House seats (rare gain for president\'s party) amid Clinton impeachment', source: 'https://en.wikipedia.org/wiki/1998_United_States_elections' },
+  { date: '2002-11-05', label: 'Midterms 2002',         category: 'elections',    description: 'Post-9/11: Reps gain 8 House and 2 Senate seats — rare gain for president\'s party', source: 'https://en.wikipedia.org/wiki/2002_United_States_elections' },
+  { date: '2006-11-07', label: 'Midterms 2006',         category: 'elections',    description: 'Iraq War backlash: Dems gain 31 House and 6 Senate seats; Pelosi first female Speaker', source: 'https://en.wikipedia.org/wiki/2006_United_States_elections' },
+  { date: '2010-11-02', label: 'Midterms 2010',         category: 'elections',    description: 'Tea Party wave: Reps gain 63 House seats — largest House shift since 1938', source: 'https://en.wikipedia.org/wiki/2010_United_States_elections' },
+  { date: '2014-11-04', label: 'Midterms 2014',         category: 'elections',    description: 'Reps gain Senate majority (+9 seats) and 13 House seats', source: 'https://en.wikipedia.org/wiki/2014_United_States_elections' },
+  { date: '2018-11-06', label: 'Midterms 2018',         category: 'elections',    description: 'Dems retake House (+41 seats); Reps gain 2 Senate seats', source: 'https://en.wikipedia.org/wiki/2018_United_States_elections' },
+  { date: '2022-11-08', label: 'Midterms 2022',         category: 'elections',    description: 'Expected "red wave" falls short; Reps win slim House majority (+9), Dems keep Senate', source: 'https://en.wikipedia.org/wiki/2022_United_States_elections' },
+  { date: '2026-11-03', label: 'Midterms 2026',         category: 'elections',    description: 'US midterm elections — House (all 435 seats) and Senate (33 seats)', source: 'https://en.wikipedia.org/wiki/2026_United_States_elections' },
 
   // Crypto-specific
   { date: '2013-12-05', label: 'China Bans BTC',        category: 'crypto',       description: 'China bans financial institutions from handling Bitcoin; BTC falls 50%' },
