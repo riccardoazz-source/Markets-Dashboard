@@ -242,9 +242,18 @@ export function RotationSection() {
     ? items
     : items.filter(i => i.group === groupFilter);
 
-  // "Accelerating" = climbing the leaderboard (1M rank better than 3M rank by ≥4 spots)
+  // Median 1M return across all assets with data — adaptive momentum floor.
+  const r1mSorted = items.map(i => i.r1m).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const medianR1m = r1mSorted.length ? r1mSorted[Math.floor(r1mSorted.length / 2)] : 0;
+
+  // "Accelerating" = climbing the leaderboard (rank-delta ≥4) AND real upward momentum
+  // (positive 1M return that's above the median). The momentum gate filters out flat
+  // assets — e.g. bonds creeping from −1% to +2% — that climb the ranking on noise alone.
   const filteredItems = accelOnly
-    ? groupFiltered.filter(i => (rankDeltas.get(i.symbol) ?? -Infinity) >= 4)
+    ? groupFiltered.filter(i =>
+        (rankDeltas.get(i.symbol) ?? -Infinity) >= 4 &&
+        i.r1m != null && i.r1m > 0 && i.r1m >= medianR1m
+      )
     : groupFiltered;
 
   const sortedItems = accelOnly
@@ -344,7 +353,7 @@ export function RotationSection() {
       {/* Accelerating mode explainer */}
       {accelOnly && !rollingLoading && (
         <p className="text-[11px] text-green-400/80">
-          Showing assets <span className="font-semibold">climbing the leaderboard</span> — ranked higher over the last month than over 3 months. These are where capital is starting to rotate, before the move is obvious.
+          Showing assets <span className="font-semibold">climbing the leaderboard with real momentum</span> — moving up the 1M ranking vs 3M and posting above-median 1M gains. These are where capital is starting to rotate, before the move is obvious.
         </p>
       )}
 
