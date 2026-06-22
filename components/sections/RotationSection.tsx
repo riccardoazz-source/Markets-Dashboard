@@ -6,6 +6,7 @@ import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from 
 import { QuoteData, CryptoData } from '@/lib/types';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { RotationChart, ChartAsset } from '@/components/charts/RotationChart';
+import { BacktestPanel } from '@/components/sections/BacktestPanel';
 
 interface RotationItem {
   symbol: string;
@@ -534,6 +535,9 @@ export function RotationSection() {
         </div>
         <RotationChart assets={chartAssets} timeframe={chartTimeframe} />
       </div>
+
+      {/* Backtest — time machine */}
+      <BacktestPanel />
     </div>
   );
 }
