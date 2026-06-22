@@ -254,20 +254,24 @@ export function RotationSection() {
     ? items
     : items.filter(i => i.group === groupFilter);
 
-  // Median 1M return across all assets with data — adaptive momentum floor.
+  // Top-third 1M return across all assets — momentum floor. Stricter than the median so
+  // flat bonds that creep up a percent or two can't qualify as "movers".
   const r1mSorted = items.map(i => i.r1m).filter((v): v is number => v != null).sort((a, b) => a - b);
-  const medianR1m = r1mSorted.length ? r1mSorted[Math.floor(r1mSorted.length / 2)] : 0;
+  const topThirdR1m = r1mSorted.length ? r1mSorted[Math.floor(r1mSorted.length * 2 / 3)] : 0;
 
   // Extension: how far an asset already is into its 1Y move. Top 20% = "already ran".
   const extPctile = rollingLoading ? new Map<string, number>() : buildExtensionPctile(items);
   const EXTENDED_CUTOFF = 0.8;
 
-  // "Accelerating" = climbing the leaderboard (rank-delta ≥4) AND real upward momentum
-  // (positive 1M return above the median). The momentum gate drops flat assets — e.g.
-  // bonds creeping from −1% to +2% — that climb the ranking on noise alone.
+  // "Accelerating" = climbing the leaderboard (rank-delta ≥4) AND a genuine, confirmed
+  // up-move. The quality gates drop flat assets — e.g. bonds bouncing from −1% to +2% —
+  // that climb the ranking on noise alone:
+  //   • r3m > 0      → the trend is confirmed over 3 months, not a one-month blip
+  //   • r1m top-third → it's a real mover now, not a sleepy +1/2%
   const accelBase = groupFiltered.filter(i =>
     (rankDeltas.get(i.symbol) ?? -Infinity) >= 4 &&
-    i.r1m != null && i.r1m > 0 && i.r1m >= medianR1m
+    i.r1m != null && i.r1m > 0 && i.r1m >= topThirdR1m &&
+    i.r3m != null && i.r3m > 0
   );
   // Extension guard: drop names already in the top 20% of 1Y gains — the move is mature
   // and crowded there, exactly the "buy the top then it crashes" trap to avoid.
