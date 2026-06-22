@@ -120,6 +120,7 @@ export function RotationSection() {
   const [error, setError] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>('3m');
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
+  const [accelOnly, setAccelOnly] = useState(false);
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('3M');
   const userHasToggled = useRef(false);
@@ -234,16 +235,25 @@ export function RotationSection() {
     return () => { cancelled = true; };
   }, []);
 
-  const filteredItems = groupFilter === 'all'
+  // Rank deltas computed across ALL items (not just filtered) so the signal is global
+  const rankDeltas = rollingLoading ? new Map<string, number>() : buildRankDeltas(items);
+
+  const groupFiltered = groupFilter === 'all'
     ? items
     : items.filter(i => i.group === groupFilter);
 
-  const sortedItems = [...filteredItems].sort((a, b) =>
-    (getPct(b, sortBy) ?? -Infinity) - (getPct(a, sortBy) ?? -Infinity)
-  );
+  // "Accelerating" = climbing the leaderboard (1M rank better than 3M rank by ≥4 spots)
+  const filteredItems = accelOnly
+    ? groupFiltered.filter(i => (rankDeltas.get(i.symbol) ?? -Infinity) >= 4)
+    : groupFiltered;
 
-  // Rank deltas computed across ALL items (not just filtered) so the signal is global
-  const rankDeltas = rollingLoading ? new Map<string, number>() : buildRankDeltas(items);
+  const sortedItems = accelOnly
+    ? [...filteredItems].sort((a, b) =>
+        (rankDeltas.get(b.symbol) ?? -Infinity) - (rankDeltas.get(a.symbol) ?? -Infinity)
+      )
+    : [...filteredItems].sort((a, b) =>
+        (getPct(b, sortBy) ?? -Infinity) - (getPct(a, sortBy) ?? -Infinity)
+      );
 
   const toggleSymbol = (symbol: string) => {
     userHasToggled.current = true;
@@ -273,21 +283,37 @@ export function RotationSection() {
     <div className="space-y-4">
       {/* Controls */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex gap-1 bg-bg-input rounded-lg p-1">
-          {SORT_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => setSortBy(opt.value)}
-              className={clsx(
-                'px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
-                sortBy === opt.value
-                  ? 'bg-accent text-white'
-                  : 'text-gray-400 hover:text-gray-100 hover:bg-border'
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setAccelOnly(v => !v)}
+            disabled={rollingLoading}
+            className={clsx(
+              'px-3 py-1.5 text-xs font-semibold rounded-lg transition-all border',
+              accelOnly
+                ? 'bg-green-500/15 border-green-500/50 text-green-300'
+                : 'bg-bg-input border-border text-gray-400 hover:text-gray-100 hover:border-gray-600',
+              rollingLoading && 'opacity-40 cursor-not-allowed'
+            )}
+            title="Show only assets climbing the leaderboard — the potential next Kospi"
+          >
+            🚀 Accelerating
+          </button>
+          <div className={clsx('flex gap-1 bg-bg-input rounded-lg p-1', accelOnly && 'opacity-40 pointer-events-none')}>
+            {SORT_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setSortBy(opt.value)}
+                className={clsx(
+                  'px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
+                  sortBy === opt.value
+                    ? 'bg-accent text-white'
+                    : 'text-gray-400 hover:text-gray-100 hover:bg-border'
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex gap-1 bg-bg-input rounded-lg p-1">
           {GROUP_FILTERS.map(opt => (
@@ -313,6 +339,13 @@ export function RotationSection() {
           <LoadingSpinner size={12} />
           <span>Computing rolling returns…</span>
         </div>
+      )}
+
+      {/* Accelerating mode explainer */}
+      {accelOnly && !rollingLoading && (
+        <p className="text-[11px] text-green-400/80">
+          Showing assets <span className="font-semibold">climbing the leaderboard</span> — ranked higher over the last month than over 3 months. These are where capital is starting to rotate, before the move is obvious.
+        </p>
       )}
 
       {/* Table */}
@@ -341,6 +374,15 @@ export function RotationSection() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
+                {sortedItems.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-10 text-center text-xs text-gray-500">
+                      {accelOnly
+                        ? 'No assets are accelerating right now — the leaderboard is stable.'
+                        : 'No assets match this filter.'}
+                    </td>
+                  </tr>
+                )}
                 {sortedItems.map((item, idx) => {
                   const isSelected = selectedSymbols.has(item.symbol);
                   const dotColor   = GROUP_COLORS[item.group];
