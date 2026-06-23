@@ -1,14 +1,25 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { useGistData, SentimentRecord, makeId } from '@/lib/gist';
+
+interface SnapshotMover { name: string; group: string; r1m: number | null; r3m: number | null; r1y: number | null }
+interface SnapshotGroup {
+  group: string;
+  leaders: SnapshotMover[];
+  laggards: SnapshotMover[];
+  accelerating: string[];
+}
 
 export interface SentimentSnapshot {
   date: string;
-  leaders: { name: string; group: string; r1m: number | null; r3m: number | null; r1y: number | null }[];
-  laggards: { name: string; group: string; r1m: number | null; r3m: number | null; r1y: number | null }[];
+  leaders: SnapshotMover[];
+  laggards: SnapshotMover[];
   accelerating: { name: string; group: string }[];
+  byGroup: SnapshotGroup[];
   levels: Record<string, number | null>;
 }
 
@@ -21,11 +32,22 @@ interface SentimentData {
   rotation_note?: string;
   risk_note?: string;
   confidence?: string;
+  // Per-asset-class notes
+  indexes_note?: string;
+  crypto_note?: string;
+  commodities_note?: string;
+  sectors_note?: string;
+  stocks_note?: string;
 }
 
-interface Stored { data: SentimentData; generatedAt: string }
-
-const LS_KEY = 'rotation-sentiment-v1';
+// Per-asset-class note key → display label + emoji.
+const CLASS_NOTES: { key: keyof SentimentData; label: string }[] = [
+  { key: 'indexes_note',     label: '📈 Indexes'     },
+  { key: 'crypto_note',      label: '🪙 Crypto'      },
+  { key: 'commodities_note', label: '🛢️ Commodities' },
+  { key: 'sectors_note',     label: '🏭 Sectors'     },
+  { key: 'stocks_note',      label: '🏷️ Stocks'      },
+];
 
 // Regime → colour. Unknown labels fall back to neutral.
 const REGIME_CLS: Record<string, string> = {
@@ -48,19 +70,84 @@ function fmtWhen(iso: string): string {
   } catch { return iso; }
 }
 
+function fmtDay(date: string): string {
+  try {
+    const d = new Date(date + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return date; }
+}
+
+// The full read of one sentiment record (latest card + each history entry share this).
+function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) {
+  const classNotes = CLASS_NOTES.filter(c => d[c.key]);
+  return (
+    <div className="space-y-3">
+      {d.headline && (
+        <p className={clsx('font-semibold text-gray-100 leading-snug', compact ? 'text-xs' : 'text-sm')}>{d.headline}</p>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className={clsx('rounded-lg border p-2.5', regimeCls(d.regime_now))}>
+          <p className="text-[9px] uppercase tracking-widest opacity-60 mb-0.5">Now</p>
+          <p className={clsx('font-black leading-tight', compact ? 'text-sm' : 'text-base')}>{d.regime_now ?? '—'}</p>
+        </div>
+        <div className={clsx('rounded-lg border p-2.5', regimeCls(d.regime_next))}>
+          <p className="text-[9px] uppercase tracking-widest opacity-60 mb-0.5">Next ~month</p>
+          <p className={clsx('font-black leading-tight', compact ? 'text-sm' : 'text-base')}>{d.regime_next ?? '—'}</p>
+        </div>
+      </div>
+
+      <div className="space-y-2 text-xs leading-relaxed">
+        {d.macro_note && (
+          <p className="text-gray-300"><span className="text-gray-500 font-medium">Today: </span>{d.macro_note}</p>
+        )}
+        {d.outlook_note && (
+          <p className="text-gray-300"><span className="text-gray-500 font-medium">Next month: </span>{d.outlook_note}</p>
+        )}
+        {d.rotation_note && (
+          <p className="text-gray-300"><span className="text-gray-500 font-medium">Rotation: </span>{d.rotation_note}</p>
+        )}
+      </div>
+
+      {classNotes.length > 0 && (
+        <div className="rounded-lg border border-border bg-bg-input/40 p-2.5 space-y-1.5">
+          <p className="text-[9px] uppercase tracking-widest text-gray-600">By asset class</p>
+          {classNotes.map(c => (
+            <p key={c.key} className="text-xs text-gray-300 leading-relaxed">
+              <span className="text-gray-400 font-medium">{c.label}: </span>{d[c.key]}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {d.risk_note && (
+        <p className="text-xs text-amber-300/90 leading-relaxed">
+          <span className="text-amber-500/80 font-medium">Key risk: </span>{d.risk_note}
+        </p>
+      )}
+
+      {d.confidence && (
+        <p className="text-[10px] text-gray-600">Confidence: {d.confidence}</p>
+      )}
+    </div>
+  );
+}
+
 export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => SentimentSnapshot; ready: boolean }) {
-  const [stored, setStored] = useState<Stored | null>(null);
+  const { data: gistData, update } = useGistData();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secs, setSecs] = useState(0);
+  const [showHistory, setShowHistory] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) setStored(JSON.parse(raw));
-    } catch { /* ignore */ }
-  }, []);
+  // History = the saved "database", newest first.
+  const history = useMemo(
+    () => [...(gistData.sentiments ?? [])].sort((a, b) => b.generatedAt.localeCompare(a.generatedAt)),
+    [gistData.sentiments],
+  );
+  const latest = history[0];
 
   const run = async () => {
     setLoading(true);
@@ -86,9 +173,19 @@ export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => 
         );
         return;
       }
-      const next: Stored = { data: json.data, generatedAt: json.generatedAt };
-      setStored(next);
-      try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      // Save to the gist database, one record per day (a same-day refresh replaces it).
+      const today = new Date().toISOString().slice(0, 10);
+      const record: SentimentRecord = {
+        id: makeId(),
+        date: today,
+        generatedAt: json.generatedAt ?? new Date().toISOString(),
+        data: json.data,
+      };
+      const prior = (gistData.sentiments ?? []).filter(r => r.date !== today);
+      const nextList = [record, ...prior]
+        .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt))
+        .slice(0, 120);
+      await update({ sentiments: nextList });
     } catch {
       setError('Request failed. Try again.');
     } finally {
@@ -97,7 +194,7 @@ export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => 
     }
   };
 
-  const d = stored?.data;
+  const d = latest?.data as SentimentData | undefined;
 
   return (
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
@@ -105,18 +202,18 @@ export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => 
         <div>
           <h3 className="text-sm font-semibold text-gray-200">🧭 Market Sentiment</h3>
           <p className="text-[11px] text-gray-500 max-w-xl">
-            Reads the live leaderboard on this page + searches today&apos;s macro headlines for a regime call — now and the next month.
+            Reads the live leaderboard on this page (all asset classes) + searches today&apos;s macro headlines for a regime call — now and the next month. Saved by date.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {stored && <span className="text-[10px] text-gray-500">{fmtWhen(stored.generatedAt)}</span>}
+          {latest && <span className="text-[10px] text-gray-500">{fmtWhen(latest.generatedAt)}</span>}
           <button
             onClick={run}
             disabled={loading || !ready}
             className={clsx('px-3 py-1.5 text-xs font-semibold rounded-lg bg-accent text-white transition-all', (loading || !ready) && 'opacity-50 cursor-not-allowed')}
             title={!ready ? 'Waiting for leaderboard data to load' : 'Read today’s sentiment'}
           >
-            {loading ? `Reading… ${secs}s` : stored ? '↻ Refresh' : '▶ Read sentiment'}
+            {loading ? `Reading… ${secs}s` : latest ? '↻ Refresh' : '▶ Read sentiment'}
           </button>
         </div>
       </div>
@@ -135,41 +232,54 @@ export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => 
       )}
 
       {d && (
-        <div className={clsx('space-y-3', loading && 'opacity-50')}>
-          {d.headline && (
-            <p className="text-sm font-semibold text-gray-100 leading-snug">{d.headline}</p>
+        <div className={clsx(loading && 'opacity-50')}>
+          <SentimentBody d={d} />
+          <p className="mt-3 text-[10px] text-gray-600 italic text-right">AI + web search — not financial advice.</p>
+        </div>
+      )}
+
+      {/* History — the saved database, browsable by date */}
+      {history.length > 0 && (
+        <div className="border-t border-border pt-2">
+          <button
+            onClick={() => setShowHistory(v => !v)}
+            className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {showHistory ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            History ({history.length} day{history.length !== 1 ? 's' : ''})
+          </button>
+          {showHistory && (
+            <div className="mt-2 space-y-1">
+              {history.map(rec => {
+                const isOpen = openId === rec.id;
+                const rd = rec.data as SentimentData;
+                return (
+                  <div key={rec.id} className="rounded-lg border border-border bg-bg-input/30 overflow-hidden">
+                    <button
+                      onClick={() => setOpenId(isOpen ? null : rec.id)}
+                      className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left hover:bg-border/20 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {isOpen ? <ChevronDown size={12} className="shrink-0 text-gray-600" /> : <ChevronRight size={12} className="shrink-0 text-gray-600" />}
+                        <span className="text-[11px] font-medium text-gray-300 shrink-0">{fmtDay(rec.date)}</span>
+                        <span className="text-[11px] text-gray-500 truncate hidden sm:inline">{rd.headline}</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className={clsx('text-[9px] px-1.5 py-0.5 rounded border', regimeCls(rd.regime_now))}>{rd.regime_now ?? '—'}</span>
+                        <span className="text-[9px] text-gray-600">→</span>
+                        <span className={clsx('text-[9px] px-1.5 py-0.5 rounded border', regimeCls(rd.regime_next))}>{rd.regime_next ?? '—'}</span>
+                      </div>
+                    </button>
+                    {isOpen && (
+                      <div className="px-2.5 pb-2.5 pt-1 border-t border-border">
+                        <SentimentBody d={rd} compact />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className={clsx('rounded-lg border p-2.5', regimeCls(d.regime_now))}>
-              <p className="text-[9px] uppercase tracking-widest opacity-60 mb-0.5">Now</p>
-              <p className="text-base font-black leading-tight">{d.regime_now ?? '—'}</p>
-            </div>
-            <div className={clsx('rounded-lg border p-2.5', regimeCls(d.regime_next))}>
-              <p className="text-[9px] uppercase tracking-widest opacity-60 mb-0.5">Next ~month</p>
-              <p className="text-base font-black leading-tight">{d.regime_next ?? '—'}</p>
-            </div>
-          </div>
-
-          <div className="space-y-2 text-xs leading-relaxed">
-            {d.macro_note && (
-              <p className="text-gray-300"><span className="text-gray-500 font-medium">Today: </span>{d.macro_note}</p>
-            )}
-            {d.outlook_note && (
-              <p className="text-gray-300"><span className="text-gray-500 font-medium">Next month: </span>{d.outlook_note}</p>
-            )}
-            {d.rotation_note && (
-              <p className="text-gray-300"><span className="text-gray-500 font-medium">Rotation: </span>{d.rotation_note}</p>
-            )}
-            {d.risk_note && (
-              <p className="text-amber-300/90"><span className="text-amber-500/80 font-medium">Key risk: </span>{d.risk_note}</p>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between text-[10px] text-gray-600">
-            {d.confidence && <span>Confidence: {d.confidence}</span>}
-            <span className="italic">AI + web search — not financial advice.</span>
-          </div>
         </div>
       )}
     </div>

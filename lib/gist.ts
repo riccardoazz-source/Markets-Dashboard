@@ -17,9 +17,17 @@ export interface AnalysisEntry {
   date: string;
 }
 
+export interface SentimentRecord {
+  id: string;
+  date: string;        // YYYY-MM-DD
+  generatedAt: string; // ISO timestamp of the reading
+  data: Record<string, string>;
+}
+
 export interface GistData {
   notes?: Record<string, NoteEntry[]>;
   analyses?: AnalysisEntry[];
+  sentiments?: SentimentRecord[];
 }
 
 /**
@@ -76,6 +84,7 @@ function mergeNotes(base: GistData, over: GistData): GistData {
   return {
     notes: { ...(base.notes ?? {}), ...(over.notes ?? {}) },
     analyses: over.analyses ?? base.analyses,
+    sentiments: over.sentiments ?? base.sentiments,
   };
 }
 
@@ -135,6 +144,7 @@ export async function updateGistData(patch: Partial<GistData>): Promise<GistData
       ? { notes: { ...(cur.notes ?? {}), ...patch.notes } }
       : {}),
     ...(patch.analyses !== undefined ? { analyses: patch.analyses } : {}),
+    ...(patch.sentiments !== undefined ? { sentiments: patch.sentiments } : {}),
   };
   _cache = merged;
   saveLocal(merged);
