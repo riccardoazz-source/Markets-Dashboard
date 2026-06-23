@@ -28,6 +28,7 @@ export interface GistData {
   notes?: Record<string, NoteEntry[]>;
   analyses?: AnalysisEntry[];
   sentiments?: SentimentRecord[];
+  pins?: string[]; // Rotation "remember to check" symbols
 }
 
 /**
@@ -85,6 +86,7 @@ function mergeNotes(base: GistData, over: GistData): GistData {
     notes: { ...(base.notes ?? {}), ...(over.notes ?? {}) },
     analyses: over.analyses ?? base.analyses,
     sentiments: over.sentiments ?? base.sentiments,
+    pins: over.pins ?? base.pins,
   };
 }
 
@@ -145,6 +147,7 @@ export async function updateGistData(patch: Partial<GistData>): Promise<GistData
       : {}),
     ...(patch.analyses !== undefined ? { analyses: patch.analyses } : {}),
     ...(patch.sentiments !== undefined ? { sentiments: patch.sentiments } : {}),
+    ...(patch.pins !== undefined ? { pins: patch.pins } : {}),
   };
   _cache = merged;
   saveLocal(merged);

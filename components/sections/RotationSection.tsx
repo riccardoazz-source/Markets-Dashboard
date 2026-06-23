@@ -146,30 +146,34 @@ export function RotationSection() {
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('3M');
   const userHasToggled = useRef(false);
 
-  // Pinned assets — durable "remember to check" list, kept in localStorage.
-  const [pins, setPins] = useState<Set<string>>(new Set());
+  // Pinned assets — durable "remember to check" list, saved to the gist database
+  // (synced across devices) just like notes and sentiment history.
+  const { data: gistData, update: updateGist } = useGistData();
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  const pins = useMemo(() => new Set(gistData.pins ?? []), [gistData.pins]);
 
-  // Stock list integration — lists are note categories from the Stocks tab.
-  const { data: gistData } = useGistData();
   const [stockList, setStockList] = useState<string | null>(null);
   const [stockItems, setStockItems] = useState<RotationItem[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
 
+  // One-time migration: lift any pins that lived only in localStorage into the gist.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(PINS_KEY);
-      if (raw) setPins(new Set(JSON.parse(raw) as string[]));
+      if (!raw) return;
+      const local = JSON.parse(raw) as string[];
+      if (local.length && !(gistData.pins && gistData.pins.length)) {
+        updateGist({ pins: local });
+      }
+      localStorage.removeItem(PINS_KEY);
     } catch { /* ignore */ }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gistData.pins]);
 
   const togglePin = (symbol: string) => {
-    setPins(prev => {
-      const next = new Set(prev);
-      if (next.has(symbol)) next.delete(symbol); else next.add(symbol);
-      try { localStorage.setItem(PINS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
-      return next;
-    });
+    const next = new Set(pins);
+    if (next.has(symbol)) next.delete(symbol); else next.add(symbol);
+    updateGist({ pins: [...next] });
   };
 
   // Stock watchlists = note categories on `stock:SYM` chart IDs (same source the
