@@ -18,10 +18,10 @@ interface Scenario {
   nPicks: number; nBeatSpx: number;
 }
 
-interface Payload { generatedAt: string; scenarios: Scenario[] }
+interface Payload { generatedAt: string; scenarios: Scenario[]; universeSize?: number }
 
 const GROUP_COLORS: Record<string, string> = {
-  Indexes: '#3b82f6', Crypto: '#f97316', Commodities: '#f59e0b', Sectors: '#8b5cf6',
+  Indexes: '#3b82f6', Crypto: '#f97316', Commodities: '#f59e0b', Sectors: '#8b5cf6', Stocks: '#f43f5e',
 };
 
 function fmtPct(v: number | null): string {
@@ -38,20 +38,28 @@ function fmtDate(s: string): string {
   return new Date(s).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
 
-export function BacktestPanel() {
+export function BacktestPanel({ stockSymbols = [] }: { stockSymbols?: string[] }) {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [active, setActive] = useState('1y');
+  // The stock set the current result was computed with, so we can flag when the
+  // user changes their active lists and the backtest needs re-running.
+  const [ranWith, setRanWith] = useState<string>('');
+
+  const stockKey = [...stockSymbols].sort().join(',');
+  const stale = !!data && ranWith !== stockKey;
 
   const run = async () => {
     setLoading(true);
     setError(false);
     try {
-      const res = await fetch('/api/rotation-backtest');
+      const qs = stockSymbols.length ? `?stocks=${encodeURIComponent(stockKey)}` : '';
+      const res = await fetch(`/api/rotation-backtest${qs}`);
       if (!res.ok) throw new Error();
       const d: Payload = await res.json();
       setData(d);
+      setRanWith(stockKey);
       // Default to the 1-year view — the most informative single horizon.
       setActive(d.scenarios.find(s => s.key === '1y')?.key ?? d.scenarios[0]?.key ?? '1y');
     } catch {
@@ -72,14 +80,19 @@ export function BacktestPanel() {
           <p className="text-[11px] text-gray-500 max-w-xl">
             Go back in time, run the model with <span className="font-medium">only the data available then</span>, and see what it would have flagged — and how much it would have returned from that date to today.
           </p>
+          {stockSymbols.length > 0 && (
+            <p className="text-[11px] text-rose-300/80 mt-1">
+              Including {stockSymbols.length} stock{stockSymbols.length === 1 ? '' : 's'} from your active lists.
+            </p>
+          )}
         </div>
-        {!data && (
+        {(!data || stale) && (
           <button
             onClick={run}
             disabled={loading}
             className={clsx('shrink-0 px-3 py-1.5 text-xs font-semibold rounded-lg bg-accent text-white transition-all', loading && 'opacity-50 cursor-not-allowed')}
           >
-            {loading ? 'Computing…' : '▶ Run backtest'}
+            {loading ? 'Computing…' : stale ? '↻ Re-run (lists changed)' : '▶ Run backtest'}
           </button>
         )}
       </div>
@@ -177,7 +190,7 @@ export function BacktestPanel() {
           )}
 
           <p className="text-[10px] text-gray-600 leading-relaxed">
-            Honest caveats: universe = the {71} assets currently in config (survivorship bias), closing prices, no costs/taxes/slippage, perfect rebalance. ~6 years of history = few cycles, and recently-listed assets simply weren&apos;t pickable in the older windows. This is a signal quality check, not a guarantee of future returns.
+            Honest caveats: universe = the {data.universeSize ?? 71} assets currently in config{stockSymbols.length ? ' + your active stock lists' : ''} (survivorship bias), closing prices, no costs/taxes/slippage, perfect rebalance. ~6 years of history = few cycles, and recently-listed assets simply weren&apos;t pickable in the older windows. This is a signal quality check, not a guarantee of future returns.
           </p>
         </>
       )}

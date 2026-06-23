@@ -9,12 +9,13 @@ export const runtime = 'edge';
 // Benchmark = S&P 500 ("what if I'd just bought the index").
 const SPX = '^GSPC';
 
-type Group = 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors';
+type Group = 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors' | 'Stocks';
 interface Meta { symbol: string; name: string; group: Group }
 
-// Universe is derived straight from config, so new assets are backtested
-// automatically — same source the live Rotation list iterates.
-const UNIVERSE: Meta[] = [
+// Base universe is derived straight from config, so new assets are backtested
+// automatically — same source the live Rotation list iterates. Any active stock
+// lists are appended per-request so the backtest matches the on-screen universe.
+const BASE_UNIVERSE: Meta[] = [
   ...INDEXES.map(i => ({ symbol: i.symbol, name: i.name, group: 'Indexes' as const })),
   ...COMMODITIES.map(c => ({ symbol: c.symbol, name: c.name, group: 'Commodities' as const })),
   ...CRYPTO_IDS.map(e => ({ symbol: CRYPTO_YAHOO_SYMBOLS[e.id] ?? `${e.symbol}-USD`, name: e.name, group: 'Crypto' as const })),
@@ -37,10 +38,12 @@ interface Scenario {
   nPicks: number; nBeatSpx: number;
 }
 
-interface Payload { generatedAt: string; scenarios: Scenario[] }
+interface Payload { generatedAt: string; scenarios: Scenario[]; universeSize: number }
 
 interface CacheEntry { data: Payload; ts: number }
-let cache: CacheEntry | null = null;
+// Keyed by the active-stocks signature so different stock selections don't
+// collide on one cached result.
+const cache = new Map<string, CacheEntry>();
 const TTL = 10 * 60_000;
 
 type Hist = { date: string; close: number }[];
@@ -83,7 +86,7 @@ function ma200AtDate(history: Hist, dateStr: string): number | null {
   return closes.slice(-200).reduce((s, c) => s + c, 0) / 200;
 }
 
-function buildScenario(histMap: Map<string, Hist>, todayStr: string, key: string, label: string, days: number): Scenario {
+function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: string, key: string, label: string, days: number): Scenario {
   const asOfDate = subDays(new Date(), days);
   const asOf = fmt(asOfDate);
   const d1m = fmt(subDays(asOfDate, 30));
@@ -91,7 +94,7 @@ function buildScenario(histMap: Map<string, Hist>, todayStr: string, key: string
   const d6m = fmt(subDays(asOfDate, 180));
   const d1y = fmt(subDays(asOfDate, 365));
 
-  const rows = UNIVERSE.map(m => {
+  const rows = universe.map(m => {
     const h = histMap.get(m.symbol) ?? [];
     return {
       ...m,
@@ -130,14 +133,32 @@ function buildScenario(histMap: Map<string, Hist>, todayStr: string, key: string
   return { key, label, asOf, picks, basketFwd, universeFwd, spxFwd, nPicks: picks.length, nBeatSpx };
 }
 
-export async function GET() {
-  if (cache && Date.now() - cache.ts < TTL) return NextResponse.json(cache.data);
+export async function GET(req: Request) {
+  // Active stock lists arrive as ?stocks=SYM1,SYM2 — append them to the universe
+  // so the backtest is run on exactly what the user sees in the live table.
+  const { searchParams } = new URL(req.url);
+  const baseSymbols = new Set(BASE_UNIVERSE.map(m => m.symbol));
+  const stockSyms = (searchParams.get('stocks') ?? '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => !baseSymbols.has(s)); // never duplicate a config asset
+  const uniqStocks = [...new Set(stockSyms)];
+
+  const universe: Meta[] = [
+    ...BASE_UNIVERSE,
+    ...uniqStocks.map(s => ({ symbol: s, name: s, group: 'Stocks' as const })),
+  ];
+
+  const cacheKey = uniqStocks.slice().sort().join(',');
+  const cached = cache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < TTL) return NextResponse.json(cached.data);
 
   // ~6.4 years back so the 5-years-ago scenario still has a full 1Y lookback
   // (5y point + 365d of history before it) plus a small buffer.
   const from = subDays(new Date(), 1825 + 365 + 150);
   const to = new Date();
-  const symbols = UNIVERSE.map(m => m.symbol);
+  const symbols = universe.map(m => m.symbol);
 
   const results = await Promise.allSettled(
     symbols.map(s => fetchYahooChart(s, from, to, '1d').catch(() => [] as Hist))
@@ -148,9 +169,9 @@ export async function GET() {
   });
 
   const todayStr = fmt(to);
-  const scenarios = SCENARIOS.map(s => buildScenario(histMap, todayStr, s.key, s.label, s.days));
+  const scenarios = SCENARIOS.map(s => buildScenario(universe, histMap, todayStr, s.key, s.label, s.days));
 
-  const data: Payload = { generatedAt: todayStr, scenarios };
-  cache = { data, ts: Date.now() };
+  const data: Payload = { generatedAt: todayStr, scenarios, universeSize: universe.length };
+  cache.set(cacheKey, { data, ts: Date.now() });
   return NextResponse.json(data);
 }

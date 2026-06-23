@@ -169,7 +169,10 @@ export function RotationSection() {
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const pins = useMemo(() => new Set(gistData.pins ?? []), [gistData.pins]);
 
-  const [activeStockLists, setActiveStockLists] = useState<string[]>([]);
+  // Active stock watchlists are persisted to the gist (like pins) so the
+  // selection survives reloads and syncs across every device.
+  const activeStockLists = useMemo(() => gistData.rotationStockLists ?? [], [gistData.rotationStockLists]);
+  const setActiveStockLists = (next: string[]) => updateGist({ rotationStockLists: next });
   const [stockItems, setStockItems] = useState<RotationItem[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
 
@@ -556,8 +559,8 @@ export function RotationSection() {
               return (
                 <button
                   key={cat}
-                  onClick={() => setActiveStockLists(prev =>
-                    active ? prev.filter(l => l !== cat) : [...prev, cat]
+                  onClick={() => setActiveStockLists(
+                    active ? activeStockLists.filter(l => l !== cat) : [...activeStockLists, cat]
                   )}
                   className={clsx('px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all',
                     active ? 'border-rose-400/60 text-rose-300 bg-rose-400/10' : 'border-border text-gray-500 hover:text-gray-300')}
@@ -761,8 +764,9 @@ export function RotationSection() {
         <QuadrantChart assets={quadrantAssets} loading={rollingLoading} />
       </div>
 
-      {/* Backtest — time machine */}
-      <BacktestPanel />
+      {/* Backtest — time machine. Includes the active stock lists so the model
+          is tested on exactly the universe shown above. */}
+      <BacktestPanel stockSymbols={stockListSymbols} />
     </div>
   );
 }
