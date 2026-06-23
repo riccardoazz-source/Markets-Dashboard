@@ -150,7 +150,13 @@ export async function POST(req: Request) {
         system_instruction: { parts: [{ text: systemInstruction }] },
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
         tools: [{ google_search: {} }],
-        generationConfig: { maxOutputTokens: 1400 },
+        generationConfig: {
+          maxOutputTokens: 2048,
+          temperature: 0.4,
+          // gemini-2.5-flash "thinks" by default — slow, and the reasoning eats
+          // the output budget so the per-class notes get truncated. Turn it off.
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       }),
     });
 
