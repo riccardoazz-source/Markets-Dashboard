@@ -1,18 +1,23 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import clsx from 'clsx';
+import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
+import { useGistData } from '@/lib/gist';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { RotationChart, ChartAsset } from '@/components/charts/RotationChart';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
+import { SentimentPanel, SentimentSnapshot } from '@/components/sections/SentimentPanel';
+
+type Group = 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors' | 'Stocks';
 
 interface RotationItem {
   symbol: string;
   name: string;
   subCategory: string;
-  group: 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors';
+  group: Group;
   price: number | null;
   currency: string;
   dayPct: number | null;
@@ -32,7 +37,7 @@ interface RollingReturn {
 }
 
 type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y';
-type GroupFilter = 'all' | 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors';
+type GroupFilter = 'all' | Group;
 type ChartTimeframe = '1M' | '3M' | '6M' | '1Y';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
@@ -59,7 +64,10 @@ const GROUP_COLORS: Record<RotationItem['group'], string> = {
   Crypto:      '#f97316',
   Commodities: '#f59e0b',
   Sectors:     '#8b5cf6',
+  Stocks:      '#f43f5e',
 };
+
+const PINS_KEY = 'rotation-pins-v1';
 
 const CHART_COLORS = [
   '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
@@ -137,6 +145,87 @@ export function RotationSection() {
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('3M');
   const userHasToggled = useRef(false);
+
+  // Pinned assets — durable "remember to check" list, kept in localStorage.
+  const [pins, setPins] = useState<Set<string>>(new Set());
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+
+  // Stock list integration — lists are note categories from the Stocks tab.
+  const { data: gistData } = useGistData();
+  const [stockList, setStockList] = useState<string | null>(null);
+  const [stockItems, setStockItems] = useState<RotationItem[]>([]);
+  const [stockLoading, setStockLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PINS_KEY);
+      if (raw) setPins(new Set(JSON.parse(raw) as string[]));
+    } catch { /* ignore */ }
+  }, []);
+
+  const togglePin = (symbol: string) => {
+    setPins(prev => {
+      const next = new Set(prev);
+      if (next.has(symbol)) next.delete(symbol); else next.add(symbol);
+      try { localStorage.setItem(PINS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
+  // Stock watchlists = note categories on `stock:SYM` chart IDs (same source the
+  // Stocks tab uses). New lists/stocks added there appear here automatically.
+  const stockLists = useMemo(() => {
+    const notes = gistData.notes ?? {};
+    const cats = new Set<string>();
+    for (const [chartId, list] of Object.entries(notes)) {
+      if (!chartId.startsWith('stock:')) continue;
+      list.forEach(n => { if (n.category) cats.add(n.category); });
+    }
+    return Array.from(cats).sort();
+  }, [gistData]);
+
+  const stockListSymbols = useMemo(() => {
+    if (!stockList) return [];
+    const notes = gistData.notes ?? {};
+    const syms: string[] = [];
+    for (const [chartId, list] of Object.entries(notes)) {
+      if (!chartId.startsWith('stock:')) continue;
+      if (list.some(n => n.category?.toLowerCase() === stockList.toLowerCase())) {
+        syms.push(chartId.slice('stock:'.length));
+      }
+    }
+    return syms;
+  }, [gistData, stockList]);
+
+  // Fetch quotes + rolling returns for the selected stock list and build items.
+  useEffect(() => {
+    if (!stockList || stockListSymbols.length === 0) { setStockItems([]); return; }
+    let cancelled = false;
+    setStockLoading(true);
+    const symParam = encodeURIComponent(stockListSymbols.join(','));
+    Promise.all([
+      fetch(`/api/quotes?symbols=${symParam}`).then(r => r.json() as Promise<QuoteData[]>).catch(() => []),
+      fetch(`/api/rotation-returns?extra=${symParam}`).then(r => r.json() as Promise<RollingReturn[]>).catch(() => []),
+    ]).then(([quotes, rolling]) => {
+      if (cancelled) return;
+      const qMap = new Map<string, QuoteData>((quotes ?? []).map(q => [q.symbol, q]));
+      const rMap = new Map<string, RollingReturn>((rolling ?? []).map(r => [r.symbol, r]));
+      const built: RotationItem[] = stockListSymbols.map(sym => {
+        const q = qMap.get(sym);
+        const r = rMap.get(sym);
+        return {
+          symbol: sym, name: sym, subCategory: 'Stock', group: 'Stocks' as const,
+          price: q?.price ?? null, currency: q?.currency ?? 'USD',
+          dayPct: q?.changePercent ?? null,
+          r1m: r?.r1m ?? null, r3m: r?.r3m ?? null, r6m: r?.r6m ?? null, r1y: r?.r1y ?? null,
+          fiveYPct: q?.fiveYearChangePercent ?? null,
+        };
+      });
+      setStockItems(built);
+      setStockLoading(false);
+    }).catch(() => { if (!cancelled) { setStockItems([]); setStockLoading(false); } });
+    return () => { cancelled = true; };
+  }, [stockList, stockListSymbols]);
 
   useEffect(() => {
     let cancelled = false;
@@ -248,20 +337,24 @@ export function RotationSection() {
     return () => { cancelled = true; };
   }, []);
 
-  // Rank deltas computed across ALL items (not just filtered) so the signal is global
-  const rankDeltas = rollingLoading ? new Map<string, number>() : buildRankDeltas(items);
+  // The full working set = config universe + the selected stock list. Stocks are
+  // fully ranked alongside everything else (rank-delta, accelerating, sorting).
+  const rows = useMemo(() => [...items, ...stockItems], [items, stockItems]);
+
+  // Rank deltas computed across ALL rows (not just filtered) so the signal is global
+  const rankDeltas = rollingLoading ? new Map<string, number>() : buildRankDeltas(rows);
 
   const groupFiltered = groupFilter === 'all'
-    ? items
-    : items.filter(i => i.group === groupFilter);
+    ? rows
+    : rows.filter(i => i.group === groupFilter);
 
   // Top-third 1M return across all assets — momentum floor. Stricter than the median so
   // flat bonds that creep up a percent or two can't qualify as "movers".
-  const r1mSorted = items.map(i => i.r1m).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const r1mSorted = rows.map(i => i.r1m).filter((v): v is number => v != null).sort((a, b) => a - b);
   const topThirdR1m = r1mSorted.length ? r1mSorted[Math.floor(r1mSorted.length * 2 / 3)] : 0;
 
   // Extension: how far an asset already is into its 1Y move. Top 20% = "already ran".
-  const extPctile = rollingLoading ? new Map<string, number>() : buildExtensionPctile(items);
+  const extPctile = rollingLoading ? new Map<string, number>() : buildExtensionPctile(rows);
   const EXTENDED_CUTOFF = 0.8;
 
   // "Accelerating" = climbing the leaderboard (rank-delta ≥4) AND a genuine, confirmed
@@ -279,7 +372,8 @@ export function RotationSection() {
   const accelEarly = accelBase.filter(i => (extPctile.get(i.symbol) ?? 0) < EXTENDED_CUTOFF);
   const hiddenExtended = accelBase.length - accelEarly.length;
 
-  const filteredItems = accelOnly ? accelEarly : groupFiltered;
+  let filteredItems = accelOnly ? accelEarly : groupFiltered;
+  if (pinnedOnly) filteredItems = filteredItems.filter(i => pins.has(i.symbol));
 
   const sortedItems = accelOnly
     ? [...filteredItems].sort((a, b) =>
@@ -308,13 +402,36 @@ export function RotationSection() {
 
   const chartAssets: ChartAsset[] = Array.from(selectedSymbols)
     .map(sym => {
-      const item = items.find(i => i.symbol === sym);
+      const item = rows.find(i => i.symbol === sym);
       return item ? { symbol: sym, name: item.name, color: colorMap.get(sym) ?? '#3b82f6' } : null;
     })
     .filter((a): a is ChartAsset => a !== null);
 
+  // Snapshot fed to the sentiment endpoint — the live leaderboard as it stands now.
+  const buildSnapshot = (): SentimentSnapshot => {
+    const withData = rows.filter(i => i.r3m != null);
+    const byR3m = [...withData].sort((a, b) => (b.r3m ?? -Infinity) - (a.r3m ?? -Infinity));
+    const mover = (i: RotationItem) => ({ name: i.name, group: i.group, r1m: i.r1m, r3m: i.r3m, r1y: i.r1y });
+    const lvl = (sym: string) => rows.find(i => i.symbol === sym)?.price ?? null;
+    return {
+      date: new Date().toISOString().slice(0, 10),
+      leaders: byR3m.slice(0, 8).map(mover),
+      laggards: byR3m.slice(-5).reverse().map(mover),
+      accelerating: accelEarly.map(i => ({ name: i.name, group: i.group })),
+      levels: {
+        'S&P 500': lvl('^GSPC'),
+        Gold: lvl('GC=F'),
+        'WTI Crude': lvl('CL=F'),
+        Bitcoin: lvl('BTC-USD'),
+      },
+    };
+  };
+
   return (
     <div className="space-y-4">
+      {/* Daily sentiment */}
+      <SentimentPanel buildSnapshot={buildSnapshot} ready={!rollingLoading} />
+
       {/* Controls */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
@@ -331,6 +448,21 @@ export function RotationSection() {
             title="Show only assets climbing the leaderboard — the potential next Kospi"
           >
             🚀 Accelerating
+          </button>
+          <button
+            onClick={() => setPinnedOnly(v => !v)}
+            disabled={pins.size === 0}
+            className={clsx(
+              'px-3 py-1.5 text-xs font-semibold rounded-lg transition-all border flex items-center gap-1',
+              pinnedOnly
+                ? 'bg-amber-500/15 border-amber-500/50 text-amber-300'
+                : 'bg-bg-input border-border text-gray-400 hover:text-gray-100 hover:border-gray-600',
+              pins.size === 0 && 'opacity-40 cursor-not-allowed'
+            )}
+            title="Show only your pinned assets"
+          >
+            <Star size={12} className={pinnedOnly ? 'fill-amber-300' : ''} />
+            Pinned{pins.size > 0 ? ` (${pins.size})` : ''}
           </button>
           <div className={clsx('flex gap-1 bg-bg-input rounded-lg p-1', accelOnly && 'opacity-40 pointer-events-none')}>
             {SORT_OPTIONS.map(opt => (
@@ -349,7 +481,7 @@ export function RotationSection() {
             ))}
           </div>
         </div>
-        <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+        <div className="flex gap-1 bg-bg-input rounded-lg p-1 flex-wrap">
           {GROUP_FILTERS.map(opt => (
             <button
               key={opt.value}
@@ -364,7 +496,51 @@ export function RotationSection() {
               {opt.label}
             </button>
           ))}
+          {stockItems.length > 0 && (
+            <button
+              onClick={() => setGroupFilter('Stocks')}
+              className={clsx(
+                'px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
+                groupFilter === 'Stocks'
+                  ? 'bg-accent text-white'
+                  : 'text-gray-400 hover:text-gray-100 hover:bg-border'
+              )}
+            >
+              Stocks
+            </button>
+          )}
         </div>
+      </div>
+
+      {/* Stock list selector — pick one of your saved Stocks watchlists to rank here */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] text-gray-500">Add a stock list:</span>
+        {stockLists.length === 0 ? (
+          <span className="text-[11px] text-gray-600 italic">
+            None yet — save stocks into a list from the Stocks tab (add a note with a category).
+          </span>
+        ) : (
+          <div className="flex gap-1 flex-wrap">
+            <button
+              onClick={() => setStockList(null)}
+              className={clsx('px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all',
+                stockList === null ? 'border-accent/60 text-accent bg-accent/10' : 'border-border text-gray-500 hover:text-gray-300')}
+            >
+              None
+            </button>
+            {stockLists.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setStockList(cat)}
+                className={clsx('px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all',
+                  stockList === cat ? 'border-rose-400/60 text-rose-300 bg-rose-400/10' : 'border-border text-gray-500 hover:text-gray-300')}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
+        {stockLoading && <LoadingSpinner size={12} />}
       </div>
 
       {/* Rolling returns loading badge */}
@@ -420,7 +596,9 @@ export function RotationSection() {
                     <td colSpan={8} className="px-3 py-10 text-center text-xs text-gray-500">
                       {accelOnly
                         ? 'No assets are accelerating right now — the leaderboard is stable.'
-                        : 'No assets match this filter.'}
+                        : pinnedOnly
+                          ? 'No pinned assets in this view — tap the ☆ on a row to pin it.'
+                          : 'No assets match this filter.'}
                     </td>
                   </tr>
                 )}
@@ -439,6 +617,7 @@ export function RotationSection() {
                     ((item.r6m != null && item.r6m < 0) || (item.r1y != null && item.r1y < 0));
                   const isSolid    = accelOnly && !isRebound &&
                     item.r6m != null && item.r6m > 0 && item.r1y != null && item.r1y > 0;
+                  const isPinned   = pins.has(item.symbol);
                   return (
                     <tr
                       key={item.symbol}
@@ -479,6 +658,14 @@ export function RotationSection() {
                               {accel.arrow}
                             </span>
                           )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); togglePin(item.symbol); }}
+                            className={clsx('shrink-0 ml-auto p-0.5 rounded transition-colors',
+                              isPinned ? 'text-amber-300' : 'text-gray-700 hover:text-gray-400')}
+                            title={isPinned ? 'Unpin' : 'Pin to remember'}
+                          >
+                            <Star size={12} className={isPinned ? 'fill-amber-300' : ''} />
+                          </button>
                         </div>
                       </td>
                       <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden md:table-cell', sortBy === 'day' ? `font-bold ${pctColor(item.dayPct)}` : pctColor(item.dayPct))}>

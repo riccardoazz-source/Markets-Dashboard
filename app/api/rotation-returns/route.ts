@@ -32,7 +32,39 @@ function rolling(history: { date: string; close: number }[], daysAgo: number): n
   return (current / past - 1) * 100;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const extra = searchParams.get('extra');
+
+  // Extra symbols (e.g. a user's stock watchlist) — computed on demand and cached
+  // per set. Returned alone; the client merges them with the default universe.
+  if (extra) {
+    const syms = Array.from(new Set(extra.split(',').map(s => s.trim()).filter(Boolean))).slice(0, 60);
+    if (syms.length === 0) return NextResponse.json([]);
+    const key = 'extra:' + [...syms].sort().join(',');
+    const cachedExtra = cache.get(key);
+    if (cachedExtra && Date.now() - cachedExtra.ts < TTL) {
+      return NextResponse.json(cachedExtra.data);
+    }
+    const from = subDays(new Date(), 375);
+    const to = new Date();
+    const results = await Promise.allSettled(
+      syms.map(sym => fetchYahooChart(sym, from, to, '1d').catch(() => []))
+    );
+    const data: RollingReturn[] = syms.map((symbol, i) => {
+      const history = results[i].status === 'fulfilled' ? results[i].value : [];
+      return {
+        symbol,
+        r1m: rolling(history, 30),
+        r3m: rolling(history, 90),
+        r6m: rolling(history, 180),
+        r1y: rolling(history, 365),
+      };
+    });
+    cache.set(key, { data, ts: Date.now() });
+    return NextResponse.json(data);
+  }
+
   const cached = cache.get('all');
   if (cached && Date.now() - cached.ts < TTL) {
     return NextResponse.json(cached.data);
