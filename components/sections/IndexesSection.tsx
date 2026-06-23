@@ -11,7 +11,7 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
-import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
+import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
 import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
@@ -414,7 +414,10 @@ function DualLineDragChart({ data, onSetRange }: { data: DualLinePoint[]; onSetR
     <div className="space-y-1 select-none">
       {selStats && (
         <div className="flex items-center justify-between bg-bg-input rounded-lg px-3 py-1.5 text-xs flex-wrap gap-2">
-          <span className="text-gray-400">{selStats.left} → {selStats.right}</span>
+          <span className="text-gray-400 flex items-center gap-2">
+            {selStats.left} → {selStats.right}
+            <span className="text-gray-500 border-l border-border pl-2">{rangeDurationLabel(selStats.left, selStats.right)}</span>
+          </span>
           <div className="flex items-center gap-3">
             <span className={clsx('font-bold tabular-nums', selStats.priceDelta >= 0 ? 'text-emerald-400' : 'text-red-400')}>
               Price {selStats.priceDelta >= 0 ? '+' : ''}{selStats.priceDelta.toFixed(2)}%

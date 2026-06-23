@@ -64,11 +64,15 @@ function retBetween(history: Hist, startStr: string, endStr: string): number | n
 
 function fmt(d: Date): string { return d.toISOString().slice(0, 10); }
 
+// Match the standard asset timeframes so the model is easy to sanity-check:
+// "what would it have picked 1 month / 1 year / 5 years ago, and how did that do?"
 const SCENARIOS: { key: string; label: string; days: number }[] = [
-  { key: '24m', label: '2 years ago',  days: 730 },
-  { key: '18m', label: '18 months ago', days: 547 },
-  { key: '12m', label: '1 year ago',   days: 365 },
-  { key: '6m',  label: '6 months ago', days: 183 },
+  { key: '1d', label: 'Day', days: 1 },
+  { key: '1m', label: '1M',  days: 30 },
+  { key: '3m', label: '3M',  days: 90 },
+  { key: '6m', label: '6M',  days: 183 },
+  { key: '1y', label: '1Y',  days: 365 },
+  { key: '5y', label: '5Y',  days: 1825 },
 ];
 
 // Run the shared RotationModel as of a past date using only data up to that date
@@ -129,8 +133,9 @@ function buildScenario(histMap: Map<string, Hist>, todayStr: string, key: string
 export async function GET() {
   if (cache && Date.now() - cache.ts < TTL) return NextResponse.json(cache.data);
 
-  // ~38 months back so the 2-years-ago scenario still has a full 1Y lookback.
-  const from = subDays(new Date(), 1170);
+  // ~6.4 years back so the 5-years-ago scenario still has a full 1Y lookback
+  // (5y point + 365d of history before it) plus a small buffer.
+  const from = subDays(new Date(), 1825 + 365 + 150);
   const to = new Date();
   const symbols = UNIVERSE.map(m => m.symbol);
 

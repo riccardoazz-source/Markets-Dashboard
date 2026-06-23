@@ -65,6 +65,20 @@ export function useChartDragSelect() {
   };
 }
 
+/**
+ * Human-readable span of a selected date range, e.g. "123 days · 4.1 mo" or
+ * "842 days · 2.3 yrs". Shared by every drag-select chart banner so the
+ * selection always shows how long the period was, not just its endpoints.
+ */
+export function rangeDurationLabel(left: string, right: string): string {
+  const ms = new Date(right).getTime() - new Date(left).getTime();
+  if (!isFinite(ms) || ms < 0) return '';
+  const days = Math.round(ms / 86_400_000);
+  const months = ms / (365.25 / 12 * 86_400_000);
+  const span = months >= 24 ? `${(months / 12).toFixed(1)} yrs` : `${months.toFixed(1)} mo`;
+  return `${days.toLocaleString()} days · ${span}`;
+}
+
 /** Value of `key` at-or-after `date` (left edge) — first non-null value at or after date. */
 export function valueAtOrAfter(
   data: ReadonlyArray<{ date: string }>, date: string, key: string,

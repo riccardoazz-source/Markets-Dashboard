@@ -13,7 +13,7 @@ import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
-import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
+import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { useGistData } from '@/lib/gist';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
@@ -404,7 +404,10 @@ function DualChart({
     <div className="relative select-none">
       {range && selStats && (
         <div className="flex items-center justify-between mb-2 bg-bg-input rounded-lg px-3 py-1.5 text-xs flex-wrap gap-2">
-          <span className="text-gray-400">{fmtD(range.left)} → {fmtD(range.right)}</span>
+          <span className="text-gray-400 flex items-center gap-2">
+            {fmtD(range.left)} → {fmtD(range.right)}
+            <span className="text-gray-500 border-l border-border pl-2">{rangeDurationLabel(range.left, range.right)}</span>
+          </span>
           <div className="flex items-center gap-3">
             <span className="text-gray-500 tabular-nums">
               {formatPrice(selStats.leftVal, currency)} → {formatPrice(selStats.rightVal, currency)}

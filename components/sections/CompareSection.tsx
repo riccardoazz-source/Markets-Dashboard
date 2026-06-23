@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from 'react';
-import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, EVENT_INDICATOR_CATEGORY, INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, MACRO_INDICATORS, CURRENCY_GROUPS } from '@/lib/config';
+import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, EVENT_INDICATOR_CATEGORY, COMPARE_ASSET_CLASSES, type CompareClass } from '@/lib/config';
+import { useGistData } from '@/lib/gist';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
@@ -38,84 +39,6 @@ class ChartErrorBoundary extends Component<
     return this.props.children;
   }
 }
-
-// ── Asset-class picker: each class has subcategories that bulk-load symbols ──
-interface AssetSubcat { label: string; symbols: string[] }
-interface AssetClassDef { key: string; label: string; subcats: AssetSubcat[] }
-
-function buildSubcats(key: string): AssetSubcat[] {
-  if (key === 'Indexes') {
-    const regions = ['America', 'EU', 'Asia', 'Global', 'EM'] as const;
-    return [
-      { label: 'All', symbols: INDEXES.map(i => i.symbol).slice(0, 8) },
-      ...regions.map(r => ({
-        label: r,
-        symbols: INDEXES.filter(i => i.region === r).map(i => i.symbol),
-      })).filter(s => s.symbols.length > 0),
-    ];
-  }
-  if (key === 'Currency') {
-    const fxRegions = ['USD', 'EUR', 'EU', 'Asia', 'America', 'EM'] as const;
-    return [
-      {
-        label: 'All',
-        symbols: CURRENCY_GROUPS.slice(0, 8).map(g => `${g.base}${g.quote}=X`),
-      },
-      ...fxRegions.map(r => ({
-        label: r,
-        symbols: CURRENCY_GROUPS
-          .filter(g => r === 'USD' ? g.base === 'USD' : r === 'EUR' ? g.base === 'EUR' : g.region === r)
-          .map(g => `${g.base}${g.quote}=X`),
-      })).filter(s => s.symbols.length > 0),
-    ];
-  }
-  if (key === 'Crypto') {
-    return [
-      { label: 'Large Cap', symbols: CRYPTO_IDS.slice(0, 8).map(c => `${c.symbol}-USD`) },
-      { label: 'Mid Cap',   symbols: CRYPTO_IDS.slice(8, 16).map(c => `${c.symbol}-USD`) },
-      { label: 'BTC & ETH', symbols: ['BTC-USD', 'ETH-USD'] },
-    ];
-  }
-  if (key === 'Commodities') {
-    const cats = ['Metals', 'Energy', 'Agri', 'Softs'] as const;
-    return [
-      { label: 'All', symbols: COMMODITIES.map(c => c.symbol).slice(0, 8) },
-      ...cats.map(cat => ({
-        label: cat,
-        symbols: COMMODITIES.filter(c => c.category === cat).map(c => c.symbol),
-      })).filter(s => s.symbols.length > 0),
-    ];
-  }
-  if (key === 'Sectors') {
-    const cats = ['Tech', 'Health', 'Finance', 'Consumer', 'Energy', 'Industrial', 'Bonds', 'Real Estate', 'Utilities'];
-    return [
-      { label: 'All', symbols: SECTORS.map(s => s.symbol).slice(0, 8) },
-      ...cats.map(cat => ({
-        label: cat,
-        symbols: SECTORS.filter(s => s.category === cat).map(s => s.symbol),
-      })).filter(s => s.symbols.length > 0),
-    ];
-  }
-  if (key === 'Macro') {
-    const cats = ['Rates', 'Inflation', 'Growth', 'Employment', 'Money', 'Debt', 'Market Value', 'Sentiment'];
-    return [
-      ...cats.map(cat => ({
-        label: cat,
-        symbols: MACRO_INDICATORS.filter(m => m.category === cat).map(m => m.id).slice(0, 8),
-      })).filter(s => s.symbols.length > 0),
-    ];
-  }
-  return [];
-}
-
-const ASSET_CLASSES: AssetClassDef[] = [
-  { key: 'Indexes',     label: 'Indexes',     subcats: buildSubcats('Indexes')     },
-  { key: 'Currency',    label: 'Currency',    subcats: buildSubcats('Currency')    },
-  { key: 'Crypto',      label: 'Crypto',      subcats: buildSubcats('Crypto')      },
-  { key: 'Commodities', label: 'Commodities', subcats: buildSubcats('Commodities') },
-  { key: 'Sectors',     label: 'Sectors',     subcats: buildSubcats('Sectors')     },
-  { key: 'Macro',       label: 'Macro',       subcats: buildSubcats('Macro')       },
-];
 
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
@@ -196,6 +119,7 @@ function buildSpreadAssets(
 }
 
 export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
+  const { data: gistData } = useGistData();
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeAssetClass, setActiveAssetClass] = useState<string | null>(null);
@@ -461,6 +385,31 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     setSelectedSymbols(symbols.slice(0, 8));
   };
 
+  // "Stocks" asset class — built from the user's note categories (watchlists),
+  // since stocks have no fixed config list. Each category that tags at least one
+  // stock note becomes a subcategory that bulk-adds those tickers.
+  const assetClasses = useMemo<CompareClass[]>(() => {
+    const notes = gistData.notes ?? {};
+    const byCat = new Map<string, string[]>();
+    for (const [chartId, list] of Object.entries(notes)) {
+      if (!chartId.startsWith('stock:')) continue;
+      const sym = chartId.slice('stock:'.length);
+      for (const n of list) {
+        if (!n.category) continue;
+        const arr = byCat.get(n.category) ?? [];
+        if (!arr.includes(sym)) arr.push(sym);
+        byCat.set(n.category, arr);
+      }
+    }
+    const subcats = [...byCat.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([label, symbols]) => ({ label, symbols }));
+    const stocksClass: CompareClass[] = subcats.length
+      ? [{ key: 'Stocks', label: 'Stocks', subcats }]
+      : [];
+    return [...COMPARE_ASSET_CLASSES, ...stocksClass];
+  }, [gistData]);
+
   // Local config search (exclude already selected)
   const localHits = ALL_COMPARABLE_ASSETS.filter(a =>
     !selectedSymbols.includes(a.symbol) &&
@@ -723,7 +672,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         <div className="flex flex-col gap-2 w-full sm:w-auto">
           {/* Asset class buttons */}
           <div className="flex gap-1.5 flex-wrap">
-            {ASSET_CLASSES.map(ac => (
+            {assetClasses.map(ac => (
               <button key={ac.key}
                 onClick={() => setActiveAssetClass(prev => prev === ac.key ? null : ac.key)}
                 className={clsx(
@@ -738,7 +687,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           </div>
           {/* Subcategory pills — shown when an asset class is active */}
           {activeAssetClass && (() => {
-            const ac = ASSET_CLASSES.find(a => a.key === activeAssetClass);
+            const ac = assetClasses.find(a => a.key === activeAssetClass);
             if (!ac || ac.subcats.length === 0) return null;
             return (
               <div className="flex gap-1.5 flex-wrap pl-1">

@@ -42,7 +42,7 @@ export function BacktestPanel() {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
-  const [active, setActive] = useState('24m');
+  const [active, setActive] = useState('1y');
 
   const run = async () => {
     setLoading(true);
@@ -52,7 +52,8 @@ export function BacktestPanel() {
       if (!res.ok) throw new Error();
       const d: Payload = await res.json();
       setData(d);
-      setActive(d.scenarios[0]?.key ?? '24m');
+      // Default to the 1-year view — the most informative single horizon.
+      setActive(d.scenarios.find(s => s.key === '1y')?.key ?? d.scenarios[0]?.key ?? '1y');
     } catch {
       setError(true);
     } finally {
@@ -86,7 +87,7 @@ export function BacktestPanel() {
       {loading && (
         <div className="flex flex-col items-center justify-center h-40 gap-2">
           <LoadingSpinner size={28} />
-          <span className="text-[11px] text-gray-500">Loading ~3 years of history for all assets…</span>
+          <span className="text-[11px] text-gray-500">Loading ~6 years of history for all assets…</span>
         </div>
       )}
       {error && <p className="text-sm text-gray-500">Backtest failed. Please try again.</p>}
@@ -176,7 +177,7 @@ export function BacktestPanel() {
           )}
 
           <p className="text-[10px] text-gray-600 leading-relaxed">
-            Honest caveats: universe = the {71} assets currently in config (survivorship bias), closing prices, no costs/taxes/slippage, perfect rebalance. ~3 years of history = few cycles. This is a signal quality check, not a guarantee of future returns.
+            Honest caveats: universe = the {71} assets currently in config (survivorship bias), closing prices, no costs/taxes/slippage, perfect rebalance. ~6 years of history = few cycles, and recently-listed assets simply weren&apos;t pickable in the older windows. This is a signal quality check, not a guarantee of future returns.
           </p>
         </>
       )}

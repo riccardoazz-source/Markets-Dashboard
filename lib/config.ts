@@ -687,23 +687,26 @@ export const COMMODITIES: AssetConfig[] = [
   { symbol: 'CC=F',  name: 'Cocoa',        category: 'Softs',   type: 'commodity' },
 ];
 
-export const CRYPTO_IDS = [
-  { id: 'bitcoin',          symbol: 'BTC', name: 'Bitcoin'   },
-  { id: 'ethereum',         symbol: 'ETH', name: 'Ethereum'  },
-  { id: 'solana',           symbol: 'SOL', name: 'Solana'    },
-  { id: 'binancecoin',      symbol: 'BNB', name: 'BNB'       },
-  { id: 'ripple',           symbol: 'XRP', name: 'XRP'       },
-  { id: 'cardano',          symbol: 'ADA', name: 'Cardano'   },
-  { id: 'avalanche-2',      symbol: 'AVAX',name: 'Avalanche' },
-  { id: 'chainlink',        symbol: 'LINK',name: 'Chainlink' },
-  { id: 'dogecoin',         symbol: 'DOGE',name: 'Dogecoin'  },
-  { id: 'tron',             symbol: 'TRX', name: 'Tron'      },
-  { id: 'polkadot',         symbol: 'DOT', name: 'Polkadot'  },
-  { id: 'litecoin',         symbol: 'LTC', name: 'Litecoin'  },
-  { id: 'sui',              symbol: 'SUI', name: 'Sui'       },
-  { id: 'hyperliquid',      symbol: 'HYPE',name: 'Hyperliquid'},
-  { id: 'zcash',            symbol: 'ZEC', name: 'Zcash'     },
-  { id: 'ondo-finance',     symbol: 'ONDO',name: 'Ondo'      },
+// `category` groups each coin by its primary market narrative. Used both for
+// the Crypto section's filter tabs and the Compare quick-add subcategories, so
+// the two always stay in sync.
+export const CRYPTO_IDS: { id: string; symbol: string; name: string; category: string }[] = [
+  { id: 'bitcoin',          symbol: 'BTC', name: 'Bitcoin',    category: 'Store of Value' },
+  { id: 'ethereum',         symbol: 'ETH', name: 'Ethereum',   category: 'Smart Contract' },
+  { id: 'solana',           symbol: 'SOL', name: 'Solana',     category: 'Smart Contract' },
+  { id: 'binancecoin',      symbol: 'BNB', name: 'BNB',        category: 'Exchange'       },
+  { id: 'ripple',           symbol: 'XRP', name: 'XRP',        category: 'Payments'       },
+  { id: 'cardano',          symbol: 'ADA', name: 'Cardano',    category: 'Smart Contract' },
+  { id: 'avalanche-2',      symbol: 'AVAX',name: 'Avalanche',  category: 'Smart Contract' },
+  { id: 'chainlink',        symbol: 'LINK',name: 'Chainlink',  category: 'DeFi'           },
+  { id: 'dogecoin',         symbol: 'DOGE',name: 'Dogecoin',   category: 'Meme'           },
+  { id: 'tron',             symbol: 'TRX', name: 'Tron',       category: 'Smart Contract' },
+  { id: 'polkadot',         symbol: 'DOT', name: 'Polkadot',   category: 'Smart Contract' },
+  { id: 'litecoin',         symbol: 'LTC', name: 'Litecoin',   category: 'Payments'       },
+  { id: 'sui',              symbol: 'SUI', name: 'Sui',        category: 'Smart Contract' },
+  { id: 'hyperliquid',      symbol: 'HYPE',name: 'Hyperliquid',category: 'DeFi'           },
+  { id: 'zcash',            symbol: 'ZEC', name: 'Zcash',      category: 'Privacy'        },
+  { id: 'ondo-finance',     symbol: 'ONDO',name: 'Ondo',       category: 'DeFi'           },
 ];
 
 export const CRYPTO_YAHOO_SYMBOLS: Record<string, string> = {
@@ -835,4 +838,96 @@ export const ALL_COMPARABLE_ASSETS = [
     type: 'currency' as const,
     group: 'FX',
   })),
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPARE QUICK-ADD ASSET CLASSES
+// Each asset class exposes the SAME subcategories its own section uses, derived
+// directly from the config above — so a new sector / macro category / crypto
+// narrative shows up in Compare automatically, with no second list to maintain.
+// Clicking a subcategory bulk-loads its assets into the comparison.
+// The "Stocks" class is built at runtime from the user's note categories (see
+// CompareSection), since stocks have no fixed config list.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface CompareSubcat { label: string; symbols: string[] }
+export interface CompareClass { key: string; label: string; subcats: CompareSubcat[] }
+
+// Distinct values in first-seen order.
+function uniqOrder<T>(xs: T[]): T[] {
+  const seen = new Set<T>();
+  const out: T[] = [];
+  for (const x of xs) if (!seen.has(x)) { seen.add(x); out.push(x); }
+  return out;
+}
+
+// Prepend an "All" subcategory holding every symbol of the class.
+function withAll(all: string[], subcats: CompareSubcat[]): CompareSubcat[] {
+  return [{ label: 'All', symbols: all }, ...subcats];
+}
+
+const fxSymbol = (g: { base: string; quote: string }) => `${g.base}${g.quote}=X`;
+
+export const COMPARE_ASSET_CLASSES: CompareClass[] = [
+  {
+    key: 'Indexes', label: 'Indexes',
+    subcats: withAll(
+      INDEXES.map(i => i.symbol),
+      uniqOrder(INDEXES.map(i => i.region ?? i.category)).map(region => ({
+        label: region!,
+        symbols: INDEXES.filter(i => (i.region ?? i.category) === region).map(i => i.symbol),
+      })),
+    ),
+  },
+  {
+    key: 'Currency', label: 'Currency',
+    subcats: withAll(
+      CURRENCY_GROUPS.map(fxSymbol),
+      [
+        { label: 'USD', symbols: CURRENCY_GROUPS.filter(g => g.base === 'USD').map(fxSymbol) },
+        { label: 'EUR', symbols: CURRENCY_GROUPS.filter(g => g.base === 'EUR').map(fxSymbol) },
+        ...uniqOrder(CURRENCY_GROUPS.map(g => g.region)).map(region => ({
+          label: region,
+          symbols: CURRENCY_GROUPS.filter(g => g.region === region).map(fxSymbol),
+        })),
+      ],
+    ),
+  },
+  {
+    key: 'Crypto', label: 'Crypto',
+    subcats: withAll(
+      CRYPTO_IDS.map(c => `${c.symbol}-USD`),
+      uniqOrder(CRYPTO_IDS.map(c => c.category)).map(cat => ({
+        label: cat,
+        symbols: CRYPTO_IDS.filter(c => c.category === cat).map(c => `${c.symbol}-USD`),
+      })),
+    ),
+  },
+  {
+    key: 'Commodities', label: 'Commodities',
+    subcats: withAll(
+      COMMODITIES.map(c => c.symbol),
+      uniqOrder(COMMODITIES.map(c => c.category)).map(cat => ({
+        label: cat,
+        symbols: COMMODITIES.filter(c => c.category === cat).map(c => c.symbol),
+      })),
+    ),
+  },
+  {
+    key: 'Sectors', label: 'Sectors',
+    subcats: withAll(
+      SECTORS.map(s => s.symbol),
+      uniqOrder(SECTORS.map(s => s.category)).map(cat => ({
+        label: cat,
+        symbols: SECTORS.filter(s => s.category === cat).map(s => s.symbol),
+      })),
+    ),
+  },
+  {
+    key: 'Macro', label: 'Macro',
+    // Every macro category that has at least one indicator, in config order.
+    subcats: uniqOrder(MACRO_INDICATORS.map(m => m.category)).map(cat => ({
+      label: cat,
+      symbols: MACRO_INDICATORS.filter(m => m.category === cat).map(m => m.id),
+    })),
+  },
 ];

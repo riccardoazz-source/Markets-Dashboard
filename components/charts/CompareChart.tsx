@@ -15,7 +15,7 @@ import { EventsChart } from './EventsChart';
 import { RecessionChart } from './RecessionChart';
 import { recessionIntervals } from '@/lib/utils';
 import { format, parseISO } from 'date-fns';
-import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
+import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 
 const RECESSION_SET = new Set(RECESSION_SERIES);
 
@@ -466,19 +466,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="text-gray-400 flex items-center gap-2">
               {fmtDate(range.left)} → {fmtDate(range.right)}
-              {(() => {
-                const ms = parseISO(range.right).getTime() - parseISO(range.left).getTime();
-                const days = Math.round(ms / 86_400_000);
-                const months = (ms / (365.25 / 12 * 86_400_000));
-                const monthsStr = months >= 24
-                  ? `${(months / 12).toFixed(1)} yrs`
-                  : `${months.toFixed(1)} mo`;
-                return (
-                  <span className="text-gray-500 border-l border-border pl-2">
-                    {days.toLocaleString()} days · {monthsStr}
-                  </span>
-                );
-              })()}
+              <span className="text-gray-500 border-l border-border pl-2">
+                {rangeDurationLabel(range.left, range.right)}
+              </span>
             </span>
             <div className="flex items-center gap-2">
               {onSetRange && (

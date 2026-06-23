@@ -24,10 +24,15 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'fiveYearCagrPercent',  label: 'CAGR' },
 ];
 
+// Category filter tabs — derived from the crypto config so they always match.
+const CRYPTO_CATEGORIES = ['All', ...Array.from(new Set(CRYPTO_IDS.map(c => c.category)))];
+const CRYPTO_CATEGORY_BY_ID = new Map(CRYPTO_IDS.map(c => [c.id, c.category]));
+
 export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [cryptoData, setCryptoData] = useState<CryptoData[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>('change24hPercent');
+  const [selectedCat, setSelectedCat] = useState('All');
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
@@ -154,7 +159,10 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
   // Double-guard: cryptoData is initialised as [] but could be stale if a fetch
   // overwrote state with a non-array error object. Spread on non-array throws.
   const safeData = Array.isArray(cryptoData) ? cryptoData : [];
-  const sorted = [...safeData].sort((a, b) => {
+  const catFiltered = selectedCat === 'All'
+    ? safeData
+    : safeData.filter(c => CRYPTO_CATEGORY_BY_ID.get(c.id) === selectedCat);
+  const sorted = [...catFiltered].sort((a, b) => {
     const av = a[sortBy] ?? -Infinity;
     const bv = b[sortBy] ?? -Infinity;
     return (bv as number) - (av as number);
@@ -185,6 +193,21 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
             </div>
           )}
         </div>
+      </div>
+
+      {/* Category filter tabs */}
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+        {CRYPTO_CATEGORIES.map(c => (
+          <button key={c} onClick={() => setSelectedCat(c)}
+            className={clsx(
+              'px-3 py-1 text-xs font-semibold rounded-full transition-all whitespace-nowrap shrink-0',
+              selectedCat === c
+                ? 'bg-accent text-white'
+                : 'text-gray-400 border border-border hover:border-border-light hover:text-gray-200'
+            )}>
+            {c}
+          </button>
+        ))}
       </div>
 
       {loading ? (
