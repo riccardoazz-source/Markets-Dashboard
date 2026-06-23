@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
+import { scoreRotation } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -70,8 +71,14 @@ const SCENARIOS: { key: string; label: string; days: number }[] = [
   { key: '6m',  label: '6 months ago', days: 183 },
 ];
 
-// Run the EXACT live "Accelerating" model as of a past date, using only data up
-// to that date (no look-ahead), then measure forward return to today.
+// Run the shared RotationModel as of a past date using only data up to that date
+// (no look-ahead), then measure forward return to today.
+function ma200AtDate(history: Hist, dateStr: string): number | null {
+  const closes = history.filter(p => p.date <= dateStr).map(p => p.close);
+  if (closes.length < 200) return null;
+  return closes.slice(-200).reduce((s, c) => s + c, 0) / 200;
+}
+
 function buildScenario(histMap: Map<string, Hist>, todayStr: string, key: string, label: string, days: number): Scenario {
   const asOfDate = subDays(new Date(), days);
   const asOf = fmt(asOfDate);
@@ -88,34 +95,18 @@ function buildScenario(histMap: Map<string, Hist>, todayStr: string, key: string
       r3m: retBetween(h, d3m, asOf),
       r6m: retBetween(h, d6m, asOf),
       r1y: retBetween(h, d1y, asOf),
+      price: priceAsOf(h, asOf),
+      ma200: ma200AtDate(h, asOf),
+      sma200w: null as number | null, // 200W SMA not computed in backtest (too expensive)
+      volRatio: null as number | null, // volume history not available in backtest
       fwd: retBetween(h, asOf, todayStr),
     };
   });
 
-  // Cross-sectional rank-delta (1M rank vs 3M rank) — scale-free acceleration.
-  const withData = rows.filter(r => r.r1m != null && r.r3m != null);
-  const by3m = [...withData].sort((a, b) => b.r3m! - a.r3m!);
-  const by1m = [...withData].sort((a, b) => b.r1m! - a.r1m!);
-  const rank3m = new Map(by3m.map((r, i) => [r.symbol, i]));
-  const rank1m = new Map(by1m.map((r, i) => [r.symbol, i]));
-  const rankDelta = new Map<string, number>();
-  for (const r of withData) rankDelta.set(r.symbol, (rank3m.get(r.symbol) ?? 0) - (rank1m.get(r.symbol) ?? 0));
-
-  // Top-third 1M momentum floor + 1Y extension percentile.
-  const r1mAsc = withData.map(r => r.r1m!).sort((a, b) => a - b);
-  const topThird = r1mAsc.length ? r1mAsc[Math.floor(r1mAsc.length * 2 / 3)] : 0;
-  const withR1y = rows.filter(r => r.r1y != null).sort((a, b) => a.r1y! - b.r1y!);
-  const extP = new Map<string, number>();
-  withR1y.forEach((r, i) => extP.set(r.symbol, withR1y.length > 1 ? i / (withR1y.length - 1) : 0));
-
-  const picks: Pick[] = rows
-    .filter(r =>
-      (rankDelta.get(r.symbol) ?? -Infinity) >= 4 &&
-      r.r1m != null && r.r1m > 0 && r.r1m >= topThird &&
-      r.r3m != null && r.r3m > 0 &&
-      (extP.get(r.symbol) ?? 0) < 0.8
-    )
-    .sort((a, b) => (rankDelta.get(b.symbol) ?? -Infinity) - (rankDelta.get(a.symbol) ?? -Infinity))
+  const picks: Pick[] = scoreRotation(rows)
+    .filter(s => s.passesGate)
+    .sort((a, b) => b.score - a.score)
+    .map(s => s.item)
     .map((r): Pick => ({
       symbol: r.symbol, name: r.name, group: r.group,
       r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y,

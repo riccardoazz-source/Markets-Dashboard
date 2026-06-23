@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 export interface ChartPoint {
   date: string;
   close: number;
+  volume?: number;
 }
 
 export interface MarketQuote {

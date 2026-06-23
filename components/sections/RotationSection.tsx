@@ -6,6 +6,7 @@ import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData } from '@/lib/gist';
+import { scoreRotation, ScoredItem } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { RotationChart, ChartAsset } from '@/components/charts/RotationChart';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
@@ -26,8 +27,9 @@ interface RotationItem {
   r6m: number | null;
   r1y: number | null;
   fiveYPct: number | null;
-  ma200: number | null;   // 200-day SMA (from rotation-returns)
-  sma200w: number | null; // 200-week SMA (from quotes/crypto/sectors)
+  ma200: number | null;    // 200-day SMA (from rotation-returns)
+  sma200w: number | null;  // 200-week SMA (from quotes/crypto/sectors)
+  volRatio: number | null; // latestVol / avg20dVol (from rotation-returns)
 }
 
 interface RollingReturn {
@@ -37,6 +39,7 @@ interface RollingReturn {
   r6m: number | null;
   r1y: number | null;
   ma200: number | null;
+  volRatio: number | null;
 }
 
 type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w';
@@ -121,31 +124,6 @@ function accelArrow(rankDelta: number | null): { arrow: string; color: string } 
   return                      { arrow: '→',  color: 'text-gray-500'  };
 }
 
-// 1Y-return percentile across the universe (1 = biggest 1Y gainer). A high percentile
-// means the big move has largely already happened → late-stage, crowded, crash-prone.
-// A low percentile on an accelerating asset = the run is still young (the sweet spot).
-function buildExtensionPctile(items: RotationItem[]): Map<string, number> {
-  const withData = items.filter(i => i.r1y != null);
-  const sorted = [...withData].sort((a, b) => (a.r1y ?? 0) - (b.r1y ?? 0));
-  const n = sorted.length;
-  const out = new Map<string, number>();
-  sorted.forEach((it, i) => out.set(it.symbol, n > 1 ? i / (n - 1) : 0));
-  return out;
-}
-
-function buildRankDeltas(items: RotationItem[]): Map<string, number> {
-  const withData = items.filter(i => i.r1m != null && i.r3m != null);
-  const by3m = [...withData].sort((a, b) => (b.r3m ?? -Infinity) - (a.r3m ?? -Infinity));
-  const by1m = [...withData].sort((a, b) => (b.r1m ?? -Infinity) - (a.r1m ?? -Infinity));
-  const rank3m = new Map(by3m.map((it, i) => [it.symbol, i]));
-  const rank1m = new Map(by1m.map((it, i) => [it.symbol, i]));
-  const out = new Map<string, number>();
-  for (const it of withData) {
-    // positive delta = better 1M rank than 3M rank → accelerating
-    out.set(it.symbol, (rank3m.get(it.symbol) ?? 0) - (rank1m.get(it.symbol) ?? 0));
-  }
-  return out;
-}
 
 export function RotationSection() {
   const [items, setItems] = useState<RotationItem[]>([]);
@@ -236,7 +214,7 @@ export function RotationSection() {
           dayPct: q?.changePercent ?? null,
           r1m: r?.r1m ?? null, r3m: r?.r3m ?? null, r6m: r?.r6m ?? null, r1y: r?.r1y ?? null,
           fiveYPct: q?.fiveYearChangePercent ?? null,
-          ma200: r?.ma200 ?? null, sma200w: q?.sma200w ?? null,
+          ma200: r?.ma200 ?? null, sma200w: q?.sma200w ?? null, volRatio: r?.volRatio ?? null,
         };
       });
       setStockItems(built);
@@ -283,7 +261,7 @@ export function RotationSection() {
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
-            ma200: null, sma200w: q?.sma200w ?? null,
+            ma200: null, sma200w: q?.sma200w ?? null, volRatio: null,
           };
         });
 
@@ -295,7 +273,7 @@ export function RotationSection() {
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
-            ma200: null, sma200w: q?.sma200w ?? null,
+            ma200: null, sma200w: q?.sma200w ?? null, volRatio: null,
           };
         });
 
@@ -311,7 +289,7 @@ export function RotationSection() {
             dayPct: c?.change24hPercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: c?.fiveYearChangePercent ?? null,
-            ma200: null, sma200w: c?.sma200w ?? null,
+            ma200: null, sma200w: c?.sma200w ?? null, volRatio: null,
           };
         });
 
@@ -321,7 +299,7 @@ export function RotationSection() {
           dayPct: s.changePercent,
           r1m: null, r3m: null, r6m: null, r1y: null,
           fiveYPct: s.fiveYearReturn,
-          ma200: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null,
+          ma200: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null, volRatio: null,
         }));
 
         const allItems = [...indexItems, ...commItems, ...cryptoItems, ...sectorItems];
@@ -337,7 +315,7 @@ export function RotationSection() {
 
         const enriched = allItems.map(item => {
           const r = rollingMap.get(item.symbol);
-          return r ? { ...item, r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200 } : item;
+          return r ? { ...item, r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, volRatio: r.volRatio } : item;
         });
 
         setItems(enriched);
@@ -363,44 +341,31 @@ export function RotationSection() {
   // fully ranked alongside everything else (rank-delta, accelerating, sorting).
   const rows = useMemo(() => [...items, ...stockItems], [items, stockItems]);
 
-  // Rank deltas computed across ALL rows (not just filtered) so the signal is global
-  const rankDeltas = rollingLoading ? new Map<string, number>() : buildRankDeltas(rows);
+  // Score all rows cross-sectionally (universe-wide percentiles, so group filter applied after)
+  const scoreMap = useMemo<Map<string, ScoredItem<RotationItem>>>(() => {
+    if (rollingLoading) return new Map();
+    return new Map(scoreRotation(rows).map(s => [s.item.symbol, s]));
+  }, [rows, rollingLoading]);
 
   const groupFiltered = groupFilter === 'all'
     ? rows
     : rows.filter(i => i.group === groupFilter);
 
-  // Top-third 1M return across all assets — momentum floor. Stricter than the median so
-  // flat bonds that creep up a percent or two can't qualify as "movers".
-  const r1mSorted = rows.map(i => i.r1m).filter((v): v is number => v != null).sort((a, b) => a - b);
-  const topThirdR1m = r1mSorted.length ? r1mSorted[Math.floor(r1mSorted.length * 2 / 3)] : 0;
+  // Accelerating: pass sanity gates (r1m>0, r3m>0), ranked by composite RotationScore
+  const accelItems = useMemo(() => {
+    if (rollingLoading) return [];
+    return groupFiltered
+      .map(i => scoreMap.get(i.symbol))
+      .filter((s): s is ScoredItem<RotationItem> => s != null && s.passesGate)
+      .sort((a, b) => b.score - a.score)
+      .map(s => s.item);
+  }, [groupFiltered, scoreMap, rollingLoading]);
 
-  // Extension: how far an asset already is into its 1Y move. Top 20% = "already ran".
-  const extPctile = rollingLoading ? new Map<string, number>() : buildExtensionPctile(rows);
-  const EXTENDED_CUTOFF = 0.8;
-
-  // "Accelerating" = climbing the leaderboard (rank-delta ≥4) AND a genuine, confirmed
-  // up-move. The quality gates drop flat assets — e.g. bonds bouncing from −1% to +2% —
-  // that climb the ranking on noise alone:
-  //   • r3m > 0      → the trend is confirmed over 3 months, not a one-month blip
-  //   • r1m top-third → it's a real mover now, not a sleepy +1/2%
-  const accelBase = groupFiltered.filter(i =>
-    (rankDeltas.get(i.symbol) ?? -Infinity) >= 4 &&
-    i.r1m != null && i.r1m > 0 && i.r1m >= topThirdR1m &&
-    i.r3m != null && i.r3m > 0
-  );
-  // Extension guard: drop names already in the top 20% of 1Y gains — the move is mature
-  // and crowded there, exactly the "buy the top then it crashes" trap to avoid.
-  const accelEarly = accelBase.filter(i => (extPctile.get(i.symbol) ?? 0) < EXTENDED_CUTOFF);
-  const hiddenExtended = accelBase.length - accelEarly.length;
-
-  let filteredItems = accelOnly ? accelEarly : groupFiltered;
+  let filteredItems = accelOnly ? accelItems : groupFiltered;
   if (pinnedOnly) filteredItems = filteredItems.filter(i => pins.has(i.symbol));
 
   const sortedItems = accelOnly
-    ? [...filteredItems].sort((a, b) =>
-        (rankDeltas.get(b.symbol) ?? -Infinity) - (rankDeltas.get(a.symbol) ?? -Infinity)
-      )
+    ? filteredItems // already sorted by score above
     : [...filteredItems].sort((a, b) =>
         (getPct(b, sortBy) ?? -Infinity) - (getPct(a, sortBy) ?? -Infinity)
       );
@@ -451,7 +416,7 @@ export function RotationSection() {
     return {
       date: new Date().toISOString().slice(0, 10),
       table: rows.map(mover),
-      accelerating: accelEarly.map(i => ({ name: i.name, group: i.group })),
+      accelerating: accelItems.map(i => ({ name: i.name, group: i.group })),
       levels: {
         'S&P 500': lvl('^GSPC'),
         Gold: lvl('GC=F'),
@@ -589,13 +554,8 @@ export function RotationSection() {
       {accelOnly && !rollingLoading && (
         <div className="space-y-1">
           <p className="text-[11px] text-green-400/80">
-            <span className="font-semibold">Early-stage rotation</span> — assets climbing the 1M ranking vs 3M with above-median momentum, whose 1-year run is <span className="font-semibold">not yet extended</span>. The spot to look before the move is obvious.
+            <span className="font-semibold">Early-stage rotation</span> — scored by acceleration (1M vs 3M leaderboard climb), trend strength, structural regime, and volume. Extension is a soft penalty, not a hard gate.
           </p>
-          {hiddenExtended > 0 && (
-            <p className="text-[11px] text-amber-400/80">
-              ⚠️ {hiddenExtended} accelerating name{hiddenExtended !== 1 ? 's' : ''} hidden as already extended (top 20% of 1-yr gains — the move is mature and crowded there).
-            </p>
-          )}
         </div>
       )}
 
@@ -642,10 +602,10 @@ export function RotationSection() {
                   const isSelected = selectedSymbols.has(item.symbol);
                   const dotColor   = GROUP_COLORS[item.group];
                   const rowColor   = colorMap.get(item.symbol);
-                  const accel      = accelArrow(rankDeltas.get(item.symbol) ?? null);
-                  // In accel mode, flag the freshest names: still in the bottom half of
-                  // 1Y gains, so the run is genuinely young, not a late blow-off.
-                  const isFresh    = accelOnly && (extPctile.get(item.symbol) ?? 1) < 0.5;
+                  const scored     = scoreMap.get(item.symbol);
+                  const accel      = accelArrow(scored?.rankDelta ?? null);
+                  // Flag names in the bottom half of 1Y extension: the run is still young.
+                  const isFresh    = accelOnly && (scored?.accPctile ?? 0) > 0.7 && (item.r1y == null || item.r1y < 30);
                   // Rebound vs trend: if the acceleration sits on a deeply negative 6M or
                   // 1Y base, it's a bounce off oversold (riskier) rather than a confirmed
                   // uptrend. Solid = up across every horizon.

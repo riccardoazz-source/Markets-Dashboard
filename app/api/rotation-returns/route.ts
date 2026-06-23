@@ -12,6 +12,7 @@ interface RollingReturn {
   r6m: number | null;
   r1y: number | null;
   ma200: number | null;
+  volRatio: number | null;
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -41,7 +42,19 @@ function ma200d(history: { date: string; close: number }[]): number | null {
   return last200.reduce((s, pt) => s + pt.close, 0) / 200;
 }
 
-function buildRow(symbol: string, history: { date: string; close: number }[]): RollingReturn {
+// Ratio of latest-day volume to the average of the prior 20 trading days.
+// Null when fewer than 10 days have valid volume (e.g. index tickers with no volume data).
+function volRatio20(history: { date: string; close: number; volume?: number }[]): number | null {
+  if (history.length < 21) return null;
+  const latest = history[history.length - 1].volume;
+  if (latest == null || latest <= 0) return null;
+  const prior = history.slice(-21, -1).map(p => p.volume).filter((v): v is number => v != null && v > 0);
+  if (prior.length < 10) return null;
+  const avg = prior.reduce((s, v) => s + v, 0) / prior.length;
+  return avg > 0 ? latest / avg : null;
+}
+
+function buildRow(symbol: string, history: { date: string; close: number; volume?: number }[]): RollingReturn {
   return {
     symbol,
     r1m: rolling(history, 30),
@@ -49,6 +62,7 @@ function buildRow(symbol: string, history: { date: string; close: number }[]): R
     r6m: rolling(history, 180),
     r1y: rolling(history, 365),
     ma200: ma200d(history),
+    volRatio: volRatio20(history),
   };
 }
 

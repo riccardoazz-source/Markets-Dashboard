@@ -378,6 +378,7 @@ export async function fetchYahooData(
   const indicators = result.indicators as Record<string, unknown> | undefined;
   const quotes = (indicators?.quote as Array<Record<string, unknown>> | undefined) ?? [];
   const closes: number[] = (quotes[0]?.close as number[]) ?? [];
+  const volumes: (number | null)[] = (quotes[0]?.volume as (number | null)[]) ?? [];
   // adjclose is split + dividend adjusted — the correct total-return price.
   const adjCloses: number[] =
     ((indicators?.adjclose as Array<Record<string, unknown>> | undefined)?.[0]?.adjclose as number[]) ?? [];
@@ -388,7 +389,8 @@ export async function fetchYahooData(
     const close = closes[i];
     if (close == null || isNaN(close) || close <= 0) continue;
     const date = new Date(timestamps[i] * 1000).toISOString().slice(0, 10);
-    points.push({ date, close });
+    const vol = volumes[i];
+    points.push({ date, close, ...(vol != null && vol > 0 ? { volume: vol } : {}) });
     const adj = adjCloses[i];
     if (adj != null && isFinite(adj) && adj > 0) adjPoints.push({ date, close: adj });
   }
