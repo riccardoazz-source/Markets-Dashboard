@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+interface Turn { role: 'user' | 'model'; text: string }
+
 interface SingleAssetRequest {
   mode?: 'single';
   name: string;
@@ -14,6 +16,7 @@ interface SingleAssetRequest {
   r3m?: number | null;
   r6m?: number | null;
   r1y?: number | null;
+  messages?: Turn[];
 }
 
 interface CompareRequest {
@@ -21,6 +24,7 @@ interface CompareRequest {
   assets: { name: string; symbol: string; totalReturn?: number | null; cagr?: number | null }[];
   correlations?: { a: string; b: string; r: number }[];
   timeframe?: string;
+  messages?: Turn[];
 }
 
 type CommentRequest = SingleAssetRequest | CompareRequest;
@@ -39,6 +43,10 @@ function corrLabel(r: number): string {
   return 'near-zero';
 }
 
+// First (synthetic) user turn so the conversation always starts with a 'user'
+// role for Gemini, and the model opens with its initial commentary.
+const INITIAL_PROMPT = 'Give me your initial take, grounded in the latest news from your web search.';
+
 export async function POST(req: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -56,34 +64,28 @@ export async function POST(req: Request) {
   }
 
   let systemInstruction: string;
-  let userMessage: string;
 
   if (body.mode === 'compare') {
     const { assets, correlations, timeframe } = body;
     const assetList = assets.map(a =>
       `${a.name} (${a.symbol}): return ${p(a.totalReturn)}, CAGR ${p(a.cagr)}`
     ).join('\n');
-
     const corrBlock = correlations && correlations.length
       ? correlations.map(c => `${c.a} ↔ ${c.b}: r = ${c.r.toFixed(2)} (${corrLabel(c.r)})`).join('\n')
       : 'n/a';
 
     systemInstruction =
-      'You are a concise portfolio analyst. Search the web for the latest market context. ' +
-      'Write a 4-5 sentence comparative analysis of the assets listed below. Cover: ' +
-      '(1) which asset is leading and why based on current market conditions, ' +
-      '(2) what the correlation data tells about portfolio diversification, ' +
-      '(3) one specific risk or opportunity across the comparison. ' +
-      'Be punchy and specific. No markdown, no bullet points — plain prose only.';
-
-    userMessage =
-      `Timeframe: ${timeframe ?? 'recent'}\n\n` +
-      `ASSETS:\n${assetList}\n\n` +
+      'You are a portfolio analyst in an ongoing chat with a trader. You are discussing ONLY the comparison of the assets below — ' +
+      'their relative performance, correlation, and how they fit together in a portfolio. ' +
+      'Stay strictly on this comparison: if the user asks about anything unrelated, briefly answer in the context of these assets or steer back. ' +
+      'Use web search whenever current market facts would help. Cite specific numbers. Keep every reply concise (max ~130 words), plain prose, no markdown.\n\n' +
+      `TIMEFRAME: ${timeframe ?? 'recent'}\n\n` +
+      `ASSETS UNDER COMPARISON:\n${assetList}\n\n` +
       `CORRELATIONS:\n${corrBlock}\n\n` +
-      `Search the web for the latest context on these assets and write the comparative analysis.`;
+      'For your FIRST reply: give a 4-5 sentence comparative analysis — which asset leads and why, what the correlations mean for diversification, and one risk or opportunity. ' +
+      'For LATER replies: answer the user\'s specific follow-up about these assets.';
   } else {
     const { name, symbol, assetClass, price, dayPct, r1m, r3m, r6m, r1y } = body as SingleAssetRequest;
-
     const dataBlock = [
       price != null ? `Price: ${price.toLocaleString()}` : null,
       `Day: ${p(dayPct)}`,
@@ -94,19 +96,21 @@ export async function POST(req: Request) {
     ].filter(Boolean).join(' · ');
 
     systemInstruction =
-      `You are a concise market analyst writing a brief for a trader. ` +
-      `ALWAYS search the web first to find the latest news, catalysts, and developments for ${name} (${symbol}). ` +
-      `Write a 3-4 sentence commentary covering: ` +
-      `(1) the key catalyst driving recent price action (from your web search), ` +
-      `(2) the current trend using the performance data provided, ` +
-      `(3) one specific risk or opportunity to watch. ` +
-      `Be punchy, specific, and cite numbers. No markdown, no bullet points — plain prose only.`;
-
-    userMessage =
-      `Asset: ${name} (${symbol}) · Class: ${assetClass}\n` +
-      `Performance: ${dataBlock}\n\n` +
-      `Search the web for the latest news on ${name} and write the commentary.`;
+      `You are a market analyst in an ongoing chat with a trader. You are discussing ONLY ${name} (${symbol}), asset class ${assetClass}. ` +
+      'Stay strictly on this asset: if the user asks about anything unrelated, briefly answer in the context of this asset or steer back to it. ' +
+      `ALWAYS use web search when current news, catalysts or facts about ${name} would help. Cite specific numbers. ` +
+      'Keep every reply concise (max ~130 words), plain prose, no markdown.\n\n' +
+      `ASSET: ${name} (${symbol}) · Class: ${assetClass}\n` +
+      `PERFORMANCE: ${dataBlock}\n\n` +
+      `For your FIRST reply: give a 3-4 sentence commentary — the key catalyst driving recent action (from web search), the current trend from the data, and one risk or opportunity. ` +
+      'For LATER replies: answer the user\'s specific follow-up about this asset.';
   }
+
+  const history = (body.messages ?? []).filter(m => m && m.text);
+  const contents = [
+    { role: 'user', parts: [{ text: INITIAL_PROMPT }] },
+    ...history.map(m => ({ role: m.role, parts: [{ text: m.text }] })),
+  ];
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 55_000);
@@ -119,11 +123,11 @@ export async function POST(req: Request) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemInstruction }] },
-        contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+        contents,
         tools: [{ google_search: {} }],
         generationConfig: {
-          maxOutputTokens: 400,
-          temperature: 0.2,
+          maxOutputTokens: 600,
+          temperature: 0.3,
           thinkingConfig: { thinkingBudget: 0 },
         },
       }),
