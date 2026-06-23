@@ -25,6 +25,8 @@ interface CurrencyRate {
 interface HistPoint { date: string; close: number }
 
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
+const FX_REGIONS = ['All', 'USD', 'EUR', 'EU', 'Asia', 'America', 'EM'] as const;
+type FxRegion = typeof FX_REGIONS[number];
 
 function decimals(rate: number | null) {
   if (!rate) return 4;
@@ -64,6 +66,7 @@ function pctText(v: number | null) {
 export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [rates, setRates] = useState<CurrencyRate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedRegion, setSelectedRegion] = useState<FxRegion>('All');
   const [selected, setSelected] = useState<{ from: string; to: string } | null>(null);
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [historical, setHistorical] = useState<HistPoint[]>([]);
@@ -132,13 +135,20 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   const dataOf = (from: string, to: string) =>
     rates.find(r => r.from === from && r.to === to) ?? null;
 
+  const filteredGroups = CURRENCY_GROUPS.filter(g => {
+    if (selectedRegion === 'All') return true;
+    if (selectedRegion === 'USD') return g.base === 'USD';
+    if (selectedRegion === 'EUR') return g.base === 'EUR';
+    return g.region === selectedRegion;
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-medium text-gray-400">USD &amp; EUR Currency Pairs</h2>
           <span className="text-[10px] text-gray-500 bg-bg-input px-2 py-0.5 rounded-full border border-border">
-            {CURRENCY_GROUPS.length} pairs · {CURRENCY_GROUPS.length * 2} directions
+            {filteredGroups.length} pairs · {filteredGroups.length * 2} directions
           </span>
         </div>
         {lastUpdate && (
@@ -149,11 +159,26 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
         )}
       </div>
 
+      {/* Region filter tabs */}
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+        {FX_REGIONS.map(r => (
+          <button key={r} onClick={() => setSelectedRegion(r)}
+            className={clsx(
+              'px-3 py-1 text-xs font-semibold rounded-full transition-all whitespace-nowrap shrink-0',
+              selectedRegion === r
+                ? 'bg-accent text-white'
+                : 'text-gray-400 border border-border hover:border-border-light hover:text-gray-200'
+            )}>
+            {r}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <LoadingGrid count={8} />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {CURRENCY_GROUPS.map(g => {
+          {filteredGroups.map(g => {
             const directions = [
               { from: g.base, to: g.quote },
               { from: g.quote, to: g.base },

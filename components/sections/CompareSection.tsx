@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef, Component, ReactNode } from 'react';
-import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, EVENT_INDICATOR_CATEGORY } from '@/lib/config';
+import { ALL_COMPARABLE_ASSETS, RECESSION_SERIES, BTC_HALVING_DATES, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, EVENT_INDICATOR_CATEGORY, INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, MACRO_INDICATORS, CURRENCY_GROUPS } from '@/lib/config';
 import { CompareAsset, HistoricalPoint, Timeframe } from '@/lib/types';
 import {
   pctChangeFromStart, calculateCAGR, formatPercent, colorForPercent,
@@ -39,11 +39,82 @@ class ChartErrorBoundary extends Component<
   }
 }
 
-const PRESETS = [
-  { label: 'Indexes', symbols: ['^GSPC', '^NDX', '^STOXX50E', 'URTH'] },
-  { label: 'Crypto',  symbols: ['BTC-USD', 'ETH-USD', 'SOL-USD'] },
-  { label: 'Commodities', symbols: ['GC=F', 'SI=F', 'CL=F'] },
-  { label: 'Tech Sectors', symbols: ['XLK', 'SOXX', 'AIQ', 'CIBR'] },
+// ── Asset-class picker: each class has subcategories that bulk-load symbols ──
+interface AssetSubcat { label: string; symbols: string[] }
+interface AssetClassDef { key: string; label: string; subcats: AssetSubcat[] }
+
+function buildSubcats(key: string): AssetSubcat[] {
+  if (key === 'Indexes') {
+    const regions = ['America', 'EU', 'Asia', 'Global', 'EM'] as const;
+    return [
+      { label: 'All', symbols: INDEXES.map(i => i.symbol).slice(0, 8) },
+      ...regions.map(r => ({
+        label: r,
+        symbols: INDEXES.filter(i => i.region === r).map(i => i.symbol),
+      })).filter(s => s.symbols.length > 0),
+    ];
+  }
+  if (key === 'Currency') {
+    const fxRegions = ['USD', 'EUR', 'EU', 'Asia', 'America', 'EM'] as const;
+    return [
+      {
+        label: 'All',
+        symbols: CURRENCY_GROUPS.slice(0, 8).map(g => `${g.base}${g.quote}=X`),
+      },
+      ...fxRegions.map(r => ({
+        label: r,
+        symbols: CURRENCY_GROUPS
+          .filter(g => r === 'USD' ? g.base === 'USD' : r === 'EUR' ? g.base === 'EUR' : g.region === r)
+          .map(g => `${g.base}${g.quote}=X`),
+      })).filter(s => s.symbols.length > 0),
+    ];
+  }
+  if (key === 'Crypto') {
+    return [
+      { label: 'Large Cap', symbols: CRYPTO_IDS.slice(0, 8).map(c => `${c.symbol}-USD`) },
+      { label: 'Mid Cap',   symbols: CRYPTO_IDS.slice(8, 16).map(c => `${c.symbol}-USD`) },
+      { label: 'BTC & ETH', symbols: ['BTC-USD', 'ETH-USD'] },
+    ];
+  }
+  if (key === 'Commodities') {
+    const cats = ['Metals', 'Energy', 'Agri', 'Softs'] as const;
+    return [
+      { label: 'All', symbols: COMMODITIES.map(c => c.symbol).slice(0, 8) },
+      ...cats.map(cat => ({
+        label: cat,
+        symbols: COMMODITIES.filter(c => c.category === cat).map(c => c.symbol),
+      })).filter(s => s.symbols.length > 0),
+    ];
+  }
+  if (key === 'Sectors') {
+    const cats = ['Tech', 'Health', 'Finance', 'Consumer', 'Energy', 'Industrial', 'Bonds', 'Real Estate', 'Utilities'];
+    return [
+      { label: 'All', symbols: SECTORS.map(s => s.symbol).slice(0, 8) },
+      ...cats.map(cat => ({
+        label: cat,
+        symbols: SECTORS.filter(s => s.category === cat).map(s => s.symbol),
+      })).filter(s => s.symbols.length > 0),
+    ];
+  }
+  if (key === 'Macro') {
+    const cats = ['Rates', 'Inflation', 'Growth', 'Employment', 'Money', 'Debt', 'Market Value', 'Sentiment'];
+    return [
+      ...cats.map(cat => ({
+        label: cat,
+        symbols: MACRO_INDICATORS.filter(m => m.category === cat).map(m => m.id).slice(0, 8),
+      })).filter(s => s.symbols.length > 0),
+    ];
+  }
+  return [];
+}
+
+const ASSET_CLASSES: AssetClassDef[] = [
+  { key: 'Indexes',     label: 'Indexes',     subcats: buildSubcats('Indexes')     },
+  { key: 'Currency',    label: 'Currency',    subcats: buildSubcats('Currency')    },
+  { key: 'Crypto',      label: 'Crypto',      subcats: buildSubcats('Crypto')      },
+  { key: 'Commodities', label: 'Commodities', subcats: buildSubcats('Commodities') },
+  { key: 'Sectors',     label: 'Sectors',     subcats: buildSubcats('Sectors')     },
+  { key: 'Macro',       label: 'Macro',       subcats: buildSubcats('Macro')       },
 ];
 
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
@@ -127,6 +198,7 @@ function buildSpreadAssets(
 export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
+  const [activeAssetClass, setActiveAssetClass] = useState<string | null>(null);
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(() => {
     if (jumpTo?.startsWith('compare:')) {
       const syms = jumpTo.slice('compare:'.length).split(',').filter(Boolean);
@@ -385,7 +457,9 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   };
 
   const removeSymbol = (symbol: string) => setSelectedSymbols(prev => prev.filter(s => s !== symbol));
-  const loadPreset = (preset: typeof PRESETS[0]) => setSelectedSymbols(preset.symbols);
+  const loadSubcat = (symbols: string[]) => {
+    setSelectedSymbols(symbols.slice(0, 8));
+  };
 
   // Local config search (exclude already selected)
   const localHits = ALL_COMPARABLE_ASSETS.filter(a =>
@@ -646,13 +720,38 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex gap-2 flex-wrap">
-          {PRESETS.map(p => (
-            <button key={p.label} onClick={() => loadPreset(p)}
-              className="px-3 py-1 text-xs font-medium rounded-full border border-border text-gray-400 hover:text-gray-100 hover:border-border-light transition-all">
-              {p.label}
-            </button>
-          ))}
+        <div className="flex flex-col gap-2 w-full sm:w-auto">
+          {/* Asset class buttons */}
+          <div className="flex gap-1.5 flex-wrap">
+            {ASSET_CLASSES.map(ac => (
+              <button key={ac.key}
+                onClick={() => setActiveAssetClass(prev => prev === ac.key ? null : ac.key)}
+                className={clsx(
+                  'px-3 py-1 text-xs font-medium rounded-full border transition-all',
+                  activeAssetClass === ac.key
+                    ? 'border-accent text-accent bg-accent/10'
+                    : 'border-border text-gray-400 hover:text-gray-100 hover:border-border-light'
+                )}>
+                {ac.label}
+              </button>
+            ))}
+          </div>
+          {/* Subcategory pills — shown when an asset class is active */}
+          {activeAssetClass && (() => {
+            const ac = ASSET_CLASSES.find(a => a.key === activeAssetClass);
+            if (!ac || ac.subcats.length === 0) return null;
+            return (
+              <div className="flex gap-1.5 flex-wrap pl-1">
+                {ac.subcats.map(sc => (
+                  <button key={sc.label}
+                    onClick={() => loadSubcat(sc.symbols)}
+                    className="px-2.5 py-0.5 text-[11px] font-semibold rounded-full border border-accent/40 text-accent/80 hover:bg-accent/15 hover:text-accent hover:border-accent transition-all whitespace-nowrap">
+                    {sc.label}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <div className="flex gap-1">

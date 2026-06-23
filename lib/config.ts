@@ -787,30 +787,32 @@ export const CURRENCY_META: Record<string, { name: string; flag: string; cc: str
 // Each group is shown as one card with BOTH directions (base→quote and the
 // inverse quote→base). Only USD- and EUR-based pairs are tracked — the base
 // currency is always USD or EUR so it leads in the card layout.
-export const CURRENCY_GROUPS: { base: string; quote: string }[] = [
-  { base: 'EUR', quote: 'USD' },
-  { base: 'USD', quote: 'GBP' },
-  { base: 'USD', quote: 'JPY' },
-  { base: 'USD', quote: 'CHF' },
-  { base: 'USD', quote: 'CNY' },
-  { base: 'USD', quote: 'CAD' },
-  { base: 'USD', quote: 'AUD' },
-  { base: 'USD', quote: 'NZD' },
-  { base: 'USD', quote: 'MXN' },
-  { base: 'USD', quote: 'INR' },
-  { base: 'USD', quote: 'BRL' },
-  { base: 'USD', quote: 'SEK' },
-  { base: 'EUR', quote: 'GBP' },
-  { base: 'EUR', quote: 'JPY' },
-  { base: 'EUR', quote: 'CHF' },
-  { base: 'EUR', quote: 'CNY' },
-  { base: 'EUR', quote: 'CAD' },
-  { base: 'EUR', quote: 'AUD' },
-  { base: 'EUR', quote: 'NZD' },
-  { base: 'EUR', quote: 'MXN' },
-  { base: 'EUR', quote: 'INR' },
-  { base: 'EUR', quote: 'BRL' },
-  { base: 'EUR', quote: 'SEK' },
+// `region` reflects the non-USD, non-EUR currency's geography (used for
+// filter tabs in the Currencies section and Compare bulk-add).
+export const CURRENCY_GROUPS: { base: string; quote: string; region: string }[] = [
+  { base: 'EUR', quote: 'USD', region: 'EU' },       // EUR = European
+  { base: 'USD', quote: 'GBP', region: 'EU' },
+  { base: 'USD', quote: 'JPY', region: 'Asia' },
+  { base: 'USD', quote: 'CHF', region: 'EU' },
+  { base: 'USD', quote: 'CNY', region: 'Asia' },
+  { base: 'USD', quote: 'CAD', region: 'America' },
+  { base: 'USD', quote: 'AUD', region: 'Asia' },
+  { base: 'USD', quote: 'NZD', region: 'Asia' },
+  { base: 'USD', quote: 'MXN', region: 'EM' },
+  { base: 'USD', quote: 'INR', region: 'EM' },
+  { base: 'USD', quote: 'BRL', region: 'EM' },
+  { base: 'USD', quote: 'SEK', region: 'EU' },
+  { base: 'EUR', quote: 'GBP', region: 'EU' },
+  { base: 'EUR', quote: 'JPY', region: 'Asia' },
+  { base: 'EUR', quote: 'CHF', region: 'EU' },
+  { base: 'EUR', quote: 'CNY', region: 'Asia' },
+  { base: 'EUR', quote: 'CAD', region: 'America' },
+  { base: 'EUR', quote: 'AUD', region: 'Asia' },
+  { base: 'EUR', quote: 'NZD', region: 'Asia' },
+  { base: 'EUR', quote: 'MXN', region: 'EM' },
+  { base: 'EUR', quote: 'INR', region: 'EM' },
+  { base: 'EUR', quote: 'BRL', region: 'EM' },
+  { base: 'EUR', quote: 'SEK', region: 'EU' },
 ];
 
 // Flat list of every pair direction (used by the Compare section and note
