@@ -81,7 +81,7 @@ export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => 
             : json.error === 'timeout'
               ? 'Timed out — the web search took too long. Try again.'
               : json.error === 'upstream'
-                ? `Anthropic error (${json.status ?? '?'}). Try again.`
+                ? `Gemini error (${json.status ?? '?'})${json.message ? ': ' + json.message : ''}. Try again.`
                 : 'Could not read sentiment. Try again.'
         );
         return;
