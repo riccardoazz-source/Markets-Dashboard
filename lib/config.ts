@@ -701,6 +701,9 @@ export const CRYPTO_IDS = [
   { id: 'polkadot',         symbol: 'DOT', name: 'Polkadot'  },
   { id: 'litecoin',         symbol: 'LTC', name: 'Litecoin'  },
   { id: 'sui',              symbol: 'SUI', name: 'Sui'       },
+  { id: 'hyperliquid',      symbol: 'HYPE',name: 'Hyperliquid'},
+  { id: 'zcash',            symbol: 'ZEC', name: 'Zcash'     },
+  { id: 'ondo-finance',     symbol: 'ONDO',name: 'Ondo'      },
 ];
 
 export const CRYPTO_YAHOO_SYMBOLS: Record<string, string> = {
@@ -717,6 +720,9 @@ export const CRYPTO_YAHOO_SYMBOLS: Record<string, string> = {
   polkadot:    'DOT-USD',
   litecoin:    'LTC-USD',
   sui:         'SUI-USD',
+  hyperliquid: 'HYPE-USD',
+  zcash:       'ZEC-USD',
+  'ondo-finance': 'ONDO-USD',
 };
 
 export const SECTORS: AssetConfig[] = [

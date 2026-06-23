@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { scoreRotation } from '@/lib/rotationModel';
+import { scoreRotation, ACCEL_LIMIT } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -106,6 +106,7 @@ function buildScenario(histMap: Map<string, Hist>, todayStr: string, key: string
   const picks: Pick[] = scoreRotation(rows)
     .filter(s => s.passesGate)
     .sort((a, b) => b.score - a.score)
+    .slice(0, ACCEL_LIMIT)
     .map(s => s.item)
     .map((r): Pick => ({
       symbol: r.symbol, name: r.name, group: r.group,

@@ -8,7 +8,7 @@ import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData } from '@/lib/gist';
 import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_LIMIT } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { RotationChart, ChartAsset } from '@/components/charts/RotationChart';
+import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
 import { SentimentPanel, SentimentSnapshot } from '@/components/sections/SentimentPanel';
 
@@ -44,7 +44,6 @@ interface RollingReturn {
 
 type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w';
 type GroupFilter = 'all' | Group;
-type ChartTimeframe = '1M' | '3M' | '6M' | '1Y';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'day',  label: 'Day'  },
@@ -65,22 +64,7 @@ const GROUP_FILTERS: { value: GroupFilter; label: string }[] = [
   { value: 'Sectors',     label: 'Sectors'     },
 ];
 
-const CHART_TF_OPTIONS: ChartTimeframe[] = ['1M', '3M', '6M', '1Y'];
-
-const GROUP_COLORS: Record<RotationItem['group'], string> = {
-  Indexes:     '#3b82f6',
-  Crypto:      '#f97316',
-  Commodities: '#f59e0b',
-  Sectors:     '#8b5cf6',
-  Stocks:      '#f43f5e',
-};
-
 const PINS_KEY = 'rotation-pins-v1';
-
-const CHART_COLORS = [
-  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
-  '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#a855f7',
-];
 
 // % gap between current price and a moving average (positive = price above MA).
 function vsMa(price: number | null, ma: number | null): number | null {
@@ -177,7 +161,6 @@ export function RotationSection() {
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
   const [accelOnly, setAccelOnly] = useState(false);
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
-  const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('3M');
   const userHasToggled = useRef(false);
 
   // Pinned assets — durable "remember to check" list, saved to the gist database
@@ -363,13 +346,6 @@ export function RotationSection() {
 
         setItems(enriched);
 
-        if (!userHasToggled.current) {
-          const sorted = [...enriched].sort((a, b) =>
-            (getPct(b, '3m') ?? -Infinity) - (getPct(a, '3m') ?? -Infinity)
-          );
-          setSelectedSymbols(new Set(sorted.slice(0, 5).map(i => i.symbol)));
-        }
-
         setRollingLoading(false);
       } catch (err) {
         if (!cancelled) { console.error(err); setError(true); setLoading(false); setRollingLoading(false); }
@@ -425,19 +401,27 @@ export function RotationSection() {
     });
   };
 
-  const colorMap = new Map<string, string>();
-  let colorIdx = 0;
-  for (const sym of selectedSymbols) {
-    colorMap.set(sym, CHART_COLORS[colorIdx % CHART_COLORS.length]);
-    colorIdx++;
-  }
-
-  const chartAssets: ChartAsset[] = Array.from(selectedSymbols)
-    .map(sym => {
-      const item = rows.find(i => i.symbol === sym);
-      return item ? { symbol: sym, name: item.name, color: colorMap.get(sym) ?? '#3b82f6' } : null;
-    })
-    .filter((a): a is ChartAsset => a !== null);
+  // Build quadrant chart data from the currently filtered view.
+  const quadrantAssets = useMemo<QuadrantAsset[]>(() => {
+    const accelSet = new Set(accelItems.map(i => i.symbol));
+    const result: QuadrantAsset[] = [];
+    for (const item of groupFiltered) {
+      const s = scoreMap.get(item.symbol);
+      if (!s || item.r3m == null) continue;
+      result.push({
+        symbol: item.symbol,
+        name: item.name,
+        group: item.group as string,
+        r3m: item.r3m,
+        accScore: Math.round(s.accPctile * 100),
+        r1m: item.r1m,
+        r1y: item.r1y,
+        isAccel: accelSet.has(item.symbol),
+        isSelected: selectedSymbols.has(item.symbol),
+      });
+    }
+    return result;
+  }, [groupFiltered, scoreMap, accelItems, selectedSymbols]);
 
   // When the user hits Refresh on the sentiment panel, snap the table back to the
   // canonical view (All classes, sorted by today's move) so what they see equals
@@ -646,8 +630,6 @@ export function RotationSection() {
                 )}
                 {sortedItems.map((item, idx) => {
                   const isSelected = selectedSymbols.has(item.symbol);
-                  const dotColor   = GROUP_COLORS[item.group];
-                  const rowColor   = colorMap.get(item.symbol);
                   const scored     = scoreMap.get(item.symbol);
                   const accel      = accelArrow(scored?.rankDelta ?? null);
                   // Flag names in the bottom half of 1Y extension: the run is still young.
@@ -677,8 +659,8 @@ export function RotationSection() {
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span
-                            className="shrink-0 w-2 h-2 rounded-full"
-                            style={{ background: isSelected && rowColor ? rowColor : dotColor, opacity: isSelected ? 1 : 0.4 }}
+                            className={clsx('shrink-0 w-2 h-2 rounded-full', isSelected ? 'opacity-100' : 'opacity-40')}
+                            style={{ background: { Indexes:'#3b82f6', Crypto:'#f97316', Commodities:'#f59e0b', Sectors:'#8b5cf6', Stocks:'#f43f5e' }[item.group] ?? '#6b7280' }}
                           />
                           <span className="truncate text-xs font-medium text-gray-200">{item.name}</span>
                           <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-border text-gray-500 leading-none hidden sm:inline">
@@ -754,32 +736,21 @@ export function RotationSection() {
         </div>
       )}
 
-      {/* Chart */}
-      <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-xs text-gray-400 font-medium">
-            {selectedSymbols.size === 0
-              ? 'Click rows to add assets to chart'
-              : `${selectedSymbols.size} asset${selectedSymbols.size !== 1 ? 's' : ''} — normalized % return`}
-          </p>
-          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
-            {CHART_TF_OPTIONS.map(tf => (
-              <button
-                key={tf}
-                onClick={() => setChartTimeframe(tf)}
-                className={clsx(
-                  'px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
-                  chartTimeframe === tf
-                    ? 'bg-accent text-white'
-                    : 'text-gray-400 hover:text-gray-100 hover:bg-border'
-                )}
-              >
-                {tf}
-              </button>
-            ))}
-          </div>
+      {/* Rotation Quadrant chart */}
+      <div className="rounded-xl border border-border bg-bg-card p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-medium text-gray-400">Rotation Quadrant</p>
+          {selectedSymbols.size > 0 && (
+            <button
+              onClick={() => { userHasToggled.current = true; setSelectedSymbols(new Set()); }}
+              className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+            >
+              Clear highlights
+            </button>
+          )}
         </div>
-        <RotationChart assets={chartAssets} timeframe={chartTimeframe} />
+        <p className="text-[10px] text-gray-600">Click a row to highlight its dot. Labeled = Accelerating top {ACCEL_LIMIT}.</p>
+        <QuadrantChart assets={quadrantAssets} loading={rollingLoading} />
       </div>
 
       {/* Backtest — time machine */}

@@ -138,6 +138,7 @@ export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSna
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secs, setSecs] = useState(0);
+  const [showLatest, setShowLatest] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -190,6 +191,7 @@ export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSna
         .sort((a, b) => b.generatedAt.localeCompare(a.generatedAt))
         .slice(0, 120);
       await update({ sentiments: nextList });
+      setShowLatest(true);
     } catch {
       setError('Request failed. Try again.');
     } finally {
@@ -211,13 +213,22 @@ export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSna
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {latest && <span className="text-[10px] text-gray-500">{fmtWhen(latest.generatedAt)}</span>}
+          {d && !loading && (
+            <button
+              onClick={() => setShowLatest(v => !v)}
+              className="px-2 py-1.5 text-xs text-gray-400 hover:text-gray-200 rounded-lg hover:bg-border transition-colors"
+              title={showLatest ? "Collapse" : "Expand last report"}
+            >
+              {showLatest ? '▲ Collapse' : '▼ Show last'}
+            </button>
+          )}
           <button
             onClick={run}
             disabled={loading || !ready}
             className={clsx('px-3 py-1.5 text-xs font-semibold rounded-lg bg-accent text-white transition-all', (loading || !ready) && 'opacity-50 cursor-not-allowed')}
-            title={!ready ? 'Waiting for leaderboard data to load' : 'Read today’s sentiment'}
+            title={!ready ? "Waiting for leaderboard data to load" : "Read today's sentiment"}
           >
-            {loading ? `Reading… ${secs}s` : latest ? '↻ Refresh' : '▶ Read sentiment'}
+            {loading ? `Reading... ${secs}s` : latest ? '↻ Refresh' : '▶ Read sentiment'}
           </button>
         </div>
       </div>
@@ -231,11 +242,11 @@ export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSna
       {loading && !d && (
         <div className="flex flex-col items-center justify-center h-28 gap-2">
           <LoadingSpinner size={24} />
-          <span className="text-[11px] text-gray-500">Searching the web &amp; reading the tape…</span>
+          <span className="text-[11px] text-gray-500">Searching the web &amp; reading the tape...</span>
         </div>
       )}
 
-      {d && (
+      {d && showLatest && (
         <div className={clsx(loading && 'opacity-50')}>
           <SentimentBody d={d} />
           <p className="mt-3 text-[10px] text-gray-600 italic text-right">AI + web search — not financial advice.</p>
