@@ -24,6 +24,7 @@ interface SentimentData {
   regime_now?: string;
   regime_next?: string;
   macro_note?: string;
+  macro_backdrop?: string;
   outlook_note?: string;
   rotation_note?: string;
   risk_note?: string;
@@ -96,6 +97,9 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
       <div className="space-y-2 text-xs leading-relaxed">
         {d.macro_note && (
           <p className="text-gray-300"><span className="text-gray-500 font-medium">Today: </span>{d.macro_note}</p>
+        )}
+        {d.macro_backdrop && (
+          <p className="text-gray-300"><span className="text-gray-500 font-medium">Macro: </span>{d.macro_backdrop}</p>
         )}
         {d.outlook_note && (
           <p className="text-gray-300"><span className="text-gray-500 font-medium">Next month: </span>{d.outlook_note}</p>

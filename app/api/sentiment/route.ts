@@ -23,7 +23,7 @@ interface Snapshot {
 
 const CLASS_FIELDS = ['indexes_note', 'crypto_note', 'commodities_note', 'sectors_note', 'stocks_note'];
 const FIELDS = [
-  'headline', 'regime_now', 'regime_next', 'macro_note',
+  'headline', 'regime_now', 'regime_next', 'macro_note', 'macro_backdrop',
   'outlook_note', 'rotation_note', 'risk_note', 'confidence',
   ...CLASS_FIELDS,
 ];
@@ -122,19 +122,23 @@ export async function POST(req: Request) {
   const systemInstruction =
     'You are a markets desk analyst writing a DAILY BRIEF from a live table you have been given. Style: Bloomberg terminal flash, not a research essay. ' +
     'READ THE FULL TABLE BELOW — it is exactly what the user sees on screen. Every field has a strict WORD LIMIT you must never exceed. ' +
-    'Always name specific assets and exact numbers FROM THE TABLE. Start from the biggest DAILY moves — that is the freshest, most important signal. ' +
-    'Use Google Search ONLY to find the CATALYST behind today\'s biggest moves (e.g. why an index dropped 10% today). Be punchy and specific, never vague. ' +
+    'Always name specific assets and exact numbers FROM THE TABLE. ' +
+    'You MUST do TWO web searches before writing:\n' +
+    '  1. Search for the catalyst behind today\'s biggest daily movers (e.g. why KOSPI dropped 10%).\n' +
+    '  2. Search for today\'s key macro backdrop: Fed/ECB/BoJ stance, latest inflation print, and the most important geopolitical development.\n' +
+    'Both searches feed different fields — macro_note covers the daily moves, macro_backdrop covers rates/inflation/geopolitics. Be punchy and specific, never vague. ' +
     'Distinguish the regime RIGHT NOW from the next ~month. ' +
     'Use one of these exact labels: Risk-On, Risk-Off, Stagflation Risk, Soft Landing, Transition, Reflation, Goldilocks.\n\n' +
     'Output ONLY these key: value lines — one per line, no preamble, no markdown, no bullet characters:\n' +
     'headline: <MAX 12 WORDS. The single biggest move today + the reason.>\n' +
     'regime_now: <one label>\n' +
     'regime_next: <one label>\n' +
-    'macro_note: <MAX 30 WORDS. The biggest daily mover + its catalyst from web search, then the second-biggest. Numbers required.>\n' +
-    'outlook_note: <MAX 25 WORDS. What changes next month and why.>\n' +
-    'rotation_note: <MAX 25 WORDS. Where capital is rotating today — name the strongest and weakest.>\n' +
+    'macro_note: <MAX 35 WORDS. The 2 biggest daily movers with catalysts from search #1. Numbers required.>\n' +
+    'macro_backdrop: <MAX 35 WORDS. From search #2: current Fed/ECB stance + latest inflation reading + key geopolitical risk. Specific, no vague generalities.>\n' +
+    'outlook_note: <MAX 25 WORDS. What changes next month given both the rotation and the macro backdrop.>\n' +
+    'rotation_note: <MAX 25 WORDS. Where capital is rotating — name the strongest and weakest asset classes today.>\n' +
     classInstr + '\n' +
-    'risk_note: <MAX 20 WORDS. The single biggest risk.>\n' +
+    'risk_note: <MAX 20 WORDS. Single biggest risk combining market + macro.>\n' +
     'confidence: <Low | Medium | High>';
 
   const userMessage =
@@ -154,7 +158,7 @@ export async function POST(req: Request) {
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
         tools: [{ google_search: {} }],
         generationConfig: {
-          maxOutputTokens: 1024,
+          maxOutputTokens: 1200,
           temperature: 0.2,
           thinkingConfig: { thinkingBudget: 0 },
         },
