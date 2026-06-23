@@ -11,22 +11,24 @@ import {
   ReferenceLine,
   ReferenceArea,
   Tooltip,
+  Customized,
 } from 'recharts';
 
-// Rotation Quadrant chart — replaces the normalized line chart.
+// Rotation Quadrant chart.
 //
 // Every asset is plotted as a dot:
 //   X = 3-month return (%) — shows where the asset has been
 //   Y = acceleration score (0–100 percentile) — shows if capital is rotating IN now
 //
 // Quadrant split at X=0 (zero 3M return) and Y=50 (median acceleration):
-//   Top-right  → Trending:   strong 3M + accelerating (confirmed uptrend)
-//   Top-left   → Recovering: weak 3M but accelerating (early rotation — the target)
-//   Bottom-right→ Fading:    strong 3M but slowing (watch for exit)
-//   Bottom-left → Lagging:   weak + decelerating (avoid)
+//   Top-right   → Trending:   strong 3M + accelerating (confirmed uptrend)
+//   Top-left    → Recovering: weak 3M but accelerating (early rotation — the target)
+//   Bottom-right→ Fading:     strong 3M but slowing (watch for exit)
+//   Bottom-left → Lagging:    weak + decelerating (avoid)
 //
-// Accelerating names (top-8 by score) are shown bigger with labels.
-// Clicking a row in the table highlights the dot here.
+// Accelerating names (top-8 by score) and any clicked rows are drawn bigger and
+// labelled. Labels are placed by a dedicated layer that spaces them apart and
+// draws a thin leader line back to the dot, so they never overlap each other.
 
 const GROUP_COLORS: Record<string, string> = {
   Indexes:     '#3b82f6',
@@ -48,50 +50,32 @@ export interface QuadrantAsset {
   isSelected: boolean;
 }
 
-function shortName(name: string): string {
-  if (name.length <= 12) return name;
-  const first = name.split(/[\s&]/)[0];
-  return first.length >= 4 ? first : name.slice(0, 11) + '…';
+// Internal: r3m clamped to the visible domain (so a single outlier can't squash
+// the rest against one edge), while r3m keeps the true value for the tooltip.
+interface PlotAsset extends QuadrantAsset {
+  r3mPlot: number;
 }
 
-// Custom scatter dot — big + labeled for accel/selected, medium for others.
-function QuadrantDot(props: { cx?: number; cy?: number; payload?: QuadrantAsset }) {
+function shortName(name: string): string {
+  if (name.length <= 14) return name;
+  const first = name.split(/[\s&]/)[0];
+  return first.length >= 4 ? first : name.slice(0, 13) + '…';
+}
+
+// Plain circle — no text. All labels are drawn by the LabelLayer below.
+function QuadrantDot(props: { cx?: number; cy?: number; payload?: PlotAsset }) {
   const { cx, cy, payload } = props;
   if (cx == null || cy == null || !payload) return null;
   const color = GROUP_COLORS[payload.group] ?? '#6b7280';
   const { isAccel, isSelected } = payload;
-
   const r = isSelected ? 7 : isAccel ? 5 : 3.5;
-  const opacity = isAccel || isSelected ? 0.95 : 0.45;
-
-  // Put label on the opposite side from the axis origin to reduce overlap:
-  // positive r3m (right side of chart) → label to the left; negative → right.
-  const labelRight = payload.r3m <= 0;
-  const labelX = labelRight ? cx + r + 4 : cx - r - 4;
-  const labelAnchor = labelRight ? 'start' : 'end';
-
-  const showLabel = isAccel || isSelected;
-
+  const opacity = isAccel || isSelected ? 0.95 : 0.4;
   return (
     <g>
       {isSelected && (
         <circle cx={cx} cy={cy} r={r + 6} fill="none" stroke={color} strokeWidth={1.5} strokeOpacity={0.5} />
       )}
       <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={opacity} />
-      {showLabel && (
-        <text
-          x={labelX}
-          y={cy + 3.5}
-          fontSize={9.5}
-          fontWeight={isSelected ? 600 : 400}
-          fill={color}
-          fillOpacity={0.95}
-          textAnchor={labelAnchor as 'start' | 'end'}
-          style={{ pointerEvents: 'none', userSelect: 'none' }}
-        >
-          {shortName(payload.name)}
-        </text>
-      )}
     </g>
   );
 }
@@ -114,25 +98,170 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
   );
 }
 
+interface Box { x1: number; y1: number; x2: number; y2: number }
+function overlaps(a: Box, b: Box): boolean {
+  return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+}
+
+// Recharts axis-map shape (only the bits we use).
+interface AxisLike { scale?: (v: number) => number }
+interface CustomizedProps {
+  xAxisMap?: Record<string, AxisLike>;
+  yAxisMap?: Record<string, AxisLike>;
+  offset?: { top: number; left: number; width: number; height: number };
+}
+
+// Dedicated label layer with collision avoidance + leader lines. Runs inside the
+// chart so it can read the live pixel scales from recharts' axis maps.
+function makeLabelLayer(labeled: PlotAsset[]) {
+  return function LabelLayer(props: CustomizedProps) {
+    const { xAxisMap, yAxisMap, offset } = props;
+    if (!xAxisMap || !yAxisMap || !offset) return null;
+    const xScale = Object.values(xAxisMap)[0]?.scale;
+    const yScale = Object.values(yAxisMap)[0]?.scale;
+    if (!xScale || !yScale) return null;
+
+    const { left, top, width, height } = offset;
+    const right = left + width;
+    const bottom = top + height;
+    const midX = left + width / 2;
+
+    const LH = 13;       // label box height
+    const CHAR = 5.3;    // approx px per character at 9.5px
+    const GAP = 5;       // gap between dot edge and text
+
+    // Selected first, then by vertical position so nudging is stable.
+    const order = [...labeled].sort((a, b) => {
+      if (a.isSelected !== b.isSelected) return a.isSelected ? -1 : 1;
+      return yScale(b.accScore) - yScale(a.accScore);
+    });
+
+    const placed: Box[] = [];
+    const nodes: React.ReactNode[] = [];
+
+    for (const a of order) {
+      const color = GROUP_COLORS[a.group] ?? '#6b7280';
+      const cx = xScale(a.r3mPlot);
+      const cy = yScale(a.accScore);
+      const r = a.isSelected ? 7 : 5;
+      const text = shortName(a.name);
+      const w = text.length * CHAR + 4;
+
+      // Place on the side that keeps the label inside the plot.
+      const placeRight = cx <= midX;
+      let anchorX = placeRight ? cx + r + GAP : cx - r - GAP;
+      let labelY = cy;
+
+      // Try the dot's own height first, then nudge vertically until free.
+      const offsets = [0, -LH, LH, -2 * LH, 2 * LH, -3 * LH, 3 * LH, -4 * LH, 4 * LH];
+      let chosen: Box | null = null;
+      for (const dy of offsets) {
+        let y = cy + dy;
+        y = Math.max(top + LH / 2, Math.min(bottom - LH / 2, y));
+        const box: Box = placeRight
+          ? { x1: anchorX, y1: y - LH / 2, x2: anchorX + w, y2: y + LH / 2 }
+          : { x1: anchorX - w, y1: y - LH / 2, x2: anchorX, y2: y + LH / 2 };
+        if (box.x1 < left) { box.x1 = left; box.x2 = left + w; }
+        if (box.x2 > right) { box.x2 = right; box.x1 = right - w; }
+        if (!placed.some(p => overlaps(box, p))) { chosen = box; labelY = y; break; }
+      }
+      if (!chosen) {
+        // Fallback: stack at the first free slot scanning downward.
+        let y = top + LH / 2;
+        while (y < bottom) {
+          const box: Box = { x1: anchorX, y1: y - LH / 2, x2: anchorX + w, y2: y + LH / 2 };
+          if (!placed.some(p => overlaps(box, p))) { chosen = box; labelY = y; break; }
+          y += LH;
+        }
+        if (!chosen) chosen = { x1: anchorX, y1: cy - LH / 2, x2: anchorX + w, y2: cy + LH / 2 };
+      }
+      placed.push(chosen);
+
+      const textX = placeRight ? chosen.x1 : chosen.x2;
+      const textAnchor = placeRight ? 'start' : 'end';
+      // Leader line: from dot edge to the label, only when the label moved.
+      const moved = Math.abs(labelY - cy) > 2;
+      const lineEndX = placeRight ? chosen.x1 - 2 : chosen.x2 + 2;
+
+      nodes.push(
+        <g key={a.symbol}>
+          {moved && (
+            <line
+              x1={cx + (placeRight ? r : -r)}
+              y1={cy}
+              x2={lineEndX}
+              y2={labelY}
+              stroke={color}
+              strokeOpacity={0.35}
+              strokeWidth={0.75}
+            />
+          )}
+          <text
+            x={textX}
+            y={labelY + 3.3}
+            fontSize={9.5}
+            fontWeight={a.isSelected ? 600 : 400}
+            fill={color}
+            fillOpacity={0.95}
+            textAnchor={textAnchor}
+            style={{ pointerEvents: 'none', userSelect: 'none' }}
+          >
+            {text}
+          </text>
+        </g>
+      );
+    }
+
+    // Quadrant names parked in the true corners, very faint.
+    const corner = (txt: string, x: number, y: number, anchor: 'start' | 'end', fill: string) => (
+      <text x={x} y={y} fontSize={10.5} fontStyle="italic" fill={fill} fillOpacity={0.6} textAnchor={anchor}
+        style={{ pointerEvents: 'none', userSelect: 'none' }}>{txt}</text>
+    );
+
+    return (
+      <g>
+        {corner('Recovering', left + 6, top + 14, 'start', '#60a5fa')}
+        {corner('Trending', right - 6, top + 14, 'end', '#22c55e')}
+        {corner('Lagging', left + 6, bottom - 8, 'start', '#f87171')}
+        {corner('Fading', right - 6, bottom - 8, 'end', '#d97706')}
+        {nodes}
+      </g>
+    );
+  };
+}
+
 interface Props {
   assets: QuadrantAsset[];
   loading?: boolean;
 }
 
 export function QuadrantChart({ assets, loading }: Props) {
-  // Separate accel (drawn last so they appear on top) from normal dots.
-  const { normal, accel } = useMemo(() => {
-    const normal: QuadrantAsset[] = [];
-    const accel: QuadrantAsset[] = [];
-    for (const a of assets) {
-      (a.isAccel ? accel : normal).push(a);
+  // Symmetric, outlier-clamped X domain so the X=0 divider sits in the centre and
+  // a lone extreme mover can't squash everyone against one edge.
+  const { plot, normal, accel, labeled, xDomain } = useMemo(() => {
+    if (assets.length === 0) {
+      return { plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[], xDomain: [-20, 20] as [number, number] };
     }
-    return { normal, accel };
+    const absVals = assets.map(a => Math.abs(a.r3m)).sort((x, y) => x - y);
+    // 90th percentile of |r3m|, padded — the visible half-range.
+    const p90 = absVals[Math.min(absVals.length - 1, Math.floor(absVals.length * 0.9))] ?? 20;
+    const maxAbs = absVals[absVals.length - 1] ?? 20;
+    const M = Math.max(15, Math.min(maxAbs + 6, p90 * 1.3));
+    const clampEdge = M * 0.985;
+
+    const plot: PlotAsset[] = assets.map(a => ({
+      ...a,
+      r3mPlot: Math.max(-clampEdge, Math.min(clampEdge, a.r3m)),
+    }));
+    const normal = plot.filter(a => !a.isAccel);
+    const accel = plot.filter(a => a.isAccel);
+    const labeled = plot.filter(a => a.isAccel || a.isSelected);
+    return { plot, normal, accel, labeled, xDomain: [-M, M] as [number, number] };
   }, [assets]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[360px] text-[11px] text-gray-600">
+      <div className="flex items-center justify-center h-[400px] text-[11px] text-gray-600">
         Loading leaderboard…
       </div>
     );
@@ -140,16 +269,14 @@ export function QuadrantChart({ assets, loading }: Props) {
 
   if (assets.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[360px] text-[11px] text-gray-500">
+      <div className="flex items-center justify-center h-[400px] text-[11px] text-gray-500">
         Waiting for rolling-return data…
       </div>
     );
   }
 
-  const allX = assets.map(a => a.r3m);
-  const xPad = 10;
-  const xMin = Math.min(...allX) - xPad;
-  const xMax = Math.max(...allX) + xPad;
+  const [xMin, xMax] = xDomain;
+  const LabelLayer = makeLabelLayer(labeled);
 
   return (
     <div className="space-y-1">
@@ -165,16 +292,16 @@ export function QuadrantChart({ assets, loading }: Props) {
         </div>
       </div>
       <ResponsiveContainer width="100%" height={400}>
-        <ScatterChart margin={{ top: 16, right: 48, bottom: 24, left: 8 }}>
+        <ScatterChart margin={{ top: 16, right: 16, bottom: 24, left: 8 }}>
           {/* Quadrant background tints */}
-          <ReferenceArea x1={0} x2={xMax} y1={50} y2={100} fill="#16a34a" fillOpacity={0.04} />
-          <ReferenceArea x1={xMin} x2={0} y1={50} y2={100} fill="#3b82f6" fillOpacity={0.04} />
-          <ReferenceArea x1={0} x2={xMax} y1={0} y2={50} fill="#f59e0b" fillOpacity={0.03} />
-          <ReferenceArea x1={xMin} x2={0} y1={0} y2={50} fill="#ef4444" fillOpacity={0.03} />
+          <ReferenceArea x1={0} x2={xMax} y1={50} y2={100} fill="#16a34a" fillOpacity={0.05} />
+          <ReferenceArea x1={xMin} x2={0} y1={50} y2={100} fill="#3b82f6" fillOpacity={0.05} />
+          <ReferenceArea x1={0} x2={xMax} y1={0} y2={50} fill="#f59e0b" fillOpacity={0.035} />
+          <ReferenceArea x1={xMin} x2={0} y1={0} y2={50} fill="#ef4444" fillOpacity={0.035} />
 
           <CartesianGrid stroke="#1e293b" strokeDasharray="0" />
           <XAxis
-            dataKey="r3m"
+            dataKey="r3mPlot"
             type="number"
             name="3M Return"
             domain={[xMin, xMax]}
@@ -197,46 +324,24 @@ export function QuadrantChart({ assets, loading }: Props) {
             width={36}
           />
 
-          {/* Axis reference lines */}
           <ReferenceLine x={0}  stroke="#334155" strokeWidth={1.5} />
           <ReferenceLine y={50} stroke="#334155" strokeWidth={1.5} />
 
-          {/* Quadrant corner labels */}
-          <ReferenceLine
-            x={xMin + (xMax - xMin) * 0.25} y={88}
-            label={{ value: 'Recovering', position: 'center', fill: '#3b82f6', fontSize: 10, fontStyle: 'italic' }}
-            stroke="none"
-          />
-          <ReferenceLine
-            x={xMin + (xMax - xMin) * 0.75} y={88}
-            label={{ value: 'Trending', position: 'center', fill: '#16a34a', fontSize: 10, fontStyle: 'italic' }}
-            stroke="none"
-          />
-          <ReferenceLine
-            x={xMin + (xMax - xMin) * 0.25} y={12}
-            label={{ value: 'Lagging', position: 'center', fill: '#ef4444', fontSize: 10, fontStyle: 'italic' }}
-            stroke="none"
-          />
-          <ReferenceLine
-            x={xMin + (xMax - xMin) * 0.75} y={12}
-            label={{ value: 'Fading', position: 'center', fill: '#b45309', fontSize: 10, fontStyle: 'italic' }}
-            stroke="none"
-          />
+          <Tooltip content={<QuadrantTooltip />} cursor={{ strokeDasharray: '3 3', stroke: '#475569' }} />
 
-          <Tooltip
-            content={<QuadrantTooltip />}
-            cursor={{ strokeDasharray: '3 3', stroke: '#475569' }}
-          />
           <Scatter
             data={normal}
-            shape={(props: { cx?: number; cy?: number; payload?: QuadrantAsset }) => <QuadrantDot {...props} />}
+            shape={(props: { cx?: number; cy?: number; payload?: PlotAsset }) => <QuadrantDot {...props} />}
             isAnimationActive={false}
           />
           <Scatter
             data={accel}
-            shape={(props: { cx?: number; cy?: number; payload?: QuadrantAsset }) => <QuadrantDot {...props} />}
+            shape={(props: { cx?: number; cy?: number; payload?: PlotAsset }) => <QuadrantDot {...props} />}
             isAnimationActive={false}
           />
+
+          {/* Labels drawn last so they sit above every dot. */}
+          <Customized component={LabelLayer} />
         </ScatterChart>
       </ResponsiveContainer>
     </div>
