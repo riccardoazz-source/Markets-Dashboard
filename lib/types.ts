@@ -24,6 +24,8 @@ export interface QuoteData {
   dividendYield?: number | null;
   /** Latest 200-week SMA (cadence-scaled). Null when <~4y of data. */
   sma200w?: number | null;
+  /** Latest 200-day SMA (last 200 trading closes). Null when <200 closes available. */
+  sma200d?: number | null;
 }
 
 export interface HistoricalPoint {
@@ -63,6 +65,8 @@ export interface CryptoData {
   fiveYearFull?: boolean;
   /** Latest 200-week SMA (cadence-scaled). Null when <~4y of data. */
   sma200w?: number | null;
+  /** Latest 200-day SMA (last 200 trading closes). Null when <200 closes available. */
+  sma200d?: number | null;
   marketCap: number;
   volume24h: number;
   image?: string;

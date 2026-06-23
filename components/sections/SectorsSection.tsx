@@ -13,7 +13,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
-import { Sma200wLine } from '@/components/ui/Sma200wLine';
+import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -30,6 +30,7 @@ interface SectorLiveData {
   low52w: number | null;
   dividendYield?: number | null;
   sma200w?: number | null;
+  sma200d?: number | null;
   currency?: string | null;
 }
 
@@ -37,7 +38,7 @@ interface SectorLiveData {
 const INITIAL: SectorLiveData = {
   price: null, changePercent: null, oneYearReturn: null, ytdReturn: null, mtdReturn: null, fiveYearReturn: null,
   fiveYearCagr: null, fiveYearFull: false,
-  high52w: null, low52w: null, dividendYield: null, sma200w: null, currency: null,
+  high52w: null, low52w: null, dividendYield: null, sma200w: null, sma200d: null, currency: null,
 };
 
 type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn' | 'fiveYearCagr';
@@ -86,6 +87,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
         low52w: number | null;
         dividendYield: number | null;
         sma200w: number | null;
+        sma200d?: number | null;
       }>;
       if (Array.isArray(data) && data.length > 0) {
         const map: Record<string, SectorLiveData> = {};
@@ -312,6 +314,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                       5Y CAGR: {formatCagr(sector.fiveYearCagr, sector.fiveYearFull)}
                     </p>
                   )}
+                  <Ma200dLine price={sector.price} sma200d={sector.sma200d} currency={sector.currency} />
                   <Sma200wLine price={sector.price} sma200w={sector.sma200w} currency={sector.currency} />
                 </>
               ) : (

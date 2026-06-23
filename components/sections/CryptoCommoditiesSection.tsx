@@ -10,7 +10,7 @@ import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { Sma200wLine } from '@/components/ui/Sma200wLine';
+import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -238,6 +238,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                     5Y CAGR: {formatCagr(coin.fiveYearCagrPercent, coin.fiveYearFull)}
                   </p>
                 )}
+                <Ma200dLine price={coin.price} sma200d={coin.sma200d} />
                 <Sma200wLine price={coin.price} sma200w={coin.sma200w} />
               </button>
             );

@@ -13,7 +13,7 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
-import { Sma200wLine } from '@/components/ui/Sma200wLine';
+import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 
@@ -264,6 +264,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                         5Y CAGR: {formatCagr(q.fiveYearCagrPercent, q.fiveYearFull)}
                       </p>
                     )}
+                    <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />
                     <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                   </>
                 ) : (

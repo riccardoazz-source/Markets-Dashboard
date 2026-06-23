@@ -26,6 +26,8 @@ interface RotationItem {
   r6m: number | null;
   r1y: number | null;
   fiveYPct: number | null;
+  ma200: number | null;   // 200-day SMA (from rotation-returns)
+  sma200w: number | null; // 200-week SMA (from quotes/crypto/sectors)
 }
 
 interface RollingReturn {
@@ -34,19 +36,22 @@ interface RollingReturn {
   r3m: number | null;
   r6m: number | null;
   r1y: number | null;
+  ma200: number | null;
 }
 
-type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y';
+type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w';
 type GroupFilter = 'all' | Group;
 type ChartTimeframe = '1M' | '3M' | '6M' | '1Y';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'day', label: 'Day'  },
-  { value: '1m',  label: '1M'   },
-  { value: '3m',  label: '3M'   },
-  { value: '6m',  label: '6M'   },
-  { value: '1y',  label: '1Y'   },
-  { value: '5y',  label: '5Y'   },
+  { value: 'day',  label: 'Day'  },
+  { value: '1m',   label: '1M'   },
+  { value: '3m',   label: '3M'   },
+  { value: '6m',   label: '6M'   },
+  { value: '1y',   label: '1Y'   },
+  { value: '5y',   label: '5Y'   },
+  { value: '200d', label: '200D' },
+  { value: '200w', label: '200W' },
 ];
 
 const GROUP_FILTERS: { value: GroupFilter; label: string }[] = [
@@ -74,14 +79,22 @@ const CHART_COLORS = [
   '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#a855f7',
 ];
 
+// % gap between current price and a moving average (positive = price above MA).
+function vsMa(price: number | null, ma: number | null): number | null {
+  if (price == null || ma == null || ma === 0) return null;
+  return (price / ma - 1) * 100;
+}
+
 function getPct(item: RotationItem, key: SortKey): number | null {
   switch (key) {
-    case 'day': return item.dayPct;
-    case '1m':  return item.r1m;
-    case '3m':  return item.r3m;
-    case '6m':  return item.r6m;
-    case '1y':  return item.r1y;
-    case '5y':  return item.fiveYPct;
+    case 'day':  return item.dayPct;
+    case '1m':   return item.r1m;
+    case '3m':   return item.r3m;
+    case '6m':   return item.r6m;
+    case '1y':   return item.r1y;
+    case '5y':   return item.fiveYPct;
+    case '200d': return vsMa(item.price, item.ma200);
+    case '200w': return vsMa(item.price, item.sma200w);
   }
 }
 
@@ -223,6 +236,7 @@ export function RotationSection() {
           dayPct: q?.changePercent ?? null,
           r1m: r?.r1m ?? null, r3m: r?.r3m ?? null, r6m: r?.r6m ?? null, r1y: r?.r1y ?? null,
           fiveYPct: q?.fiveYearChangePercent ?? null,
+          ma200: r?.ma200 ?? null, sma200w: q?.sma200w ?? null,
         };
       });
       setStockItems(built);
@@ -269,6 +283,7 @@ export function RotationSection() {
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
+            ma200: null, sma200w: q?.sma200w ?? null,
           };
         });
 
@@ -280,6 +295,7 @@ export function RotationSection() {
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
+            ma200: null, sma200w: q?.sma200w ?? null,
           };
         });
 
@@ -295,6 +311,7 @@ export function RotationSection() {
             dayPct: c?.change24hPercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: c?.fiveYearChangePercent ?? null,
+            ma200: null, sma200w: c?.sma200w ?? null,
           };
         });
 
@@ -304,6 +321,7 @@ export function RotationSection() {
           dayPct: s.changePercent,
           r1m: null, r3m: null, r6m: null, r1y: null,
           fiveYPct: s.fiveYearReturn,
+          ma200: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null,
         }));
 
         const allItems = [...indexItems, ...commItems, ...cryptoItems, ...sectorItems];
@@ -319,7 +337,7 @@ export function RotationSection() {
 
         const enriched = allItems.map(item => {
           const r = rollingMap.get(item.symbol);
-          return r ? { ...item, r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y } : item;
+          return r ? { ...item, r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200 } : item;
         });
 
         setItems(enriched);
@@ -369,7 +387,10 @@ export function RotationSection() {
   const accelBase = groupFiltered.filter(i =>
     (rankDeltas.get(i.symbol) ?? -Infinity) >= 4 &&
     i.r1m != null && i.r1m > 0 && i.r1m >= topThirdR1m &&
-    i.r3m != null && i.r3m > 0
+    i.r3m != null && i.r3m > 0 &&
+    // Price must be above its 200-day MA (confirms trend is structural, not a dead-cat bounce).
+    // If ma200 is missing (e.g. asset <200d old), the gate is waived rather than blocking.
+    (i.ma200 == null || i.price == null || i.price > i.ma200)
   );
   // Extension guard: drop names already in the top 20% of 1Y gains — the move is mature
   // and crowded there, exactly the "buy the top then it crashes" trap to avoid.
@@ -604,12 +625,14 @@ export function RotationSection() {
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden sm:table-cell', sortBy === '6m' ? 'text-accent' : 'text-gray-600')}>6M</th>
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden sm:table-cell', sortBy === '1y' ? 'text-accent' : 'text-gray-600')}>1Y</th>
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden lg:table-cell', sortBy === '5y' ? 'text-accent' : 'text-gray-600')}>5Y</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden xl:table-cell', sortBy === '200d' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-day MA (green=above, red=below)">vs 200D</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden xl:table-cell', sortBy === '200w' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-week MA (green=above, red=below)">vs 200W</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {sortedItems.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-10 text-center text-xs text-gray-500">
+                    <td colSpan={10} className="px-3 py-10 text-center text-xs text-gray-500">
                       {accelOnly
                         ? 'No assets are accelerating right now — the leaderboard is stable.'
                         : pinnedOnly
@@ -633,7 +656,11 @@ export function RotationSection() {
                     ((item.r6m != null && item.r6m < 0) || (item.r1y != null && item.r1y < 0));
                   const isSolid    = accelOnly && !isRebound &&
                     item.r6m != null && item.r6m > 0 && item.r1y != null && item.r1y > 0;
+                  // Above 200W = structural long-term bull (mega-cycle confirmed).
+                  const above200w  = item.price != null && item.sma200w != null && item.price > item.sma200w;
                   const isPinned   = pins.has(item.symbol);
+                  const vs200d     = vsMa(item.price, item.ma200);
+                  const vs200w     = vsMa(item.price, item.sma200w);
                   return (
                     <tr
                       key={item.symbol}
@@ -669,6 +696,11 @@ export function RotationSection() {
                               ✓ trend
                             </span>
                           )}
+                          {above200w && !rollingLoading && (
+                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 leading-none" title="Price above 200-week MA — structural long-term bull">
+                              🐂 200W
+                            </span>
+                          )}
                           {accel && !rollingLoading && (
                             <span className={clsx('shrink-0 text-[10px] font-bold leading-none', accel.color)}>
                               {accel.arrow}
@@ -701,6 +733,14 @@ export function RotationSection() {
                       </td>
                       <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden lg:table-cell', sortBy === '5y' ? `font-bold ${pctColor(item.fiveYPct)}` : pctColor(item.fiveYPct))}>
                         {fmtPct(item.fiveYPct)}
+                      </td>
+                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden xl:table-cell', sortBy === '200d' ? `font-bold ${pctColor(vs200d)}` : pctColor(vs200d))}
+                          title={item.ma200 != null ? `200D MA: ${item.ma200.toFixed(2)}` : undefined}>
+                        {rollingLoading ? <span className="text-gray-700">…</span> : fmtPct(vs200d)}
+                      </td>
+                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden xl:table-cell', sortBy === '200w' ? `font-bold ${pctColor(vs200w)}` : pctColor(vs200w))}
+                          title={item.sma200w != null ? `200W MA: ${item.sma200w.toFixed(2)}` : undefined}>
+                        {rollingLoading ? <span className="text-gray-700">…</span> : fmtPct(vs200w)}
                       </td>
                     </tr>
                   );

@@ -47,6 +47,7 @@ export async function GET() {
         low52w: q?.low52w ?? null,
         dividendYield: q?.dividendYield ?? null,
         sma200w: q?.sma200w ?? null,
+        sma200d: q?.sma200d ?? null,
         currency: q?.currency ?? 'USD',
       };
     });

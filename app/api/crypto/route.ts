@@ -159,7 +159,7 @@ async function fetchFiveYearAnchors(ids: string[]): Promise<Map<string, number>>
 // Yahoo isn't rate-limited like CoinGecko's free tier, so it's the reliable source
 // when CoinGecko anchor fetches fail (which is most of the time on cold serverless
 // instances). One round-trip per coin instead of three.
-interface YahooAnchors { fiveY: number | null; fiveYTs: number | null; ytd: number | null; mtd: number | null; sma200w: number | null }
+interface YahooAnchors { fiveY: number | null; fiveYTs: number | null; ytd: number | null; mtd: number | null; sma200w: number | null; sma200d: number | null }
 const yahooAnchorCache = new Map<string, { anchors: YahooAnchors; day: string }>();
 
 async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
@@ -168,7 +168,7 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
   if (cached && cached.day === today) return cached.anchors;
 
   const symbol = CRYPTO_YAHOO_SYMBOLS[coinId];
-  const empty: YahooAnchors = { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null };
+  const empty: YahooAnchors = { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null, sma200d: null };
   if (!symbol) return empty;
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5y&interval=1d&includePrePost=false`;
@@ -239,12 +239,24 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
       }
     }
 
+    // 200-day SMA: last 200 valid closes (crypto trades daily, no scaling needed).
+    let sma200d: number | null = null;
+    {
+      const vals200: number[] = [];
+      for (const c of closes) if (typeof c === 'number' && isFinite(c) && c > 0) vals200.push(c);
+      if (vals200.length >= 200) {
+        const last200 = vals200.slice(-200);
+        sma200d = last200.reduce((a, b) => a + b, 0) / 200;
+      }
+    }
+
     const anchors: YahooAnchors = {
       fiveY: findFirstValid(fiveYearsAgo),
       fiveYTs,
       ytd: findFirstValid(jan1),
       mtd: findFirstValid(monthStart),
       sma200w,
+      sma200d,
     };
     yahooAnchorCache.set(coinId, { anchors, day: today });
     return anchors;
@@ -259,7 +271,7 @@ async function fetchYahooAnchorsAll(ids: string[]): Promise<Map<string, YahooAnc
   const map = new Map<string, YahooAnchors>();
   // Yahoo is fine with parallel — no rate limit at this volume (8 coins)
   const results = await Promise.all(
-    ids.map(id => fetchYahooCryptoAnchors(id).then(a => ({ id, a })).catch(() => ({ id, a: { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null } as YahooAnchors })))
+    ids.map(id => fetchYahooCryptoAnchors(id).then(a => ({ id, a })).catch(() => ({ id, a: { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null, sma200d: null } as YahooAnchors })))
   );
   for (const { id, a } of results) map.set(id, a);
   return map;
@@ -312,7 +324,7 @@ export async function GET(req: NextRequest) {
         const sym = (coin.symbol as string)?.toUpperCase();
         const currentPrice = coin.current_price as number;
         const id = coin.id as string;
-        const ya = yahooAnchors.get(id) ?? { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null };
+        const ya = yahooAnchors.get(id) ?? { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null, sma200d: null };
 
         // YTD: CoinGecko anchor first (precise Jan 1 UTC), Yahoo fallback (first
         // trading day ≥ Jan 1).
@@ -371,6 +383,7 @@ export async function GET(req: NextRequest) {
           fiveYearCagrPercent,
           fiveYearFull,
           sma200w: ya.sma200w,
+          sma200d: ya.sma200d,
           marketCap: coin.market_cap,
           volume24h: coin.total_volume,
           image: coin.image,

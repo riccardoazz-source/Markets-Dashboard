@@ -42,6 +42,18 @@ export interface YahooQuote {
   dividendYield: number | null;
   /** Latest 200-week SMA (≈1400 calendar days, cadence-scaled). Null when <~4y of data. */
   sma200w: number | null;
+  /** Latest 200-day SMA (last 200 trading-day closes). Null when <200 closes available. */
+  sma200d: number | null;
+}
+
+// Latest 200-day SMA: simple average of the last 200 trading-day closes.
+// Requires no period-scaling — 200 trading closes is an exact definition.
+function computeSma200d(closes: (number | null)[]): number | null {
+  const vals: number[] = [];
+  for (const c of closes) if (c != null && c > 0) vals.push(c);
+  if (vals.length < 200) return null;
+  const last200 = vals.slice(-200);
+  return last200.reduce((a, b) => a + b, 0) / 200;
 }
 
 // Latest 200-week SMA. The period (1400 calendar days = 200 weeks) is scaled to
@@ -479,6 +491,7 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
         ? (it.trailingAnnualDividendYield as number)
         : null,
       sma200w: null, // v7 batch carries no historical closes
+      sma200d: null,
     }));
   } catch (e) {
     console.error('[yahoo-v7] fetch failed:', (e as Error).message);
@@ -539,6 +552,7 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     volume: (m.regularMarketVolume as number) ?? null,
     dividendYield: divYield,
     sma200w: computeSma200w(timestamps, closes),
+    sma200d: computeSma200d(closes),
   };
 }
 
@@ -619,6 +633,7 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       volume: (m.regularMarketVolume as number) ?? null,
       dividendYield: computeDivYieldFromEvents(result, price),
       sma200w: computeSma200w(timestamps, closes),
+      sma200d: computeSma200d(closes),
     };
   } catch {
     return null;
@@ -690,6 +705,7 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
         dividendYield: it.trailingAnnualDividendYield != null && Number(it.trailingAnnualDividendYield) > 0
           ? Number(it.trailingAnnualDividendYield) : null,
         sma200w: null, // v7 batch carries no historical closes
+        sma200d: null,
       };
     }).filter(q => q.price > 0);
   } catch { /* try next host */ }
@@ -824,6 +840,7 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
             volume: null,
             dividendYield: null,
             sma200w: null, // quoteSummary backfill carries no historical closes
+            sma200d: null,
           } satisfies YahooQuote,
         };
       }));

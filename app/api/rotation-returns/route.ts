@@ -11,6 +11,7 @@ interface RollingReturn {
   r3m: number | null;
   r6m: number | null;
   r1y: number | null;
+  ma200: number | null;
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -32,12 +33,29 @@ function rolling(history: { date: string; close: number }[], daysAgo: number): n
   return (current / past - 1) * 100;
 }
 
+// 200-day simple moving average: average of the last 200 daily closes.
+// 375-day fetch ≈ 267 trading days — enough for this MA.
+function ma200d(history: { date: string; close: number }[]): number | null {
+  if (history.length < 200) return null;
+  const last200 = history.slice(-200);
+  return last200.reduce((s, pt) => s + pt.close, 0) / 200;
+}
+
+function buildRow(symbol: string, history: { date: string; close: number }[]): RollingReturn {
+  return {
+    symbol,
+    r1m: rolling(history, 30),
+    r3m: rolling(history, 90),
+    r6m: rolling(history, 180),
+    r1y: rolling(history, 365),
+    ma200: ma200d(history),
+  };
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const extra = searchParams.get('extra');
 
-  // Extra symbols (e.g. a user's stock watchlist) — computed on demand and cached
-  // per set. Returned alone; the client merges them with the default universe.
   if (extra) {
     const syms = Array.from(new Set(extra.split(',').map(s => s.trim()).filter(Boolean))).slice(0, 60);
     if (syms.length === 0) return NextResponse.json([]);
@@ -53,13 +71,7 @@ export async function GET(req: Request) {
     );
     const data: RollingReturn[] = syms.map((symbol, i) => {
       const history = results[i].status === 'fulfilled' ? results[i].value : [];
-      return {
-        symbol,
-        r1m: rolling(history, 30),
-        r3m: rolling(history, 90),
-        r6m: rolling(history, 180),
-        r1y: rolling(history, 365),
-      };
+      return buildRow(symbol, history);
     });
     cache.set(key, { data, ts: Date.now() });
     return NextResponse.json(data);
@@ -86,13 +98,7 @@ export async function GET(req: Request) {
 
   const data: RollingReturn[] = allSymbols.map((symbol, i) => {
     const history = results[i].status === 'fulfilled' ? results[i].value : [];
-    return {
-      symbol,
-      r1m: rolling(history, 30),
-      r3m: rolling(history, 90),
-      r6m: rolling(history, 180),
-      r1y: rolling(history, 365),
-    };
+    return buildRow(symbol, history);
   });
 
   cache.set('all', { data, ts: Date.now() });

@@ -7,6 +7,25 @@ import { formatPrice } from '@/lib/utils';
  * (per design: SMA below price → red, above → green).
  * Renders nothing when either value is missing (e.g. assets younger than ~4y).
  */
+/** Compact "200D" line: latest 200-day SMA, RED when below price, GREEN when above. */
+export function Ma200dLine({
+  price,
+  sma200d,
+  currency = 'USD',
+}: {
+  price: number | null | undefined;
+  sma200d: number | null | undefined;
+  currency?: string | null;
+}) {
+  if (price == null || sma200d == null) return null;
+  const below = sma200d < price;
+  return (
+    <p className={clsx('text-[10px] mt-0.5', below ? 'text-red-400' : 'text-emerald-400')}>
+      200D: {formatPrice(sma200d, currency ?? 'USD')}
+    </p>
+  );
+}
+
 export function Sma200wLine({
   price,
   sma200w,
