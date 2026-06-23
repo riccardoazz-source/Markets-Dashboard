@@ -18,6 +18,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2, Layers } from 'lucide-react';
+import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 
 const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Currency', 'Sentiment', 'Crypto', 'Debt', 'Market Value', 'Recessions', 'Events'];
 
@@ -528,6 +529,12 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   Compare
                 </button>
               )}
+              <GeminiCommentButton
+                key={selected!}
+                name={selectedIndicator?.name ?? selected!}
+                symbol={selected!}
+                assetClass="Macro"
+              />
               <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
                 <X size={16} />
               </button>

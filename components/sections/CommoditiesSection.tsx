@@ -13,6 +13,7 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
+import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 
 type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
@@ -244,6 +245,14 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                   Compare
                 </button>
               )}
+              <GeminiCommentButton
+                key={selected!}
+                name={selectedConfig?.name ?? selected!}
+                symbol={selected!}
+                assetClass="Commodities"
+                price={selectedQuote?.price}
+                dayPct={selectedQuote?.changePercent}
+              />
               <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
                 <X size={16} />
               </button>

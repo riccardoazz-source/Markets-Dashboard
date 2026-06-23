@@ -169,7 +169,7 @@ export function RotationSection() {
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const pins = useMemo(() => new Set(gistData.pins ?? []), [gistData.pins]);
 
-  const [stockList, setStockList] = useState<string | null>(null);
+  const [activeStockLists, setActiveStockLists] = useState<string[]>([]);
   const [stockItems, setStockItems] = useState<RotationItem[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
 
@@ -206,21 +206,23 @@ export function RotationSection() {
   }, [gistData]);
 
   const stockListSymbols = useMemo(() => {
-    if (!stockList) return [];
+    if (activeStockLists.length === 0) return [];
     const notes = gistData.notes ?? {};
+    const activeLower = activeStockLists.map(l => l.toLowerCase());
     const syms: string[] = [];
     for (const [chartId, list] of Object.entries(notes)) {
       if (!chartId.startsWith('stock:')) continue;
-      if (list.some(n => n.category?.toLowerCase() === stockList.toLowerCase())) {
-        syms.push(chartId.slice('stock:'.length));
+      if (list.some(n => n.category && activeLower.includes(n.category.toLowerCase()))) {
+        const sym = chartId.slice('stock:'.length);
+        if (!syms.includes(sym)) syms.push(sym);
       }
     }
     return syms;
-  }, [gistData, stockList]);
+  }, [gistData, activeStockLists]);
 
-  // Fetch quotes + rolling returns for the selected stock list and build items.
+  // Fetch quotes + rolling returns for the selected stock lists and build items.
   useEffect(() => {
-    if (!stockList || stockListSymbols.length === 0) { setStockItems([]); return; }
+    if (activeStockLists.length === 0 || stockListSymbols.length === 0) { setStockItems([]); return; }
     let cancelled = false;
     setStockLoading(true);
     const symParam = encodeURIComponent(stockListSymbols.join(','));
@@ -247,7 +249,7 @@ export function RotationSection() {
       setStockLoading(false);
     }).catch(() => { if (!cancelled) { setStockItems([]); setStockLoading(false); } });
     return () => { cancelled = true; };
-  }, [stockList, stockListSymbols]);
+  }, [activeStockLists, stockListSymbols]);
 
   useEffect(() => {
     let cancelled = false;
@@ -540,32 +542,38 @@ export function RotationSection() {
         </div>
       </div>
 
-      {/* Stock list selector — pick one of your saved Stocks watchlists to rank here */}
+      {/* Stock list selector — toggle one or more saved Stocks watchlists to rank here */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-gray-500">Add a stock list:</span>
+        <span className="text-[11px] text-gray-500">Stock lists:</span>
         {stockLists.length === 0 ? (
           <span className="text-[11px] text-gray-600 italic">
             None yet — save stocks into a list from the Stocks tab (add a note with a category).
           </span>
         ) : (
           <div className="flex gap-1 flex-wrap">
-            <button
-              onClick={() => setStockList(null)}
-              className={clsx('px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all',
-                stockList === null ? 'border-accent/60 text-accent bg-accent/10' : 'border-border text-gray-500 hover:text-gray-300')}
-            >
-              None
-            </button>
-            {stockLists.map(cat => (
+            {stockLists.map(cat => {
+              const active = activeStockLists.includes(cat);
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setActiveStockLists(prev =>
+                    active ? prev.filter(l => l !== cat) : [...prev, cat]
+                  )}
+                  className={clsx('px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all',
+                    active ? 'border-rose-400/60 text-rose-300 bg-rose-400/10' : 'border-border text-gray-500 hover:text-gray-300')}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+            {activeStockLists.length > 0 && (
               <button
-                key={cat}
-                onClick={() => setStockList(cat)}
-                className={clsx('px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all',
-                  stockList === cat ? 'border-rose-400/60 text-rose-300 bg-rose-400/10' : 'border-border text-gray-500 hover:text-gray-300')}
+                onClick={() => setActiveStockLists([])}
+                className="px-2.5 py-1 text-[11px] font-medium rounded-full border border-border text-gray-600 hover:text-gray-400 transition-all"
               >
-                {cat}
+                Clear
               </button>
-            ))}
+            )}
           </div>
         )}
         {stockLoading && <LoadingSpinner size={12} />}

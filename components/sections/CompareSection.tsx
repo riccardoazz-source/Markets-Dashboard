@@ -14,6 +14,7 @@ import { CompareChart } from '@/components/charts/CompareChart';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { X, Search, ChevronDown, ChevronUp, Layers, Minus, Plus } from 'lucide-react';
+import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { StackAnalysisPanel, DEFAULT_TOOLS } from '@/components/ui/StackAnalysisPanel';
 import type { ActiveTools } from '@/components/ui/ChartTools';
@@ -965,6 +966,37 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       ) : (
         <div className="flex items-center justify-center h-48 text-gray-500 text-sm">
           Select assets to compare
+        </div>
+      )}
+
+      {displayAssets.length >= 2 && !loading && (
+        <div className="flex justify-end">
+          <GeminiCommentButton
+            key={selectedSymbols.join(',')}
+            mode="compare"
+            assets={allAssets
+              .filter(a => !a.isSpread && !RECESSION_SET.has(a.symbol))
+              .map(a => ({ name: a.name, symbol: a.symbol, totalReturn: a.totalReturn ?? undefined, cagr: a.cagr ?? undefined }))}
+            correlations={(() => {
+              const { labels, matrix } = correl;
+              const pairs: { a: string; b: string; r: number }[] = [];
+              for (let i = 0; i < labels.length; i++) {
+                for (let j = i + 1; j < labels.length; j++) {
+                  const r = matrix[i]?.[j];
+                  if (r != null && isFinite(r)) {
+                    pairs.push({
+                      a: allAssets.find(x => x.symbol === labels[i])?.name ?? labels[i],
+                      b: allAssets.find(x => x.symbol === labels[j])?.name ?? labels[j],
+                      r,
+                    });
+                  }
+                }
+              }
+              return pairs.sort((a, b) => Math.abs(b.r) - Math.abs(a.r)).slice(0, 6);
+            })()}
+            timeframe={customRange ? 'Custom' : timeframe}
+            label="Compare Analysis"
+          />
         </div>
       )}
 

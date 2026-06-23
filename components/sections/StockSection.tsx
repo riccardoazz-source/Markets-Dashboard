@@ -27,6 +27,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
 import { Search, X, BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
+import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
 
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
@@ -1078,6 +1079,12 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   Compare
                 </button>
               )}
+              <GeminiCommentButton
+                key={selected.symbol}
+                name={selected.name}
+                symbol={selected.symbol}
+                assetClass="Stocks"
+              />
               <TimeframeSelector
                 value={timeframe}
                 onChange={tf => { setCustomRange(null); setTimeframe(tf); }}

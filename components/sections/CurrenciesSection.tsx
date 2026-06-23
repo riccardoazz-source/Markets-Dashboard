@@ -12,6 +12,7 @@ import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartToo
 import { LoadingSpinner, LoadingGrid } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { ArrowRight, RefreshCw, BarChart2 } from 'lucide-react';
+import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 
 interface CurrencyRate {
   from: string;
@@ -277,6 +278,14 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                   Compare
                 </button>
               )}
+              <GeminiCommentButton
+                key={`${selected.from}${selected.to}`}
+                name={`${selected.from}/${selected.to}`}
+                symbol={`${selected.from}${selected.to}=X`}
+                assetClass="Currency"
+                price={selectedRate?.rate ?? undefined}
+                dayPct={selectedRate?.change1d ?? undefined}
+              />
             </div>
             <TimeframeSelector
               value={timeframe}

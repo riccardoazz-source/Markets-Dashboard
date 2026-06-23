@@ -9,6 +9,7 @@ import {
   YAxis,
   CartesianGrid,
   ReferenceLine,
+  ReferenceArea,
   Tooltip,
 } from 'recharts';
 
@@ -48,37 +49,47 @@ export interface QuadrantAsset {
 }
 
 function shortName(name: string): string {
-  if (name.length <= 14) return name;
-  // Use first word if it's meaningful
+  if (name.length <= 12) return name;
   const first = name.split(/[\s&]/)[0];
-  return first.length >= 4 ? first : name.slice(0, 13) + '…';
+  return first.length >= 4 ? first : name.slice(0, 11) + '…';
 }
 
-// Custom scatter dot — big + labeled for accel/selected, tiny + dim otherwise.
+// Custom scatter dot — big + labeled for accel/selected, medium for others.
 function QuadrantDot(props: { cx?: number; cy?: number; payload?: QuadrantAsset }) {
   const { cx, cy, payload } = props;
   if (cx == null || cy == null || !payload) return null;
   const color = GROUP_COLORS[payload.group] ?? '#6b7280';
   const { isAccel, isSelected } = payload;
-  const r = isSelected ? 6 : isAccel ? 4.5 : 2.5;
-  const opacity = isAccel || isSelected ? 0.9 : 0.3;
-  const label = shortName(payload.name);
+
+  const r = isSelected ? 7 : isAccel ? 5 : 3.5;
+  const opacity = isAccel || isSelected ? 0.95 : 0.45;
+
+  // Put label on the opposite side from the axis origin to reduce overlap:
+  // positive r3m (right side of chart) → label to the left; negative → right.
+  const labelRight = payload.r3m <= 0;
+  const labelX = labelRight ? cx + r + 4 : cx - r - 4;
+  const labelAnchor = labelRight ? 'start' : 'end';
+
+  const showLabel = isAccel || isSelected;
+
   return (
     <g>
       {isSelected && (
-        <circle cx={cx} cy={cy} r={r + 5} fill="none" stroke={color} strokeWidth={1.5} strokeOpacity={0.45} />
+        <circle cx={cx} cy={cy} r={r + 6} fill="none" stroke={color} strokeWidth={1.5} strokeOpacity={0.5} />
       )}
       <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={opacity} />
-      {(isAccel || isSelected) && (
+      {showLabel && (
         <text
-          x={cx + r + 4}
+          x={labelX}
           y={cy + 3.5}
-          fontSize={9}
+          fontSize={9.5}
+          fontWeight={isSelected ? 600 : 400}
           fill={color}
-          fillOpacity={0.85}
+          fillOpacity={0.95}
+          textAnchor={labelAnchor as 'start' | 'end'}
           style={{ pointerEvents: 'none', userSelect: 'none' }}
         >
-          {label}
+          {shortName(payload.name)}
         </text>
       )}
     </g>
@@ -103,42 +114,6 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
   );
 }
 
-// Faint quadrant-label overlay rendered via a custom chart layer.
-function QuadrantLabels({
-  xScale, yScale, width, height,
-}: {
-  xScale: (v: number) => number;
-  yScale: (v: number) => number;
-  width: number;
-  height: number;
-}) {
-  const cx0 = xScale(0);
-  const cy50 = yScale(50);
-  const labels = [
-    { text: 'Recovering', x: cx0 / 2,              y: height * 0.15, anchor: 'middle' },
-    { text: 'Trending',   x: (cx0 + width) / 2,    y: height * 0.15, anchor: 'middle' },
-    { text: 'Lagging',    x: cx0 / 2,              y: height * 0.9,  anchor: 'middle' },
-    { text: 'Fading',     x: (cx0 + width) / 2,    y: height * 0.9,  anchor: 'middle' },
-  ];
-  return (
-    <g pointerEvents="none">
-      {labels.map(l => (
-        <text
-          key={l.text}
-          x={l.x}
-          y={l.y}
-          textAnchor={l.anchor as 'middle'}
-          fontSize={10}
-          fill="#334155"
-          fontStyle="italic"
-        >
-          {l.text}
-        </text>
-      ))}
-    </g>
-  );
-}
-
 interface Props {
   assets: QuadrantAsset[];
   loading?: boolean;
@@ -157,7 +132,7 @@ export function QuadrantChart({ assets, loading }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[320px] text-[11px] text-gray-600">
+      <div className="flex items-center justify-center h-[360px] text-[11px] text-gray-600">
         Loading leaderboard…
       </div>
     );
@@ -165,14 +140,14 @@ export function QuadrantChart({ assets, loading }: Props) {
 
   if (assets.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[320px] text-[11px] text-gray-500">
+      <div className="flex items-center justify-center h-[360px] text-[11px] text-gray-500">
         Waiting for rolling-return data…
       </div>
     );
   }
 
   const allX = assets.map(a => a.r3m);
-  const xPad = 8;
+  const xPad = 10;
   const xMin = Math.min(...allX) - xPad;
   const xMax = Math.max(...allX) + xPad;
 
@@ -189,8 +164,14 @@ export function QuadrantChart({ assets, loading }: Props) {
           ))}
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={320}>
-        <ScatterChart margin={{ top: 8, right: 24, bottom: 20, left: 8 }}>
+      <ResponsiveContainer width="100%" height={400}>
+        <ScatterChart margin={{ top: 16, right: 48, bottom: 24, left: 8 }}>
+          {/* Quadrant background tints */}
+          <ReferenceArea x1={0} x2={xMax} y1={50} y2={100} fill="#16a34a" fillOpacity={0.04} />
+          <ReferenceArea x1={xMin} x2={0} y1={50} y2={100} fill="#3b82f6" fillOpacity={0.04} />
+          <ReferenceArea x1={0} x2={xMax} y1={0} y2={50} fill="#f59e0b" fillOpacity={0.03} />
+          <ReferenceArea x1={xMin} x2={0} y1={0} y2={50} fill="#ef4444" fillOpacity={0.03} />
+
           <CartesianGrid stroke="#1e293b" strokeDasharray="0" />
           <XAxis
             dataKey="r3m"
@@ -201,7 +182,7 @@ export function QuadrantChart({ assets, loading }: Props) {
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`}
-            label={{ value: '3M Return', position: 'insideBottom', offset: -10, fill: '#4b5563', fontSize: 10 }}
+            label={{ value: '3M Return', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
             dataKey="accScore"
@@ -215,11 +196,36 @@ export function QuadrantChart({ assets, loading }: Props) {
             label={{ value: 'Accel', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
             width={36}
           />
-          <ReferenceLine x={0}  stroke="#334155" strokeWidth={1} />
-          <ReferenceLine y={50} stroke="#334155" strokeWidth={1} />
+
+          {/* Axis reference lines */}
+          <ReferenceLine x={0}  stroke="#334155" strokeWidth={1.5} />
+          <ReferenceLine y={50} stroke="#334155" strokeWidth={1.5} />
+
+          {/* Quadrant corner labels */}
+          <ReferenceLine
+            x={xMin + (xMax - xMin) * 0.25} y={88}
+            label={{ value: 'Recovering', position: 'center', fill: '#3b82f6', fontSize: 10, fontStyle: 'italic' }}
+            stroke="none"
+          />
+          <ReferenceLine
+            x={xMin + (xMax - xMin) * 0.75} y={88}
+            label={{ value: 'Trending', position: 'center', fill: '#16a34a', fontSize: 10, fontStyle: 'italic' }}
+            stroke="none"
+          />
+          <ReferenceLine
+            x={xMin + (xMax - xMin) * 0.25} y={12}
+            label={{ value: 'Lagging', position: 'center', fill: '#ef4444', fontSize: 10, fontStyle: 'italic' }}
+            stroke="none"
+          />
+          <ReferenceLine
+            x={xMin + (xMax - xMin) * 0.75} y={12}
+            label={{ value: 'Fading', position: 'center', fill: '#b45309', fontSize: 10, fontStyle: 'italic' }}
+            stroke="none"
+          />
+
           <Tooltip
             content={<QuadrantTooltip />}
-            cursor={false}
+            cursor={{ strokeDasharray: '3 3', stroke: '#475569' }}
           />
           <Scatter
             data={normal}

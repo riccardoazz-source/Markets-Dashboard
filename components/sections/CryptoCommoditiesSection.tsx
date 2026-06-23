@@ -13,6 +13,7 @@ import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
+import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 
 type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
@@ -291,6 +292,14 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                   Compare
                 </button>
               )}
+              <GeminiCommentButton
+                key={selected}
+                name={selectedCrypto.name}
+                symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`}
+                assetClass="Crypto"
+                price={selectedCrypto.price}
+                dayPct={selectedCrypto.change24hPercent}
+              />
               <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
                 <X size={16} />
               </button>
