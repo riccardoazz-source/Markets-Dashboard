@@ -124,7 +124,7 @@ export async function POST(req: Request) {
     'READ THE FULL TABLE BELOW — it is exactly what the user sees on screen. Every field has a strict WORD LIMIT you must never exceed. ' +
     'Always name specific assets and exact numbers FROM THE TABLE. ' +
     'You MUST do TWO web searches before writing:\n' +
-    '  1. Search for the catalyst behind today\'s biggest daily movers (e.g. why KOSPI dropped 10%).\n' +
+    '  1. Search for the catalyst behind today\'s biggest daily movers shown in the data below (the names with the largest day % move).\n' +
     '  2. Search for today\'s key macro backdrop: Fed/ECB/BoJ stance, latest inflation print, and the most important geopolitical development.\n' +
     'Both searches feed different fields — macro_note covers the daily moves, macro_backdrop covers rates/inflation/geopolitics. Be punchy and specific, never vague. ' +
     'Distinguish the regime RIGHT NOW from the next ~month. ' +
