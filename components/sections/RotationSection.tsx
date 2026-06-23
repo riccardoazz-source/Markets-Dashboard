@@ -411,36 +411,29 @@ export function RotationSection() {
     })
     .filter((a): a is ChartAsset => a !== null);
 
-  // Snapshot fed to the sentiment endpoint — the live leaderboard as it stands now.
+  // When the user hits Refresh on the sentiment panel, snap the table back to the
+  // canonical view (All classes, sorted by today's move) so what they see equals
+  // what Gemini is fed.
+  const resetTableForSentiment = () => {
+    userHasToggled.current = true;
+    setAccelOnly(false);
+    setPinnedOnly(false);
+    setGroupFilter('all');
+    setSortBy('day');
+  };
+
+  // Snapshot fed to the sentiment endpoint — the ENTIRE on-screen table, so Gemini
+  // reads exactly what the user sees and reasons over it itself.
   const buildSnapshot = (): SentimentSnapshot => {
-    const withData = rows.filter(i => i.r3m != null);
-    const byR3m = [...withData].sort((a, b) => (b.r3m ?? -Infinity) - (a.r3m ?? -Infinity));
-    const mover = (i: RotationItem) => ({ name: i.name, group: i.group, r1m: i.r1m, r3m: i.r3m, r1y: i.r1y });
+    const mover = (i: RotationItem) => ({
+      name: i.name, group: i.group, dayPct: i.dayPct,
+      r1m: i.r1m, r3m: i.r3m, r6m: i.r6m, r1y: i.r1y,
+    });
     const lvl = (sym: string) => rows.find(i => i.symbol === sym)?.price ?? null;
-    const accelByGroup = new Map<Group, string[]>();
-    for (const i of accelEarly) {
-      const arr = accelByGroup.get(i.group) ?? [];
-      arr.push(i.name);
-      accelByGroup.set(i.group, arr);
-    }
-    // Per-asset-class breakdown so the model can comment on each one specifically.
-    const GROUP_ORDER: Group[] = ['Indexes', 'Crypto', 'Commodities', 'Sectors', 'Stocks'];
-    const byGroup = GROUP_ORDER.map(g => {
-      const inGroup = byR3m.filter(i => i.group === g);
-      if (inGroup.length === 0) return null;
-      return {
-        group: g,
-        leaders: inGroup.slice(0, 4).map(mover),
-        laggards: inGroup.length > 4 ? inGroup.slice(-2).reverse().map(mover) : [],
-        accelerating: accelByGroup.get(g) ?? [],
-      };
-    }).filter((g): g is NonNullable<typeof g> => g !== null);
     return {
       date: new Date().toISOString().slice(0, 10),
-      leaders: byR3m.slice(0, 8).map(mover),
-      laggards: byR3m.slice(-5).reverse().map(mover),
+      table: rows.map(mover),
       accelerating: accelEarly.map(i => ({ name: i.name, group: i.group })),
-      byGroup,
       levels: {
         'S&P 500': lvl('^GSPC'),
         Gold: lvl('GC=F'),
@@ -453,7 +446,7 @@ export function RotationSection() {
   return (
     <div className="space-y-4">
       {/* Daily sentiment */}
-      <SentimentPanel buildSnapshot={buildSnapshot} ready={!rollingLoading} />
+      <SentimentPanel buildSnapshot={buildSnapshot} ready={!rollingLoading} onBeforeRun={resetTableForSentiment} />
 
       {/* Controls */}
       <div className="flex items-center justify-between gap-3 flex-wrap">

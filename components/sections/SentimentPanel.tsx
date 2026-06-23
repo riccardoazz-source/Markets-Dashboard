@@ -6,20 +6,16 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useGistData, SentimentRecord, makeId } from '@/lib/gist';
 
-interface SnapshotMover { name: string; group: string; r1m: number | null; r3m: number | null; r1y: number | null }
-interface SnapshotGroup {
-  group: string;
-  leaders: SnapshotMover[];
-  laggards: SnapshotMover[];
-  accelerating: string[];
+interface SnapshotMover {
+  name: string; group: string;
+  dayPct: number | null;
+  r1m: number | null; r3m: number | null; r6m: number | null; r1y: number | null;
 }
 
 export interface SentimentSnapshot {
   date: string;
-  leaders: SnapshotMover[];
-  laggards: SnapshotMover[];
+  table: SnapshotMover[]; // the full on-screen table
   accelerating: { name: string; group: string }[];
-  byGroup: SnapshotGroup[];
   levels: Record<string, number | null>;
 }
 
@@ -133,7 +129,7 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
   );
 }
 
-export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => SentimentSnapshot; ready: boolean }) {
+export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSnapshot: () => SentimentSnapshot; ready: boolean; onBeforeRun?: () => void }) {
   const { data: gistData, update } = useGistData();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,10 +146,14 @@ export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => 
   const latest = history[0];
 
   const run = async () => {
+    // Reset the table to All + Day first so the view matches exactly what Gemini
+    // is fed, then snapshot it on the next frame.
+    onBeforeRun?.();
     setLoading(true);
     setError(null);
     setSecs(0);
     timerRef.current = setInterval(() => setSecs(s => s + 1), 1000);
+    await new Promise(r => requestAnimationFrame(() => r(null)));
     try {
       const res = await fetch('/api/sentiment', {
         method: 'POST',

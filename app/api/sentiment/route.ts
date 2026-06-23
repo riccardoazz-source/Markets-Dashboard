@@ -3,36 +3,40 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Daily market sentiment for the Rotation section. Fed the ACTUAL leaderboard
-// already computed on screen — globally AND broken down per asset class
-// (Indexes, Crypto, Commodities, Sectors, Stocks) — and asks Gemini + Google
-// Search for a regime call now and over the next month, plus a macro read on
-// each asset class present.
+// Daily market sentiment for the Rotation section. Fed the ENTIRE live table
+// the user sees on screen (all asset classes, with today's day-move + rolling
+// returns) and asks Gemini + Google Search for a tight daily brief: a regime
+// call now and next month, plus one sharp note per asset class — always
+// anchored to the biggest DAILY movers, with the catalyst pulled from the web.
 
-interface SnapshotMover { name: string; group: string; r1m: number | null; r3m: number | null; r1y: number | null }
-interface SnapshotGroup {
-  group: string;
-  leaders: SnapshotMover[];
-  laggards: SnapshotMover[];
-  accelerating: string[];
+interface Mover {
+  name: string; group: string;
+  dayPct: number | null;
+  r1m: number | null; r3m: number | null; r6m: number | null; r1y: number | null;
 }
 interface Snapshot {
   date: string;
-  leaders: SnapshotMover[];
-  laggards: SnapshotMover[];
+  table: Mover[];                                  // the full on-screen table
   accelerating: { name: string; group: string }[];
-  byGroup?: SnapshotGroup[];
   levels: Record<string, number | null>;
 }
 
-// Per-asset-class note keys, in display order. Only emitted for classes present.
 const CLASS_FIELDS = ['indexes_note', 'crypto_note', 'commodities_note', 'sectors_note', 'stocks_note'];
-
 const FIELDS = [
   'headline', 'regime_now', 'regime_next', 'macro_note',
   'outlook_note', 'rotation_note', 'risk_note', 'confidence',
   ...CLASS_FIELDS,
 ];
+
+// Asset-class display order and the exact output key the model must use.
+const GROUP_ORDER = ['Indexes', 'Crypto', 'Commodities', 'Sectors', 'Stocks'];
+const GROUP_KEY: Record<string, string> = {
+  Indexes: 'indexes_note',
+  Crypto: 'crypto_note',
+  Commodities: 'commodities_note',
+  Sectors: 'sectors_note',
+  Stocks: 'stocks_note',
+};
 
 function parseKV(txt: string): Record<string, string> {
   const obj: Record<string, string> = {};
@@ -48,19 +52,15 @@ function parseKV(txt: string): Record<string, string> {
   return obj;
 }
 
-function fmtMover(m: SnapshotMover): string {
-  const p = (v: number | null) => (v == null ? 'n/a' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
-  return `${m.name} (${m.group}): 1M ${p(m.r1m)}, 3M ${p(m.r3m)}, 1Y ${p(m.r1y)}`;
+function p(v: number | null): string {
+  if (v == null) return 'n/a';
+  return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
 }
 
-// Map group name → the exact output key the model must use.
-const GROUP_KEY: Record<string, string> = {
-  Indexes: 'indexes_note',
-  Crypto: 'crypto_note',
-  Commodities: 'commodities_note',
-  Sectors: 'sectors_note',
-  Stocks: 'stocks_note',
-};
+// One compact table row: name then day / 1M / 3M / 6M / 1Y.
+function fmtRow(m: Mover): string {
+  return `${m.name}: day ${p(m.dayPct)}, 1M ${p(m.r1m)}, 3M ${p(m.r3m)}, 6M ${p(m.r6m)}, 1Y ${p(m.r1y)}`;
+}
 
 export async function POST(req: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -78,64 +78,67 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'bad_request' }, { status: 400 });
   }
 
+  const table = snap.table ?? [];
+
   const levelsStr = Object.entries(snap.levels ?? {})
     .filter(([, v]) => v != null)
     .map(([k, v]) => `${k}: ${v}`)
     .join(', ') || 'n/a';
 
-  // Per-asset-class breakdown so the model can comment on each one specifically.
-  const groups = (snap.byGroup ?? []).filter(g => g.leaders.length || g.laggards.length);
-  const groupBlock = groups.length
-    ? groups.map(g =>
-        `=== ${g.group.toUpperCase()} ===\n` +
-        `  Strongest: ${g.leaders.length ? g.leaders.map(m => fmtMover(m)).join(' | ') : 'n/a'}\n` +
-        `  Weakest:   ${g.laggards.length ? g.laggards.map(m => fmtMover(m)).join(' | ') : 'n/a'}\n` +
-        `  Accelerating: ${g.accelerating.length ? g.accelerating.join(', ') : 'none'}`
-      ).join('\n\n')
-    : 'n/a';
+  // Today's biggest moves across everything — the headline anchor.
+  const withDay = table.filter(m => m.dayPct != null);
+  const byDay = [...withDay].sort((a, b) => (b.dayPct ?? 0) - (a.dayPct ?? 0));
+  const topUp = byDay.slice(0, 6).map(m => `${m.name} ${p(m.dayPct)}`).join(', ');
+  const topDown = [...byDay].reverse().slice(0, 6).map(m => `${m.name} ${p(m.dayPct)}`).join(', ');
+
+  // Full table grouped by asset class, each class sorted by today's move (desc).
+  const presentGroups = GROUP_ORDER.filter(g => table.some(m => m.group === g));
+  const tableBlock = presentGroups.map(g => {
+    const rows = table.filter(m => m.group === g).sort((a, b) => (b.dayPct ?? -Infinity) - (a.dayPct ?? -Infinity));
+    return `=== ${g.toUpperCase()} (${rows.length}) ===\n` + rows.map(m => `  ${fmtRow(m)}`).join('\n');
+  }).join('\n\n');
 
   const dataBlock =
     `DATE: ${snap.date}\n` +
-    `LIVE PRICE LEVELS (from the dashboard): ${levelsStr}\n\n` +
-    `CROSS-ASSET LEADERS (top by 3-month return):\n` +
-    (snap.leaders ?? []).map(m => `  • ${fmtMover(m)}`).join('\n') + '\n\n' +
-    `CROSS-ASSET LAGGARDS (weakest by 3-month return):\n` +
-    (snap.laggards ?? []).map(m => `  • ${fmtMover(m)}`).join('\n') + '\n\n' +
-    `MODEL'S "ACCELERATING / EARLY ROTATION" PICKS (climbing the leaderboard, momentum confirmed, not yet extended):\n` +
-    ((snap.accelerating ?? []).length
-      ? (snap.accelerating ?? []).map(m => `  • ${m.name} (${m.group})`).join('\n')
+    `KEY PRICE LEVELS: ${levelsStr}\n\n` +
+    `TODAY'S BIGGEST MOVES (anchor the headline + macro_note here FIRST):\n` +
+    `  UP:   ${topUp || 'n/a'}\n` +
+    `  DOWN: ${topDown || 'n/a'}\n\n` +
+    `MODEL'S ACCELERATING PICKS (climbing the leaderboard, not yet extended):\n` +
+    (snap.accelerating?.length
+      ? snap.accelerating.map(m => `  • ${m.name} (${m.group})`).join('\n')
       : '  (none flagged today)') + '\n\n' +
-    `PER-ASSET-CLASS BREAKDOWN:\n` + groupBlock;
+    `FULL TABLE — every asset on screen, grouped by class, sorted by today's move:\n` +
+    tableBlock;
 
-  // Only require class notes for the classes actually present in the data.
-  const presentClassLines = groups
-    .map(g => GROUP_KEY[g.group])
-    .filter((k): k is string => !!k);
-  const classInstr = presentClassLines.length
-    ? presentClassLines.map(k =>
-        `${k}: <1-2 sentences on the ${k.replace('_note', '')} asset class: what's leading/lagging and the macro read>`
-      ).join('\n')
-    : '';
+  // Per-class note instructions, only for classes actually present.
+  const classInstr = presentGroups
+    .map(g => {
+      const key = GROUP_KEY[g];
+      return `${key}: <MAX 25 WORDS. Lead with ${g}'s biggest mover TODAY (name + day %), then its 3M leader. One sharp sentence.>`;
+    })
+    .join('\n');
 
   const systemInstruction =
-    'You are a markets strategist. You are given a real cross-asset leaderboard already computed from live prices, broken down per asset class. ' +
-    'Use Google Search to find today\'s macro headlines (rates, inflation prints, central banks, geopolitics, earnings). ' +
-    'Synthesize a concise, decision-useful read. Anchor your conclusions to the SUPPLIED DATA — explain what the rotation in each asset class implies, and confirm or push back on the model\'s accelerating picks using fresh news. ' +
-    'Distinguish the regime RIGHT NOW from the regime you expect over the NEXT MONTH. ' +
-    'Use one of these exact regime labels for regime_now and regime_next: Risk-On, Risk-Off, Stagflation Risk, Soft Landing, Transition, Reflation, Goldilocks. ' +
-    'Reply with ONLY these key: value lines (no preamble, no markdown, one line each):\n' +
-    'headline: <≤12 words, the single most important takeaway>\n' +
+    'You are a markets desk analyst writing a DAILY BRIEF from a live table you have been given. Style: Bloomberg terminal flash, not a research essay. ' +
+    'READ THE FULL TABLE BELOW — it is exactly what the user sees on screen. Every field has a strict WORD LIMIT you must never exceed. ' +
+    'Always name specific assets and exact numbers FROM THE TABLE. Start from the biggest DAILY moves — that is the freshest, most important signal. ' +
+    'Use Google Search ONLY to find the CATALYST behind today\'s biggest moves (e.g. why an index dropped 10% today). Be punchy and specific, never vague. ' +
+    'Distinguish the regime RIGHT NOW from the next ~month. ' +
+    'Use one of these exact labels: Risk-On, Risk-Off, Stagflation Risk, Soft Landing, Transition, Reflation, Goldilocks.\n\n' +
+    'Output ONLY these key: value lines — one per line, no preamble, no markdown, no bullet characters:\n' +
+    'headline: <MAX 12 WORDS. The single biggest move today + the reason.>\n' +
     'regime_now: <one label>\n' +
-    'regime_next: <one label, the next ~month>\n' +
-    'macro_note: <1-2 sentences: what is driving markets today>\n' +
-    'outlook_note: <1-2 sentences: what to expect next month and why>\n' +
-    'rotation_note: <1-2 sentences: the big-picture cross-asset rotation>\n' +
-    (classInstr ? classInstr + '\n' : '') +
-    'risk_note: <1 sentence: the biggest risk to this view>\n' +
+    'regime_next: <one label>\n' +
+    'macro_note: <MAX 30 WORDS. The biggest daily mover + its catalyst from web search, then the second-biggest. Numbers required.>\n' +
+    'outlook_note: <MAX 25 WORDS. What changes next month and why.>\n' +
+    'rotation_note: <MAX 25 WORDS. Where capital is rotating today — name the strongest and weakest.>\n' +
+    classInstr + '\n' +
+    'risk_note: <MAX 20 WORDS. The single biggest risk.>\n' +
     'confidence: <Low | Medium | High>';
 
   const userMessage =
-    'Here is the live cross-asset leaderboard from the dashboard. Search today\'s macro headlines, then give the sentiment read with a note on each asset class present.\n\n' +
+    'Here is the full live table from the dashboard. Read it, search the web for the catalyst behind today\'s biggest moves, then write the brief — strictly within every word limit.\n\n' +
     dataBlock;
 
   const ctrl = new AbortController();
@@ -151,10 +154,8 @@ export async function POST(req: Request) {
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
         tools: [{ google_search: {} }],
         generationConfig: {
-          maxOutputTokens: 2048,
-          temperature: 0.4,
-          // gemini-2.5-flash "thinks" by default — slow, and the reasoning eats
-          // the output budget so the per-class notes get truncated. Turn it off.
+          maxOutputTokens: 1024,
+          temperature: 0.2,
           thinkingConfig: { thinkingBudget: 0 },
         },
       }),
@@ -166,14 +167,12 @@ export async function POST(req: Request) {
     }
 
     const json = await r.json() as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-      }>;
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
     };
 
     const text = (json.candidates?.[0]?.content?.parts ?? [])
-      .filter(p => p.text)
-      .map(p => p.text as string)
+      .filter(part => part.text)
+      .map(part => part.text as string)
       .join('\n');
 
     const parsed = parseKV(text);
