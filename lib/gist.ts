@@ -79,62 +79,90 @@ export function makeId(): string {
 
 interface GistResponse { cloud?: boolean; data?: GistData }
 
-// Merge `over` on top of `base` at the per-chartId level so fresh edits win
-// but baseline chartIds the cache lacks are still adopted.
-function mergeNotes(base: GistData, over: GistData): GistData {
+// Union sentiment history by date — newest reading per day wins. This guarantees
+// no device ever loses macro history, and a fresher reading on one device replaces
+// an older same-day reading on another.
+function mergeSentiments(a: SentimentRecord[] = [], b: SentimentRecord[] = []): SentimentRecord[] {
+  const byDate = new Map<string, SentimentRecord>();
+  for (const r of [...a, ...b]) {
+    const prev = byDate.get(r.date);
+    if (!prev || (r.generatedAt ?? '') > (prev.generatedAt ?? '')) byDate.set(r.date, r);
+  }
+  return [...byDate.values()]
+    .sort((x, y) => (y.generatedAt ?? '').localeCompare(x.generatedAt ?? ''))
+    .slice(0, 120);
+}
+
+// Merge two snapshots. `winner` is authoritative for conflicts; keys present only
+// in `other` are preserved; sentiment history is always unioned by recency.
+// For notes, the per-chartId map merges with the winner's chartIds taking priority.
+function mergeCloud(other: GistData, winner: GistData): GistData {
   return {
-    notes: { ...(base.notes ?? {}), ...(over.notes ?? {}) },
-    analyses: over.analyses ?? base.analyses,
-    sentiments: over.sentiments ?? base.sentiments,
-    pins: over.pins ?? base.pins,
+    notes: { ...(other.notes ?? {}), ...(winner.notes ?? {}) },
+    analyses: winner.analyses ?? other.analyses,
+    sentiments: mergeSentiments(other.sentiments, winner.sentiments),
+    pins: winner.pins ?? other.pins,
   };
+}
+
+// Shared fetch+merge. `preferCacheOnConflict` keeps any write made during an
+// initial in-flight load (true), or lets the freshly-fetched remote win on an
+// explicit refresh so cross-device changes propagate (false).
+async function fetchAndMerge(preferCacheOnConflict: boolean): Promise<GistData> {
+  try {
+    const resp = await fetch('/api/gist').then(r => r.json()) as GistResponse | GistData;
+    // New API shape is { cloud, data }; fall back to legacy flat GistData.
+    const wrapped = !!resp && typeof resp === 'object' && 'data' in resp;
+    const remote: GistData = wrapped ? ((resp as GistResponse).data ?? {}) : (resp as GistData);
+    const cloud = wrapped ? !!(resp as GistResponse).cloud : Object.keys(remote).length > 0;
+    const local = loadLocal();
+    const remoteHasData = Object.keys(remote).length > 0;
+
+    // Server is authoritative: remote wins over on-disk local on conflicts, but
+    // local-only keys (and sentiment history) are preserved.
+    const baseline = remoteHasData ? mergeCloud(local, remote) : local;
+
+    // Reconcile with the in-memory cache.
+    if (!_cache) {
+      _cache = baseline;
+    } else if (preferCacheOnConflict) {
+      _cache = mergeCloud(baseline, _cache); // a write landed during load → keep it
+    } else {
+      _cache = mergeCloud(_cache, baseline); // explicit refresh → remote wins
+    }
+    saveLocal(_cache);
+    notify(_cache);
+
+    // Cloud configured but empty while this device has local notes: seed the cloud.
+    if (cloud && !remoteHasData && Object.keys(local).length > 0) {
+      fetch('/api/gist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(local),
+      }).catch(() => {});
+    }
+
+    setSyncStatus(cloud ? 'synced' : 'local-only');
+    return _cache;
+  } catch {
+    _cache = _cache ?? loadLocal();
+    setSyncStatus('error');
+    return _cache!;
+  }
 }
 
 export async function loadGistData(): Promise<GistData> {
   if (_cache) return _cache;
   if (_fetchPromise) return _fetchPromise;
-  _fetchPromise = fetch('/api/gist')
-    .then(r => r.json())
-    .then((resp: GistResponse | GistData) => {
-      // New API shape is { cloud, data }; fall back to legacy flat GistData.
-      const wrapped = !!resp && typeof resp === 'object' && 'data' in resp;
-      const remote: GistData = wrapped
-        ? ((resp as GistResponse).data ?? {})
-        : (resp as GistData);
-      const cloud = wrapped
-        ? !!(resp as GistResponse).cloud
-        : Object.keys(remote).length > 0;
-      const local = loadLocal();
-      const remoteHasData = Object.keys(remote).length > 0;
-      // Prefer local data over server so client-side deletes/edits survive
-      // a hard refresh even when the server write was slow or failed.
-      // Remote still provides fallback for chartIds not present locally.
-      const baseline = remoteHasData ? mergeNotes(remote, local) : local;
+  _fetchPromise = fetchAndMerge(true).finally(() => { _fetchPromise = null; });
+  return _fetchPromise;
+}
 
-      // If a write landed while this fetch was in flight, _cache holds the
-      // fresher state — keep it and only adopt baseline chartIds it lacks.
-      _cache = _cache ? mergeNotes(baseline, _cache) : baseline;
-      saveLocal(_cache);
-
-      // Cloud configured but empty while this device has local notes:
-      // seed the cloud so the existing notes are not lost.
-      if (cloud && !remoteHasData && Object.keys(local).length > 0) {
-        fetch('/api/gist', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(local),
-        }).catch(() => {});
-      }
-
-      setSyncStatus(cloud ? 'synced' : 'local-only');
-      return _cache;
-    })
-    .catch(() => {
-      _cache = _cache ?? loadLocal();
-      setSyncStatus('error');
-      return _cache!;
-    })
-    .finally(() => { _fetchPromise = null; });
+// Force a re-fetch even when a cache exists — used when the app regains focus so
+// changes made on another device are pulled in. Remote wins on conflicts.
+export async function refreshGistData(): Promise<GistData> {
+  if (_fetchPromise) return _fetchPromise;
+  _fetchPromise = fetchAndMerge(false).finally(() => { _fetchPromise = null; });
   return _fetchPromise;
 }
 
@@ -178,7 +206,19 @@ export function useGistData() {
     loadGistData().then(d => setData({ ...d }));
     const listener = (d: GistData) => setData({ ...d });
     _listeners.add(listener);
-    return () => { _listeners.delete(listener); };
+    // Pull changes made on other devices whenever the app regains focus or
+    // becomes visible again (e.g. switching back to the tab / reopening on mobile).
+    const onFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      refreshGistData();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      _listeners.delete(listener);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
   }, []);
 
   const update = async (patch: Partial<GistData>) => {
