@@ -1,19 +1,34 @@
 /**
  * Shared rotation-scoring model.
  *
- * Formula (all cross-sectional percentiles, 0..1):
- *   0.40 × ACC   — acceleration: climbed the 1M leaderboard vs 3M (main early-rotation signal)
- *   0.25 × TRD   — trend strength: r3m percentile (confirms the move is real, not a blip)
- *   0.15 × REG   — regime: structural tailwind (above 200W→1.0, above 200D→0.6, below→0.2)
- *   0.10 × VOL   — volume: capital moving in (guarded — neutral 0.5 when data unavailable)
- *  −0.10 × EXT   — extension penalty: r1y percentile (penalises crowded / already-ran moves)
+ * IMPORTANT: MODEL_WEIGHTS below is the single source of truth for the formula.
+ * The on-screen legend in RotationSection renders these exact numbers, so editing
+ * them here updates both the calculation AND the documented formula automatically.
  *
- * Gates (minimum bars before score matters):
- *   r1m > 0  AND  r3m > 0
+ * Score = Σ weightᵢ × componentᵢ   (every component is a cross-sectional percentile, 0..1)
+ *   ACC  — acceleration: climbed the 1M leaderboard vs 3M (main early-rotation signal)
+ *   TRD  — trend strength: r3m percentile (confirms the move is real, not a blip)
+ *   REG  — regime: structural tailwind (above 200W→1.0, above 200D→0.6, below→0.2)
+ *   VOL  — volume: capital moving in (guarded — neutral 0.5 when data unavailable)
+ *   EXT  — extension penalty (SUBTRACTED): r1y percentile (penalises crowded / already-ran)
  *
- * The model is used by both the live Rotation table and the historical backtest so that
- * both always test exactly the same logic.
+ * Gate (minimum bar before the score counts): r1m > 0 AND r3m > 0.
+ * The live table then shows only the TOP `ACCEL_LIMIT` by score — a focused shortlist.
+ *
+ * Used by both the live Rotation table and the historical backtest, so both always
+ * test exactly the same logic.
  */
+
+export const MODEL_WEIGHTS = {
+  acceleration: 0.40, // ACC — 1M-vs-3M leaderboard climb
+  trend:        0.25, // TRD — r3m percentile
+  regime:       0.15, // REG — 200D / 200W structural position
+  volume:       0.10, // VOL — volume vs 20-day average
+  extension:    0.10, // EXT — r1y percentile (subtracted)
+} as const;
+
+// How many names the "Accelerating" shortlist shows (top N by score).
+export const ACCEL_LIMIT = 8;
 
 export interface ModelInput {
   symbol: string;
@@ -83,8 +98,9 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       ? Math.max(0, Math.min(1, (vr - 0.7) / 1.3))
       : 0.5;
 
+    const W = MODEL_WEIGHTS;
     const score = hasReturns
-      ? 0.40 * accPctile + 0.25 * p3m + 0.15 * reg + 0.10 * vol - 0.10 * p1y
+      ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg + W.volume * vol - W.extension * p1y
       : -1;
 
     const passesGate = hasReturns && item.r1m! > 0 && item.r3m! > 0;

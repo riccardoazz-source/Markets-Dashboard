@@ -6,7 +6,7 @@ import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData } from '@/lib/gist';
-import { scoreRotation, ScoredItem } from '@/lib/rotationModel';
+import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_LIMIT } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { RotationChart, ChartAsset } from '@/components/charts/RotationChart';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
@@ -122,6 +122,49 @@ function accelArrow(rankDelta: number | null): { arrow: string; color: string } 
   if (rankDelta <= -12)return { arrow: '↓↓', color: 'text-red-300'   };
   if (rankDelta <= -4) return { arrow: '↓',  color: 'text-red-500'   };
   return                      { arrow: '→',  color: 'text-gray-500'  };
+}
+
+// Collapsible legend: explains every badge AND prints the live model formula.
+// The formula weights come straight from MODEL_WEIGHTS, so this can never drift
+// from the actual calculation in lib/rotationModel.ts.
+function RotationLegend() {
+  const W = MODEL_WEIGHTS;
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  return (
+    <details className="rounded-lg border border-border bg-bg-input/40 text-[11px]">
+      <summary className="cursor-pointer select-none px-3 py-2 text-gray-300 font-medium hover:text-gray-100">
+        Legend &amp; model formula
+      </summary>
+      <div className="px-3 pb-3 pt-1 space-y-3 text-gray-400">
+        <div>
+          <p className="text-gray-300 font-semibold mb-1">Badges</p>
+          <ul className="space-y-1">
+            <li><span className="inline-block w-2 h-2 rounded-full bg-blue-500 align-middle mr-1.5" />Coloured dot = asset class (Indexes blue · Crypto orange · Commodities amber · Sectors purple · Stocks pink)</li>
+            <li><span className="text-green-300">🌱 early</span> — strong acceleration and the 1-year run is still small: caught early, before the crowd</li>
+            <li><span className="text-amber-300">↩ rebound</span> — accelerating off a negative 6M/1Y base: a bounce off oversold, riskier than a confirmed trend</li>
+            <li><span className="text-blue-300">✓ trend</span> — up across every horizon (3M, 6M, 1Y all positive): a confirmed uptrend</li>
+            <li><span className="text-emerald-300">🐂 200W</span> — price above its 200-week moving average: structural long-term bull</li>
+            <li><span className="text-green-400 font-bold">↑↑ ↑ → ↓ ↓↓</span> — leaderboard climb: how many places the asset moved up (↑) or down (↓) from its 3M to 1M ranking</li>
+            <li><span className="text-amber-300">★</span> — pinned (saved to your database)</li>
+          </ul>
+        </div>
+        <div>
+          <p className="text-gray-300 font-semibold mb-1">RotationScore — how &quot;Accelerating&quot; is ranked</p>
+          <p className="mb-1.5">Every asset is scored cross-sectionally (each input is its percentile rank vs the whole universe, 0–1). The list shows the <span className="text-gray-200">top {ACCEL_LIMIT}</span> by score.</p>
+          <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
+{`Score = ${pct(W.acceleration)} · ACC   (1M-vs-3M leaderboard climb)
+      + ${pct(W.trend)} · TRD   (3-month return percentile)
+      + ${pct(W.regime)} · REG   (200W→1.0 · 200D→0.6 · below→0.2)
+      + ${pct(W.volume)} · VOL   (volume vs 20-day avg; 0.5 if N/A)
+      − ${pct(W.extension)} · EXT   (1-year return percentile — penalty)
+
+Gate:  shown only if  r1m > 0  AND  r3m > 0`}
+          </pre>
+          <p className="mt-1.5 text-gray-500">ACC is the core early-rotation signal — it rewards assets whose recent (1M) strength outranks their medium-term (3M) strength, i.e. capital is rotating in now. EXT is subtracted so already-extended names rank lower.</p>
+        </div>
+      </div>
+    </details>
+  );
 }
 
 
@@ -351,13 +394,15 @@ export function RotationSection() {
     ? rows
     : rows.filter(i => i.group === groupFilter);
 
-  // Accelerating: pass sanity gates (r1m>0, r3m>0), ranked by composite RotationScore
+  // Accelerating: pass sanity gates (r1m>0, r3m>0), ranked by composite RotationScore,
+  // then capped to the top ACCEL_LIMIT — a focused shortlist, not half the universe.
   const accelItems = useMemo(() => {
     if (rollingLoading) return [];
     return groupFiltered
       .map(i => scoreMap.get(i.symbol))
       .filter((s): s is ScoredItem<RotationItem> => s != null && s.passesGate)
       .sort((a, b) => b.score - a.score)
+      .slice(0, ACCEL_LIMIT)
       .map(s => s.item);
   }, [groupFiltered, scoreMap, rollingLoading]);
 
@@ -550,12 +595,13 @@ export function RotationSection() {
         </div>
       )}
 
-      {/* Accelerating mode explainer */}
+      {/* Accelerating mode explainer + legend */}
       {accelOnly && !rollingLoading && (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <p className="text-[11px] text-green-400/80">
-            <span className="font-semibold">Early-stage rotation</span> — scored by acceleration (1M vs 3M leaderboard climb), trend strength, structural regime, and volume. Extension is a soft penalty, not a hard gate.
+            <span className="font-semibold">Early-stage rotation</span> — the top {ACCEL_LIMIT} names by RotationScore: acceleration (1M vs 3M leaderboard climb), trend strength, structural regime and volume, minus an extension penalty.
           </p>
+          <RotationLegend />
         </div>
       )}
 

@@ -674,12 +674,17 @@ export const COMMODITIES: AssetConfig[] = [
   { symbol: 'GC=F',  name: 'Gold',         category: 'Metals',  type: 'commodity' },
   { symbol: 'SI=F',  name: 'Silver',       category: 'Metals',  type: 'commodity' },
   { symbol: 'PL=F',  name: 'Platinum',     category: 'Metals',  type: 'commodity' },
+  { symbol: 'PA=F',  name: 'Palladium',    category: 'Metals',  type: 'commodity' },
+  { symbol: 'HG=F',  name: 'Copper',       category: 'Metals',  type: 'commodity' },
   { symbol: 'CL=F',  name: 'WTI Crude',    category: 'Energy',  type: 'commodity' },
   { symbol: 'BZ=F',  name: 'Brent Crude',  category: 'Energy',  type: 'commodity' },
   { symbol: 'NG=F',  name: 'Natural Gas',  category: 'Energy',  type: 'commodity' },
-  { symbol: 'HG=F',  name: 'Copper',       category: 'Metals',  type: 'commodity' },
   { symbol: 'ZW=F',  name: 'Wheat',        category: 'Agri',    type: 'commodity' },
   { symbol: 'ZC=F',  name: 'Corn',         category: 'Agri',    type: 'commodity' },
+  { symbol: 'ZS=F',  name: 'Soybeans',     category: 'Agri',    type: 'commodity' },
+  { symbol: 'KC=F',  name: 'Coffee',       category: 'Softs',   type: 'commodity' },
+  { symbol: 'SB=F',  name: 'Sugar',        category: 'Softs',   type: 'commodity' },
+  { symbol: 'CC=F',  name: 'Cocoa',        category: 'Softs',   type: 'commodity' },
 ];
 
 export const CRYPTO_IDS = [
@@ -691,6 +696,11 @@ export const CRYPTO_IDS = [
   { id: 'cardano',          symbol: 'ADA', name: 'Cardano'   },
   { id: 'avalanche-2',      symbol: 'AVAX',name: 'Avalanche' },
   { id: 'chainlink',        symbol: 'LINK',name: 'Chainlink' },
+  { id: 'dogecoin',         symbol: 'DOGE',name: 'Dogecoin'  },
+  { id: 'tron',             symbol: 'TRX', name: 'Tron'      },
+  { id: 'polkadot',         symbol: 'DOT', name: 'Polkadot'  },
+  { id: 'litecoin',         symbol: 'LTC', name: 'Litecoin'  },
+  { id: 'sui',              symbol: 'SUI', name: 'Sui'       },
 ];
 
 export const CRYPTO_YAHOO_SYMBOLS: Record<string, string> = {
@@ -702,6 +712,11 @@ export const CRYPTO_YAHOO_SYMBOLS: Record<string, string> = {
   cardano:     'ADA-USD',
   'avalanche-2':'AVAX-USD',
   chainlink:   'LINK-USD',
+  dogecoin:    'DOGE-USD',
+  tron:        'TRX-USD',
+  polkadot:    'DOT-USD',
+  litecoin:    'LTC-USD',
+  sui:         'SUI-USD',
 };
 
 export const SECTORS: AssetConfig[] = [
