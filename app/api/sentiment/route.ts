@@ -3,10 +3,9 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Daily market sentiment for the Rotation section. Unlike a generic "what's the
-// market doing" prompt, this is fed the ACTUAL leaderboard already computed on
-// screen (leaders, laggards, the model's accelerating picks, key price levels)
-// and asks Claude to combine that with a live web search into a read of:
+// Daily market sentiment for the Rotation section. Fed the ACTUAL leaderboard
+// already computed on screen (leaders, laggards, the model's accelerating picks,
+// key price levels) and asks Gemini + Google Search to produce a regime call:
 //   • today's regime, and
 //   • the regime it expects over the NEXT month.
 
@@ -44,10 +43,10 @@ function fmtMover(m: SnapshotMover): string {
 }
 
 export async function POST(req: Request) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'missing_key', message: 'Set ANTHROPIC_API_KEY in the deployment environment to enable sentiment.' },
+      { error: 'missing_key', message: 'Set GEMINI_API_KEY in the deployment environment to enable sentiment.' },
       { status: 200 },
     );
   }
@@ -76,8 +75,9 @@ export async function POST(req: Request) {
       ? (snap.accelerating ?? []).map(m => `  • ${m.name} (${m.group})`).join('\n')
       : '  (none flagged today)');
 
-  const system =
-    'You are a markets strategist. You are given a real cross-asset leaderboard already computed from live prices, plus the ability to web-search for today\'s macro headlines (rates, inflation prints, central banks, geopolitics, earnings). ' +
+  const systemInstruction =
+    'You are a markets strategist. You are given a real cross-asset leaderboard already computed from live prices. ' +
+    'Use Google Search to find today\'s macro headlines (rates, inflation prints, central banks, geopolitics, earnings). ' +
     'Synthesize a concise, decision-useful read. Anchor your conclusions to the SUPPLIED DATA — explain what the rotation in the leaderboard implies, and confirm or push back on the model\'s accelerating picks using fresh news. ' +
     'Distinguish the regime RIGHT NOW from the regime you expect over the NEXT MONTH. ' +
     'Use one of these exact regime labels for regime_now and regime_next: Risk-On, Risk-Off, Stagflation Risk, Soft Landing, Transition, Reflation, Goldilocks. ' +
@@ -91,28 +91,23 @@ export async function POST(req: Request) {
     'risk_note: <1 sentence: the biggest risk to this view>\n' +
     'confidence: <Low | Medium | High>';
 
+  const userMessage =
+    'Here is the live cross-asset leaderboard from the dashboard. Search today\'s macro headlines, then give the sentiment read.\n\n' +
+    dataBlock;
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 55_000);
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const r = await fetch(url, {
       signal: ctrl.signal,
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 900,
-        system,
-        tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }],
-        messages: [{
-          role: 'user',
-          content:
-            'Here is the live cross-asset leaderboard from the dashboard. Web-search today\'s macro headlines, then give the sentiment read.\n\n' +
-            dataBlock,
-        }],
+        system_instruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+        tools: [{ google_search: {} }],
+        generationConfig: { maxOutputTokens: 1000 },
       }),
     });
 
@@ -121,10 +116,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'upstream', status: r.status, message: body.slice(0, 300) }, { status: 200 });
     }
 
-    const json = await r.json() as { content?: Array<{ type: string; text?: string }> };
-    const text = (json.content ?? [])
-      .filter(b => b.type === 'text' && b.text)
-      .map(b => b.text as string)
+    const json = await r.json() as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
+
+    const text = (json.candidates?.[0]?.content?.parts ?? [])
+      .filter(p => p.text)
+      .map(p => p.text as string)
       .join('\n');
 
     const parsed = parseKV(text);

@@ -77,7 +77,7 @@ export function SentimentPanel({ buildSnapshot, ready }: { buildSnapshot: () => 
       if (json.error) {
         setError(
           json.error === 'missing_key'
-            ? 'Sentiment needs an ANTHROPIC_API_KEY set in the deployment environment.'
+            ? 'Sentiment needs a GEMINI_API_KEY set in the deployment environment.'
             : json.error === 'timeout'
               ? 'Timed out — the web search took too long. Try again.'
               : json.error === 'upstream'
