@@ -387,10 +387,7 @@ export function RotationSection() {
   const accelBase = groupFiltered.filter(i =>
     (rankDeltas.get(i.symbol) ?? -Infinity) >= 4 &&
     i.r1m != null && i.r1m > 0 && i.r1m >= topThirdR1m &&
-    i.r3m != null && i.r3m > 0 &&
-    // Price must be above its 200-day MA (confirms trend is structural, not a dead-cat bounce).
-    // If ma200 is missing (e.g. asset <200d old), the gate is waived rather than blocking.
-    (i.ma200 == null || i.price == null || i.price > i.ma200)
+    i.r3m != null && i.r3m > 0
   );
   // Extension guard: drop names already in the top 20% of 1Y gains — the move is mature
   // and crowded there, exactly the "buy the top then it crashes" trap to avoid.
