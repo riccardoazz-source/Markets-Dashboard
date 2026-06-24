@@ -77,7 +77,7 @@
 
 export const MODEL_WEIGHTS = {
   acceleration: 0.45, // ACC — 3-horizon pace-ladder percentile
-  trend:        0.25, // TRD — r3m/r6m blend percentile
+  trend:        0.25, // TRD — r3m/r6m blend + risk-adjusted SHA (inside TRD: 50%/20%/30%)
   regime:       0.10, // REG — price vs 200-day MA
   extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
   volume:       0.04, // VOL — volume confirmation (null→0.5 neutral, so backtest unaffected)
@@ -229,6 +229,16 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const n6m          = validWith6m.length;
   const byR6mAsc     = [...validWith6m].sort((a, b) => a.r6m! - b.r6m!);
   const rankR6mAsc   = new Map(byR6mAsc.map((r, i) => [r.symbol, i]));
+  // Sharpe-like ratio: r3m / monthlyVol — rewards assets whose returns are large
+  // RELATIVE to their own volatility (durable low-vol trends score higher than
+  // noisy spikes of the same magnitude). Null-vol items get neutral 0.5 so the
+  // backtest is unaffected when vol is unavailable. Perplexity formula: R(T)/σ(T).
+  const sharpe3mOf = (i: ModelInput) =>
+    (i.r3m != null && i.vol != null && i.vol > 0) ? i.r3m / i.vol : null;
+  const validWithSharpe  = valid.filter(i => sharpe3mOf(i) != null);
+  const nSharpe          = validWithSharpe.length;
+  const bySharpeAsc      = [...validWithSharpe].sort((a, b) => (sharpe3mOf(a) ?? 0) - (sharpe3mOf(b) ?? 0));
+  const rankSharpeAsc    = new Map(bySharpeAsc.map((r, i) => [r.symbol, i]));
 
   return items.map(item => {
     const hasReturns = item.r1m != null && item.r3m != null;
@@ -239,13 +249,21 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
     const accPctile  = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
     const p3m        = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
-    // TRD = composite trend signal: primary 3M (captures recent momentum), secondary
-    // 6M (captures medium-term trend when 3M is a poor measurement snapshot). The
-    // blend reduces sensitivity to the exact measurement date — e.g. an asset in a
-    // strong 6M uptrend that pulls back slightly before measurement still gets TRD
-    // credit from the 6M leg, avoiding it being penalised for the short-term dip.
+    // TRD = composite trend signal with three legs:
+    //   p3m     (50%) — raw 3M return rank (recent momentum)
+    //   p6m_trd (20%) — raw 6M return rank (medium-term trend continuity)
+    //   pSharpe (30%) — r3m/monthlyVol rank (risk-adjusted: rewards smooth trends
+    //                    over noisy spikes of the same raw magnitude)
+    // Null-vol items get pSharpe=0.5 (neutral) — backtest and assets without vol
+    // history are unaffected.
     const p6m_trd  = item.r6m != null && n6m > 0 ? toP(rankR6mAsc.get(item.symbol) ?? 0, n6m) : p3m;
-    const pTrend   = item.r6m != null ? 0.65 * p3m + 0.35 * p6m_trd : p3m;
+    const sh3m     = sharpe3mOf(item);
+    const pSharpe  = sh3m != null && nSharpe > 0
+      ? toP(rankSharpeAsc.get(item.symbol) ?? 0, nSharpe)
+      : 0.5;
+    const pTrend   = item.r6m != null
+      ? 0.50 * p3m + 0.20 * p6m_trd + 0.30 * pSharpe
+      : 0.70 * p3m + 0.30 * pSharpe;
     const pStretch   = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
     const pR1mAbs    = toP(rankR1mAbsAsc.get(item.symbol) ?? 0, n);
     // EXT = worst of: (a) price stretched far above MA200 in vol units, or

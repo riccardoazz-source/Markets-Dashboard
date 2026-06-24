@@ -18,6 +18,7 @@ interface RollingReturn {
   high52w: number | null;
   low52w: number | null;
   pos52w: number | null; // 0–100 position of the latest close within the 52W range
+  lastClose: number | null; // most recent daily close — use for regime gate (not intraday)
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -93,6 +94,7 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     high52w: r.high52w,
     low52w: r.low52w,
     pos52w: r.pos52w,
+    lastClose: history.length > 0 ? history[history.length - 1].close : null,
   };
 }
 

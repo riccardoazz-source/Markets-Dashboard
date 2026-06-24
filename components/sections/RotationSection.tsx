@@ -19,7 +19,8 @@ interface RotationItem {
   name: string;
   subCategory: string;
   group: Group;
-  price: number | null;
+  price: number | null;      // live intraday price (display only)
+  lastClose: number | null;  // most recent daily close (used for regime gate — matches backtest)
   currency: string;
   dayPct: number | null;
   r1m: number | null;
@@ -48,6 +49,7 @@ interface RollingReturn {
   high52w: number | null;
   low52w: number | null;
   pos52w: number | null;
+  lastClose: number | null;
 }
 
 type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w' | '52w';
@@ -169,19 +171,25 @@ function RotationLegend() {
   ACCEL   = 0.55·aRecent + 0.35·aBuild + 0.20·min(0, aLong)
             (2-horizon fallback 0.60/0.40 when r1y unavailable)
 
+TRD = composite trend (when r6m available):
+  0.50 · p3m     (raw 3M return rank)
+  0.20 · p6m     (raw 6M return rank — medium-term continuity)
+  0.30 · SHA     (r3m / monthlyVol rank — risk-adjusted, rewards smooth trends)
+  SHA null → neutral 0.5 (backtest unaffected when vol unavailable)
+
 Over-extension guard — EXT = max of two signals:
   STRETCH = max(0, price/MA200 − 1)·100 / monthlyVol   (σ above MA200)
   R1M_ABS = cross-sectional percentile of |r1m|
   EXT     = max(STRETCH_pctile, R1M_ABS_pctile)
 
 Score = ${pct(W.acceleration)} · ACC   (3-horizon acceleration percentile)
-      + ${pct(W.trend)} · TRD   (3M/6M return blend percentile)
+      + ${pct(W.trend)} · TRD   (3M/6M/SHA blend — see above)
       + ${pct(W.regime)} · REG   (above 200-day MA→1.0 · below→0.2)
       + ${pct(W.volume)} · VOL   (volume: latestVol/avg20dVol percentile; null→neutral)
       − wEXT · EXT   (over-extension; wEXT = 20% · commodities 32%)
 
 Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
-       AND  price ≥ 200-day MA   (regime confirmation)
+       AND  price ≥ 200-day MA   (regime confirmation — uses daily close, matches backtest)
        (cap = 50% · commodities 25%)
        aBuild / aLong: ranking signals, not gate blockers`}
           </pre>
@@ -282,7 +290,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
         const r = rMap.get(sym);
         return {
           symbol: sym, name: sym, subCategory: 'Stock', group: 'Stocks' as const,
-          price: q?.price ?? null, currency: q?.currency ?? 'USD',
+          price: q?.price ?? null, lastClose: r?.lastClose ?? null, currency: q?.currency ?? 'USD',
           dayPct: q?.changePercent ?? null,
           r1m: r?.r1m ?? null, r3m: r?.r3m ?? null, r6m: r?.r6m ?? null, r1y: r?.r1y ?? null,
           fiveYPct: q?.fiveYearChangePercent ?? null,
@@ -330,7 +338,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           const q = quoteMap.get(idx.symbol);
           return {
             symbol: idx.symbol, name: idx.name, subCategory: idx.category, group: 'Indexes',
-            price: q?.price ?? null, currency: q?.currency ?? 'USD',
+            price: q?.price ?? null, lastClose: null, currency: q?.currency ?? 'USD',
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
@@ -343,7 +351,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           const q = quoteMap.get(c.symbol);
           return {
             symbol: c.symbol, name: c.name, subCategory: c.category, group: 'Commodities',
-            price: q?.price ?? null, currency: q?.currency ?? 'USD',
+            price: q?.price ?? null, lastClose: null, currency: q?.currency ?? 'USD',
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
@@ -360,7 +368,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           const yahooSym = CRYPTO_YAHOO_SYMBOLS[entry.id] ?? `${entry.symbol}-USD`;
           return {
             symbol: yahooSym, name: entry.name, subCategory: 'Crypto', group: 'Crypto',
-            price: c?.price ?? null, currency: 'USD',
+            price: c?.price ?? null, lastClose: null, currency: 'USD',
             dayPct: c?.change24hPercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: c?.fiveYearChangePercent ?? null,
@@ -371,7 +379,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
 
         const sectorItems: RotationItem[] = sectors.map(s => ({
           symbol: s.symbol, name: s.name, subCategory: s.category, group: 'Sectors' as const,
-          price: s.price, currency: s.currency ?? 'USD',
+          price: s.price, lastClose: null, currency: s.currency ?? 'USD',
           dayPct: s.changePercent,
           r1m: null, r3m: null, r6m: null, r1y: null,
           fiveYPct: s.fiveYearReturn,
@@ -395,6 +403,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           return r ? {
             ...item,
             r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, vol: r.vol, volRatio: r.volRatio,
+            lastClose: r.lastClose ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -416,10 +425,16 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
   // fully ranked alongside everything else (rank-delta, accelerating, sorting).
   const rows = useMemo(() => [...items, ...stockItems], [items, stockItems]);
 
-  // Score all rows cross-sectionally (universe-wide percentiles, so group filter applied after)
+  // Score all rows cross-sectionally (universe-wide percentiles, so group filter applied after).
+  // Use lastClose (daily close from rotation-returns) as the price for the regime gate so it
+  // matches the backtest — both use the same daily close, avoiding intraday divergence.
   const scoreMap = useMemo<Map<string, ScoredItem<RotationItem>>>(() => {
     if (rollingLoading) return new Map();
-    return new Map(scoreRotation(rows).map(s => [s.item.symbol, s]));
+    const forScoring: RotationItem[] = rows.map(item => ({
+      ...item,
+      price: item.lastClose ?? item.price,
+    }));
+    return new Map(scoreRotation(forScoring).map(s => [s.item.symbol, s]));
   }, [rows, rollingLoading]);
 
   const groupFiltered = groupFilter === 'all'

@@ -690,8 +690,6 @@ export const COMMODITIES: AssetConfig[] = [
 // `category` groups each coin by its primary market narrative. Used both for
 // the Crypto section's filter tabs and the Compare quick-add subcategories, so
 // the two always stay in sync.
-// `startDate` clips historical chart data to exclude pre-launch Yahoo ticker garbage
-// (e.g. HYPE-USD existed before Hyperliquid's token launch and carried a different asset).
 export const CRYPTO_IDS: { id: string; symbol: string; name: string; category: string; startDate?: string }[] = [
   { id: 'bitcoin',          symbol: 'BTC', name: 'Bitcoin',    category: 'Store of Value' },
   { id: 'ethereum',         symbol: 'ETH', name: 'Ethereum',   category: 'Smart Contract' },
@@ -706,7 +704,6 @@ export const CRYPTO_IDS: { id: string; symbol: string; name: string; category: s
   { id: 'polkadot',         symbol: 'DOT', name: 'Polkadot',   category: 'Smart Contract' },
   { id: 'litecoin',         symbol: 'LTC', name: 'Litecoin',   category: 'Payments'       },
   { id: 'sui',              symbol: 'SUI', name: 'Sui',        category: 'Smart Contract' },
-  { id: 'hyperliquid',      symbol: 'HYPE',name: 'Hyperliquid',category: 'DeFi',          startDate: '2024-11-29' },
   { id: 'zcash',            symbol: 'ZEC', name: 'Zcash',      category: 'Privacy'        },
   { id: 'ondo-finance',     symbol: 'ONDO',name: 'Ondo',       category: 'DeFi'           },
 ];
@@ -725,7 +722,6 @@ export const CRYPTO_YAHOO_SYMBOLS: Record<string, string> = {
   polkadot:    'DOT-USD',
   litecoin:    'LTC-USD',
   sui:         'SUI-USD',
-  hyperliquid: 'HYPE-USD',
   zcash:       'ZEC-USD',
   'ondo-finance': 'ONDO-USD',
 };

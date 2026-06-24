@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ScrollNav } from '@/components/ui/ScrollNav';
 
 export const metadata: Metadata = {
   title: 'MarketPulse – Live Markets Dashboard',
@@ -11,6 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="min-h-screen bg-bg text-gray-100">
         {children}
+        <ScrollNav />
       </body>
     </html>
   );
