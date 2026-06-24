@@ -1,36 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
-export function ScrollNav() {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => setVisible(window.scrollY > 200);
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
-  if (!visible) return null;
+// Inline page-jump buttons.
+//   <ScrollButton to="bottom" />  → down arrow, placed at the TOP of the page
+//   <ScrollButton to="top" />     → up arrow,   placed at the BOTTOM of the page
+// Single-click smooth scroll to the far end of the page. Inline (not floating),
+// so each sits at the end it sends you away from.
+export function ScrollButton({ to }: { to: 'top' | 'bottom' }) {
+  const onClick = () =>
+    window.scrollTo({
+      top: to === 'top' ? 0 : document.body.scrollHeight,
+      behavior: 'smooth',
+    });
 
   return (
-    <div className="fixed bottom-6 right-4 z-50 flex flex-col gap-2">
-      <button
-        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-        className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-card border border-border text-gray-400 hover:text-gray-100 hover:border-gray-500 shadow-lg transition-all text-base"
-        title="Vai in cima"
-        aria-label="Scroll to top"
-      >
-        ↑
-      </button>
-      <button
-        onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })}
-        className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-card border border-border text-gray-400 hover:text-gray-100 hover:border-gray-500 shadow-lg transition-all text-base"
-        title="Vai in fondo"
-        aria-label="Scroll to bottom"
-      >
-        ↓
-      </button>
-    </div>
+    <button
+      onClick={onClick}
+      className="flex items-center justify-center w-8 h-8 rounded-full bg-bg-input border border-border text-gray-400 hover:text-gray-100 hover:border-gray-500 transition-all text-base shrink-0"
+      title={to === 'top' ? 'Vai a inizio pagina' : 'Vai in fondo alla pagina'}
+      aria-label={to === 'top' ? 'Scroll to top' : 'Scroll to bottom'}
+    >
+      {to === 'top' ? '↑' : '↓'}
+    </button>
   );
 }
