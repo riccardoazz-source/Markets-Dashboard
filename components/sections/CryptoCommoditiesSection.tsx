@@ -134,6 +134,14 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
         }
       }
 
+      // Clip to the asset's known real-data start date. Some Yahoo tickers reuse a
+      // symbol that previously belonged to a different (now-delisted) asset — HYPE-USD
+      // is the canonical example: the ticker existed before Hyperliquid's Nov 2024
+      // airdrop and carried an unrelated instrument that went to zero. Without this
+      // clip the MAX chart shows bogus pre-launch data ending at −100%.
+      if (coin?.startDate) {
+        data = data.filter(p => p.date >= coin.startDate!);
+      }
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
       setDataMsg(dataAvailabilityMessage(data, tf));

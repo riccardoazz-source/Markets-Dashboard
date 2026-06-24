@@ -157,30 +157,34 @@ function RotationLegend() {
           <p className="text-gray-300 font-semibold mb-1">RotationScore — how &quot;Accelerating&quot; is ranked</p>
           <p className="mb-1.5">Each input is a cross-sectional percentile vs the whole universe (0–1). The list shows <span className="text-gray-200">every name that clears the gate</span>, ranked by score — the count is whatever the market warrants, not a fixed number.</p>
           <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
-{`Pace ladder (geometric monthly pace at each horizon):
-  p1 = r1m
-  p3 = ((1+r3m/100)^(1/3) − 1)·100
-  p6 = ((1+r6m/100)^(1/6) − 1)·100
+{`3-horizon pace ladder (geometric monthly pace at each horizon):
+  p1  = r1m
+  p3  = ((1+r3m/100)^(1/3) − 1)·100
+  p6  = ((1+r6m/100)^(1/6) − 1)·100
+  p1y = ((1+r1y/100)^(1/12) − 1)·100
 
-  aRecent = p1 − p3      (last month vs the quarter)
-  aBuild  = p3 − p6      (quarter vs half-year → BUILDING)
-  ACCEL   = 0.6·aRecent + 0.4·aBuild
+  aRecent = p1 − p3    (last month faster than the quarter?)
+  aBuild  = p3 − p6    (quarter faster than the half-year? → BUILDING)
+  aLong   = p6 − p1y   (half-year faster than the annual? → whole curve bending up)
+  ACCEL   = 0.50·aRecent + 0.30·aBuild + 0.20·aLong
+            (2-horizon fallback 0.60/0.40 when r1y unavailable)
 
 Over-extension guard — EXT = max of two signals:
   STRETCH = max(0, price/MA200 − 1)·100 / monthlyVol   (σ above MA200)
   R1M_ABS = cross-sectional percentile of |r1m|
   EXT     = max(STRETCH_pctile, R1M_ABS_pctile)
 
-Score = ${pct(W.acceleration)} · ACC   (acceleration percentile)
-      + ${pct(W.trend)} · TRD   (3-month return percentile)
+Score = ${pct(W.acceleration)} · ACC   (3-horizon acceleration percentile)
+      + ${pct(W.trend)} · TRD   (3M/6M return blend percentile)
       + ${pct(W.regime)} · REG   (above 200-day MA→1.0 · below→0.2)
+      + ${pct(W.volume)} · VOL   (volume: latestVol/avg20dVol percentile; null→neutral)
       − wEXT · EXT   (over-extension; wEXT = 20% · commodities 32%)
 
 Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
        (cap = 50% · commodities 25%)
-       aBuild: ranking signal only — strong build → higher score, not a gate blocker`}
+       aBuild / aLong: ranking signals — strong build/long → higher score, not gate blockers`}
           </pre>
-          <p className="mt-1.5 text-gray-500">EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). The penalty scales with extension, so a commodity early in a real secular trend (low stretch) is untouched. Every input is point-in-time, so the backtest stays honest.</p>
+          <p className="mt-1.5 text-gray-500">aLong detects maturing trends: when the 1Y pace outpaces the 6M pace the run is winding down (aLong&lt;0), dragging ACCEL lower even if the recent month is still positive. EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). VOL rewards breakouts on elevated volume (backtest-neutral when volume history is unavailable). Every input is point-in-time, so the backtest stays honest.</p>
         </div>
       </div>
     </details>

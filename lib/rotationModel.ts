@@ -20,15 +20,23 @@
  * ── Acceleration: the pace ladder ────────────────────────────────────────────
  * Convert each horizon's cumulative return into a geometric MONTHLY pace:
  *
- *   p1 = r1m                                   (last ~1 month)
- *   p3 = ((1+r3m/100)^(1/3) − 1)·100           (avg monthly over last 3 months)
- *   p6 = ((1+r6m/100)^(1/6) − 1)·100           (avg monthly over last 6 months)
+ *   p1  = r1m                                   (last ~1 month)
+ *   p3  = ((1+r3m/100)^(1/3) − 1)·100           (avg monthly over last 3 months)
+ *   p6  = ((1+r6m/100)^(1/6) − 1)·100           (avg monthly over last 6 months)
+ *   p1y = ((1+r1y/100)^(1/12) − 1)·100          (avg monthly over last 12 months)
  *
- * Two successive accelerations:
- *   aRecent = p1 − p3   (is the last month faster than the quarter?)
- *   aBuild  = p3 − p6   (is the quarter faster than the half-year? → BUILDING)
+ * Three successive accelerations (v5):
+ *   aRecent = p1 − p3    (last month vs quarter)
+ *   aBuild  = p3 − p6    (quarter vs half-year → building)
+ *   aLong   = p6 − p1y   (half-year vs annual  → the whole curve is re-accelerating)
  *
- *   ACCEL = 0.6·aRecent + 0.4·aBuild           (composite, percentage points)
+ *   ACCEL = 0.50·aRecent + 0.30·aBuild + 0.20·aLong  (3-horizon; all data available)
+ *   ACCEL = 0.60·aRecent + 0.40·aBuild               (fallback when r1y absent)
+ *
+ * aLong distinguishes a maturing trend (1Y pace > 6M pace → the run is winding
+ * down) from a genuine new acceleration (6M pace > 1Y pace → momentum building
+ * into every horizon). A classic blow-off scores well on aRecent but has aLong<0
+ * because the year-long pace was higher than the current 6M pace.
  *
  * A genuine, durable accelerator needs BOTH legs positive: the curve is bending
  * up across the WHOLE window, not just spiking in the last month. A dead-cat
@@ -44,11 +52,13 @@
  *   stretch = max(0, price/MA200 − 1)·100 / monthlyVol    (monthly-σ above MA200)
  *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = 0.50·ACC + 0.25·TRD + 0.15·REG − 0.10·EXT     (each input 0..1)
- *     ACC — acceleration percentile (the pace-ladder composite above)
- *     TRD — r3m percentile (the move is real and in the right direction)
+ *   Score = 0.45·ACC + 0.25·TRD + 0.10·REG + 0.04·VOL − wEXT·EXT   (each input 0..1)
+ *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
+ *     TRD — r3m/r6m blend percentile (the move is real and sustained)
  *     REG — regime: price above its 200-day MA (1.0) / below (0.2) / no data (0.5)
+ *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
+ *     wEXT: 0.20 standard · 0.32 commodities
  *
  *   Gate (shown in the Accelerating shortlist only if):
  *     r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
@@ -66,10 +76,11 @@
  */
 
 export const MODEL_WEIGHTS = {
-  acceleration: 0.45, // ACC — pace-ladder composite (percentile)
-  trend:        0.25, // TRD — r3m percentile
+  acceleration: 0.45, // ACC — 3-horizon pace-ladder percentile
+  trend:        0.25, // TRD — r3m/r6m blend percentile
   regime:       0.10, // REG — price vs 200-day MA
-  extension:    0.20, // EXT — over-extension: max(stretch above MA200, r1m magnitude)
+  extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
+  volume:       0.04, // VOL — volume confirmation (null→0.5 neutral, so backtest unaffected)
 } as const;
 
 // ── Commodity blow-off control (v4) ──────────────────────────────────────────
@@ -115,13 +126,14 @@ export interface ModelInput {
 
 export interface ScoredItem<T extends ModelInput> {
   item: T;
-  score: number;       // composite (higher = stronger acceleration candidate)
-  accel: number;       // raw pace-ladder acceleration in percentage points
-  accPctile: number;   // cross-sectional percentile of accel (0..1) — the Quadrant Y-axis
-  aRecent: number;     // p1 − p3 (recent leg)
-  aBuild: number;      // p3 − p6 (build leg)
-  stretch: number;     // monthly-σ above the 200-day MA (blow-off measure)
-  passesGate: boolean; // r1m>0 AND r3m>0 AND aRecent>0 AND aBuild>0
+  score: number;        // composite (higher = stronger acceleration candidate)
+  accel: number;        // raw pace-ladder acceleration in percentage points
+  accPctile: number;    // cross-sectional percentile of accel (0..1) — the Quadrant Y-axis
+  aRecent: number;      // p1 − p3 (recent leg)
+  aBuild: number;       // p3 − p6 (build leg)
+  aLong: number | null; // p6 − p1y_pace (long leg; null when r1y unavailable)
+  stretch: number;      // monthly-σ above the 200-day MA (blow-off measure)
+  passesGate: boolean;  // r1m>0 AND r3m>0 AND aRecent>0 AND r1m<cap
 }
 
 function toP(rank: number, n: number): number {
@@ -135,17 +147,37 @@ function paceMonthly(r: number, months: number): number {
   return (Math.pow(g, 1 / months) - 1) * 100;
 }
 
-export interface AccelParts { accel: number; aRecent: number; aBuild: number }
+export interface AccelParts { accel: number; aRecent: number; aBuild: number; aLong: number | null }
 
-// Pace-ladder acceleration. r6m optional: without it the build leg is unknown and
-// reported as 0 (which fails the strict >0 gate — a build signal is required).
-export function computeAccel(r1m: number, r3m: number, r6m?: number | null): AccelParts {
+// 3-horizon pace-ladder acceleration.
+// r6m: needed for the build leg (3M vs 6M). Without it build leg = 0.
+// r1y: needed for the long leg (6M vs 1Y). Without it aLong = null.
+//
+// With full data:   ACCEL = 0.50·aRecent + 0.30·aBuild + 0.20·aLong
+// Without r1y:      ACCEL = 0.60·aRecent + 0.40·aBuild  (v4 formula)
+// Without r6m:      ACCEL = aRecent
+//
+// aLong catches maturing trends: if the 1Y pace > 6M pace the run is winding
+// down (aLong<0), dragging ACCEL lower even when aRecent is still positive.
+export function computeAccel(r1m: number, r3m: number, r6m?: number | null, r1y?: number | null): AccelParts {
   const p1 = r1m;
   const p3 = paceMonthly(r3m, 3);
   const aRecent = p1 - p3;
-  const aBuild = r6m == null ? 0 : p3 - paceMonthly(r6m, 6);
-  const accel = 0.6 * aRecent + 0.4 * aBuild;
-  return { accel, aRecent, aBuild };
+
+  if (r6m == null) {
+    return { accel: aRecent, aRecent, aBuild: 0, aLong: null };
+  }
+  const p6    = paceMonthly(r6m, 6);
+  const aBuild = p3 - p6;
+
+  if (r1y == null) {
+    const accel = 0.60 * aRecent + 0.40 * aBuild;
+    return { accel, aRecent, aBuild, aLong: null };
+  }
+  const p1y  = paceMonthly(r1y, 12);
+  const aLong = p6 - p1y;
+  const accel = 0.50 * aRecent + 0.30 * aBuild + 0.20 * aLong;
+  return { accel, aRecent, aBuild, aLong };
 }
 
 // Over-extension above the 200-day MA, in monthly-σ units. Only the stretch ABOVE
@@ -162,7 +194,7 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const valid = items.filter(i => i.r1m != null && i.r3m != null);
   const n = valid.length;
 
-  const accelOf = (i: ModelInput) => computeAccel(i.r1m as number, i.r3m as number, i.r6m).accel;
+  const accelOf = (i: ModelInput) => computeAccel(i.r1m as number, i.r3m as number, i.r6m, i.r1y).accel;
   const stretchOf = (i: ModelInput) => computeStretch(i.price, i.ma200, i.vol);
   // Absolute r1m magnitude: penalises extreme recent movers regardless of direction.
   // Assets with very high r1m (blow-off months like +60%) tend to mean-revert; those
@@ -178,6 +210,14 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const rankAccelAsc   = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
   const rankStretchAsc = new Map(byStretchAsc.map((r, i) => [r.symbol, i]));
   const rankR1mAbsAsc  = new Map(byR1mAbsAsc.map((r, i) => [r.symbol, i]));
+  // Volume confirmation: cross-sectional percentile of latestVol/avg20dVol.
+  // Only items with a real volRatio participate; items without (backtest, most
+  // crypto) get the neutral 0.5 rank — so the backtest is completely unaffected
+  // and live mode gets real volume signal for assets that have the data.
+  const validWithVol   = valid.filter(i => i.volRatio != null);
+  const nVol           = validWithVol.length;
+  const byVolRatioAsc  = [...validWithVol].sort((a, b) => (a.volRatio ?? 0) - (b.volRatio ?? 0));
+  const rankVolRatioAsc = new Map(byVolRatioAsc.map((r, i) => [r.symbol, i]));
   // r6m rank — used as secondary trend signal in TRD. Only items with r6m data
   // participate (their pool is n6m, not n), so null-r6m items aren't penalised.
   const validWith6m  = valid.filter(i => i.r6m != null);
@@ -188,8 +228,8 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   return items.map(item => {
     const hasReturns = item.r1m != null && item.r3m != null;
     const parts = hasReturns
-      ? computeAccel(item.r1m as number, item.r3m as number, item.r6m)
-      : { accel: 0, aRecent: 0, aBuild: 0 };
+      ? computeAccel(item.r1m as number, item.r3m as number, item.r6m, item.r1y)
+      : { accel: 0, aRecent: 0, aBuild: 0, aLong: null as number | null };
     const stretch = stretchOf(item);
 
     const accPctile  = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
@@ -217,10 +257,17 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // Commodities carry a heavier over-extension penalty (they snap back harder),
     // but because the penalty scales with pExt a commodity that is only modestly
     // stretched — i.e. early in a real trend — is barely touched.
+    // Volume confirmation: high-vol breakout = stronger signal.
+    // Items with volRatio=null (backtest, crypto) get 0.5 (neutral) so they're
+    // unaffected; among live assets with real volume data it's a meaningful tie-breaker.
+    const pVol = item.volRatio != null && nVol > 0
+      ? toP(rankVolRatioAsc.get(item.symbol) ?? 0, nVol)
+      : 0.5;
+
     const W = MODEL_WEIGHTS;
     const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
     const score = hasReturns
-      ? W.acceleration * accPctile + W.trend * pTrend + W.regime * reg - extWeight * pExt
+      ? W.acceleration * accPctile + W.trend * pTrend + W.regime * reg + W.volume * pVol - extWeight * pExt
       : -1;
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
@@ -240,7 +287,8 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
     return {
       item, score, accel: parts.accel, accPctile,
-      aRecent: parts.aRecent, aBuild: parts.aBuild, stretch, passesGate,
+      aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
+      stretch, passesGate,
     };
   });
 }
