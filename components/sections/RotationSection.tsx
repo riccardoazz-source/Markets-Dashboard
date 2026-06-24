@@ -872,7 +872,14 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           )}
         </div>
         <p className="text-[10px] text-gray-600">Click a row to highlight its dot. Labeled = names that clear the Accelerating gate.</p>
-        <QuadrantChart assets={quadrantAssets} loading={rollingLoading} />
+        <QuadrantChart
+          assets={quadrantAssets}
+          loading={rollingLoading}
+          onAssetClick={a => {
+            const t = assetNavTarget(a.group, a.symbol);
+            onNavigate?.(t.section, t.jumpTo);
+          }}
+        />
       </div>
 
       {/* Backtest — time machine. Includes the active stock lists so the model

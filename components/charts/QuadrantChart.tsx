@@ -64,19 +64,21 @@ function shortName(name: string): string {
 }
 
 // Plain circle — no text. All labels are drawn by the LabelLayer below.
-function QuadrantDot(props: { cx?: number; cy?: number; payload?: PlotAsset }) {
-  const { cx, cy, payload } = props;
+function QuadrantDot(props: { cx?: number; cy?: number; payload?: PlotAsset; onClick?: () => void }) {
+  const { cx, cy, payload, onClick } = props;
   if (cx == null || cy == null || !payload) return null;
   const color = GROUP_COLORS[payload.group] ?? '#6b7280';
   const { isAccel, isSelected } = payload;
   const r = isSelected ? 7 : isAccel ? 5 : 3.5;
   const opacity = isAccel || isSelected ? 0.95 : 0.4;
   return (
-    <g>
+    <g onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined}>
       {isSelected && (
         <circle cx={cx} cy={cy} r={r + 6} fill="none" stroke={color} strokeWidth={1.5} strokeOpacity={0.5} />
       )}
       <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={opacity} />
+      {/* Larger invisible hit area so small dots are easy to click */}
+      <circle cx={cx} cy={cy} r={Math.max(r + 4, 10)} fill="transparent" />
     </g>
   );
 }
@@ -234,9 +236,10 @@ function makeLabelLayer(labeled: PlotAsset[]) {
 interface Props {
   assets: QuadrantAsset[];
   loading?: boolean;
+  onAssetClick?: (asset: QuadrantAsset) => void;
 }
 
-export function QuadrantChart({ assets, loading }: Props) {
+export function QuadrantChart({ assets, loading, onAssetClick }: Props) {
   // Symmetric, outlier-clamped X domain so the X=0 divider sits in the centre and
   // a lone extreme mover can't squash everyone against one edge.
   const { plot, normal, accel, labeled, xDomain } = useMemo(() => {
@@ -332,12 +335,22 @@ export function QuadrantChart({ assets, loading }: Props) {
 
           <Scatter
             data={normal}
-            shape={(props: { cx?: number; cy?: number; payload?: PlotAsset }) => <QuadrantDot {...props} />}
+            shape={(props: { cx?: number; cy?: number; payload?: PlotAsset }) => (
+              <QuadrantDot
+                {...props}
+                onClick={props.payload && onAssetClick ? () => onAssetClick(props.payload!) : undefined}
+              />
+            )}
             isAnimationActive={false}
           />
           <Scatter
             data={accel}
-            shape={(props: { cx?: number; cy?: number; payload?: PlotAsset }) => <QuadrantDot {...props} />}
+            shape={(props: { cx?: number; cy?: number; payload?: PlotAsset }) => (
+              <QuadrantDot
+                {...props}
+                onClick={props.payload && onAssetClick ? () => onAssetClick(props.payload!) : undefined}
+              />
+            )}
             isAnimationActive={false}
           />
 
