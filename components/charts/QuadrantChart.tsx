@@ -44,6 +44,7 @@ export interface QuadrantAsset {
   group: string;
   r3m: number;       // x-axis: 3M return %
   accScore: number;  // y-axis: accPctile × 100 (0–100)
+  accel?: number;    // raw acceleration in percentage points (last month vs prior two)
   r1m: number | null;
   r1y: number | null;
   isAccel: boolean;
@@ -92,7 +93,7 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
       <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">Accel: <span className="text-gray-100">{p.accScore.toFixed(0)}/100</span></p>
+      <p className="text-gray-300">Accel: <span className="text-gray-100">{p.accScore.toFixed(0)}/100</span>{p.accel != null && <span className={p.accel >= 0 ? 'text-green-400' : 'text-red-400'}> ({p.accel >= 0 ? '+' : ''}{p.accel.toFixed(1)}pp)</span>}</p>
       {p.isAccel && <p className="text-green-400 font-semibold">🌱 Accelerating</p>}
     </div>
   );

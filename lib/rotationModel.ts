@@ -1,29 +1,42 @@
 /**
- * Shared rotation-scoring model.
+ * Shared rotation-scoring model — the SINGLE source of truth for the
+ * Accelerating shortlist AND the Rotation Quadrant Y-axis AND the backtest.
  *
- * IMPORTANT: MODEL_WEIGHTS below is the single source of truth for the formula.
- * The on-screen legend in RotationSection renders these exact numbers, so editing
- * them here updates both the calculation AND the documented formula automatically.
+ * The whole model is built from quantities that can be computed identically
+ * from price history at ANY point in time (r1m, r3m, r1y, price, 200-day MA).
+ * That is deliberate: it makes the historical backtest a FAITHFUL reproduction
+ * of the live formula — at a past date we recompute exactly the same inputs
+ * with no look-ahead, so "what would it have flagged then" is honest.
  *
- * Score = Σ weightᵢ × componentᵢ   (every component is a cross-sectional percentile, 0..1)
- *   ACC  — acceleration: climbed the 1M leaderboard vs 3M (main early-rotation signal)
- *   TRD  — trend strength: r3m percentile (confirms the move is real, not a blip)
- *   REG  — regime: structural tailwind (above 200W→1.0, above 200D→0.6, below→0.2)
- *   VOL  — volume: capital moving in (guarded — neutral 0.5 when data unavailable)
- *   EXT  — extension penalty (SUBTRACTED): r1y percentile (penalises crowded / already-ran)
+ * ── Acceleration (the core idea) ─────────────────────────────────────────────
+ * True acceleration is the SECOND derivative of the price path: is the asset
+ * speeding UP, not just rising? We measure it as the gap between the most recent
+ * month's pace and the pace of the two months before it:
  *
- * Gate (minimum bar before the score counts): r1m > 0 AND r3m > 0.
- * The live table then shows only the TOP `ACCEL_LIMIT` by score — a focused shortlist.
+ *   g1 = 1 + r1m/100                  (growth factor, last ~1 month)
+ *   g3 = 1 + r3m/100                  (growth factor, last ~3 months)
+ *   priorMonthly = √(g3 / g1) − 1     (monthly pace of the 2 months BEFORE last)
+ *   ACCEL = r1m − priorMonthly×100    (percentage points)
  *
- * Used by both the live Rotation table and the historical backtest, so both always
- * test exactly the same logic.
+ * ACCEL > 0  ⇒ the last month outpaced the previous two ⇒ genuinely accelerating
+ * (the price curve is convex up). This is per-asset — it does not depend on what
+ * the rest of the universe did, unlike a pure leaderboard-rank shuffle.
+ *
+ * ── Score ────────────────────────────────────────────────────────────────────
+ *   Score = Σ weightᵢ × componentᵢ      (each component is a 0..1 percentile/level)
+ *     ACC  — acceleration percentile (the main signal, see above)
+ *     TRD  — r3m percentile (the move is real and in the right direction)
+ *     REG  — regime: price above its 200-day MA (1.0) / below (0.2) / no data (0.5)
+ *     EXT  — r1y percentile (SUBTRACTED): prefers earlier accelerations to late ones
+ *
+ *   Gate (shown in the Accelerating shortlist only if): r1m > 0 AND r3m > 0 AND ACCEL > 0
+ *   — i.e. rising AND speeding up. The list then shows the top ACCEL_LIMIT by score.
  */
 
 export const MODEL_WEIGHTS = {
-  acceleration: 0.40, // ACC — 1M-vs-3M leaderboard climb
+  acceleration: 0.50, // ACC — month-over-prior-months pace increase (percentile)
   trend:        0.25, // TRD — r3m percentile
-  regime:       0.15, // REG — 200D / 200W structural position
-  volume:       0.10, // VOL — volume vs 20-day average
+  regime:       0.15, // REG — price vs 200-day MA
   extension:    0.10, // EXT — r1y percentile (subtracted)
 } as const;
 
@@ -37,74 +50,67 @@ export interface ModelInput {
   r1y: number | null;
   price: number | null;
   ma200: number | null;    // 200-day SMA (null → data unavailable, not "below")
-  sma200w: number | null;  // 200-week SMA
-  volRatio?: number | null; // latestVol / avg20dVol; null → treat as neutral
+  sma200w?: number | null;  // kept for callers; not used by the score (backtest can't compute it)
+  volRatio?: number | null; // kept for callers; not used by the score (no historical volume)
 }
 
 export interface ScoredItem<T extends ModelInput> {
   item: T;
-  score: number;       // composite 0..1 (higher = stronger rotation candidate)
-  rankDelta: number;   // raw position-climb for arrow display
-  accPctile: number;   // acceleration component alone (0..1)
-  passesGate: boolean; // r1m>0 AND r3m>0
+  score: number;       // composite (higher = stronger acceleration candidate)
+  accel: number;       // raw acceleration in percentage points (can be negative)
+  accPctile: number;   // cross-sectional percentile of accel (0..1) — the Quadrant Y-axis
+  passesGate: boolean; // r1m>0 AND r3m>0 AND accel>0
 }
 
 function toP(rank: number, n: number): number {
   return n > 1 ? rank / (n - 1) : 0.5;
 }
 
+// Acceleration in percentage points: last month's pace minus the geometric
+// monthly pace of the two months before it. Positive = speeding up.
+export function computeAccel(r1m: number, r3m: number): number {
+  const g1 = 1 + r1m / 100;
+  const g3 = 1 + r3m / 100;
+  // Growth factors are always > 0 (an asset cannot lose more than 100%); guard anyway.
+  if (g1 <= 0 || g3 <= 0) return r1m;
+  const priorMonthly = (Math.sqrt(g3 / g1) - 1) * 100;
+  return r1m - priorMonthly;
+}
+
 export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[] {
   const valid = items.filter(i => i.r1m != null && i.r3m != null);
   const n = valid.length;
 
-  // Ascending-rank helpers (rank 0 = worst, rank n-1 = best)
-  const byR3mAsc = [...valid].sort((a, b) => a.r3m! - b.r3m!);
-  const byR1yAsc = [...valid].sort((a, b) => (a.r1y ?? -Infinity) - (b.r1y ?? -Infinity));
-  const rankR3mAsc = new Map(byR3mAsc.map((r, i) => [r.symbol, i]));
-  const rankR1yAsc = new Map(byR1yAsc.map((r, i) => [r.symbol, i]));
+  const accelOf = (i: ModelInput) => computeAccel(i.r1m as number, i.r3m as number);
 
-  // Descending-rank helpers for rank-delta (rank 0 = best, consistent with existing arrow logic)
-  const byR1mDesc = [...valid].sort((a, b) => b.r1m! - a.r1m!);
-  const byR3mDesc = [...valid].sort((a, b) => b.r3m! - a.r3m!);
-  const rankR1mDesc = new Map(byR1mDesc.map((r, i) => [r.symbol, i]));
-  const rankR3mDesc = new Map(byR3mDesc.map((r, i) => [r.symbol, i]));
-
-  // Acceleration = how many positions an asset climbed from 3M to 1M leaderboard
-  const rawDeltas = valid.map(r => ({
-    symbol: r.symbol,
-    delta: (rankR3mDesc.get(r.symbol) ?? 0) - (rankR1mDesc.get(r.symbol) ?? 0),
-  }));
-  const sortedDeltaVals = [...rawDeltas].sort((a, b) => a.delta - b.delta);
-  const deltaRankAsc = new Map(sortedDeltaVals.map((d, i) => [d.symbol, i]));
-  const rawDeltaMap = new Map(rawDeltas.map(d => [d.symbol, d.delta]));
+  // Ascending-rank helpers (rank 0 = worst, rank n-1 = best) → cross-sectional percentiles.
+  const byR3mAsc   = [...valid].sort((a, b) => a.r3m! - b.r3m!);
+  const byR1yAsc   = [...valid].sort((a, b) => (a.r1y ?? -Infinity) - (b.r1y ?? -Infinity));
+  const byAccelAsc = [...valid].sort((a, b) => accelOf(a) - accelOf(b));
+  const rankR3mAsc   = new Map(byR3mAsc.map((r, i) => [r.symbol, i]));
+  const rankR1yAsc   = new Map(byR1yAsc.map((r, i) => [r.symbol, i]));
+  const rankAccelAsc = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
 
   return items.map(item => {
     const hasReturns = item.r1m != null && item.r3m != null;
+    const accel = hasReturns ? accelOf(item) : 0;
 
+    const accPctile = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
     const p3m = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
     const p1y = toP(rankR1yAsc.get(item.symbol) ?? 0, n);
-    const accPctile = toP(deltaRankAsc.get(item.symbol) ?? 0, n);
-    const rankDelta = rawDeltaMap.get(item.symbol) ?? 0;
 
-    // Regime: how structurally bullish is the asset right now
-    const above200w = item.price != null && item.sma200w != null && item.price > item.sma200w;
+    // Regime: above the 200-day MA = structural tailwind. 200-day is used (not 200W)
+    // because it is computable identically in the historical backtest.
     const above200d = item.price != null && item.ma200 != null && item.price > item.ma200;
-    const noMaData = item.ma200 == null && item.sma200w == null;
-    const reg = above200w ? 1.0 : above200d ? 0.6 : noMaData ? 0.5 : 0.2;
-
-    // Volume: guarded neutral when unavailable (Indexes/Commodities often have no volume)
-    const vr = item.volRatio ?? null;
-    const vol = vr != null && vr > 0
-      ? Math.max(0, Math.min(1, (vr - 0.7) / 1.3))
-      : 0.5;
+    const reg = above200d ? 1.0 : item.ma200 == null ? 0.5 : 0.2;
 
     const W = MODEL_WEIGHTS;
     const score = hasReturns
-      ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg + W.volume * vol - W.extension * p1y
+      ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg - W.extension * p1y
       : -1;
 
-    const passesGate = hasReturns && item.r1m! > 0 && item.r3m! > 0;
+    const passesGate = hasReturns && item.r1m! > 0 && item.r3m! > 0 && accel > 0;
 
-    return { item, score, rankDelta, accPctile, passesGate };
+    return { item, score, accel, accPctile, passesGate };
   });
 }

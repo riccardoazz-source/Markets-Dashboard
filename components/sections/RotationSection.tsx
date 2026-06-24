@@ -116,15 +116,15 @@ function pctColor(v: number | null): string {
   return 'text-gray-500';
 }
 
-// Rank delta: positive = asset moved UP in the 1M ranking vs 3M ranking.
-// Computed after sorting all items by each metric, so this is called at render time.
-function accelArrow(rankDelta: number | null): { arrow: string; color: string } | null {
-  if (rankDelta == null) return null;
-  if (rankDelta >= 12) return { arrow: '↑↑', color: 'text-green-300' };
-  if (rankDelta >= 4)  return { arrow: '↑',  color: 'text-green-500' };
-  if (rankDelta <= -12)return { arrow: '↓↓', color: 'text-red-300'   };
-  if (rankDelta <= -4) return { arrow: '↓',  color: 'text-red-500'   };
-  return                      { arrow: '→',  color: 'text-gray-500'  };
+// Acceleration arrow from the asset's acceleration percentile (0..1): how strongly
+// it is speeding up relative to the universe right now.
+function accelArrow(accPctile: number | null): { arrow: string; color: string } | null {
+  if (accPctile == null) return null;
+  if (accPctile >= 0.85) return { arrow: '↑↑', color: 'text-green-300' };
+  if (accPctile >= 0.65) return { arrow: '↑',  color: 'text-green-500' };
+  if (accPctile <= 0.15) return { arrow: '↓↓', color: 'text-red-300'   };
+  if (accPctile <= 0.35) return { arrow: '↓',  color: 'text-red-500'   };
+  return                       { arrow: '→',  color: 'text-gray-500'  };
 }
 
 // Collapsible legend: explains every badge AND prints the live model formula.
@@ -146,24 +146,26 @@ function RotationLegend() {
             <li><span className="text-green-300">🌱 early</span> — strong acceleration and the 1-year run is still small: caught early, before the crowd</li>
             <li><span className="text-amber-300">↩ rebound</span> — accelerating off a negative 6M/1Y base: a bounce off oversold, riskier than a confirmed trend</li>
             <li><span className="text-blue-300">✓ trend</span> — up across every horizon (3M, 6M, 1Y all positive): a confirmed uptrend</li>
-            <li><span className="text-emerald-300">🐂 200W</span> — price above its 200-week moving average: structural long-term bull</li>
-            <li><span className="text-green-400 font-bold">↑↑ ↑ → ↓ ↓↓</span> — leaderboard climb: how many places the asset moved up (↑) or down (↓) from its 3M to 1M ranking</li>
+            <li><span className="text-emerald-300">🐂 200W</span> — price above its 200-week moving average: structural long-term bull (display only — not in the score)</li>
+            <li><span className="text-green-400 font-bold">↑↑ ↑ → ↓ ↓↓</span> — acceleration: how strongly the asset is speeding up (last month&apos;s pace vs the two months before) relative to the universe</li>
             <li><span className="text-amber-300">★</span> — pinned (saved to your database)</li>
           </ul>
         </div>
         <div>
           <p className="text-gray-300 font-semibold mb-1">RotationScore — how &quot;Accelerating&quot; is ranked</p>
-          <p className="mb-1.5">Every asset is scored cross-sectionally (each input is its percentile rank vs the whole universe, 0–1). The list shows the <span className="text-gray-200">top {ACCEL_LIMIT}</span> by score.</p>
+          <p className="mb-1.5">Each input is a cross-sectional percentile vs the whole universe (0–1). The list shows the <span className="text-gray-200">top {ACCEL_LIMIT}</span> by score.</p>
           <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
-{`Score = ${pct(W.acceleration)} · ACC   (1M-vs-3M leaderboard climb)
+{`ACCEL = r1m − (√((1+r3m)/(1+r1m)) − 1)·100
+        (last month's pace minus the two months before it)
+
+Score = ${pct(W.acceleration)} · ACC   (acceleration percentile)
       + ${pct(W.trend)} · TRD   (3-month return percentile)
-      + ${pct(W.regime)} · REG   (200W→1.0 · 200D→0.6 · below→0.2)
-      + ${pct(W.volume)} · VOL   (volume vs 20-day avg; 0.5 if N/A)
+      + ${pct(W.regime)} · REG   (above 200-day MA→1.0 · below→0.2)
       − ${pct(W.extension)} · EXT   (1-year return percentile — penalty)
 
-Gate:  shown only if  r1m > 0  AND  r3m > 0`}
+Gate:  shown only if  r1m > 0  AND  r3m > 0  AND  ACCEL > 0`}
           </pre>
-          <p className="mt-1.5 text-gray-500">ACC is the core early-rotation signal — it rewards assets whose recent (1M) strength outranks their medium-term (3M) strength, i.e. capital is rotating in now. EXT is subtracted so already-extended names rank lower.</p>
+          <p className="mt-1.5 text-gray-500">ACC measures real acceleration — whether the most recent month is faster than the preceding two (the price curve bending up), per asset, not a leaderboard reshuffle. EXT is subtracted so earlier accelerations rank above already-extended ones. Every input is computable from price history at any past date, so the backtest reproduces this formula exactly.</p>
         </div>
       </div>
     </details>
@@ -404,8 +406,8 @@ export function RotationSection() {
     ? rows
     : rows.filter(i => i.group === groupFilter);
 
-  // Accelerating: pass sanity gates (r1m>0, r3m>0), ranked by composite RotationScore,
-  // then capped to the top ACCEL_LIMIT — a focused shortlist, not half the universe.
+  // Accelerating: pass the gate (r1m>0, r3m>0, ACCEL>0), ranked by composite
+  // RotationScore, then capped to the top ACCEL_LIMIT — a focused shortlist.
   const accelItems = useMemo(() => {
     if (rollingLoading) return [];
     return groupFiltered
@@ -448,6 +450,7 @@ export function RotationSection() {
         group: item.group as string,
         r3m: item.r3m,
         accScore: Math.round(s.accPctile * 100),
+        accel: s.accel,
         r1m: item.r1m,
         r1y: item.r1y,
         isAccel: accelSet.has(item.symbol),
@@ -507,7 +510,7 @@ export function RotationSection() {
                 : 'bg-bg-input border-border text-gray-400 hover:text-gray-100 hover:border-gray-600',
               rollingLoading && 'opacity-40 cursor-not-allowed'
             )}
-            title="Show only assets climbing the leaderboard — the potential next Kospi"
+            title="Show only assets that are genuinely accelerating — rising AND speeding up"
           >
             🚀 Accelerating
           </button>
@@ -662,7 +665,7 @@ export function RotationSection() {
                   <tr>
                     <td colSpan={11} className="px-3 py-10 text-center text-xs text-gray-500">
                       {accelOnly
-                        ? 'No assets are accelerating right now — the leaderboard is stable.'
+                        ? 'Nothing is accelerating right now — no asset is both rising and speeding up.'
                         : pinnedOnly
                           ? 'No pinned assets in this view — tap the ☆ on a row to pin it.'
                           : 'No assets match this filter.'}
@@ -672,7 +675,7 @@ export function RotationSection() {
                 {sortedItems.map((item, idx) => {
                   const isSelected = selectedSymbols.has(item.symbol);
                   const scored     = scoreMap.get(item.symbol);
-                  const accel      = accelArrow(scored?.rankDelta ?? null);
+                  const accel      = accelArrow(scored?.accPctile ?? null);
                   // Flag names in the bottom half of 1Y extension: the run is still young.
                   const isFresh    = accelOnly && (scored?.accPctile ?? 0) > 0.7 && (item.r1y == null || item.r1y < 30);
                   // Rebound vs trend: if the acceleration sits on a deeply negative 6M or
