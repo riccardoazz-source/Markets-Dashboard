@@ -493,30 +493,25 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
     setSortBy('day');
   };
 
-  // Snapshot of the Rotation Quadrant saved alongside each sentiment reading, so
-  // past days' quadrants can be re-drawn from the history. Built from ALL rows
-  // (not the filtered view) so it's the full-universe picture regardless of the
-  // user's current group filter. Numbers rounded to 1 decimal to keep storage tiny.
+  // Snapshot of the Rotation Quadrant saved alongside each sentiment reading so
+  // past days' quadrants can be re-drawn from history. Derived from quadrantAssets
+  // — the SAME source the live chart renders — so "what you see" is exactly what
+  // gets saved. onBeforeRun() resets groupFilter to 'all' before calling Gemini, so
+  // by the time the result is stored the quadrant already shows the full universe
+  // (stocks included), and this snapshot captures exactly that view.
   const buildQuadrant = (): QuadrantPoint[] => {
     const r1 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 10) / 10);
-    const accelSet = new Set(accelItems.map(i => i.symbol));
-    const out: QuadrantPoint[] = [];
-    for (const item of rows) {
-      const s = scoreMap.get(item.symbol);
-      if (!s || item.r3m == null) continue;
-      out.push({
-        symbol: item.symbol,
-        name: item.name,
-        group: item.group as string,
-        r3m: r1(item.r3m)!,
-        accScore: Math.round(s.accPctile * 100),
-        accel: r1(s.accel) ?? undefined,
-        r1m: r1(item.r1m),
-        r1y: r1(item.r1y),
-        isAccel: accelSet.has(item.symbol),
-      });
-    }
-    return out;
+    return quadrantAssets.map(a => ({
+      symbol: a.symbol,
+      name: a.name,
+      group: a.group,
+      r3m: r1(a.r3m)!,
+      accScore: a.accScore,
+      accel: a.accel != null ? r1(a.accel) ?? undefined : undefined,
+      r1m: r1(a.r1m),
+      r1y: r1(a.r1y),
+      isAccel: a.isAccel,
+    }));
   };
 
   // Snapshot fed to the sentiment endpoint — the ENTIRE on-screen table, so Gemini
