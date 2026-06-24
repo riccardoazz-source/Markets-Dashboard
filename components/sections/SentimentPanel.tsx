@@ -4,7 +4,8 @@ import { useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { useGistData, SentimentRecord, makeId } from '@/lib/gist';
+import { useGistData, SentimentRecord, QuadrantPoint, makeId } from '@/lib/gist';
+import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
 
 interface SnapshotMover {
   name: string; group: string;
@@ -133,7 +134,33 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
   );
 }
 
-export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSnapshot: () => SentimentSnapshot; ready: boolean; onBeforeRun?: () => void }) {
+// Re-draws a saved Rotation Quadrant from stored points. Collapsed by default so
+// the history stays scannable; expand to see that day's full rotation picture.
+function SavedQuadrant({ points }: { points: QuadrantPoint[] }) {
+  const [open, setOpen] = useState(false);
+  const assets = useMemo<QuadrantAsset[]>(
+    () => points.map(p => ({ ...p, isSelected: false })),
+    [points],
+  );
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-bg-input/30 overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-1.5 px-2.5 py-2 text-left hover:bg-border/20 transition-colors"
+      >
+        {open ? <ChevronDown size={12} className="shrink-0 text-gray-600" /> : <ChevronRight size={12} className="shrink-0 text-gray-600" />}
+        <span className="text-[11px] font-medium text-gray-400">🧭 Rotation Quadrant — that day</span>
+      </button>
+      {open && (
+        <div className="px-1.5 pb-2">
+          <QuadrantChart assets={assets} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun }: { buildSnapshot: () => SentimentSnapshot; getQuadrant?: () => QuadrantPoint[]; ready: boolean; onBeforeRun?: () => void }) {
   const { data: gistData, update } = useGistData();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,11 +207,13 @@ export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSna
       }
       // Save to the gist database, one record per day (a same-day refresh replaces it).
       const today = new Date().toISOString().slice(0, 10);
+      const quadrant = getQuadrant?.();
       const record: SentimentRecord = {
         id: makeId(),
         date: today,
         generatedAt: json.generatedAt ?? new Date().toISOString(),
         data: json.data,
+        ...(quadrant && quadrant.length ? { quadrant } : {}),
       };
       const prior = (gistData.sentiments ?? []).filter(r => r.date !== today);
       const nextList = [record, ...prior]
@@ -249,6 +278,7 @@ export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSna
       {d && showLatest && (
         <div className={clsx(loading && 'opacity-50')}>
           <SentimentBody d={d} />
+          {latest?.quadrant && latest.quadrant.length > 0 && <SavedQuadrant points={latest.quadrant} />}
           <p className="mt-3 text-[10px] text-gray-600 italic text-right">AI + web search — not financial advice.</p>
         </div>
       )}
@@ -288,6 +318,7 @@ export function SentimentPanel({ buildSnapshot, ready, onBeforeRun }: { buildSna
                     {isOpen && (
                       <div className="px-2.5 pb-2.5 pt-1 border-t border-border">
                         <SentimentBody d={rd} compact />
+                        {rec.quadrant && rec.quadrant.length > 0 && <SavedQuadrant points={rec.quadrant} />}
                       </div>
                     )}
                   </div>

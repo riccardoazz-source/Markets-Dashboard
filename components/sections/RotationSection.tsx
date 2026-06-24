@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
-import { useGistData } from '@/lib/gist';
+import { useGistData, QuadrantPoint } from '@/lib/gist';
 import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_MAX } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
@@ -493,6 +493,32 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
     setSortBy('day');
   };
 
+  // Snapshot of the Rotation Quadrant saved alongside each sentiment reading, so
+  // past days' quadrants can be re-drawn from the history. Built from ALL rows
+  // (not the filtered view) so it's the full-universe picture regardless of the
+  // user's current group filter. Numbers rounded to 1 decimal to keep storage tiny.
+  const buildQuadrant = (): QuadrantPoint[] => {
+    const r1 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 10) / 10);
+    const accelSet = new Set(accelItems.map(i => i.symbol));
+    const out: QuadrantPoint[] = [];
+    for (const item of rows) {
+      const s = scoreMap.get(item.symbol);
+      if (!s || item.r3m == null) continue;
+      out.push({
+        symbol: item.symbol,
+        name: item.name,
+        group: item.group as string,
+        r3m: r1(item.r3m)!,
+        accScore: Math.round(s.accPctile * 100),
+        accel: r1(s.accel) ?? undefined,
+        r1m: r1(item.r1m),
+        r1y: r1(item.r1y),
+        isAccel: accelSet.has(item.symbol),
+      });
+    }
+    return out;
+  };
+
   // Snapshot fed to the sentiment endpoint — the ENTIRE on-screen table, so Gemini
   // reads exactly what the user sees and reasons over it itself.
   const buildSnapshot = (): SentimentSnapshot => {
@@ -517,7 +543,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
   return (
     <div className="space-y-4">
       {/* Daily sentiment */}
-      <SentimentPanel buildSnapshot={buildSnapshot} ready={!rollingLoading} onBeforeRun={resetTableForSentiment} />
+      <SentimentPanel buildSnapshot={buildSnapshot} getQuadrant={buildQuadrant} ready={!rollingLoading} onBeforeRun={resetTableForSentiment} />
 
       {/* Controls */}
       <div className="flex items-center justify-between gap-3 flex-wrap">

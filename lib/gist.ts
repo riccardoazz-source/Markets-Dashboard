@@ -17,11 +17,26 @@ export interface AnalysisEntry {
   date: string;
 }
 
+// One dot of a saved Rotation Quadrant — enough to faithfully re-render the chart
+// for a past day. Stored instead of a raster screenshot: tiny, crisp, interactive.
+export interface QuadrantPoint {
+  symbol: string;
+  name: string;
+  group: string;
+  r3m: number;        // x-axis: 3M return %
+  accScore: number;   // y-axis: acceleration percentile (0–100)
+  accel?: number;     // raw acceleration in pp (for the tooltip)
+  r1m: number | null;
+  r1y: number | null;
+  isAccel: boolean;   // was it on the Accelerating shortlist that day
+}
+
 export interface SentimentRecord {
   id: string;
   date: string;        // YYYY-MM-DD
   generatedAt: string; // ISO timestamp of the reading
   data: Record<string, string>;
+  quadrant?: QuadrantPoint[]; // snapshot of the Rotation Quadrant at reading time
 }
 
 export interface GistData {
