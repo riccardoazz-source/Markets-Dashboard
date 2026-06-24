@@ -88,7 +88,10 @@ export function BacktestPanel({ stockSymbols = [], onNavigate }: { stockSymbols?
   // table so its row auto-fills from whatever this run produced.
   const liveResults: Partial<Record<PeriodKey, PeriodResult>> | undefined = data
     ? Object.fromEntries(
-        data.scenarios.map(s => [s.key, { basket: s.basketFwd, spx: s.spxFwd, picks: s.nPicks } as PeriodResult])
+        data.scenarios.map(s => [s.key, {
+          basket: s.basketFwd, spx: s.spxFwd, picks: s.nPicks,
+          winnerHits: s.nWinnerHits, winnerTotal: s.winners.length,
+        } as PeriodResult])
       ) as Partial<Record<PeriodKey, PeriodResult>>
     : undefined;
 

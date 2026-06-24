@@ -69,7 +69,10 @@ export function ModelVersionsPanel({ liveResults }: Props) {
         <p className="text-[10px] text-gray-500 leading-relaxed">
           La riga del <span className="text-gray-300">modello attuale</span> si compila da sola con l&apos;ultimo backtest che lanci.
           Ogni cella mostra <span className="text-gray-300">basket %</span> · <span className="text-gray-500">vs S&amp;P 500</span> · n. picks · α (alpha vs SPX).
-          Il <span className="text-gray-300">Reliability</span> = alpha pesato × min(1, picks/6): premia chi batte il mercato con molti picks, non con pochi colpi fortunati.
+          Il <span className="text-gray-300">Reliability</span> dà <span className="text-gray-300">priorità a quanti winner reali catturi</span> (colonna Capt) e
+          penalizza chi va sotto S&amp;P in modo crescente con l&apos;orizzonte:
+          1D irrilevante · 1M accettabile · <span className="text-red-300">5Y sotto S&amp;P = spazzatura</span> (penalità ×5).
+          Pochi picks o pochi winner catturati abbassano ancora il punteggio.
         </p>
 
         <div className="overflow-x-auto">
@@ -80,8 +83,9 @@ export function ModelVersionsPanel({ liveResults }: Props) {
                 {PERIOD_ORDER.map(k => (
                   <th key={k} className="px-2 py-1.5 text-right">{PERIOD_LABELS[k]}</th>
                 ))}
-                <th className="px-2 py-1.5 text-right" title="Alpha pesato medio vs S&P 500">α pes.</th>
+                <th className="px-2 py-1.5 text-right" title="Alpha pesato medio vs S&P 500 (valore grezzo)">α pes.</th>
                 <th className="px-2 py-1.5 text-right" title="% di periodi in cui il basket batte SPX">Hit</th>
+                <th className="px-2 py-1.5 text-right" title="% media dei winner reali catturati dal modello">Capt</th>
                 <th className="px-2 py-1.5 text-right" title="Media picks">Picks</th>
                 <th className="px-2 py-1.5 text-right" title="Reliability ratio">Rel.</th>
               </tr>
@@ -108,11 +112,19 @@ export function ModelVersionsPanel({ liveResults }: Props) {
                     <td className="px-2 py-2 text-right align-top text-[11px] tabular-nums text-gray-300">
                       {rel ? `${Math.round(rel.hitRate * 100)}%` : '—'}
                     </td>
+                    <td className={clsx('px-2 py-2 text-right align-top text-[11px] tabular-nums', rel && rel.hasCapture ? 'text-gray-200 font-semibold' : 'text-gray-600')}>
+                      {rel && rel.hasCapture ? `${Math.round(rel.captureRate * 100)}%` : '—'}
+                    </td>
                     <td className="px-2 py-2 text-right align-top text-[11px] tabular-nums text-gray-300">
                       {rel ? rel.avgPicks.toFixed(1) : '—'}
                     </td>
                     <td className={clsx('px-2 py-2 text-right align-top text-sm font-bold tabular-nums', rel ? (rel.reliability > 0 ? 'text-green-300' : 'text-red-300') : 'text-gray-700')}>
-                      {rel ? rel.reliability.toFixed(1) : '—'}
+                      {rel ? (
+                        <div className="flex flex-col items-end leading-tight">
+                          <span>{rel.reliability.toFixed(1)}</span>
+                          {rel.worst5y && <span className="text-[8px] px-1 rounded bg-red-500/20 text-red-300 leading-none mt-0.5" title="5Y sotto S&P 500 — spazzatura">🗑 5Y&lt;SPX</span>}
+                        </div>
+                      ) : '—'}
                     </td>
                   </tr>
                 );

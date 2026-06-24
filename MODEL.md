@@ -25,20 +25,35 @@ Ogni volta che cambiamo la formula del modello:
 2. Si descrive la nuova versione nella sezione Formule
 3. Dopo aver eseguito il backtest nell'app, si aggiornano i valori nella tabella
 
-**Reliability Ratio** — misura quanto ci si può fidare di una versione:
+**Reliability Ratio** — misura quanto ci si può fidare di una versione. Due principi:
+
+1. **Priorità alla cattura dei winner reali** — quanti dei top performer effettivi
+   del periodo il modello ha preso (non solo "ha battuto SPX").
+2. **Penalità asimmetrica per orizzonte** quando va sotto S&P 500:
+   - 1D sotto SPX → non muore nessuno (severità 0.2)
+   - 1M sotto SPX → accettabile (severità 0.6)
+   - 5Y sotto SPX → spazzatura (severità 5.0, affossa il punteggio)
 
 ```
-Reliability = WeightedAlpha × min(1, AvgPicks / 6)
+alpha_p     = basket_p − spx_p
+effAlpha_p  = alpha_p ≥ 0 ? alpha_p : alpha_p × lossSeverity_p
+WeightedAlphaEff = Σ w_p · effAlpha_p / Σ w_p
+CaptureRate = Σ w_p · (winnerHits_p / winnerTotal_p) / Σ w_p
+PickFactor  = min(1, AvgPicks / 6)
+qualityMult = (0.35 + 0.65 · CaptureRate) · PickFactor
+
+Reliability = WeightedAlphaEff ≥ 0
+              ? WeightedAlphaEff × qualityMult        (modello buono)
+              : WeightedAlphaEff × (2 − qualityMult)  (modello scarso → peggiora)
 ```
 
-- **WeightedAlpha** = media pesata del (Basket − SPX) su tutti i periodi con dati
-  - Pesi: 1D=5%, 1M=10%, 3M=20%, 6M=20%, 1Y=25%, 5Y=20%
-- **AvgPicks** = media dei picks attraverso i periodi
-- Il fattore `min(1, picks/6)` penalizza le versioni con pochi picks:
-  trovare 2 asset che battono il mercato è meno affidabile di trovarne 10.
-  Sopra 6 picks il fattore è 1.0 (full credit).
+- **Pesi orizzonte** w_p: 1D=5%, 1M=10%, 3M=20%, 6M=20%, 1Y=25%, 5Y=20%
+- **lossSeverity** (solo se alpha<0): 1D=0.2, 1M=0.6, 3M=1.0, 6M=1.5, 1Y=2.5, 5Y=5.0
+- **CaptureRate** è la leva prioritaria: catturare i winner reali scala il punteggio
+  da 0.35× (nessuno) a 1.0× (tutti). Senza dati di cattura → neutro (1.0).
 
-Alpha positivo + alto hit rate + molti picks → Reliability alta.
+Cattura alta + batte SPX (soprattutto a lungo) + molti picks → Reliability alta.
+Una sola sottoperformance a 5Y → Reliability negativa = spazzatura.
 
 ---
 
