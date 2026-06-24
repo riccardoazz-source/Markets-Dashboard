@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { assetNavTarget } from '@/lib/config';
 
 interface Pick {
   symbol: string; name: string; group: string;
@@ -46,11 +47,6 @@ function pctColor(v: number | null): string {
 function fmtDate(s: string): string {
   return new Date(s).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
-
-const GROUP_TO_SECTION: Record<string, string> = {
-  Indexes: 'indexes', Crypto: 'crypto', Commodities: 'commodities',
-  Sectors: 'sectors', Stocks: 'stock',
-};
 
 export function BacktestPanel({ stockSymbols = [], onNavigate }: { stockSymbols?: string[]; onNavigate?: (section: string, symbol: string) => void }) {
   const [data, setData] = useState<Payload | null>(null);
@@ -190,7 +186,7 @@ export function BacktestPanel({ stockSymbols = [], onNavigate }: { stockSymbols?
                       {scenario.picks.map((p, i) => (
                         <tr
                           key={p.symbol}
-                          onClick={() => onNavigate?.(GROUP_TO_SECTION[p.group] ?? 'indexes', p.symbol)}
+                          onClick={() => { const t = assetNavTarget(p.group, p.symbol); onNavigate?.(t.section, t.jumpTo); }}
                           className={onNavigate ? 'cursor-pointer hover:bg-white/5 transition-colors' : ''}
                         >
                           <td className="px-2 py-1.5 text-[11px] text-gray-600 tabular-nums">{i + 1}</td>
@@ -236,7 +232,7 @@ export function BacktestPanel({ stockSymbols = [], onNavigate }: { stockSymbols?
                       {scenario.winners.map((w, i) => (
                         <tr
                           key={w.symbol}
-                          onClick={() => onNavigate?.(GROUP_TO_SECTION[w.group] ?? 'indexes', w.symbol)}
+                          onClick={() => { const t = assetNavTarget(w.group, w.symbol); onNavigate?.(t.section, t.jumpTo); }}
                           className={clsx(w.picked && 'bg-green-500/5', onNavigate && 'cursor-pointer hover:bg-white/5 transition-colors')}
                         >
                           <td className="px-2 py-1.5 text-[11px] text-gray-600 tabular-nums">{i + 1}</td>

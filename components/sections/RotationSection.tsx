@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import clsx from 'clsx';
 import { Star } from 'lucide-react';
-import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
+import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS, assetNavTarget } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData, QuadrantPoint } from '@/lib/gist';
 import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_MAX } from '@/lib/rotationModel';
@@ -187,11 +187,6 @@ Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
   );
 }
 
-
-const GROUP_TO_SECTION: Record<string, string> = {
-  Indexes: 'indexes', Crypto: 'crypto', Commodities: 'commodities',
-  Sectors: 'sectors', Stocks: 'stock',
-};
 
 export function RotationSection({ onNavigate }: { onNavigate?: (section: string, symbol: string) => void }) {
   const [items, setItems] = useState<RotationItem[]>([]);
@@ -742,7 +737,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
                   return (
                     <tr
                       key={item.symbol}
-                      onClick={() => onNavigate?.(GROUP_TO_SECTION[item.group] ?? 'indexes', item.symbol)}
+                      onClick={() => { const t = assetNavTarget(item.group as string, item.symbol); onNavigate?.(t.section, t.jumpTo); }}
                       className={clsx(
                         'cursor-pointer transition-colors hover:bg-border/30',
                         isSelected && 'bg-accent/10'

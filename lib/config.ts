@@ -768,6 +768,31 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'IBGL.AS',name: 'EU Govt Bond 15-30yr',   category: 'Bonds',      type: 'sector' },
 ];
 
+// Reverse map: Yahoo crypto symbol (e.g. "BTC-USD") → CoinGecko id (e.g. "bitcoin").
+// Built the SAME way Rotation builds its crypto symbols, so the lookup always hits.
+const CRYPTO_YAHOO_TO_ID: Record<string, string> = Object.fromEntries(
+  CRYPTO_IDS.map(e => [CRYPTO_YAHOO_SYMBOLS[e.id] ?? `${e.symbol}-USD`, e.id]),
+);
+
+// Translate a Rotation/Backtest asset (group + its Yahoo symbol/ticker) into the
+// navigation target the destination section expects. Crypto needs `crypto:<id>`
+// and Stocks need `stock:<ticker>`; the rest match on their raw config symbol.
+// This is why clicking a crypto or stock row "sometimes" didn't open before — the
+// raw Yahoo symbol never matched those sections' prefixed jumpTo format.
+export function assetNavTarget(group: string, symbol: string): { section: string; jumpTo: string } {
+  switch (group) {
+    case 'Crypto': {
+      const id = CRYPTO_YAHOO_TO_ID[symbol];
+      return { section: 'crypto', jumpTo: id ? `crypto:${id}` : `crypto:${symbol}` };
+    }
+    case 'Stocks':      return { section: 'stock',       jumpTo: `stock:${symbol}` };
+    case 'Commodities': return { section: 'commodities', jumpTo: symbol };
+    case 'Sectors':     return { section: 'sectors',     jumpTo: symbol };
+    case 'Indexes':
+    default:            return { section: 'indexes',     jumpTo: symbol };
+  }
+}
+
 // Currency metadata — flag emoji + ISO-3166 country code + full name, keyed by
 // ISO currency code. `cc` is used to load a real flag image (emoji flags don't
 // render on Windows).
