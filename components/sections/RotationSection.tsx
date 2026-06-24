@@ -626,7 +626,7 @@ export function RotationSection() {
       {accelOnly && !rollingLoading && (
         <div className="space-y-2">
           <p className="text-[11px] text-green-400/80">
-            <span className="font-semibold">Early-stage rotation</span> — the top {ACCEL_LIMIT} names by RotationScore: acceleration (1M vs 3M leaderboard climb), trend strength, structural regime and volume, minus an extension penalty.
+            <span className="font-semibold">Early-stage rotation</span> — the top {ACCEL_LIMIT} names by RotationScore: true geometric acceleration (last month&apos;s pace faster than the two months before it), trend strength, regime vs 200-day MA, minus an extension penalty.
           </p>
           <RotationLegend />
         </div>
