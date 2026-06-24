@@ -6,7 +6,7 @@ import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData } from '@/lib/gist';
-import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_LIMIT } from '@/lib/rotationModel';
+import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_MAX } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
@@ -155,7 +155,7 @@ function RotationLegend() {
         </div>
         <div>
           <p className="text-gray-300 font-semibold mb-1">RotationScore — how &quot;Accelerating&quot; is ranked</p>
-          <p className="mb-1.5">Each input is a cross-sectional percentile vs the whole universe (0–1). The list shows the <span className="text-gray-200">top {ACCEL_LIMIT}</span> by score.</p>
+          <p className="mb-1.5">Each input is a cross-sectional percentile vs the whole universe (0–1). The list shows <span className="text-gray-200">every name that clears the gate</span>, ranked by score — the count is whatever the market warrants, not a fixed number.</p>
           <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
 {`Pace ladder (geometric monthly pace at each horizon):
   p1 = r1m
@@ -176,8 +176,9 @@ Score = ${pct(W.acceleration)} · ACC   (acceleration percentile)
       + ${pct(W.regime)} · REG   (above 200-day MA→1.0 · below→0.2)
       − wEXT · EXT   (over-extension; wEXT = 20% · commodities 32%)
 
-Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  aBuild > 0
-       AND  r1m < cap   (cap = 50% · commodities 25%)`}
+Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
+       (cap = 50% · commodities 25%)
+       aBuild: ranking signal only — strong build → higher score, not a gate blocker`}
           </pre>
           <p className="mt-1.5 text-gray-500">EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). The penalty scales with extension, so a commodity early in a real secular trend (low stretch) is untouched. Every input is point-in-time, so the backtest stays honest.</p>
         </div>
@@ -420,15 +421,17 @@ export function RotationSection() {
     ? rows
     : rows.filter(i => i.group === groupFilter);
 
-  // Accelerating: pass the gate (r1m>0, r3m>0, ACCEL>0), ranked by composite
-  // RotationScore, then capped to the top ACCEL_LIMIT — a focused shortlist.
+  // Accelerating: EVERY name that clears the gate (r1m>0, r3m>0, aRecent>0,
+  // r1m<cap), ranked by composite RotationScore. No fixed top-N — the gate is the
+  // quality filter, so the list is as long as the market warrants (few in a shock,
+  // many in a broad rally). ACCEL_MAX is only a safety ceiling.
   const accelItems = useMemo(() => {
     if (rollingLoading) return [];
     return groupFiltered
       .map(i => scoreMap.get(i.symbol))
       .filter((s): s is ScoredItem<RotationItem> => s != null && s.passesGate)
       .sort((a, b) => b.score - a.score)
-      .slice(0, ACCEL_LIMIT)
+      .slice(0, ACCEL_MAX)
       .map(s => s.item);
   }, [groupFiltered, scoreMap, rollingLoading]);
 
@@ -640,7 +643,7 @@ export function RotationSection() {
       {accelOnly && !rollingLoading && (
         <div className="space-y-2">
           <p className="text-[11px] text-green-400/80">
-            <span className="font-semibold">Early-stage rotation</span> — the top {ACCEL_LIMIT} names by RotationScore: BUILDING acceleration (last month faster than the quarter, quarter faster than the half-year), trend strength, regime vs 200-day MA, minus a blow-off penalty for parabolic over-extension.
+            <span className="font-semibold">Early-stage rotation</span> — every name that clears the gate, ranked by RotationScore: recent acceleration (last month faster than the quarter), trend strength, regime vs 200-day MA, minus a blow-off penalty for parabolic over-extension. The count varies with the market — there is no fixed slot limit.
           </p>
           <RotationLegend />
         </div>
@@ -825,7 +828,7 @@ export function RotationSection() {
             </button>
           )}
         </div>
-        <p className="text-[10px] text-gray-600">Click a row to highlight its dot. Labeled = Accelerating top {ACCEL_LIMIT}.</p>
+        <p className="text-[10px] text-gray-600">Click a row to highlight its dot. Labeled = names that clear the Accelerating gate.</p>
         <QuadrantChart assets={quadrantAssets} loading={rollingLoading} />
       </div>
 

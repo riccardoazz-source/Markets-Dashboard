@@ -234,7 +234,7 @@ export function BacktestPanel({ stockSymbols = [] }: { stockSymbols?: string[] }
                               {w.picked ? (
                                 <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-300 leading-none" title="The model picked this one">✓ picked</span>
                               ) : w.passedGate ? (
-                                <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 leading-none" title="Passed the gate (accelerating) but ranked outside the top 8">skipped</span>
+                                <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 leading-none" title="Passed the gate (accelerating) but ranked below the shortlist ceiling">skipped</span>
                               ) : (
                                 <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-red-500/15 text-red-300 leading-none" title="The gate rejected it — not flagged as accelerating">missed</span>
                               )}
@@ -254,7 +254,7 @@ export function BacktestPanel({ stockSymbols = [] }: { stockSymbols?: string[] }
           {/* Diagnostic legend for the winners column */}
           <p className="text-[10px] text-gray-600 leading-relaxed">
             In <span className="text-gray-400">Who actually won</span>: <span className="text-green-300">✓ picked</span> = the model bought it ·{' '}
-            <span className="text-amber-300">skipped</span> = it was accelerating (passed the gate) but ranked outside the top 8 ·{' '}
+            <span className="text-amber-300">skipped</span> = it was accelerating (passed the gate) but ranked below the shortlist ceiling ·{' '}
             <span className="text-red-300">missed</span> = the gate rejected it. The skipped/missed names are where the formula can improve.
           </p>
 

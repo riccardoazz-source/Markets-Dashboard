@@ -51,8 +51,10 @@
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
  *
  *   Gate (shown in the Accelerating shortlist only if):
- *     r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  aBuild > 0  AND  r1m < cap
- *   — rising AND accelerating in a BUILDING way. Top ACCEL_LIMIT by score.
+ *     r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
+ *   — rising AND recently accelerating. aBuild is a ranking signal, NOT a gate
+ *   blocker: hard-excluding it in shock periods produces too few picks. Assets
+ *   with strong aBuild still rank higher via ACCEL. Top ACCEL_LIMIT by score.
  *
  * ── v4: commodity blow-off control ───────────────────────────────────────────
  * Commodities mean-revert harder than equities. The backtest showed event-driven
@@ -87,8 +89,15 @@ function isCommodity(i: ModelInput): boolean {
   return (i.group ?? '').toLowerCase().startsWith('commodit');
 }
 
-// How many names the "Accelerating" shortlist shows (top N by score).
+// Size of the "who actually won" leaderboard in the backtest (top N by forward
+// return). This is a BENCHMARK size, NOT a cap on the model's picks.
 export const ACCEL_LIMIT = 8;
+
+// Safety ceiling on the Accelerating shortlist. The GATE decides how many names
+// actually qualify — it can be 3 in a shock or 20 in a broad rally. This only
+// prevents the list from ballooning to the entire universe in a mega-bull;
+// names are ranked by score, so the strongest always come first.
+export const ACCEL_MAX = 25;
 
 export interface ModelInput {
   symbol: string;
@@ -201,15 +210,20 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg - extWeight * pExt
       : -1;
 
-    // BUILDING acceleration required: both legs positive AND r1m not a blow-off spike.
-    // The hard cap on r1m hard-excludes extreme single-month outliers (Ondo +64%,
-    // Zcash +82%) that the scoring EXT penalty alone can't fully demote because ACC
-    // rewards them just as strongly. Commodities use a TIGHTER cap (25% vs 50%):
-    // the backtest showed commodity spikes above ~25%/month (Silver +41%, WTI +44%,
-    // Palladium +39%) reliably reverse, while equity moves of that size can persist.
+    // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
+    // aRecent > 0 (last month faster than the quarter → acceleration signal).
+    // aBuild (quarter vs half-year) is intentionally NOT in the hard gate because:
+    //   (a) it is already captured in ACCEL (0.4·aBuild), so building trends rank
+    //       higher naturally; (b) excluding it as a gate in volatile/shock periods
+    //       (e.g. tariff selloff March 2026) would leave fewer than 4 valid picks —
+    //       the model showed only 4 picks in a universe of 60+, which is unusable.
+    // The hard cap on r1m stays: single-month outliers (Ondo +64%, Zcash +82%)
+    // that EXT alone can't demote (because ACC rewards them just as strongly).
+    // Commodities: tighter cap (25% vs 50%) — event spikes above this threshold
+    // reliably mean-revert (Silver +41%, WTI +44%, Palladium +39%).
     const r1mCap = isCommodity(item) ? COMMODITY_R1M_CAP : R1M_CAP;
     const passesGate = hasReturns && item.r1m! > 0 && item.r1m! < r1mCap && item.r3m! > 0
-      && parts.aRecent > 0 && parts.aBuild > 0;
+      && parts.aRecent > 0;
 
     return {
       item, score, accel: parts.accel, accPctile,
