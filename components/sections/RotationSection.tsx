@@ -174,11 +174,12 @@ Over-extension guard — EXT = max of two signals:
 Score = ${pct(W.acceleration)} · ACC   (acceleration percentile)
       + ${pct(W.trend)} · TRD   (3-month return percentile)
       + ${pct(W.regime)} · REG   (above 200-day MA→1.0 · below→0.2)
-      − ${pct(W.extension)} · EXT   (over-extension — doubled vs v2)
+      − wEXT · EXT   (over-extension; wEXT = 20% · commodities 32%)
 
-Gate:  r1m > 0  AND  r1m < 50%  AND  r3m > 0  AND  aRecent > 0  AND  aBuild > 0`}
+Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  aBuild > 0
+       AND  r1m < cap   (cap = 50% · commodities 25%)`}
           </pre>
-          <p className="mt-1.5 text-gray-500">EXT now catches two types of blow-off: price stretched above MA200 (existing) AND extreme recent 1M magnitude. Backtest showed that assets with r1m &gt; 40% almost always mean-revert; the hard gate cap at 50% kills the worst outliers (Ondo +64%, Zcash +82%) while the EXT penalty demotes the rest. Weight doubled to 20% to make the signal compete with ACC on equal terms. Every input is point-in-time, so the backtest is still honest.</p>
+          <p className="mt-1.5 text-gray-500">EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). The penalty scales with extension, so a commodity early in a real secular trend (low stretch) is untouched. Every input is point-in-time, so the backtest stays honest.</p>
         </div>
       </div>
     </details>

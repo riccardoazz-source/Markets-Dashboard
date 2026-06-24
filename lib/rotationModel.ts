@@ -51,16 +51,41 @@
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
  *
  *   Gate (shown in the Accelerating shortlist only if):
- *     r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  aBuild > 0
+ *     r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  aBuild > 0  AND  r1m < cap
  *   — rising AND accelerating in a BUILDING way. Top ACCEL_LIMIT by score.
+ *
+ * ── v4: commodity blow-off control ───────────────────────────────────────────
+ * Commodities mean-revert harder than equities. The backtest showed event-driven
+ * commodity spikes (Iran war → Brent/WTI; fear → Silver/Gold) get bought then
+ * crash, while the missed winners are tech/semis. So commodities get a heavier
+ * extension weight (0.32 vs 0.20) and a tighter single-month blow-off cap
+ * (25% vs 50%). The penalty scales with extension, so a commodity early in a
+ * genuine secular trend (low stretch) is untouched.
  */
 
 export const MODEL_WEIGHTS = {
   acceleration: 0.45, // ACC — pace-ladder composite (percentile)
   trend:        0.25, // TRD — r3m percentile
   regime:       0.10, // REG — price vs 200-day MA
-  extension:    0.20, // EXT — over-extension: max(stretch above MA200, r1m magnitude) — doubled weight
+  extension:    0.20, // EXT — over-extension: max(stretch above MA200, r1m magnitude)
 } as const;
+
+// ── Commodity blow-off control (v4) ──────────────────────────────────────────
+// Commodities mean-revert HARDER than equities: their momentum is driven by
+// supply/demand shocks and fear spikes (Iran war → Brent/WTI; panic → Silver/
+// Gold) that snap back, whereas equity/tech trends ride durable earnings growth.
+// The backtest confirmed it: nearly every commodity the model bought on a spike
+// reversed (Silver +41%→−15%, Palladium +39%→−37%, WTI +44%→−25%), while the
+// winners it missed were tech/semis. So commodities get a STRONGER blow-off
+// guard — but one that scales with extension, so a commodity EARLY in a genuine
+// secular trend (low stretch, e.g. the multi-year gold bull) is NOT penalised.
+export const COMMODITY_EXT_WEIGHT = 0.32; // vs 0.20 for everything else
+export const R1M_CAP          = 50; // hard blow-off cap on single-month return
+export const COMMODITY_R1M_CAP = 25; // commodities blow off sooner → tighter cap
+
+function isCommodity(i: ModelInput): boolean {
+  return (i.group ?? '').toLowerCase().startsWith('commodit');
+}
 
 // How many names the "Accelerating" shortlist shows (top N by score).
 export const ACCEL_LIMIT = 8;
@@ -73,6 +98,7 @@ export interface ModelInput {
   r1y: number | null;
   price: number | null;
   ma200: number | null;    // 200-day SMA (null → data unavailable, not "below")
+  group?: string;          // asset class (e.g. 'Commodities') → enables class-aware blow-off control
   vol?: number | null;     // realized MONTHLY volatility in % (null → unavailable)
   sma200w?: number | null;  // kept for callers; not used by the score (backtest can't compute it)
   volRatio?: number | null; // kept for callers; not used by the score (no historical volume)
@@ -166,17 +192,23 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const above200d = item.price != null && item.ma200 != null && item.price > item.ma200;
     const reg = above200d ? 1.0 : item.ma200 == null ? 0.5 : 0.2;
 
+    // Commodities carry a heavier over-extension penalty (they snap back harder),
+    // but because the penalty scales with pExt a commodity that is only modestly
+    // stretched — i.e. early in a real trend — is barely touched.
     const W = MODEL_WEIGHTS;
+    const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
     const score = hasReturns
-      ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg - W.extension * pExt
+      ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg - extWeight * pExt
       : -1;
 
     // BUILDING acceleration required: both legs positive AND r1m not a blow-off spike.
-    // The hard cap on r1m (< 50%) hard-excludes extreme single-month outliers (Ondo +64%,
-    // Zcash +82%, Silver +41%) that the scoring EXT penalty alone can't fully demote
-    // because ACC rewards them just as strongly. Empirically: assets with r1m > 50%
-    // almost always mean-revert within the next month regardless of their build signal.
-    const passesGate = hasReturns && item.r1m! > 0 && item.r1m! < 50 && item.r3m! > 0
+    // The hard cap on r1m hard-excludes extreme single-month outliers (Ondo +64%,
+    // Zcash +82%) that the scoring EXT penalty alone can't fully demote because ACC
+    // rewards them just as strongly. Commodities use a TIGHTER cap (25% vs 50%):
+    // the backtest showed commodity spikes above ~25%/month (Silver +41%, WTI +44%,
+    // Palladium +39%) reliably reverse, while equity moves of that size can persist.
+    const r1mCap = isCommodity(item) ? COMMODITY_R1M_CAP : R1M_CAP;
+    const passesGate = hasReturns && item.r1m! > 0 && item.r1m! < r1mCap && item.r3m! > 0
       && parts.aRecent > 0 && parts.aBuild > 0;
 
     return {
