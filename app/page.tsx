@@ -13,7 +13,7 @@ import { StockSection } from '@/components/sections/StockSection';
 import { SourcesSection } from '@/components/sections/SourcesSection';
 import { RotationSection } from '@/components/sections/RotationSection';
 import { SectionNotesPanel } from '@/components/ui/SectionNotesPanel';
-import { ScrollButton } from '@/components/ui/ScrollNav';
+import { ScrollNav } from '@/components/ui/ScrollNav';
 import { isNotesSection, type NotesSection } from '@/lib/sectionNotes';
 
 const SECTION_LABELS: Record<Section, string> = {
@@ -70,17 +70,13 @@ export default function Home() {
             <h1 className="text-lg sm:text-xl font-bold text-white">{SECTION_LABELS[section]}</h1>
             <p className="text-xs sm:text-sm text-gray-500 mt-0.5 hidden sm:block">{SECTION_DESCRIPTIONS[section]}</p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Jump to the bottom of the page — lives at the top */}
-            <ScrollButton to="bottom" />
-            {isNotesSection(section) && (
-              <SectionNotesPanel
-                section={section}
-                sectionLabel={SECTION_LABELS[section]}
-                onNavigate={handleNavigate}
-              />
-            )}
-          </div>
+          {isNotesSection(section) && (
+            <SectionNotesPanel
+              section={section}
+              sectionLabel={SECTION_LABELS[section]}
+              onNavigate={handleNavigate}
+            />
+          )}
         </div>
 
         {section === 'indexes'     && <IndexesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
@@ -95,14 +91,15 @@ export default function Home() {
         {section === 'sources'     && <SourcesSection />}
       </main>
 
-      <footer className="max-w-screen-2xl mx-auto px-4 py-6 mt-8 border-t border-border flex items-center justify-between gap-3">
+      <footer className="max-w-screen-2xl mx-auto px-4 py-6 mt-8 border-t border-border">
         <p className="text-xs text-gray-600">
           Data sourced from Yahoo Finance, CoinGecko, and ECB via Frankfurter.
           Refreshes every 60 seconds. Not financial advice.
         </p>
-        {/* Jump back to the top of the page — lives at the bottom */}
-        <ScrollButton to="top" />
       </footer>
+
+      {/* Fixed page-jump arrows on the right edge — reachable from any scroll position */}
+      <ScrollNav />
     </>
   );
 }

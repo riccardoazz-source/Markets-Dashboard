@@ -1,25 +1,33 @@
 'use client';
 
-// Inline page-jump buttons.
-//   <ScrollButton to="bottom" />  → down arrow, placed at the TOP of the page
-//   <ScrollButton to="top" />     → up arrow,   placed at the BOTTOM of the page
-// Single-click smooth scroll to the far end of the page. Inline (not floating),
-// so each sits at the end it sends you away from.
-export function ScrollButton({ to }: { to: 'top' | 'bottom' }) {
-  const onClick = () =>
+// Fixed page-jump controls, parked against the right edge (next to the
+// scrollbar) and vertically centred — so they stay reachable from ANY scroll
+// position. Up = jump to the top, Down = jump to the bottom.
+export function ScrollNav() {
+  const jump = (to: 'top' | 'bottom') =>
     window.scrollTo({
       top: to === 'top' ? 0 : document.body.scrollHeight,
       behavior: 'smooth',
     });
 
   return (
-    <button
-      onClick={onClick}
-      className="flex items-center justify-center w-8 h-8 rounded-full bg-bg-input border border-border text-gray-400 hover:text-gray-100 hover:border-gray-500 transition-all text-base shrink-0"
-      title={to === 'top' ? 'Vai a inizio pagina' : 'Vai in fondo alla pagina'}
-      aria-label={to === 'top' ? 'Scroll to top' : 'Scroll to bottom'}
-    >
-      {to === 'top' ? '↑' : '↓'}
-    </button>
+    <div className="fixed right-1.5 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-1.5">
+      <button
+        onClick={() => jump('top')}
+        className="flex items-center justify-center w-8 h-8 rounded-full bg-bg-card/90 border border-border text-gray-400 hover:text-gray-100 hover:border-gray-500 shadow-lg backdrop-blur transition-all text-base"
+        title="Vai a inizio pagina"
+        aria-label="Scroll to top"
+      >
+        ↑
+      </button>
+      <button
+        onClick={() => jump('bottom')}
+        className="flex items-center justify-center w-8 h-8 rounded-full bg-bg-card/90 border border-border text-gray-400 hover:text-gray-100 hover:border-gray-500 shadow-lg backdrop-blur transition-all text-base"
+        title="Vai in fondo alla pagina"
+        aria-label="Scroll to bottom"
+      >
+        ↓
+      </button>
+    </div>
   );
 }
