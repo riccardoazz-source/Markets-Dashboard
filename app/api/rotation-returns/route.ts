@@ -13,6 +13,9 @@ interface RollingReturn {
   r1y: number | null;
   ma200: number | null;
   volRatio: number | null;
+  high52w: number | null;
+  low52w: number | null;
+  pos52w: number | null; // 0–100 position of the latest close within the 52W range
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -54,7 +57,28 @@ function volRatio20(history: { date: string; close: number; volume?: number }[])
   return avg > 0 ? latest / avg : null;
 }
 
+// 52-week high/low and the latest close's position within that range.
+// Window = trailing 365 calendar days (the 375-day fetch leaves a small buffer).
+//   pos = (close − low) / (high − low) × 100  →  0% at the low, 100% at the high.
+function range52w(history: { date: string; close: number }[]): { high52w: number | null; low52w: number | null; pos52w: number | null } {
+  if (history.length < 2) return { high52w: null, low52w: null, pos52w: null };
+  const d = new Date();
+  d.setDate(d.getDate() - 365);
+  const cutoff = d.toISOString().slice(0, 10);
+  const window = history.filter(p => p.date >= cutoff);
+  if (window.length < 2) return { high52w: null, low52w: null, pos52w: null };
+  let hi = -Infinity, lo = Infinity;
+  for (const p of window) {
+    if (p.close > hi) hi = p.close;
+    if (p.close < lo) lo = p.close;
+  }
+  const current = history[history.length - 1].close;
+  const pos = hi > lo ? Math.max(0, Math.min(100, ((current - lo) / (hi - lo)) * 100)) : null;
+  return { high52w: hi, low52w: lo, pos52w: pos };
+}
+
 function buildRow(symbol: string, history: { date: string; close: number; volume?: number }[]): RollingReturn {
+  const r = range52w(history);
   return {
     symbol,
     r1m: rolling(history, 30),
@@ -63,6 +87,9 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     r1y: rolling(history, 365),
     ma200: ma200d(history),
     volRatio: volRatio20(history),
+    high52w: r.high52w,
+    low52w: r.low52w,
+    pos52w: r.pos52w,
   };
 }
 

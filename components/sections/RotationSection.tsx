@@ -30,6 +30,9 @@ interface RotationItem {
   ma200: number | null;    // 200-day SMA (from rotation-returns)
   sma200w: number | null;  // 200-week SMA (from quotes/crypto/sectors)
   volRatio: number | null; // latestVol / avg20dVol (from rotation-returns)
+  high52w: number | null;  // 52-week high (from rotation-returns)
+  low52w: number | null;   // 52-week low (from rotation-returns)
+  pos52wRaw: number | null;// route-computed 52W range position (fallback)
 }
 
 interface RollingReturn {
@@ -40,9 +43,12 @@ interface RollingReturn {
   r1y: number | null;
   ma200: number | null;
   volRatio: number | null;
+  high52w: number | null;
+  low52w: number | null;
+  pos52w: number | null;
 }
 
-type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w';
+type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w' | '52w';
 type GroupFilter = 'all' | Group;
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
@@ -52,6 +58,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: '6m',   label: '6M'   },
   { value: '1y',   label: '1Y'   },
   { value: '5y',   label: '5Y'   },
+  { value: '52w',  label: '52W'  },
   { value: '200d', label: '200D' },
   { value: '200w', label: '200W' },
 ];
@@ -72,6 +79,17 @@ function vsMa(price: number | null, ma: number | null): number | null {
   return (price / ma - 1) * 100;
 }
 
+// Position of the current price within the 52-week range: 0% = on the 52W low,
+// 100% = on the 52W high. Computed live from the latest price when high/low are
+// known (so it tracks intraday), falling back to the route-computed value.
+function pos52w(item: RotationItem): number | null {
+  const { price, high52w, low52w, pos52wRaw } = item;
+  if (price != null && high52w != null && low52w != null && high52w > low52w) {
+    return Math.max(0, Math.min(100, ((price - low52w) / (high52w - low52w)) * 100));
+  }
+  return pos52wRaw;
+}
+
 function getPct(item: RotationItem, key: SortKey): number | null {
   switch (key) {
     case 'day':  return item.dayPct;
@@ -80,6 +98,7 @@ function getPct(item: RotationItem, key: SortKey): number | null {
     case '6m':   return item.r6m;
     case '1y':   return item.r1y;
     case '5y':   return item.fiveYPct;
+    case '52w':  return pos52w(item);
     case '200d': return vsMa(item.price, item.ma200);
     case '200w': return vsMa(item.price, item.sma200w);
   }
@@ -246,6 +265,7 @@ export function RotationSection() {
           r1m: r?.r1m ?? null, r3m: r?.r3m ?? null, r6m: r?.r6m ?? null, r1y: r?.r1y ?? null,
           fiveYPct: q?.fiveYearChangePercent ?? null,
           ma200: r?.ma200 ?? null, sma200w: q?.sma200w ?? null, volRatio: r?.volRatio ?? null,
+          high52w: r?.high52w ?? q?.high52w ?? null, low52w: r?.low52w ?? q?.low52w ?? null, pos52wRaw: r?.pos52w ?? null,
         };
       });
       setStockItems(built);
@@ -293,6 +313,7 @@ export function RotationSection() {
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
             ma200: null, sma200w: q?.sma200w ?? null, volRatio: null,
+            high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
           };
         });
 
@@ -305,6 +326,7 @@ export function RotationSection() {
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
             ma200: null, sma200w: q?.sma200w ?? null, volRatio: null,
+            high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
           };
         });
 
@@ -321,6 +343,7 @@ export function RotationSection() {
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: c?.fiveYearChangePercent ?? null,
             ma200: null, sma200w: c?.sma200w ?? null, volRatio: null,
+            high52w: null, low52w: null, pos52wRaw: null,
           };
         });
 
@@ -331,6 +354,7 @@ export function RotationSection() {
           r1m: null, r3m: null, r6m: null, r1y: null,
           fiveYPct: s.fiveYearReturn,
           ma200: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null, volRatio: null,
+          high52w: null, low52w: null, pos52wRaw: null,
         }));
 
         const allItems = [...indexItems, ...commItems, ...cryptoItems, ...sectorItems];
@@ -346,7 +370,12 @@ export function RotationSection() {
 
         const enriched = allItems.map(item => {
           const r = rollingMap.get(item.symbol);
-          return r ? { ...item, r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, volRatio: r.volRatio } : item;
+          return r ? {
+            ...item,
+            r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, volRatio: r.volRatio,
+            // Prefer the uniform 52W range from history; keep any quote value as fallback.
+            high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
+          } : item;
         });
 
         setItems(enriched);
@@ -623,6 +652,7 @@ export function RotationSection() {
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden sm:table-cell', sortBy === '6m' ? 'text-accent' : 'text-gray-600')}>6M</th>
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden sm:table-cell', sortBy === '1y' ? 'text-accent' : 'text-gray-600')}>1Y</th>
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden lg:table-cell', sortBy === '5y' ? 'text-accent' : 'text-gray-600')}>5Y</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden md:table-cell', sortBy === '52w' ? 'text-accent' : 'text-gray-600')} title="Position within the 52-week range: 0% = on the 52W low, 100% = on the 52W high">52W Range</th>
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden xl:table-cell', sortBy === '200d' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-day MA (green=above, red=below)">vs 200D</th>
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden xl:table-cell', sortBy === '200w' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-week MA (green=above, red=below)">vs 200W</th>
                 </tr>
@@ -630,7 +660,7 @@ export function RotationSection() {
               <tbody className="divide-y divide-border">
                 {sortedItems.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-3 py-10 text-center text-xs text-gray-500">
+                    <td colSpan={11} className="px-3 py-10 text-center text-xs text-gray-500">
                       {accelOnly
                         ? 'No assets are accelerating right now — the leaderboard is stable.'
                         : pinnedOnly
@@ -657,6 +687,7 @@ export function RotationSection() {
                   const isPinned   = pins.has(item.symbol);
                   const vs200d     = vsMa(item.price, item.ma200);
                   const vs200w     = vsMa(item.price, item.sma200w);
+                  const rangePos   = pos52w(item);
                   return (
                     <tr
                       key={item.symbol}
@@ -729,6 +760,23 @@ export function RotationSection() {
                       </td>
                       <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden lg:table-cell', sortBy === '5y' ? `font-bold ${pctColor(item.fiveYPct)}` : pctColor(item.fiveYPct))}>
                         {fmtPct(item.fiveYPct)}
+                      </td>
+                      <td className="px-3 py-2 hidden md:table-cell"
+                          title={item.high52w != null && item.low52w != null ? `52W range: ${item.low52w.toFixed(2)} – ${item.high52w.toFixed(2)}` : undefined}>
+                        {rollingLoading ? (
+                          <div className="text-right text-gray-700">…</div>
+                        ) : rangePos == null ? (
+                          <div className="text-right text-gray-500">—</div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 justify-end">
+                            <div className="w-12 h-1.5 rounded-full bg-border overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${rangePos}%`, background: rangePos >= 66 ? '#4ade80' : rangePos >= 33 ? '#fbbf24' : '#f87171' }} />
+                            </div>
+                            <span className={clsx('text-xs tabular-nums w-8 text-right', sortBy === '52w' && 'font-bold', rangePos >= 66 ? 'text-green-400' : rangePos >= 33 ? 'text-amber-400' : 'text-red-400')}>
+                              {rangePos.toFixed(0)}%
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden xl:table-cell', sortBy === '200d' ? `font-bold ${pctColor(vs200d)}` : pctColor(vs200d))}
                           title={item.ma200 != null ? `200D MA: ${item.ma200.toFixed(2)}` : undefined}>
