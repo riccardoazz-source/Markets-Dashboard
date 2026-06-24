@@ -31,11 +31,25 @@ interface Pick {
   fwd: number | null;
 }
 
+// An asset that ACTUALLY won over the period (top forward return), regardless of
+// whether the model picked it. `picked`/`passedGate` tell the diagnostic story:
+//   picked            → the model got it
+//   !picked & passed  → the model saw it accelerating but ranked it out of top N
+//   !picked & !passed → the model's gate rejected it (signal/gate miss)
+interface Winner {
+  symbol: string; name: string; group: Group;
+  r1m: number | null; r3m: number | null; r6m: number | null; r1y: number | null;
+  fwd: number;
+  picked: boolean;
+  passedGate: boolean;
+}
+
 interface Scenario {
   key: string; label: string; asOf: string;
   picks: Pick[];
+  winners: Winner[];
   basketFwd: number | null; universeFwd: number | null; spxFwd: number | null;
-  nPicks: number; nBeatSpx: number;
+  nPicks: number; nBeatSpx: number; nWinnerHits: number;
 }
 
 interface Payload { generatedAt: string; scenarios: Scenario[]; universeSize: number }
@@ -114,18 +128,37 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
     };
   });
 
-  const picks: Pick[] = scoreRotation(rows)
+  const scored = scoreRotation(rows);
+  const gateMap = new Map(scored.map(s => [s.item.symbol, s.passesGate]));
+  const pickItems = scored
     .filter(s => s.passesGate)
     .sort((a, b) => b.score - a.score)
     .slice(0, ACCEL_LIMIT)
-    .map(s => s.item)
-    .map((r): Pick => ({
+    .map(s => s.item);
+  const pickedSet = new Set(pickItems.map(r => r.symbol));
+
+  const picks: Pick[] = pickItems.map((r): Pick => ({
+    symbol: r.symbol, name: r.name, group: r.group,
+    r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y,
+    stage: (r.r6m != null && r.r6m < 0) || (r.r1y != null && r.r1y < 0) ? 'rebound'
+         : (r.r6m != null && r.r6m > 0 && r.r1y != null && r.r1y > 0) ? 'trend' : 'neutral',
+    fwd: r.fwd,
+  }));
+
+  // The assets that ACTUALLY won over the period — top ACCEL_LIMIT by forward
+  // return — so "what I'd have bought" sits next to "what actually won".
+  const winners: Winner[] = rows
+    .filter((r): r is typeof r & { fwd: number } => r.fwd != null)
+    .sort((a, b) => b.fwd - a.fwd)
+    .slice(0, ACCEL_LIMIT)
+    .map((r): Winner => ({
       symbol: r.symbol, name: r.name, group: r.group,
       r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y,
-      stage: (r.r6m != null && r.r6m < 0) || (r.r1y != null && r.r1y < 0) ? 'rebound'
-           : (r.r6m != null && r.r6m > 0 && r.r1y != null && r.r1y > 0) ? 'trend' : 'neutral',
       fwd: r.fwd,
+      picked: pickedSet.has(r.symbol),
+      passedGate: gateMap.get(r.symbol) ?? false,
     }));
+  const nWinnerHits = winners.filter(w => w.picked).length;
 
   const pickFwds = picks.map(p => p.fwd).filter((v): v is number => v != null);
   const basketFwd = pickFwds.length ? pickFwds.reduce((a, b) => a + b, 0) / pickFwds.length : null;
@@ -134,7 +167,7 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
   const spxFwd = retBetween(histMap.get(SPX) ?? [], asOf, todayStr);
   const nBeatSpx = spxFwd == null ? 0 : picks.filter(p => p.fwd != null && p.fwd > spxFwd).length;
 
-  return { key, label, asOf, picks, basketFwd, universeFwd, spxFwd, nPicks: picks.length, nBeatSpx };
+  return { key, label, asOf, picks, winners, basketFwd, universeFwd, spxFwd, nPicks: picks.length, nBeatSpx, nWinnerHits };
 }
 
 export async function GET(req: Request) {

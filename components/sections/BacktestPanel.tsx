@@ -11,11 +11,20 @@ interface Pick {
   fwd: number | null;
 }
 
+interface Winner {
+  symbol: string; name: string; group: string;
+  r1m: number | null; r3m: number | null; r6m: number | null; r1y: number | null;
+  fwd: number;
+  picked: boolean;
+  passedGate: boolean;
+}
+
 interface Scenario {
   key: string; label: string; asOf: string;
   picks: Pick[];
+  winners: Winner[];
   basketFwd: number | null; universeFwd: number | null; spxFwd: number | null;
-  nPicks: number; nBeatSpx: number;
+  nPicks: number; nBeatSpx: number; nWinnerHits: number;
 }
 
 interface Payload { generatedAt: string; scenarios: Scenario[]; universeSize?: number }
@@ -143,51 +152,111 @@ export function BacktestPanel({ stockSymbols = [] }: { stockSymbols?: string[] }
             )}
             {scenario.nPicks > 0 && (
               <p className="text-[11px] text-gray-400 mt-1">
-                {scenario.nBeatSpx}/{scenario.nPicks} picks beat the S&P 500.
+                {scenario.nBeatSpx}/{scenario.nPicks} picks beat the S&P 500 ·{' '}
+                <span className={clsx('font-semibold', scenario.nWinnerHits > 0 ? 'text-green-300' : 'text-red-300')}>
+                  captured {scenario.nWinnerHits}/{scenario.winners.length}
+                </span>{' '}
+                of the period&apos;s actual top performers.
               </p>
             )}
           </div>
 
-          {/* Picks table */}
-          {scenario.picks.length === 0 ? (
-            <p className="text-xs text-gray-500">
-              The model would have selected nothing as of {fmtDate(scenario.asOf)} — no asset passed all gates. (Sometimes the right call is to stay out.)
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-[10px] text-gray-600">
-                    <th className="px-2 py-1.5 text-left w-6">#</th>
-                    <th className="px-2 py-1.5 text-left">Would have bought</th>
-                    <th className="px-2 py-1.5 text-right">1M then</th>
-                    <th className="px-2 py-1.5 text-right">Return since</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {scenario.picks.map((p, i) => (
-                    <tr key={p.symbol}>
-                      <td className="px-2 py-1.5 text-[11px] text-gray-600 tabular-nums">{i + 1}</td>
-                      <td className="px-2 py-1.5">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="shrink-0 w-2 h-2 rounded-full" style={{ background: GROUP_COLORS[p.group] ?? '#888' }} />
-                          <span className="truncate text-xs font-medium text-gray-200">{p.name}</span>
-                          {p.stage === 'rebound' && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 leading-none">↩ rebound</span>
-                          )}
-                          {p.stage === 'trend' && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-300 leading-none">✓ trend</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(p.r1m))}>{fmtPct(p.r1m)}</td>
-                      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums font-bold', pctColor(p.fwd))}>{fmtPct(p.fwd)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Two columns: what the model would have bought vs what actually won */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Model picks */}
+            <div>
+              <p className="text-[11px] font-semibold text-gray-300 mb-1.5">🤖 What the model would have bought</p>
+              {scenario.picks.length === 0 ? (
+                <p className="text-xs text-gray-500">
+                  The model would have selected nothing as of {fmtDate(scenario.asOf)} — no asset passed all gates. (Sometimes the right call is to stay out.)
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-[10px] text-gray-600">
+                        <th className="px-2 py-1.5 text-left w-6">#</th>
+                        <th className="px-2 py-1.5 text-left">Pick</th>
+                        <th className="px-2 py-1.5 text-right">1M then</th>
+                        <th className="px-2 py-1.5 text-right">Since</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {scenario.picks.map((p, i) => (
+                        <tr key={p.symbol}>
+                          <td className="px-2 py-1.5 text-[11px] text-gray-600 tabular-nums">{i + 1}</td>
+                          <td className="px-2 py-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="shrink-0 w-2 h-2 rounded-full" style={{ background: GROUP_COLORS[p.group] ?? '#888' }} />
+                              <span className="truncate text-xs font-medium text-gray-200">{p.name}</span>
+                              {p.stage === 'rebound' && (
+                                <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 leading-none">↩ rebound</span>
+                              )}
+                              {p.stage === 'trend' && (
+                                <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-300 leading-none">✓ trend</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(p.r1m))}>{fmtPct(p.r1m)}</td>
+                          <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums font-bold', pctColor(p.fwd))}>{fmtPct(p.fwd)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          )}
+
+            {/* Actual winners */}
+            <div>
+              <p className="text-[11px] font-semibold text-gray-300 mb-1.5">🏆 Who actually won the period</p>
+              {scenario.winners.length === 0 ? (
+                <p className="text-xs text-gray-500">No forward data for this period.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-[10px] text-gray-600">
+                        <th className="px-2 py-1.5 text-left w-6">#</th>
+                        <th className="px-2 py-1.5 text-left">Top performer</th>
+                        <th className="px-2 py-1.5 text-right">1M then</th>
+                        <th className="px-2 py-1.5 text-right">Since</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {scenario.winners.map((w, i) => (
+                        <tr key={w.symbol} className={clsx(w.picked && 'bg-green-500/5')}>
+                          <td className="px-2 py-1.5 text-[11px] text-gray-600 tabular-nums">{i + 1}</td>
+                          <td className="px-2 py-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="shrink-0 w-2 h-2 rounded-full" style={{ background: GROUP_COLORS[w.group] ?? '#888' }} />
+                              <span className="truncate text-xs font-medium text-gray-200">{w.name}</span>
+                              {w.picked ? (
+                                <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-300 leading-none" title="The model picked this one">✓ picked</span>
+                              ) : w.passedGate ? (
+                                <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 leading-none" title="Passed the gate (accelerating) but ranked outside the top 8">skipped</span>
+                              ) : (
+                                <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-red-500/15 text-red-300 leading-none" title="The gate rejected it — not flagged as accelerating">missed</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(w.r1m))}>{fmtPct(w.r1m)}</td>
+                          <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums font-bold', pctColor(w.fwd))}>{fmtPct(w.fwd)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Diagnostic legend for the winners column */}
+          <p className="text-[10px] text-gray-600 leading-relaxed">
+            In <span className="text-gray-400">Who actually won</span>: <span className="text-green-300">✓ picked</span> = the model bought it ·{' '}
+            <span className="text-amber-300">skipped</span> = it was accelerating (passed the gate) but ranked outside the top 8 ·{' '}
+            <span className="text-red-300">missed</span> = the gate rejected it. The skipped/missed names are where the formula can improve.
+          </p>
 
           <p className="text-[10px] text-gray-600 leading-relaxed">
             Honest caveats: universe = the {data.universeSize ?? 71} assets currently in config{stockSymbols.length ? ' + your active stock lists' : ''} (survivorship bias), closing prices, no costs/taxes/slippage, perfect rebalance. ~6 years of history = few cycles, and recently-listed assets simply weren&apos;t pickable in the older windows. This is a signal quality check, not a guarantee of future returns.
