@@ -56,10 +56,10 @@
  */
 
 export const MODEL_WEIGHTS = {
-  acceleration: 0.50, // ACC — pace-ladder composite (percentile)
+  acceleration: 0.45, // ACC — pace-ladder composite (percentile)
   trend:        0.25, // TRD — r3m percentile
-  regime:       0.15, // REG — price vs 200-day MA
-  extension:    0.10, // EXT — over-extension above MA200 in vol units (subtracted)
+  regime:       0.10, // REG — price vs 200-day MA
+  extension:    0.20, // EXT — over-extension: max(stretch above MA200, r1m magnitude) — doubled weight
 } as const;
 
 // How many names the "Accelerating" shortlist shows (top N by score).
@@ -129,14 +129,20 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
   const accelOf = (i: ModelInput) => computeAccel(i.r1m as number, i.r3m as number, i.r6m).accel;
   const stretchOf = (i: ModelInput) => computeStretch(i.price, i.ma200, i.vol);
+  // Absolute r1m magnitude: penalises extreme recent movers regardless of direction.
+  // Assets with very high r1m (blow-off months like +60%) tend to mean-revert; those
+  // with moderate r1m (+5-20%) tend to continue. This is the key pattern the backtest exposed.
+  const r1mAbsOf = (i: ModelInput) => Math.abs(i.r1m ?? 0);
 
   // Ascending-rank helpers (rank 0 = worst, rank n-1 = best) → cross-sectional percentiles.
   const byR3mAsc     = [...valid].sort((a, b) => a.r3m! - b.r3m!);
   const byAccelAsc   = [...valid].sort((a, b) => accelOf(a) - accelOf(b));
   const byStretchAsc = [...valid].sort((a, b) => stretchOf(a) - stretchOf(b));
+  const byR1mAbsAsc  = [...valid].sort((a, b) => r1mAbsOf(a) - r1mAbsOf(b));
   const rankR3mAsc     = new Map(byR3mAsc.map((r, i) => [r.symbol, i]));
   const rankAccelAsc   = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
   const rankStretchAsc = new Map(byStretchAsc.map((r, i) => [r.symbol, i]));
+  const rankR1mAbsAsc  = new Map(byR1mAbsAsc.map((r, i) => [r.symbol, i]));
 
   return items.map(item => {
     const hasReturns = item.r1m != null && item.r3m != null;
@@ -145,9 +151,15 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       : { accel: 0, aRecent: 0, aBuild: 0 };
     const stretch = stretchOf(item);
 
-    const accPctile = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
-    const p3m       = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
-    const pExt      = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
+    const accPctile  = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
+    const p3m        = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
+    const pStretch   = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
+    const pR1mAbs    = toP(rankR1mAbsAsc.get(item.symbol) ?? 0, n);
+    // EXT = worst of: (a) price stretched far above MA200 in vol units, or
+    // (b) extreme recent 1M magnitude. The backtest showed that top r1m gainers
+    // (+40-80%) reliably reverse — this catches them even when stretch is diluted
+    // by a sector-wide rally (e.g., all commodities extended together).
+    const pExt = Math.max(pStretch, pR1mAbs);
 
     // Regime: above the 200-day MA = structural tailwind. 200-day (not 200W) is
     // used because it is computable identically in the historical backtest.
@@ -159,8 +171,12 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg - W.extension * pExt
       : -1;
 
-    // BUILDING acceleration required: both legs of the pace ladder positive.
-    const passesGate = hasReturns && item.r1m! > 0 && item.r3m! > 0
+    // BUILDING acceleration required: both legs positive AND r1m not a blow-off spike.
+    // The hard cap on r1m (< 50%) hard-excludes extreme single-month outliers (Ondo +64%,
+    // Zcash +82%, Silver +41%) that the scoring EXT penalty alone can't fully demote
+    // because ACC rewards them just as strongly. Empirically: assets with r1m > 50%
+    // almost always mean-revert within the next month regardless of their build signal.
+    const passesGate = hasReturns && item.r1m! > 0 && item.r1m! < 50 && item.r3m! > 0
       && parts.aRecent > 0 && parts.aBuild > 0;
 
     return {

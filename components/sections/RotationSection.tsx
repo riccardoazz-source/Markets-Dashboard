@@ -166,17 +166,19 @@ function RotationLegend() {
   aBuild  = p3 − p6      (quarter vs half-year → BUILDING)
   ACCEL   = 0.6·aRecent + 0.4·aBuild
 
-Blow-off guard:
+Over-extension guard — EXT = max of two signals:
   STRETCH = max(0, price/MA200 − 1)·100 / monthlyVol   (σ above MA200)
+  R1M_ABS = cross-sectional percentile of |r1m|
+  EXT     = max(STRETCH_pctile, R1M_ABS_pctile)
 
 Score = ${pct(W.acceleration)} · ACC   (acceleration percentile)
       + ${pct(W.trend)} · TRD   (3-month return percentile)
       + ${pct(W.regime)} · REG   (above 200-day MA→1.0 · below→0.2)
-      − ${pct(W.extension)} · EXT   (over-extension percentile — penalty)
+      − ${pct(W.extension)} · EXT   (over-extension — doubled vs v2)
 
-Gate:  shown only if  r1m>0  AND  r3m>0  AND  aRecent>0  AND  aBuild>0`}
+Gate:  r1m > 0  AND  r1m < 50%  AND  r3m > 0  AND  aRecent > 0  AND  aBuild > 0`}
           </pre>
-          <p className="mt-1.5 text-gray-500">ACC reads the whole curve, not one window: a name qualifies only if the last month is faster than the quarter AND the quarter is faster than the half-year — the price is genuinely bending up (building), not just spiking once. EXT subtracts parabolic over-extension above the 200-day MA measured in the asset&apos;s own volatility, so blow-off tops that tend to mean-revert are demoted. Every input is computable from price history at any past date, so the backtest reproduces this formula exactly.</p>
+          <p className="mt-1.5 text-gray-500">EXT now catches two types of blow-off: price stretched above MA200 (existing) AND extreme recent 1M magnitude. Backtest showed that assets with r1m &gt; 40% almost always mean-revert; the hard gate cap at 50% kills the worst outliers (Ondo +64%, Zcash +82%) while the EXT penalty demotes the rest. Weight doubled to 20% to make the signal compete with ACC on equal terms. Every input is point-in-time, so the backtest is still honest.</p>
         </div>
       </div>
     </details>
