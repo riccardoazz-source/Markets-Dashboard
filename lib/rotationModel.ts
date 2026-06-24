@@ -176,7 +176,12 @@ export function computeAccel(r1m: number, r3m: number, r6m?: number | null, r1y?
   }
   const p1y  = paceMonthly(r1y, 12);
   const aLong = p6 - p1y;
-  const accel = 0.50 * aRecent + 0.30 * aBuild + 0.20 * aLong;
+  // aLong is a BRAKE, never a booster: only its NEGATIVE side feeds the score.
+  // A maturing trend (1Y pace > 6M pace → aLong<0) is demoted, but a dormant asset
+  // that just woke up (flat 1Y, recent pop → aLong>0) gets NO bonus — otherwise the
+  // pace ladder would reward exactly the commodity pops (Sugar/Wheat/Corn) that
+  // mean-revert. The recent/build legs already capture genuine acceleration.
+  const accel = 0.55 * aRecent + 0.35 * aBuild + 0.20 * Math.min(0, aLong);
   return { accel, aRecent, aBuild, aLong };
 }
 
@@ -281,9 +286,18 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // that EXT alone can't demote (because ACC rewards them just as strongly).
     // Commodities: tighter cap (25% vs 50%) — event spikes above this threshold
     // reliably mean-revert (Silver +41%, WTI +44%, Palladium +39%).
+    // Regime confirmation: a pick must NOT be trading below its 200-day MA. This
+    // is the quality bar the backtest was missing — in shock periods the gate let
+    // through low-quality momentum pops (Sugar/Wheat/Corn flashing up while still
+    // below their 200d MA) that then mean-reverted, dragging the basket negative.
+    // A genuine rebound that has reclaimed its 200d MA still qualifies (Semis, EV
+    // off a correction), so the model's V-shape capability is preserved. When the
+    // 200d MA is unknown (recently-listed asset, too little history) we DON'T
+    // exclude — missing data must not be read as "below".
+    const regimeOk = item.ma200 == null || item.price == null || item.price >= item.ma200;
     const r1mCap = isCommodity(item) ? COMMODITY_R1M_CAP : R1M_CAP;
     const passesGate = hasReturns && item.r1m! > 0 && item.r1m! < r1mCap && item.r3m! > 0
-      && parts.aRecent > 0;
+      && parts.aRecent > 0 && regimeOk;
 
     return {
       item, score, accel: parts.accel, accPctile,

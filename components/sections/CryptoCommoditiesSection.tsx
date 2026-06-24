@@ -99,38 +99,43 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
         // CoinGecko granularity: > 90 days → daily, but free-tier caps daily
         // data at ~3650 days (10 years). Requesting days=4000+ silently
         // degrades to MONTHLY data (~141 points), which breaks SMA/EMA tools.
-        // For MAX: use Yahoo Finance (daily from 2014) as primary source.
         const daysMap: Record<string, number> = { '1D': 3, '1W': 7, 'MTD': 35, '1M': 30, '3M': 90, '6M': 180, 'YTD': 365, '1Y': 365, '3Y': 1095, '5Y': 1825, '10Y': 3650, 'MAX': 3650 };
         const days = daysMap[tf] ?? 365;
+        const yahooSym = CRYPTO_YAHOO_SYMBOLS[coin?.id ?? id];
 
-        // For MAX, try Yahoo Finance first (daily from 2014, ~4400 pts)
+        // Fetch CoinGecko and Yahoo CONCURRENTLY, then pick the best result.
+        // Why: CoinGecko's free tier rate-limits (30/min) and its route retries
+        // with backoff (up to ~4.5s) before giving up — which made recently-listed
+        // coins (e.g. Hyperliquid) load slowly or show "no data" whenever CoinGecko
+        // was throttled. Yahoo is fast and not rate-limited, so we race them: Yahoo
+        // always resolves quickly as a backstop, and CoinGecko is preferred for its
+        // finer granularity only when it returns promptly. The startDate clip below
+        // trims any pre-listing Yahoo garbage (HYPE-USD reused a delisted ticker).
+        const cgPromise: Promise<HistoricalPoint[]> = fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`)
+          .then(r => (r.ok ? r.json() : null))
+          .then(j => (Array.isArray(j) ? (j as HistoricalPoint[]) : []))
+          .catch(() => []);
+        const yPromise: Promise<HistoricalPoint[]> = yahooSym
+          ? fetch(`/api/historical?symbol=${encodeURIComponent(yahooSym)}&timeframe=${tf}`)
+              .then(r => (r.ok ? r.json() : null))
+              .then(j => (Array.isArray(j) ? (j as HistoricalPoint[]) : []))
+              .catch(() => [])
+          : Promise.resolve([]);
+
+        const yData = await yPromise;
+        // Give CoinGecko a brief window for its better granularity, but never let a
+        // throttled CoinGecko stall the chart — cap the extra wait at 1.5s.
+        const cgData = await Promise.race([
+          cgPromise,
+          new Promise<HistoricalPoint[]>(res => setTimeout(() => res([]), 1500)),
+        ]);
+
         if (tf === 'MAX') {
-          const yahooSym = CRYPTO_YAHOO_SYMBOLS[coin?.id ?? id];
-          if (yahooSym) {
-            const yRes = await fetch(`/api/historical?symbol=${encodeURIComponent(yahooSym)}&timeframe=MAX`);
-            if (yRes.ok) {
-              const yRaw = await yRes.json() as HistoricalPoint[];
-              if (Array.isArray(yRaw) && yRaw.length > 500) data = yRaw;
-            }
-          }
-        }
-
-        if (!data.length) {
-          const res = await fetch(`/api/crypto?mode=historical&id=${coin?.id ?? id}&days=${days}`);
-          const rawJson = await res.json();
-          data = Array.isArray(rawJson) ? (rawJson as HistoricalPoint[]) : [];
-        }
-
-        // Yahoo Finance fallback when CoinGecko is rate-limited (common for >1Y ranges)
-        if (!data.length) {
-          const yahooSym = CRYPTO_YAHOO_SYMBOLS[coin?.id ?? id];
-          if (yahooSym) {
-            const fbRes = await fetch(`/api/historical?symbol=${encodeURIComponent(yahooSym)}&timeframe=${tf}`);
-            if (fbRes.ok) {
-              const fbRaw = await fbRes.json() as HistoricalPoint[];
-              if (Array.isArray(fbRaw) && fbRaw.length) data = fbRaw;
-            }
-          }
+          // MAX: prefer whichever has the longer usable history.
+          data = cgData.length >= yData.length ? cgData : yData;
+        } else {
+          // Shorter ranges: prefer CoinGecko's granularity, fall back to Yahoo.
+          data = cgData.length ? cgData : yData;
         }
       }
 

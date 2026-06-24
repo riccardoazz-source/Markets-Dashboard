@@ -163,10 +163,10 @@ function RotationLegend() {
   p6  = ((1+r6m/100)^(1/6) − 1)·100
   p1y = ((1+r1y/100)^(1/12) − 1)·100
 
-  aRecent = p1 − p3    (last month faster than the quarter?)
-  aBuild  = p3 − p6    (quarter faster than the half-year? → BUILDING)
-  aLong   = p6 − p1y   (half-year faster than the annual? → whole curve bending up)
-  ACCEL   = 0.50·aRecent + 0.30·aBuild + 0.20·aLong
+  aRecent = p1 − p3         (last month faster than the quarter?)
+  aBuild  = p3 − p6         (quarter faster than the half-year? → BUILDING)
+  aLong   = p6 − p1y        (half-year vs annual → only the NEGATIVE side counts)
+  ACCEL   = 0.55·aRecent + 0.35·aBuild + 0.20·min(0, aLong)
             (2-horizon fallback 0.60/0.40 when r1y unavailable)
 
 Over-extension guard — EXT = max of two signals:
@@ -181,10 +181,11 @@ Score = ${pct(W.acceleration)} · ACC   (3-horizon acceleration percentile)
       − wEXT · EXT   (over-extension; wEXT = 20% · commodities 32%)
 
 Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
+       AND  price ≥ 200-day MA   (regime confirmation)
        (cap = 50% · commodities 25%)
-       aBuild / aLong: ranking signals — strong build/long → higher score, not gate blockers`}
+       aBuild / aLong: ranking signals, not gate blockers`}
           </pre>
-          <p className="mt-1.5 text-gray-500">aLong detects maturing trends: when the 1Y pace outpaces the 6M pace the run is winding down (aLong&lt;0), dragging ACCEL lower even if the recent month is still positive. EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). VOL rewards breakouts on elevated volume (backtest-neutral when volume history is unavailable). Every input is point-in-time, so the backtest stays honest.</p>
+          <p className="mt-1.5 text-gray-500"><span className="text-gray-300">Regime confirmation</span>: a pick must trade at/above its 200-day MA — this filters low-quality momentum pops that flash up while still below trend (and then revert), while keeping genuine rebounds that have reclaimed the MA. aLong is a <span className="text-gray-300">brake, not a booster</span>: a maturing trend (1Y pace &gt; 6M pace → aLong&lt;0) is demoted, but a dormant asset that just popped gets no bonus. EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). VOL rewards breakouts on elevated volume (backtest-neutral when volume history is unavailable). Every input is point-in-time, so the backtest stays honest.</p>
         </div>
       </div>
     </details>
