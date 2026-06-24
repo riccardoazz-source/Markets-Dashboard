@@ -178,6 +178,12 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const rankAccelAsc   = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
   const rankStretchAsc = new Map(byStretchAsc.map((r, i) => [r.symbol, i]));
   const rankR1mAbsAsc  = new Map(byR1mAbsAsc.map((r, i) => [r.symbol, i]));
+  // r6m rank — used as secondary trend signal in TRD. Only items with r6m data
+  // participate (their pool is n6m, not n), so null-r6m items aren't penalised.
+  const validWith6m  = valid.filter(i => i.r6m != null);
+  const n6m          = validWith6m.length;
+  const byR6mAsc     = [...validWith6m].sort((a, b) => a.r6m! - b.r6m!);
+  const rankR6mAsc   = new Map(byR6mAsc.map((r, i) => [r.symbol, i]));
 
   return items.map(item => {
     const hasReturns = item.r1m != null && item.r3m != null;
@@ -188,6 +194,13 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
     const accPctile  = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
     const p3m        = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
+    // TRD = composite trend signal: primary 3M (captures recent momentum), secondary
+    // 6M (captures medium-term trend when 3M is a poor measurement snapshot). The
+    // blend reduces sensitivity to the exact measurement date — e.g. an asset in a
+    // strong 6M uptrend that pulls back slightly before measurement still gets TRD
+    // credit from the 6M leg, avoiding it being penalised for the short-term dip.
+    const p6m_trd  = item.r6m != null && n6m > 0 ? toP(rankR6mAsc.get(item.symbol) ?? 0, n6m) : p3m;
+    const pTrend   = item.r6m != null ? 0.65 * p3m + 0.35 * p6m_trd : p3m;
     const pStretch   = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
     const pR1mAbs    = toP(rankR1mAbsAsc.get(item.symbol) ?? 0, n);
     // EXT = worst of: (a) price stretched far above MA200 in vol units, or
@@ -207,7 +220,7 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const W = MODEL_WEIGHTS;
     const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
     const score = hasReturns
-      ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg - extWeight * pExt
+      ? W.acceleration * accPctile + W.trend * pTrend + W.regime * reg - extWeight * pExt
       : -1;
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),

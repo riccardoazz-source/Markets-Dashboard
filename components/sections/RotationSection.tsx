@@ -188,7 +188,12 @@ Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
 }
 
 
-export function RotationSection() {
+const GROUP_TO_SECTION: Record<string, string> = {
+  Indexes: 'indexes', Crypto: 'crypto', Commodities: 'commodities',
+  Sectors: 'sectors', Stocks: 'stock',
+};
+
+export function RotationSection({ onNavigate }: { onNavigate?: (section: string, symbol: string) => void }) {
   const [items, setItems] = useState<RotationItem[]>([]);
   const [rollingLoading, setRollingLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -711,7 +716,7 @@ export function RotationSection() {
                   return (
                     <tr
                       key={item.symbol}
-                      onClick={() => toggleSymbol(item.symbol)}
+                      onClick={() => onNavigate?.(GROUP_TO_SECTION[item.group] ?? 'indexes', item.symbol)}
                       className={clsx(
                         'cursor-pointer transition-colors hover:bg-border/30',
                         isSelected && 'bg-accent/10'
@@ -721,8 +726,10 @@ export function RotationSection() {
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span
-                            className={clsx('shrink-0 w-2 h-2 rounded-full', isSelected ? 'opacity-100' : 'opacity-40')}
+                            onClick={(e) => { e.stopPropagation(); toggleSymbol(item.symbol); }}
+                            className={clsx('shrink-0 w-2.5 h-2.5 rounded-full transition-opacity', isSelected ? 'opacity-100 ring-1 ring-white/30' : 'opacity-40 hover:opacity-70')}
                             style={{ background: { Indexes:'#3b82f6', Crypto:'#f97316', Commodities:'#f59e0b', Sectors:'#8b5cf6', Stocks:'#f43f5e' }[item.group] ?? '#6b7280' }}
+                            title="Click to highlight on chart"
                           />
                           <span className="truncate text-xs font-medium text-gray-200">{item.name}</span>
                           <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-border text-gray-500 leading-none hidden sm:inline">
@@ -834,7 +841,7 @@ export function RotationSection() {
 
       {/* Backtest — time machine. Includes the active stock lists so the model
           is tested on exactly the universe shown above. */}
-      <BacktestPanel stockSymbols={stockListSymbols} />
+      <BacktestPanel stockSymbols={stockListSymbols} onNavigate={onNavigate} />
     </div>
   );
 }

@@ -86,7 +86,7 @@ export default function Home() {
         {section === 'macro'       && <MacroSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'stock'       && <StockSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'compare'     && <CompareSection jumpTo={jumpTarget} />}
-        {section === 'rotation'    && <RotationSection />}
+        {section === 'rotation'    && <RotationSection onNavigate={(s, id) => { setSection(s as Section); setJumpTarget(id); }} />}
         {section === 'sources'     && <SourcesSection />}
       </main>
 

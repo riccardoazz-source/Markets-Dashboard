@@ -47,7 +47,12 @@ function fmtDate(s: string): string {
   return new Date(s).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 }
 
-export function BacktestPanel({ stockSymbols = [] }: { stockSymbols?: string[] }) {
+const GROUP_TO_SECTION: Record<string, string> = {
+  Indexes: 'indexes', Crypto: 'crypto', Commodities: 'commodities',
+  Sectors: 'sectors', Stocks: 'stock',
+};
+
+export function BacktestPanel({ stockSymbols = [], onNavigate }: { stockSymbols?: string[]; onNavigate?: (section: string, symbol: string) => void }) {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -183,7 +188,11 @@ export function BacktestPanel({ stockSymbols = [] }: { stockSymbols?: string[] }
                     </thead>
                     <tbody className="divide-y divide-border">
                       {scenario.picks.map((p, i) => (
-                        <tr key={p.symbol}>
+                        <tr
+                          key={p.symbol}
+                          onClick={() => onNavigate?.(GROUP_TO_SECTION[p.group] ?? 'indexes', p.symbol)}
+                          className={onNavigate ? 'cursor-pointer hover:bg-white/5 transition-colors' : ''}
+                        >
                           <td className="px-2 py-1.5 text-[11px] text-gray-600 tabular-nums">{i + 1}</td>
                           <td className="px-2 py-1.5">
                             <div className="flex items-center gap-1.5 min-w-0">
@@ -225,7 +234,11 @@ export function BacktestPanel({ stockSymbols = [] }: { stockSymbols?: string[] }
                     </thead>
                     <tbody className="divide-y divide-border">
                       {scenario.winners.map((w, i) => (
-                        <tr key={w.symbol} className={clsx(w.picked && 'bg-green-500/5')}>
+                        <tr
+                          key={w.symbol}
+                          onClick={() => onNavigate?.(GROUP_TO_SECTION[w.group] ?? 'indexes', w.symbol)}
+                          className={clsx(w.picked && 'bg-green-500/5', onNavigate && 'cursor-pointer hover:bg-white/5 transition-colors')}
+                        >
                           <td className="px-2 py-1.5 text-[11px] text-gray-600 tabular-nums">{i + 1}</td>
                           <td className="px-2 py-1.5">
                             <div className="flex items-center gap-1.5 min-w-0">

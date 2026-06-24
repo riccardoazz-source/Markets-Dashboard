@@ -149,12 +149,13 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
     fwd: r.fwd,
   }));
 
-  // The assets that ACTUALLY won over the period — top ACCEL_LIMIT by forward
-  // return — so "what I'd have bought" sits next to "what actually won".
+  // The assets that ACTUALLY won over the period — same count as picks, so the two
+  // columns are directly comparable. When the model has few picks (e.g. shock period)
+  // the winners column is equally compact; when it has 15 picks, we show 15 winners.
   const winners: Winner[] = rows
     .filter((r): r is typeof r & { fwd: number } => r.fwd != null)
     .sort((a, b) => b.fwd - a.fwd)
-    .slice(0, ACCEL_LIMIT)
+    .slice(0, pickItems.length || ACCEL_LIMIT)
     .map((r): Winner => ({
       symbol: r.symbol, name: r.name, group: r.group,
       r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y,
