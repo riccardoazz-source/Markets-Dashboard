@@ -1,6 +1,24 @@
 # Rotation Model — Version History & Backtest Log
 
-## Come usare questo file
+> **La tabella viva è ora DENTRO l'app**, sotto il pannello Backtest (sezione
+> espandibile "📊 Versioni del modello & risultati backtest"). La riga del
+> modello attuale si auto-compila dall'ultimo backtest lanciato. Il registro dati
+> è in `lib/modelVersions.ts`.
+>
+> **RESTART (Modello 1)**: abbiamo azzerato la numerazione. Il "Modello 1" è la
+> formula attuale; da qui ogni cambio incrementa (Modello 2, 3, …). La cronologia
+> git qui sotto (v1–v5.2) è solo archeologia di come ci siamo arrivati.
+
+## Come iteriamo
+
+1. Lanci il backtest nell'app → la riga del Modello attuale si compila da sola
+2. Quando cambiamo formula: congelo i risultati del modello attuale in
+   `lib/modelVersions.ts` (current:false) e aggiungo il nuovo come current:true
+3. Il Reliability ratio si ricalcola da solo e marca il "★ best"
+
+---
+
+## Archeologia (git history — pre-restart)
 
 Ogni volta che cambiamo la formula del modello:
 1. Si aggiunge una riga nella tabella dei risultati con la versione precedente

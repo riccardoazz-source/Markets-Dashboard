@@ -4,6 +4,8 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { assetNavTarget } from '@/lib/config';
+import { ModelVersionsPanel } from '@/components/sections/ModelVersionsPanel';
+import type { PeriodKey, PeriodResult } from '@/lib/modelVersions';
 
 interface Pick {
   symbol: string; name: string; group: string;
@@ -81,6 +83,14 @@ export function BacktestPanel({ stockSymbols = [], onNavigate }: { stockSymbols?
 
   const scenario = data?.scenarios.find(s => s.key === active) ?? null;
   const beat = !!scenario && scenario.basketFwd != null && scenario.spxFwd != null && scenario.basketFwd > scenario.spxFwd;
+
+  // Live results for the current model, keyed by period — feeds the versions
+  // table so its row auto-fills from whatever this run produced.
+  const liveResults: Partial<Record<PeriodKey, PeriodResult>> | undefined = data
+    ? Object.fromEntries(
+        data.scenarios.map(s => [s.key, { basket: s.basketFwd, spx: s.spxFwd, picks: s.nPicks } as PeriodResult])
+      ) as Partial<Record<PeriodKey, PeriodResult>>
+    : undefined;
 
   return (
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
@@ -272,6 +282,10 @@ export function BacktestPanel({ stockSymbols = [], onNavigate }: { stockSymbols?
           </p>
         </>
       )}
+
+      {/* Model version history + reliability — auto-fills the current model row
+          from the latest run; frozen snapshots accumulate as we iterate. */}
+      <ModelVersionsPanel liveResults={liveResults} />
     </div>
   );
 }
