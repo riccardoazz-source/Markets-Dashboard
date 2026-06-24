@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
+import { realizedMonthlyVol } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -12,6 +13,7 @@ interface RollingReturn {
   r6m: number | null;
   r1y: number | null;
   ma200: number | null;
+  vol: number | null;    // realized monthly volatility (%) — feeds the blow-off guard
   volRatio: number | null;
   high52w: number | null;
   low52w: number | null;
@@ -86,6 +88,7 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     r6m: rolling(history, 180),
     r1y: rolling(history, 365),
     ma200: ma200d(history),
+    vol: realizedMonthlyVol(history.map(p => p.close)),
     volRatio: volRatio20(history),
     high52w: r.high52w,
     low52w: r.low52w,

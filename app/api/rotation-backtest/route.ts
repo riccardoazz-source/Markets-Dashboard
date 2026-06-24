@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { scoreRotation, ACCEL_LIMIT } from '@/lib/rotationModel';
+import { scoreRotation, ACCEL_LIMIT, realizedMonthlyVol } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -96,6 +96,9 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
 
   const rows = universe.map(m => {
     const h = histMap.get(m.symbol) ?? [];
+    // Realized vol from ONLY the closes up to the as-of date (no look-ahead),
+    // so the blow-off guard sees the same σ it would have seen back then.
+    const closesAsOf = h.filter(p => p.date <= asOf).map(p => p.close);
     return {
       ...m,
       r1m: retBetween(h, d1m, asOf),
@@ -104,6 +107,7 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
       r1y: retBetween(h, d1y, asOf),
       price: priceAsOf(h, asOf),
       ma200: ma200AtDate(h, asOf),
+      vol: realizedMonthlyVol(closesAsOf),
       sma200w: null as number | null, // 200W SMA not computed in backtest (too expensive)
       volRatio: null as number | null, // volume history not available in backtest
       fwd: retBetween(h, asOf, todayStr),

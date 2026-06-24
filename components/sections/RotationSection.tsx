@@ -28,6 +28,7 @@ interface RotationItem {
   r1y: number | null;
   fiveYPct: number | null;
   ma200: number | null;    // 200-day SMA (from rotation-returns)
+  vol: number | null;      // realized monthly volatility % (from rotation-returns)
   sma200w: number | null;  // 200-week SMA (from quotes/crypto/sectors)
   volRatio: number | null; // latestVol / avg20dVol (from rotation-returns)
   high52w: number | null;  // 52-week high (from rotation-returns)
@@ -42,6 +43,7 @@ interface RollingReturn {
   r6m: number | null;
   r1y: number | null;
   ma200: number | null;
+  vol: number | null;
   volRatio: number | null;
   high52w: number | null;
   low52w: number | null;
@@ -147,7 +149,7 @@ function RotationLegend() {
             <li><span className="text-amber-300">↩ rebound</span> — accelerating off a negative 6M/1Y base: a bounce off oversold, riskier than a confirmed trend</li>
             <li><span className="text-blue-300">✓ trend</span> — up across every horizon (3M, 6M, 1Y all positive): a confirmed uptrend</li>
             <li><span className="text-emerald-300">🐂 200W</span> — price above its 200-week moving average: structural long-term bull (display only — not in the score)</li>
-            <li><span className="text-green-400 font-bold">↑↑ ↑ → ↓ ↓↓</span> — acceleration: how strongly the asset is speeding up (last month&apos;s pace vs the two months before) relative to the universe</li>
+            <li><span className="text-green-400 font-bold">↑↑ ↑ → ↓ ↓↓</span> — acceleration: how strongly the asset is speeding up (pace ladder: last month vs quarter vs half-year) relative to the universe</li>
             <li><span className="text-amber-300">★</span> — pinned (saved to your database)</li>
           </ul>
         </div>
@@ -155,17 +157,26 @@ function RotationLegend() {
           <p className="text-gray-300 font-semibold mb-1">RotationScore — how &quot;Accelerating&quot; is ranked</p>
           <p className="mb-1.5">Each input is a cross-sectional percentile vs the whole universe (0–1). The list shows the <span className="text-gray-200">top {ACCEL_LIMIT}</span> by score.</p>
           <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
-{`ACCEL = r1m − (√((1+r3m)/(1+r1m)) − 1)·100
-        (last month's pace minus the two months before it)
+{`Pace ladder (geometric monthly pace at each horizon):
+  p1 = r1m
+  p3 = ((1+r3m/100)^(1/3) − 1)·100
+  p6 = ((1+r6m/100)^(1/6) − 1)·100
+
+  aRecent = p1 − p3      (last month vs the quarter)
+  aBuild  = p3 − p6      (quarter vs half-year → BUILDING)
+  ACCEL   = 0.6·aRecent + 0.4·aBuild
+
+Blow-off guard:
+  STRETCH = max(0, price/MA200 − 1)·100 / monthlyVol   (σ above MA200)
 
 Score = ${pct(W.acceleration)} · ACC   (acceleration percentile)
       + ${pct(W.trend)} · TRD   (3-month return percentile)
       + ${pct(W.regime)} · REG   (above 200-day MA→1.0 · below→0.2)
-      − ${pct(W.extension)} · EXT   (1-year return percentile — penalty)
+      − ${pct(W.extension)} · EXT   (over-extension percentile — penalty)
 
-Gate:  shown only if  r1m > 0  AND  r3m > 0  AND  ACCEL > 0`}
+Gate:  shown only if  r1m>0  AND  r3m>0  AND  aRecent>0  AND  aBuild>0`}
           </pre>
-          <p className="mt-1.5 text-gray-500">ACC measures real acceleration — whether the most recent month is faster than the preceding two (the price curve bending up), per asset, not a leaderboard reshuffle. EXT is subtracted so earlier accelerations rank above already-extended ones. Every input is computable from price history at any past date, so the backtest reproduces this formula exactly.</p>
+          <p className="mt-1.5 text-gray-500">ACC reads the whole curve, not one window: a name qualifies only if the last month is faster than the quarter AND the quarter is faster than the half-year — the price is genuinely bending up (building), not just spiking once. EXT subtracts parabolic over-extension above the 200-day MA measured in the asset&apos;s own volatility, so blow-off tops that tend to mean-revert are demoted. Every input is computable from price history at any past date, so the backtest reproduces this formula exactly.</p>
         </div>
       </div>
     </details>
@@ -266,7 +277,7 @@ export function RotationSection() {
           dayPct: q?.changePercent ?? null,
           r1m: r?.r1m ?? null, r3m: r?.r3m ?? null, r6m: r?.r6m ?? null, r1y: r?.r1y ?? null,
           fiveYPct: q?.fiveYearChangePercent ?? null,
-          ma200: r?.ma200 ?? null, sma200w: q?.sma200w ?? null, volRatio: r?.volRatio ?? null,
+          ma200: r?.ma200 ?? null, vol: r?.vol ?? null, sma200w: q?.sma200w ?? null, volRatio: r?.volRatio ?? null,
           high52w: r?.high52w ?? q?.high52w ?? null, low52w: r?.low52w ?? q?.low52w ?? null, pos52wRaw: r?.pos52w ?? null,
         };
       });
@@ -314,7 +325,7 @@ export function RotationSection() {
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
-            ma200: null, sma200w: q?.sma200w ?? null, volRatio: null,
+            ma200: null, vol: null, sma200w: q?.sma200w ?? null, volRatio: null,
             high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
           };
         });
@@ -327,7 +338,7 @@ export function RotationSection() {
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
-            ma200: null, sma200w: q?.sma200w ?? null, volRatio: null,
+            ma200: null, vol: null, sma200w: q?.sma200w ?? null, volRatio: null,
             high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
           };
         });
@@ -344,7 +355,7 @@ export function RotationSection() {
             dayPct: c?.change24hPercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: c?.fiveYearChangePercent ?? null,
-            ma200: null, sma200w: c?.sma200w ?? null, volRatio: null,
+            ma200: null, vol: null, sma200w: c?.sma200w ?? null, volRatio: null,
             high52w: null, low52w: null, pos52wRaw: null,
           };
         });
@@ -355,7 +366,7 @@ export function RotationSection() {
           dayPct: s.changePercent,
           r1m: null, r3m: null, r6m: null, r1y: null,
           fiveYPct: s.fiveYearReturn,
-          ma200: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null, volRatio: null,
+          ma200: null, vol: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null, volRatio: null,
           high52w: null, low52w: null, pos52wRaw: null,
         }));
 
@@ -374,7 +385,7 @@ export function RotationSection() {
           const r = rollingMap.get(item.symbol);
           return r ? {
             ...item,
-            r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, volRatio: r.volRatio,
+            r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, vol: r.vol, volRatio: r.volRatio,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -626,7 +637,7 @@ export function RotationSection() {
       {accelOnly && !rollingLoading && (
         <div className="space-y-2">
           <p className="text-[11px] text-green-400/80">
-            <span className="font-semibold">Early-stage rotation</span> — the top {ACCEL_LIMIT} names by RotationScore: true geometric acceleration (last month&apos;s pace faster than the two months before it), trend strength, regime vs 200-day MA, minus an extension penalty.
+            <span className="font-semibold">Early-stage rotation</span> — the top {ACCEL_LIMIT} names by RotationScore: BUILDING acceleration (last month faster than the quarter, quarter faster than the half-year), trend strength, regime vs 200-day MA, minus a blow-off penalty for parabolic over-extension.
           </p>
           <RotationLegend />
         </div>

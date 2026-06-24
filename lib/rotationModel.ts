@@ -2,42 +2,64 @@
  * Shared rotation-scoring model — the SINGLE source of truth for the
  * Accelerating shortlist AND the Rotation Quadrant Y-axis AND the backtest.
  *
- * The whole model is built from quantities that can be computed identically
- * from price history at ANY point in time (r1m, r3m, r1y, price, 200-day MA).
- * That is deliberate: it makes the historical backtest a FAITHFUL reproduction
- * of the live formula — at a past date we recompute exactly the same inputs
- * with no look-ahead, so "what would it have flagged then" is honest.
+ * Everything is built from quantities computable IDENTICALLY from price history
+ * at ANY point in time (r1m, r3m, r6m, r1y, price, 200-day MA, realized vol).
+ * That makes the historical backtest a FAITHFUL reproduction of the live
+ * formula: at a past date we recompute the exact same inputs with no
+ * look-ahead, so "what would it have flagged then" is honest.
  *
- * ── Acceleration (the core idea) ─────────────────────────────────────────────
- * True acceleration is the SECOND derivative of the price path: is the asset
- * speeding UP, not just rising? We measure it as the gap between the most recent
- * month's pace and the pace of the two months before it:
+ * ── Why v2 ───────────────────────────────────────────────────────────────────
+ * The first model measured acceleration from a SINGLE window (r1m vs r3m). The
+ * backtest exposed its weakness: it could not tell a durable, building trend
+ * (NVDA) apart from a one-month blow-off on top of an already-decelerating base
+ * (energy/commodities mid-2021, META). Both have "last month faster than the
+ * quarter", so the old formula bought both — and the blow-offs mean-reverted.
  *
- *   g1 = 1 + r1m/100                  (growth factor, last ~1 month)
- *   g3 = 1 + r3m/100                  (growth factor, last ~3 months)
- *   priorMonthly = √(g3 / g1) − 1     (monthly pace of the 2 months BEFORE last)
- *   ACCEL = r1m − priorMonthly×100    (percentage points)
+ * v2 fixes this with a PACE LADDER across the whole curve plus a blow-off guard.
  *
- * ACCEL > 0  ⇒ the last month outpaced the previous two ⇒ genuinely accelerating
- * (the price curve is convex up). This is per-asset — it does not depend on what
- * the rest of the universe did, unlike a pure leaderboard-rank shuffle.
+ * ── Acceleration: the pace ladder ────────────────────────────────────────────
+ * Convert each horizon's cumulative return into a geometric MONTHLY pace:
+ *
+ *   p1 = r1m                                   (last ~1 month)
+ *   p3 = ((1+r3m/100)^(1/3) − 1)·100           (avg monthly over last 3 months)
+ *   p6 = ((1+r6m/100)^(1/6) − 1)·100           (avg monthly over last 6 months)
+ *
+ * Two successive accelerations:
+ *   aRecent = p1 − p3   (is the last month faster than the quarter?)
+ *   aBuild  = p3 − p6   (is the quarter faster than the half-year? → BUILDING)
+ *
+ *   ACCEL = 0.6·aRecent + 0.4·aBuild           (composite, percentage points)
+ *
+ * A genuine, durable accelerator needs BOTH legs positive: the curve is bending
+ * up across the WHOLE window, not just spiking in the last month. A dead-cat
+ * bounce / blow-off has aRecent>0 but aBuild<0 (the medium term is already
+ * rolling over) → it is now rejected by the gate.
+ *
+ * ── Blow-off guard (over-extension) ──────────────────────────────────────────
+ * A parabolic top is a price stretched far above its 200-day MA RELATIVE to its
+ * own volatility. We measure stretch in monthly-σ units and subtract it, so the
+ * model prefers accelerations that are still early over ones that have already
+ * gone vertical and are prone to revert:
+ *
+ *   stretch = max(0, price/MA200 − 1)·100 / monthlyVol    (monthly-σ above MA200)
  *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = Σ weightᵢ × componentᵢ      (each component is a 0..1 percentile/level)
- *     ACC  — acceleration percentile (the main signal, see above)
- *     TRD  — r3m percentile (the move is real and in the right direction)
- *     REG  — regime: price above its 200-day MA (1.0) / below (0.2) / no data (0.5)
- *     EXT  — r1y percentile (SUBTRACTED): prefers earlier accelerations to late ones
+ *   Score = 0.50·ACC + 0.25·TRD + 0.15·REG − 0.10·EXT     (each input 0..1)
+ *     ACC — acceleration percentile (the pace-ladder composite above)
+ *     TRD — r3m percentile (the move is real and in the right direction)
+ *     REG — regime: price above its 200-day MA (1.0) / below (0.2) / no data (0.5)
+ *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
  *
- *   Gate (shown in the Accelerating shortlist only if): r1m > 0 AND r3m > 0 AND ACCEL > 0
- *   — i.e. rising AND speeding up. The list then shows the top ACCEL_LIMIT by score.
+ *   Gate (shown in the Accelerating shortlist only if):
+ *     r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  aBuild > 0
+ *   — rising AND accelerating in a BUILDING way. Top ACCEL_LIMIT by score.
  */
 
 export const MODEL_WEIGHTS = {
-  acceleration: 0.50, // ACC — month-over-prior-months pace increase (percentile)
+  acceleration: 0.50, // ACC — pace-ladder composite (percentile)
   trend:        0.25, // TRD — r3m percentile
   regime:       0.15, // REG — price vs 200-day MA
-  extension:    0.10, // EXT — r1y percentile (subtracted)
+  extension:    0.10, // EXT — over-extension above MA200 in vol units (subtracted)
 } as const;
 
 // How many names the "Accelerating" shortlist shows (top N by score).
@@ -47,9 +69,11 @@ export interface ModelInput {
   symbol: string;
   r1m: number | null;
   r3m: number | null;
+  r6m?: number | null;     // needed for the pace-ladder build leg
   r1y: number | null;
   price: number | null;
   ma200: number | null;    // 200-day SMA (null → data unavailable, not "below")
+  vol?: number | null;     // realized MONTHLY volatility in % (null → unavailable)
   sma200w?: number | null;  // kept for callers; not used by the score (backtest can't compute it)
   volRatio?: number | null; // kept for callers; not used by the score (no historical volume)
 }
@@ -57,60 +81,110 @@ export interface ModelInput {
 export interface ScoredItem<T extends ModelInput> {
   item: T;
   score: number;       // composite (higher = stronger acceleration candidate)
-  accel: number;       // raw acceleration in percentage points (can be negative)
+  accel: number;       // raw pace-ladder acceleration in percentage points
   accPctile: number;   // cross-sectional percentile of accel (0..1) — the Quadrant Y-axis
-  passesGate: boolean; // r1m>0 AND r3m>0 AND accel>0
+  aRecent: number;     // p1 − p3 (recent leg)
+  aBuild: number;      // p3 − p6 (build leg)
+  stretch: number;     // monthly-σ above the 200-day MA (blow-off measure)
+  passesGate: boolean; // r1m>0 AND r3m>0 AND aRecent>0 AND aBuild>0
 }
 
 function toP(rank: number, n: number): number {
   return n > 1 ? rank / (n - 1) : 0.5;
 }
 
-// Acceleration in percentage points: last month's pace minus the geometric
-// monthly pace of the two months before it. Positive = speeding up.
-export function computeAccel(r1m: number, r3m: number): number {
-  const g1 = 1 + r1m / 100;
-  const g3 = 1 + r3m / 100;
-  // Growth factors are always > 0 (an asset cannot lose more than 100%); guard anyway.
-  if (g1 <= 0 || g3 <= 0) return r1m;
-  const priorMonthly = (Math.sqrt(g3 / g1) - 1) * 100;
-  return r1m - priorMonthly;
+// Geometric monthly pace implied by a cumulative return over `months` months.
+function paceMonthly(r: number, months: number): number {
+  const g = 1 + r / 100;
+  if (g <= 0) return r / months; // guard (return < −100% is impossible; be safe)
+  return (Math.pow(g, 1 / months) - 1) * 100;
+}
+
+export interface AccelParts { accel: number; aRecent: number; aBuild: number }
+
+// Pace-ladder acceleration. r6m optional: without it the build leg is unknown and
+// reported as 0 (which fails the strict >0 gate — a build signal is required).
+export function computeAccel(r1m: number, r3m: number, r6m?: number | null): AccelParts {
+  const p1 = r1m;
+  const p3 = paceMonthly(r3m, 3);
+  const aRecent = p1 - p3;
+  const aBuild = r6m == null ? 0 : p3 - paceMonthly(r6m, 6);
+  const accel = 0.6 * aRecent + 0.4 * aBuild;
+  return { accel, aRecent, aBuild };
+}
+
+// Over-extension above the 200-day MA, in monthly-σ units. Only the stretch ABOVE
+// the MA is a blow-off risk; below the MA is handled by the regime term, so it
+// contributes 0 here. Larger = more parabolic = more revert-prone.
+function computeStretch(price: number | null, ma200: number | null, vol: number | null | undefined): number {
+  if (price == null || ma200 == null || ma200 <= 0) return 0;
+  const abovePct = Math.max(0, (price / ma200 - 1) * 100);
+  const denom = vol != null && vol > 0 ? vol : 10; // fallback scale when vol unknown
+  return abovePct / denom;
 }
 
 export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[] {
   const valid = items.filter(i => i.r1m != null && i.r3m != null);
   const n = valid.length;
 
-  const accelOf = (i: ModelInput) => computeAccel(i.r1m as number, i.r3m as number);
+  const accelOf = (i: ModelInput) => computeAccel(i.r1m as number, i.r3m as number, i.r6m).accel;
+  const stretchOf = (i: ModelInput) => computeStretch(i.price, i.ma200, i.vol);
 
   // Ascending-rank helpers (rank 0 = worst, rank n-1 = best) → cross-sectional percentiles.
-  const byR3mAsc   = [...valid].sort((a, b) => a.r3m! - b.r3m!);
-  const byR1yAsc   = [...valid].sort((a, b) => (a.r1y ?? -Infinity) - (b.r1y ?? -Infinity));
-  const byAccelAsc = [...valid].sort((a, b) => accelOf(a) - accelOf(b));
-  const rankR3mAsc   = new Map(byR3mAsc.map((r, i) => [r.symbol, i]));
-  const rankR1yAsc   = new Map(byR1yAsc.map((r, i) => [r.symbol, i]));
-  const rankAccelAsc = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
+  const byR3mAsc     = [...valid].sort((a, b) => a.r3m! - b.r3m!);
+  const byAccelAsc   = [...valid].sort((a, b) => accelOf(a) - accelOf(b));
+  const byStretchAsc = [...valid].sort((a, b) => stretchOf(a) - stretchOf(b));
+  const rankR3mAsc     = new Map(byR3mAsc.map((r, i) => [r.symbol, i]));
+  const rankAccelAsc   = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
+  const rankStretchAsc = new Map(byStretchAsc.map((r, i) => [r.symbol, i]));
 
   return items.map(item => {
     const hasReturns = item.r1m != null && item.r3m != null;
-    const accel = hasReturns ? accelOf(item) : 0;
+    const parts = hasReturns
+      ? computeAccel(item.r1m as number, item.r3m as number, item.r6m)
+      : { accel: 0, aRecent: 0, aBuild: 0 };
+    const stretch = stretchOf(item);
 
     const accPctile = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
-    const p3m = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
-    const p1y = toP(rankR1yAsc.get(item.symbol) ?? 0, n);
+    const p3m       = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
+    const pExt      = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
 
-    // Regime: above the 200-day MA = structural tailwind. 200-day is used (not 200W)
-    // because it is computable identically in the historical backtest.
+    // Regime: above the 200-day MA = structural tailwind. 200-day (not 200W) is
+    // used because it is computable identically in the historical backtest.
     const above200d = item.price != null && item.ma200 != null && item.price > item.ma200;
     const reg = above200d ? 1.0 : item.ma200 == null ? 0.5 : 0.2;
 
     const W = MODEL_WEIGHTS;
     const score = hasReturns
-      ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg - W.extension * p1y
+      ? W.acceleration * accPctile + W.trend * p3m + W.regime * reg - W.extension * pExt
       : -1;
 
-    const passesGate = hasReturns && item.r1m! > 0 && item.r3m! > 0 && accel > 0;
+    // BUILDING acceleration required: both legs of the pace ladder positive.
+    const passesGate = hasReturns && item.r1m! > 0 && item.r3m! > 0
+      && parts.aRecent > 0 && parts.aBuild > 0;
 
-    return { item, score, accel, accPctile, passesGate };
+    return {
+      item, score, accel: parts.accel, accPctile,
+      aRecent: parts.aRecent, aBuild: parts.aBuild, stretch, passesGate,
+    };
   });
+}
+
+// ── Realized volatility helper ──────────────────────────────────────────────
+// Monthly realized volatility (%) from a series of daily closes — the stdev of
+// daily simple returns scaled by √21. Used by both the live route and the
+// backtest so "stretch in σ units" means the same thing at any date. Lookback
+// defaults to ~3 months (63 trading days) to track the current vol regime.
+export function realizedMonthlyVol(closes: number[], lookback = 63): number | null {
+  if (closes.length < 21) return null;
+  const window = closes.slice(-lookback);
+  const rets: number[] = [];
+  for (let i = 1; i < window.length; i++) {
+    const a = window[i - 1], b = window[i];
+    if (a > 0) rets.push(b / a - 1);
+  }
+  if (rets.length < 15) return null;
+  const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
+  const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
+  return Math.sqrt(variance) * Math.sqrt(21) * 100;
 }
