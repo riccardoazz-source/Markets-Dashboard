@@ -250,8 +250,8 @@ export const ACCEL_MAX = 25;
 // heavier than pos52w) ensures genuine engines (semis: high CYC, high VQ) outrank
 // cyclical names (crypto: low CYC) when both qualify for the sleeve.
 export const PRE_BREAKOUT_SLOTS = 6;     // M14: 4→6. The sleeve holds the biggest missed winners (semis/miners falling at the pick date — MU, AVGO, CRDO). Now that crypto coins are excluded, the extra slots go to quality seculars, not cyclical pops.
-export const PRE_BREAKOUT_POS52W_MIN = 40; // M12: 60→40 — quality pullbacks allowed, not just near-52w-high names
-export const PRE_BREAKOUT_R1M_FLOOR = -25; // M12: -20→-25 — catches CRDO-type −22.9% monthly drops
+export const PRE_BREAKOUT_POS52W_MIN = 25; // M15: 40→25 — a deep quality correction sits LOW in its 52w range; that's the buy, not a disqualifier. Quality is enforced by preQualityOk + the preScore ranking instead.
+export const PRE_BREAKOUT_R1M_FLOOR = -40; // M15: -25→-40 — catches RIOT-type −25%+ drawdowns. A high-beta engine routinely corrects 30-40% before its next leg; the r1y>0 + MA200 + quality gates keep out true falling knives.
 
 export interface ModelInput {
   symbol: string;
@@ -567,7 +567,7 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // the r1m floor (−25%: a correction, not a crash), the pos52w floor (40%: not at
     // the bottom of the range), and the MA200 proximity check (price/MA200 ≥ 0.87).
     const preRegimeOk = item.ma200 != null && item.price != null
-      && item.price / item.ma200 >= 0.87; // M12: allows pullbacks up to ~13% below MA200 (was strict ≥)
+      && item.price / item.ma200 >= 0.80; // M15: 0.87→0.80 — a 20% dip below the 200d MA is still a structurally intact engine, not a breakdown.
     // M14: exclude ALL cyclicals (crypto coins AND commodities), not just commodities.
     // The 3M backtest showed the sleeve filling with crypto-coin "rebounds" (Ondo,
     // Tron, Bitcoin, Litecoin, Sui) that DON'T lead the next leg — a basing crypto
@@ -575,10 +575,20 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // winners (CRDO, AMD, Semiconductors) were missed. isCyclical catches group
     // 'Crypto' (the coins) but NOT group 'Stocks' — so the winning bitcoin MINERS
     // (RIOT, IREN, WULF, CIFR, all 'Stocks') stay fully eligible for the sleeve.
+    //
+    // M15 — the sleeve now catches DEEP quality drawdowns. The study of missed
+    // winners is unambiguous: every one (CRDO −22.9%, RIOT −25.1%, AMD, MU, AVGO,
+    // Semiconductors) was a high-beta QUALITY engine FALLING at the pick date. The
+    // old tight gates (pos52w≥40, r1m>−25, MA200) excluded exactly these. M15 widens
+    // the gates AND adds a hard quality bar so only genuine engines (above-median
+    // secular trend OR strong upside-vol) can use the wider room — junk that merely
+    // fell is filtered by preQualityOk and then out-ranked by preScore.
+    const preQualityOk = pCyc >= 0.5 || pVQ >= 0.6;
     const passesPreBreakout = hasReturns && !passesGate && !isCyclical(item)
       && item.r1y != null && item.r1y > 0
       && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
       && item.r1m != null && item.r1m > PRE_BREAKOUT_R1M_FLOOR
+      && preQualityOk
       && preRegimeOk;
     // Rank within the sleeve: CYC (secular quality) + VQ (upside engine) heavy,
     // pos52w light. M12: 0.5/0.3/0.2 → 0.3/0.4/0.3. Semis beat crypto in this ranking
