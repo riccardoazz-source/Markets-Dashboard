@@ -51,11 +51,38 @@
  *
  *   stretch = max(0, price/MA200 − 1)·100 / monthlyVol    (monthly-σ above MA200)
  *
+ * ── M6: volatility is the ENGINE, not the enemy ──────────────────────────────
+ * The backtest exposed the core flaw: the old TRD divided return by volatility
+ * (a Sharpe-like term, SHA). That REWARDS smooth low-vol assets and PENALISES
+ * the volatile ones — but the biggest winners ARE the volatile ones. At the 5Y
+ * date the model bought ADBE (+16%, then −66%) and INTU (−46%) — smooth, low-vol
+ * software — and MISSED MU (+1178%) and AVGO (+726%) — high-vol semis. A bond can
+ * "accelerate" but will never 10× because its volatility caps it; you WANT the
+ * assets with the capacity for big moves. So M6 deletes SHA and adds volQuality:
+ *
+ *   volEdge = upsideSemiDev − downsideSemiDev   (net "good" volatility, %/month)
+ *   VQ = pctile(volEdge)
+ *
+ * volEdge is HIGH for an asset whose big daily moves are mostly UP (a real engine:
+ * NVDA, MU), ~0 for a low-vol bond (no capacity) AND for a symmetric churner, and
+ * NEGATIVE for a downside-heavy/crashing asset. It rewards capacity-with-direction.
+ *
+ * ── Cycle guard (CYC) ────────────────────────────────────────────────────────
+ * A cyclical asset can have acceleration AND good upside volatility yet blow off
+ * and crash on an external shock (oil +44% then −25% on the Iran war). The tell:
+ * a secular compounder marches up persistently for a year+ (high long-horizon
+ * trend R²); a cyclical pop is a flat/choppy base with a recent vertical spike
+ * (low long-horizon R²). CYC = pctile(trendR2 over ~12 months) separates them —
+ * it counterweights VQ so peak-cycle pops (high upside vol, low long-trend R²)
+ * are demoted, while genuine compounders (high on both) are rewarded.
+ *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = 0.38·ACC + 0.22·TRD + 0.12·LEAD + 0.10·REG + 0.04·VOL − wEXT·EXT   (each input 0..1)
+ *   Score = 0.34·ACC + 0.18·VQ + 0.14·TRD + 0.12·CYC + 0.10·LEAD + 0.08·REG + 0.04·VOL − wEXT·EXT
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
- *     TRD — 0.45·p3m + 0.15·p6m + 0.40·SHA  (risk-adjusted trend; M3: SHA raised 30%→40%)
- *     LEAD— 0.6·pos52w + 0.4·trendR2 percentile (M4: quality leadership for winner capture)
+ *     VQ  — net upside volatility percentile (M6: the "good volatility" engine)
+ *     TRD — 0.6·p3m + 0.4·p6m percentile (raw durable momentum; SHA removed)
+ *     CYC — long-horizon (~12mo) trend-persistence R² percentile (secular vs cyclical)
+ *     LEAD— 0.6·pos52w + 0.4·trendR2 percentile (quality leadership for winner capture)
  *     REG — regime: pctile(price/MA200−1) graduated (far above=high, below=low, null=0.5)
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
@@ -77,10 +104,12 @@
  */
 
 export const MODEL_WEIGHTS = {
-  acceleration: 0.38, // ACC — 3-horizon pace-ladder percentile (M4: 0.45→0.38, ACC over-rewards short spikes)
-  trend:        0.22, // TRD — r3m/r6m blend + risk-adjusted SHA (inside TRD: 45%/15%/40%) (M4: 0.25→0.22)
-  lead:         0.12, // LEAD — quality leadership: 52w-range position + trend smoothness (M4 new)
-  regime:       0.10, // REG — price vs 200-day MA (graduated percentile)
+  acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar: how & how much it accelerated)
+  volQuality:   0.18, // VQ  — net upside volatility (M6: the "good volatility" engine — replaces SHA, flipped sign)
+  trend:        0.14, // TRD — raw 3M/6M momentum percentile (SHA removed; vol now lives in VQ)
+  cycle:        0.12, // CYC — long-horizon (~12mo) trend-persistence R² (M6: secular compounder vs cyclical pop)
+  lead:         0.10, // LEAD — quality leadership: 52w-range position + short-trend smoothness
+  regime:       0.08, // REG — price vs 200-day MA (graduated percentile)
   extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
   volume:       0.04, // VOL — volume confirmation (null→0.5 neutral, so backtest unaffected)
 } as const;
@@ -112,50 +141,12 @@ export const ACCEL_LIMIT = 8;
 // names are ranked by score, so the strongest always come first.
 // History: M3 cut this 25→12 to chase basket RETURN. But the capture-first
 // reliability later showed M3 caught the FEWEST real winners (13/53) — the
-// concentration optimised the wrong thing. Since capturing many winners now
-// matters more than headline return, M4 widens back to 20: more breadth = more
-// winners caught, while the LEAD quality factor lifts precision per pick.
+// concentration optimised the wrong thing. M4 widened back to 20: more breadth =
+// more winners caught. M5 tried per-group caps to break correlated ETF clusters,
+// but that just "shot into the crowd" (forced diversification dilutes conviction).
+// M6 drops the caps entirely and instead fixes the ROOT cause — the model was
+// picking low-volatility losers over high-volatility winners (see volQuality).
 export const ACCEL_MAX = 20;
-
-// ── Group diversity caps (M5) ─────────────────────────────────────────────────
-// Without caps, momentum signals cluster: at peak-momentum moments the model
-// fills 5–6 slots with correlated thematic ETFs (WCLD + CIBR + AIQ + XLK…) that
-// all peaked together in Jun 2021 and all crashed together. Individual winners
-// (NVDA, PLTR, MU) were buried below the ETF cluster even when they outscored
-// most of it, because the ETFs occupied every high slot. A per-group cap breaks
-// the cluster: once 3 Sector ETFs are chosen, the 4th-best slot goes to the next
-// group (Stocks, Crypto, Index) regardless of raw score. Stocks have no cap since
-// individual names are far less correlated than thematic ETF baskets.
-export const GROUP_CAPS: Partial<Record<string, number>> = {
-  sectors:     3,
-  indexes:     3,
-  crypto:      3,
-  commodities: 2,
-};
-
-// Group-aware pick selector — replaces a plain `.slice(0, maxTotal)`.
-// Returns the top maxTotal passing items by score, respecting per-group caps so
-// correlated ETF clusters can't crowd out other asset classes.
-export function selectWithGroupCap<T extends ModelInput>(
-  scored: ScoredItem<T>[],
-  maxTotal: number,
-): ScoredItem<T>[] {
-  const passing = scored
-    .filter(s => s.passesGate && s.score >= 0)
-    .sort((a, b) => b.score - a.score);
-  const groupCount = new Map<string, number>();
-  const selected: ScoredItem<T>[] = [];
-  for (const s of passing) {
-    if (selected.length >= maxTotal) break;
-    const grp = (s.item.group ?? '').toLowerCase();
-    const cap = GROUP_CAPS[grp];
-    const count = groupCount.get(grp) ?? 0;
-    if (cap != null && count >= cap) continue;
-    groupCount.set(grp, count + 1);
-    selected.push(s);
-  }
-  return selected;
-}
 
 export interface ModelInput {
   symbol: string;
@@ -166,9 +157,11 @@ export interface ModelInput {
   price: number | null;
   ma200: number | null;    // 200-day SMA (null → data unavailable, not "below")
   group?: string;          // asset class (e.g. 'Commodities') → enables class-aware blow-off control
-  vol?: number | null;     // realized MONTHLY volatility in % (null → unavailable)
+  vol?: number | null;     // realized MONTHLY volatility in % (null → unavailable; feeds EXT stretch)
+  volEdge?: number | null; // net upside volatility (upside − downside semidev, %/month) — VQ signal
   pos52w?: number | null;  // 0–100 position of the latest close in its 52-week range (LEAD signal)
-  trendR2?: number | null; // 0–1 smoothness of the trailing uptrend (LEAD signal; 0 if downtrend)
+  trendR2?: number | null; // 0–1 smoothness of the trailing ~6mo uptrend (LEAD signal; 0 if downtrend)
+  trendR2Long?: number | null; // 0–1 ~12mo trend persistence (CYC signal; secular vs cyclical)
   sma200w?: number | null;  // kept for callers; not used by the score (backtest can't compute it)
   volRatio?: number | null; // kept for callers; not used by the score (no historical volume)
 }
@@ -302,16 +295,25 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const n6m          = validWith6m.length;
   const byR6mAsc     = [...validWith6m].sort((a, b) => a.r6m! - b.r6m!);
   const rankR6mAsc   = new Map(byR6mAsc.map((r, i) => [r.symbol, i]));
-  // Sharpe-like ratio: r3m / monthlyVol — rewards assets whose returns are large
-  // RELATIVE to their own volatility (durable low-vol trends score higher than
-  // noisy spikes of the same magnitude). Null-vol items get neutral 0.5 so the
-  // backtest is unaffected when vol is unavailable. Perplexity formula: R(T)/σ(T).
-  const sharpe3mOf = (i: ModelInput) =>
-    (i.r3m != null && i.vol != null && i.vol > 0) ? i.r3m / i.vol : null;
-  const validWithSharpe  = valid.filter(i => sharpe3mOf(i) != null);
-  const nSharpe          = validWithSharpe.length;
-  const bySharpeAsc      = [...validWithSharpe].sort((a, b) => (sharpe3mOf(a) ?? 0) - (sharpe3mOf(b) ?? 0));
-  const rankSharpeAsc    = new Map(bySharpeAsc.map((r, i) => [r.symbol, i]));
+  // VQ — net upside volatility (M6). The biggest winners are HIGH-volatility
+  // assets; a low-vol asset (bond, utility) literally cannot 10× because its
+  // volatility caps it. The OLD model divided return by vol (Sharpe), rewarding
+  // the smooth losers (ADBE/INTU) over the volatile winners (MU/AVGO). volEdge
+  // ranks by upsideSemiDev − downsideSemiDev: high = an upside-dominated engine,
+  // ~0 = a low-vol bond OR a symmetric churner, negative = downside-heavy/crashing.
+  // Null → neutral 0.5 (assets without daily-return history aren't penalised).
+  const validWithVQ  = valid.filter(i => i.volEdge != null);
+  const nVQ          = validWithVQ.length;
+  const byVQAsc      = [...validWithVQ].sort((a, b) => (a.volEdge ?? 0) - (b.volEdge ?? 0));
+  const rankVQAsc    = new Map(byVQAsc.map((r, i) => [r.symbol, i]));
+  // CYC — long-horizon (~12mo) trend persistence. Separates a secular compounder
+  // (marches up for a year+ → high R²) from a cyclical pop (flat/choppy base with
+  // a recent vertical spike → low R²) that blows off and crashes on an external
+  // shock. Counterweights VQ: a peak-cycle pop scores high on VQ but low on CYC.
+  const validWithCyc  = valid.filter(i => i.trendR2Long != null);
+  const nCyc          = validWithCyc.length;
+  const byCycAsc      = [...validWithCyc].sort((a, b) => (a.trendR2Long ?? 0) - (b.trendR2Long ?? 0));
+  const rankCycAsc    = new Map(byCycAsc.map((r, i) => [r.symbol, i]));
 
   return items.map(item => {
     const hasReturns = item.r1m != null && item.r3m != null;
@@ -322,23 +324,12 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
     const accPctile  = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
     const p3m        = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
-    // TRD = composite trend signal with three legs:
-    //   p3m     (45%) — raw 3M return rank (recent momentum)
-    //   p6m_trd (15%) — raw 6M return rank (medium-term trend continuity)
-    //   pSharpe (40%) — r3m/monthlyVol rank (risk-adjusted: rewards smooth trends
-    //                    over noisy spikes of the same raw magnitude)
-    // M3: raised SHA weight 30%→40% to better penalise spike-and-reverse plays
-    // (commodity event spikes, meme pumps) vs genuine durable uptrends.
-    // Null-vol items get pSharpe=0.5 (neutral) — backtest and assets without vol
-    // history are unaffected.
+    // TRD = raw durable momentum: 0.6·3M-rank + 0.4·6M-rank. M6 removed the
+    // Sharpe leg (r3m/vol) — that risk-adjustment penalised exactly the volatile
+    // winners we want; volatility now lives in VQ with the CORRECT sign. Null-r6m
+    // items use p3m for the 6M leg so they aren't penalised for missing history.
     const p6m_trd  = item.r6m != null && n6m > 0 ? toP(rankR6mAsc.get(item.symbol) ?? 0, n6m) : p3m;
-    const sh3m     = sharpe3mOf(item);
-    const pSharpe  = sh3m != null && nSharpe > 0
-      ? toP(rankSharpeAsc.get(item.symbol) ?? 0, nSharpe)
-      : 0.5;
-    const pTrend   = item.r6m != null
-      ? 0.45 * p3m + 0.15 * p6m_trd + 0.40 * pSharpe
-      : 0.60 * p3m + 0.40 * pSharpe;
+    const pTrend   = 0.60 * p3m + 0.40 * p6m_trd;
     const pStretch   = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
     const pR1mAbs    = toP(rankR1mAbsAsc.get(item.symbol) ?? 0, n);
     // EXT = worst of: (a) price stretched far above MA200 in vol units, or
@@ -375,10 +366,17 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const pTq  = item.trendR2 != null && nTq  > 0 ? toP(rankTqAsc.get(item.symbol) ?? 0, nTq) : 0.5;
     const lead = 0.6 * pPos + 0.4 * pTq;
 
+    // VQ — net upside volatility percentile (the "good volatility" engine). High =
+    // capacity for big moves with an upside tilt; null → 0.5 neutral.
+    const pVQ  = item.volEdge != null && nVQ > 0 ? toP(rankVQAsc.get(item.symbol) ?? 0, nVQ) : 0.5;
+    // CYC — long-horizon trend persistence percentile (secular vs cyclical).
+    const pCyc = item.trendR2Long != null && nCyc > 0 ? toP(rankCycAsc.get(item.symbol) ?? 0, nCyc) : 0.5;
+
     const W = MODEL_WEIGHTS;
     const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
     const score = hasReturns
-      ? W.acceleration * accPctile + W.trend * pTrend + W.lead * lead + W.regime * reg + W.volume * pVol - extWeight * pExt
+      ? W.acceleration * accPctile + W.volQuality * pVQ + W.trend * pTrend + W.cycle * pCyc
+        + W.lead * lead + W.regime * reg + W.volume * pVol - extWeight * pExt
       : -1;
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
@@ -430,6 +428,31 @@ export function realizedMonthlyVol(closes: number[], lookback = 63): number | nu
   const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
   const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
   return Math.sqrt(variance) * Math.sqrt(21) * 100;
+}
+
+// ── Net upside volatility (the "good volatility" engine — M6) ────────────────
+// Splits daily returns into ups and downs and returns the difference of their
+// root-mean-squares, scaled to a monthly %. This is the signal the old Sharpe
+// term got backwards: instead of PENALISING volatility, it REWARDS the volatility
+// that points UP and penalises the volatility that points DOWN.
+//   upRms   = √(mean(r²) over positive days)   → magnitude of up-moves
+//   downRms = √(mean(r²) over negative days)   → magnitude of down-moves
+//   volEdge = (upRms − downRms)·√21·100
+// HIGH  → an upside-dominated engine (NVDA, MU: big up moves, contained downside)
+// ~0    → a low-vol bond (no capacity) OR a symmetric churner (ups ≈ downs)
+// <0    → downside-heavy / crashing. Computed identically live and in backtest
+// (both feed daily closes up to the as-of date) so it never look-aheads.
+export function upsideVolEdge(closes: number[], lookback = 63): number | null {
+  if (closes.length < 21) return null;
+  const window = closes.slice(-lookback);
+  const up: number[] = [], down: number[] = [];
+  for (let i = 1; i < window.length; i++) {
+    const a = window[i - 1], b = window[i];
+    if (a > 0) { const r = b / a - 1; if (r >= 0) up.push(r); else down.push(r); }
+  }
+  if (up.length + down.length < 15) return null;
+  const rms = (xs: number[]) => xs.length ? Math.sqrt(xs.reduce((s, x) => s + x * x, 0) / xs.length) : 0;
+  return (rms(up) - rms(down)) * Math.sqrt(21) * 100;
 }
 
 // ── Trend quality (the "smooth trend" / frog-in-the-pan signal) ──────────────

@@ -6,7 +6,7 @@ import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS, assetNavTarget } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData, QuadrantPoint } from '@/lib/gist';
-import { scoreRotation, selectWithGroupCap, ScoredItem, MODEL_WEIGHTS, ACCEL_MAX } from '@/lib/rotationModel';
+import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_MAX } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
@@ -30,12 +30,14 @@ interface RotationItem {
   fiveYPct: number | null;
   ma200: number | null;    // 200-day SMA (from rotation-returns)
   vol: number | null;      // realized monthly volatility % (from rotation-returns)
+  volEdge: number | null;  // net upside volatility %/month (from rotation-returns; VQ signal)
   sma200w: number | null;  // 200-week SMA (from quotes/crypto/sectors)
   volRatio: number | null; // latestVol / avg20dVol (from rotation-returns)
   high52w: number | null;  // 52-week high (from rotation-returns)
   low52w: number | null;   // 52-week low (from rotation-returns)
   pos52wRaw: number | null;// route-computed 52W range position (fallback)
-  trendR2: number | null;  // 0–1 trailing-trend smoothness (from rotation-returns; LEAD signal)
+  trendR2: number | null;  // 0–1 trailing ~6mo trend smoothness (from rotation-returns; LEAD signal)
+  trendR2Long: number | null; // 0–1 ~12mo trend persistence (from rotation-returns; CYC signal)
   pos52w?: number | null;  // resolved 0–100 range position fed to the model (set at scoring time)
 }
 
@@ -47,11 +49,13 @@ interface RollingReturn {
   r1y: number | null;
   ma200: number | null;
   vol: number | null;
+  volEdge: number | null;
   volRatio: number | null;
   high52w: number | null;
   low52w: number | null;
   pos52w: number | null;
   trendR2: number | null;
+  trendR2Long: number | null;
   lastClose: number | null;
 }
 
@@ -174,31 +178,37 @@ function RotationLegend() {
   ACCEL   = 0.55·aRecent + 0.35·aBuild + 0.20·min(0, aLong)
             (2-horizon fallback 0.60/0.40 when r1y unavailable)
 
-TRD = composite trend (when r6m available):
-  0.50 · p3m     (raw 3M return rank)
-  0.20 · p6m     (raw 6M return rank — medium-term continuity)
-  0.30 · SHA     (r3m / monthlyVol rank — risk-adjusted, rewards smooth trends)
-  SHA null → neutral 0.5 (backtest unaffected when vol unavailable)
+VQ = net upside volatility — the "good volatility" engine (M6):
+  upRms   = √mean(r² on UP days)      downRms = √mean(r² on DOWN days)
+  volEdge = (upRms − downRms)·√21·100     VQ = pctile(volEdge)
+  HIGH = upside-dominated mover (capacity for big moves: NVDA, MU)
+  ~0   = low-vol bond (capped) OR symmetric churner ·  <0 = downside-heavy
+  (replaces the old Sharpe term, which divided by vol → picked smooth LOSERS)
+
+TRD = raw durable momentum:  0.60 · p3m  +  0.40 · p6m   (percentile ranks)
+
+CYC = pctile( trendR2 over ~12 months )   secular vs cyclical:
+  HIGH = a compounder marching up for a year+ (NVDA)
+  LOW  = a flat/choppy base with a recent vertical spike (oil on a war) → demoted
 
 Over-extension guard — EXT = max of two signals:
   STRETCH = max(0, price/MA200 − 1)·100 / monthlyVol   (σ above MA200)
   R1M_ABS = cross-sectional percentile of |r1m|
   EXT     = max(STRETCH_pctile, R1M_ABS_pctile)
 
-Score = ${pct(W.acceleration)} · ACC   (3-horizon acceleration percentile)
-      + ${pct(W.trend)} · TRD   (3M/6M/SHA blend — see above)
-      + ${pct(W.regime)} · REG   (above 200-day MA→1.0 · below→0.2)
+Score = ${pct(W.acceleration)} · ACC   (3-horizon acceleration percentile — an asset isn't a winner if it doesn't accelerate)
+      + ${pct(W.volQuality)} · VQ   (net upside volatility — the engine of big returns)
+      + ${pct(W.trend)} · TRD   (raw 3M/6M momentum)
+      + ${pct(W.cycle)} · CYC   (12-month trend persistence — secular, not cyclical)
+      + ${pct(W.lead)} · LEAD  (52w-high position + 6mo trend smoothness)
+      + ${pct(W.regime)} · REG   (graduated percentile of price vs 200-day MA)
       + ${pct(W.volume)} · VOL   (volume: latestVol/avg20dVol percentile; null→neutral)
       − wEXT · EXT   (over-extension; wEXT = 20% · commodities 32%)
 
 Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
        AND  price ≥ 200-day MA   (regime confirmation — uses daily close, matches backtest)
        (cap = 50% · commodities 25%)
-       aBuild / aLong: ranking signals, not gate blockers
-
-Group diversity caps (M5 — full-universe "All" view only):
-  Sectors  ≤ 3   Indexes  ≤ 3   Crypto  ≤ 3   Commodities  ≤ 2   Stocks: unlimited
-  Prevents correlated ETF clusters from filling every slot at momentum peaks.`}
+       aBuild / aLong: ranking signals, not gate blockers`}
           </pre>
           <p className="mt-1.5 text-gray-500"><span className="text-gray-300">Regime confirmation</span>: a pick must trade at/above its 200-day MA — this filters low-quality momentum pops that flash up while still below trend (and then revert), while keeping genuine rebounds that have reclaimed the MA. aLong is a <span className="text-gray-300">brake, not a booster</span>: a maturing trend (1Y pace &gt; 6M pace → aLong&lt;0) is demoted, but a dormant asset that just popped gets no bonus. EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). VOL rewards breakouts on elevated volume (backtest-neutral when volume history is unavailable). Every input is point-in-time, so the backtest stays honest.</p>
         </div>
@@ -301,9 +311,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           dayPct: q?.changePercent ?? null,
           r1m: r?.r1m ?? null, r3m: r?.r3m ?? null, r6m: r?.r6m ?? null, r1y: r?.r1y ?? null,
           fiveYPct: q?.fiveYearChangePercent ?? null,
-          ma200: r?.ma200 ?? null, vol: r?.vol ?? null, sma200w: q?.sma200w ?? null, volRatio: r?.volRatio ?? null,
+          ma200: r?.ma200 ?? null, vol: r?.vol ?? null, volEdge: r?.volEdge ?? null, sma200w: q?.sma200w ?? null, volRatio: r?.volRatio ?? null,
           high52w: r?.high52w ?? q?.high52w ?? null, low52w: r?.low52w ?? q?.low52w ?? null, pos52wRaw: r?.pos52w ?? null,
-          trendR2: r?.trendR2 ?? null,
+          trendR2: r?.trendR2 ?? null, trendR2Long: r?.trendR2Long ?? null,
         };
       });
       setStockItems(built);
@@ -350,9 +360,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
-            ma200: null, vol: null, sma200w: q?.sma200w ?? null, volRatio: null,
+            ma200: null, vol: null, volEdge: null, sma200w: q?.sma200w ?? null, volRatio: null,
             high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
-            trendR2: null,
+            trendR2: null, trendR2Long: null,
           };
         });
 
@@ -364,9 +374,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             dayPct: q?.changePercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: q?.fiveYearChangePercent ?? null,
-            ma200: null, vol: null, sma200w: q?.sma200w ?? null, volRatio: null,
+            ma200: null, vol: null, volEdge: null, sma200w: q?.sma200w ?? null, volRatio: null,
             high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
-            trendR2: null,
+            trendR2: null, trendR2Long: null,
           };
         });
 
@@ -382,9 +392,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             dayPct: c?.change24hPercent ?? null,
             r1m: null, r3m: null, r6m: null, r1y: null,
             fiveYPct: c?.fiveYearChangePercent ?? null,
-            ma200: null, vol: null, sma200w: c?.sma200w ?? null, volRatio: null,
+            ma200: null, vol: null, volEdge: null, sma200w: c?.sma200w ?? null, volRatio: null,
             high52w: null, low52w: null, pos52wRaw: null,
-            trendR2: null,
+            trendR2: null, trendR2Long: null,
           };
         });
 
@@ -394,9 +404,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           dayPct: s.changePercent,
           r1m: null, r3m: null, r6m: null, r1y: null,
           fiveYPct: s.fiveYearReturn,
-          ma200: null, vol: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null, volRatio: null,
+          ma200: null, vol: null, volEdge: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null, volRatio: null,
           high52w: null, low52w: null, pos52wRaw: null,
-          trendR2: null,
+          trendR2: null, trendR2Long: null,
         }));
 
         const allItems = [...indexItems, ...commItems, ...cryptoItems, ...sectorItems];
@@ -414,9 +424,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           const r = rollingMap.get(item.symbol);
           return r ? {
             ...item,
-            r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, vol: r.vol, volRatio: r.volRatio,
+            r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, vol: r.vol, volEdge: r.volEdge ?? null, volRatio: r.volRatio,
             lastClose: r.lastClose ?? null,
-            trendR2: r.trendR2 ?? null,
+            trendR2: r.trendR2 ?? null, trendR2Long: r.trendR2Long ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -457,25 +467,19 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
     ? rows
     : rows.filter(i => i.group === groupFilter);
 
-  // Accelerating: names that clear the gate, ranked by RotationScore.
-  // When viewing ALL groups: apply per-group diversity caps (M5 — max 3 Sectors,
-  // 3 Indexes, 3 Crypto, 2 Commodities) so correlated ETF clusters can't crowd out
-  // other asset classes. When filtered to a specific group: show every qualifying
-  // name in that group with no cap (the user is explicitly browsing one class).
+  // Accelerating: EVERY name that clears the gate (r1m>0, r3m>0, aRecent>0,
+  // r1m<cap), ranked by composite RotationScore. No fixed top-N — the gate is the
+  // quality filter, so the list is as long as the market warrants (few in a shock,
+  // many in a broad rally). ACCEL_MAX is only a safety ceiling.
   const accelItems = useMemo(() => {
     if (rollingLoading) return [];
-    const scored = groupFiltered
+    return groupFiltered
       .map(i => scoreMap.get(i.symbol))
-      .filter((s): s is ScoredItem<RotationItem> => s != null);
-    if (groupFilter === 'all') {
-      return selectWithGroupCap(scored, ACCEL_MAX).map(s => s.item);
-    }
-    return scored
-      .filter(s => s.passesGate)
+      .filter((s): s is ScoredItem<RotationItem> => s != null && s.passesGate)
       .sort((a, b) => b.score - a.score)
       .slice(0, ACCEL_MAX)
       .map(s => s.item);
-  }, [groupFiltered, scoreMap, rollingLoading, groupFilter]);
+  }, [groupFiltered, scoreMap, rollingLoading]);
 
   let filteredItems = accelOnly ? accelItems : groupFiltered;
   if (pinnedOnly) filteredItems = filteredItems.filter(i => pins.has(i.symbol));

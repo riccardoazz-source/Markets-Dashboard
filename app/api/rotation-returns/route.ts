@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { realizedMonthlyVol, trendQualityR2 } from '@/lib/rotationModel';
+import { realizedMonthlyVol, upsideVolEdge, trendQualityR2 } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -14,11 +14,13 @@ interface RollingReturn {
   r1y: number | null;
   ma200: number | null;
   vol: number | null;    // realized monthly volatility (%) — feeds the blow-off guard
+  volEdge: number | null; // net upside volatility (%/month) — VQ signal (M6)
   volRatio: number | null;
   high52w: number | null;
   low52w: number | null;
   pos52w: number | null; // 0–100 position of the latest close within the 52W range
-  trendR2: number | null; // 0–1 smoothness of the trailing uptrend (LEAD signal)
+  trendR2: number | null; // 0–1 smoothness of the trailing ~6mo uptrend (LEAD signal)
+  trendR2Long: number | null; // 0–1 ~12mo trend persistence (CYC signal)
   lastClose: number | null; // most recent daily close — use for regime gate (not intraday)
 }
 
@@ -42,7 +44,7 @@ function rolling(history: { date: string; close: number }[], daysAgo: number): n
 }
 
 // 200-day simple moving average: average of the last 200 daily closes.
-// 375-day fetch ≈ 267 trading days — enough for this MA.
+// 470-day fetch ≈ 325 trading days — enough for this MA and the 252-day CYC R².
 function ma200d(history: { date: string; close: number }[]): number | null {
   if (history.length < 200) return null;
   const last200 = history.slice(-200);
@@ -91,11 +93,13 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     r1y: rolling(history, 365),
     ma200: ma200d(history),
     vol: realizedMonthlyVol(history.map(p => p.close)),
+    volEdge: upsideVolEdge(history.map(p => p.close)),
     volRatio: volRatio20(history),
     high52w: r.high52w,
     low52w: r.low52w,
     pos52w: r.pos52w,
     trendR2: trendQualityR2(history.map(p => p.close)),
+    trendR2Long: trendQualityR2(history.map(p => p.close), 252),
     lastClose: history.length > 0 ? history[history.length - 1].close : null,
   };
 }
@@ -112,7 +116,7 @@ export async function GET(req: Request) {
     if (cachedExtra && Date.now() - cachedExtra.ts < TTL) {
       return NextResponse.json(cachedExtra.data);
     }
-    const from = subDays(new Date(), 375);
+    const from = subDays(new Date(), 470);
     const to = new Date();
     const results = await Promise.allSettled(
       syms.map(sym => fetchYahooChart(sym, from, to, '1d').catch(() => []))
@@ -137,7 +141,7 @@ export async function GET(req: Request) {
     ...SECTORS.map(s => s.symbol),
   ];
 
-  const from = subDays(new Date(), 375);
+  const from = subDays(new Date(), 470);
   const to = new Date();
 
   const results = await Promise.allSettled(

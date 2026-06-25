@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { scoreRotation, selectWithGroupCap, ACCEL_LIMIT, ACCEL_MAX, realizedMonthlyVol, trendQualityR2 } from '@/lib/rotationModel';
+import { scoreRotation, ACCEL_LIMIT, ACCEL_MAX, realizedMonthlyVol, upsideVolEdge, trendQualityR2 } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -135,8 +135,10 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
       price: priceAsOf(h, asOf),
       ma200: ma200AtDate(h, asOf),
       vol: realizedMonthlyVol(closesAsOf),
+      volEdge: upsideVolEdge(closesAsOf),
       pos52w: pos52wAtDate(h, asOf),
       trendR2: trendQualityR2(closesAsOf),
+      trendR2Long: trendQualityR2(closesAsOf, 252),
       sma200w: null as number | null, // 200W SMA not computed in backtest (too expensive)
       volRatio: null as number | null, // volume history not available in backtest
       fwd: retBetween(h, asOf, todayStr),
@@ -145,11 +147,14 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
 
   const scored = scoreRotation(rows);
   const gateMap = new Map(scored.map(s => [s.item.symbol, s.passesGate]));
-  // Picks = gate-passing assets ranked by score, with per-group diversity caps
-  // (M5: max 3 Sectors, 3 Indexes, 3 Crypto, 2 Commodities, unlimited Stocks).
-  // Without caps, correlated ETF clusters (5+ thematic tech ETFs) crowd out
-  // individual winners. ACCEL_MAX remains the absolute ceiling.
-  const pickItems = selectWithGroupCap(scored, ACCEL_MAX).map(s => s.item);
+  // Picks = EVERY asset that clears the gate, ranked by score (M6 dropped the M5
+  // group caps — forced diversification just diluted conviction). ACCEL_MAX is
+  // only a safety ceiling so the basket can't become the whole universe.
+  const pickItems = scored
+    .filter(s => s.passesGate)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, ACCEL_MAX)
+    .map(s => s.item);
   const pickedSet = new Set(pickItems.map(r => r.symbol));
 
   const picks: Pick[] = pickItems.map((r): Pick => ({

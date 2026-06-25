@@ -58,9 +58,23 @@ Verifica su dati reali — vince la CATTURA, non il rendimento:
 
 M3 aveva i rendimenti più alti ma ha preso MENO vincitori → meno affidabile.
 M4 riallargò i pick (12→20) e aggiunse LEAD (pos52w + trendR2), ma a 5Y il modello
-comprava 5+ Sector ETF correlati (Cloud Computing, Cybersecurity, AI&ML, Technology)
-che picchiavano insieme a giu-2021 e crollavano insieme — prendendo solo 4/20 vincitori.
-M5 aggiunge cap per gruppo: max 3 Sectors, 3 Indexes, 3 Crypto, 2 Commodities.
+comprava software liscio a bassa volatilità (ADBE → poi −66%, INTU −46%) e MANCAVA
+i veri vincitori volatili (MU +1178%, AVGO +726%).
+
+**M5** (cap per gruppo) → RIFIUTATO: cappare la diversificazione "spara nel mucchio",
+cura il sintomo non la causa.
+
+**M6 — la volatilità è il MOTORE, non il nemico.** La causa vera era il termine SHA
+(rendimento/volatilità) che premiava i perdenti lisci e penalizzava i vincitori
+volatili. M6 lo elimina e aggiunge:
+- **VQ** = `pctile(upsideRms − downsideRms)` — premia la "volatilità buona" (capacità
+  di muoversi tanto, verso l'alto). Un bond non farà mai +200%: è cappato dalla sua
+  volatilità. Vuoi gli asset con la capacità di esplodere.
+- **CYC** = `pctile(trendR2 a ~12 mesi)` — distingue il compounder secolare (NVDA,
+  sale per un anno+) dal ciclico che esplode e crolla per fattori esterni (petrolio
+  +44%→−25% per la guerra in Iran). Fa da contrappeso a VQ.
+- **ACC** resta il pilastro #1 (peso 0.34, il più alto) E un gate: un asset non è
+  un vincitore se non accelera (serve aRecent>0 per qualificarsi).
 
 ---
 
