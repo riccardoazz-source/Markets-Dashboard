@@ -109,7 +109,7 @@
  *
  * ── Score ────────────────────────────────────────────────────────────────────
  *   Score = 0.34·ACC + 0.26·VQ + 0.08·TRD + 0.08·CYC + 0.12·LEAD + 0.04·REG
- *           + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH + REBOUND
+ *           + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH + REBOUND − LOWVQ
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
  *           M9: aLong now SYMMETRIC (0.50·aRecent + 0.35·aBuild + 0.15·aLong)
  *     VQ  — net upside volatility percentile (M6 engine; M14 raised 0.22→0.26)
@@ -187,10 +187,10 @@ export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch)
 //   bonus    = REBOUND_WEIGHT · oversold · pCyc   (added to score, quality-scaled)
 export const OVERSOLD_RSI_START = 40;   // bonus starts when RSI drops below 40
 export const OVERSOLD_RSI_FLOOR = 10;   // full bonus at RSI 10 (deeply oversold)
-export const REBOUND_WEIGHT = 0.20;     // M20: 0.10→0.20. The rebound is THE lever that
-// lifts a falling quality engine into the main top-25 (where the sleeve kept failing to
-// reach). At 0.10·oversold·pCyc the bonus was ~0.013 for CRDO — invisible. Doubled AND
-// re-scaled by pVQ (below), it now meaningfully out-ranks the low-beta defensives.
+export const REBOUND_WEIGHT = 0.30;     // M21: 0.20→0.30. M20's spread between a falling quality
+// engine (CRDO: bonus=0.080) and a defensive (S&P 500: bonus=0) was too small to reliably
+// displace defensives that win on ACC/TRD (fell less). At 0.30 CRDO gets 0.120 — strong
+// enough to overcome the momentum deficit vs a defensive that barely fell.
 
 // Cyclical asset classes: they mean-revert hardest off an overbought RSI, so the
 // overheat guard bites them. Commodities (supply/demand & fear spikes) and crypto
@@ -230,11 +230,15 @@ export const CYCLICAL_VQ_DISCOUNT = 0.5;
 // Energy & Utilities) — they beat SPX but are NEVER top-25 GAINERS, so they burn
 // capture slots. Every real winner is a high-beta upside engine (high pVQ). This
 // penalty subtracts from any name whose upside-vol percentile sits below the floor,
-// scaled by how far below — a bond (pVQ≈0.05) is sunk hard, a broad index (≈0.15)
-// moderately, a real engine (≥FLOOR) untouched. It is the symmetric partner to the
+// scaled by how far below — a bond (pVQ≈0.05) is sunk hard, a broad index (≈0.20)
+// meaningfully, a real engine (≥FLOOR) untouched. It is the symmetric partner to the
 // rebound bonus: lift the high-vol oversold engines, sink the no-engine defensives.
-export const LOWVQ_FLOOR  = 0.35;
-export const LOWVQ_WEIGHT = 0.16;
+// M21: floor 0.35→0.45 (covers more of the universe's bottom half) and weight 0.16→0.32
+// (double the penalty). M20's spread CRDO vs S&P 500 was 0.024 — too small. At 0.32
+// S&P 500 (pVQ≈0.20) gets −0.080, MSCI World −0.096, US Treasury −0.128. Combined
+// with the stronger REBOUND the total spread nearly doubles, reliably displacing defensives.
+export const LOWVQ_FLOOR  = 0.45;
+export const LOWVQ_WEIGHT = 0.32;
 
 // Size of the "who actually won" leaderboard in the backtest (top N by forward
 // return). This is a BENCHMARK size, NOT a cap on the model's picks.
@@ -562,9 +566,10 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // This is the missing daily-direction guard: overheat only fires at RSI>70 (never
     // in a selloff), so nothing was demoting the falling-modestly crypto until now.
     const vqWeight = isCyclical(item) ? W.volQuality * CYCLICAL_VQ_DISCOUNT : W.volQuality;
-    // M20 — low-VQ defensive penalty: sink names with no upside engine (bonds, broad
+    // M20/M21 — low-VQ defensive penalty: sink names with no upside engine (bonds, broad
     // indexes) that only ranked because they fell least in a selloff. Scales with how
     // far pVQ sits below the floor; a real engine (pVQ ≥ FLOOR) pays nothing.
+    // M21: floor 0.35→0.45, weight 0.16→0.32 — doubled impact on S&P 500/Treasury/MSCI World.
     const lowVQpenalty = LOWVQ_WEIGHT * Math.max(0, LOWVQ_FLOOR - pVQ);
     const score = hasReturns
       ? W.acceleration * accPctile + vqWeight * pVQ + W.trend * pTrend + W.cycle * pCyc
