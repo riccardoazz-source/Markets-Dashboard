@@ -29,6 +29,7 @@ export interface QuadrantPoint {
   r1m: number | null;
   r1y: number | null;
   isAccel: boolean;   // was it on the Accelerating shortlist that day
+  isPinned?: boolean; // was it in the user's pinned list at save time
 }
 
 export interface SentimentRecord {

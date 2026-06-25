@@ -536,9 +536,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
       r1m: item.r1m,
       r1y: item.r1y,
       isAccel: accelSet.has(item.symbol),
-      isSelected: selectedSymbols.has(item.symbol),
+      isSelected: selectedSymbols.has(item.symbol) || pins.has(item.symbol),
     }));
-  }, [groupFiltered, scoreMap, accelItems, selectedSymbols]);
+  }, [groupFiltered, scoreMap, accelItems, selectedSymbols, pins]);
 
   // When the user hits Refresh on the sentiment panel, snap the table back to the
   // canonical view (All classes, sorted by today's move) so what they see equals
@@ -569,6 +569,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
       r1m: r1(a.r1m),
       r1y: r1(a.r1y),
       isAccel: a.isAccel,
+      isPinned: pins.has(a.symbol),
     }));
   };
 

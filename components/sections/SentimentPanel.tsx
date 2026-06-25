@@ -159,7 +159,7 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
 function SavedQuadrant({ points, modelId }: { points: QuadrantPoint[]; modelId?: number }) {
   const [open, setOpen] = useState(false);
   const assets = useMemo<QuadrantAsset[]>(
-    () => points.map(p => ({ ...p, isSelected: false })),
+    () => points.map(p => ({ ...p, isSelected: p.isPinned ?? false })),
     [points],
   );
   const currentModelId = MODEL_VERSIONS.find(v => v.current)?.id;
