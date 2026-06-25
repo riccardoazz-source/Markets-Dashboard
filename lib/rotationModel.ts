@@ -54,7 +54,7 @@
  * ── Score ────────────────────────────────────────────────────────────────────
  *   Score = 0.45·ACC + 0.25·TRD + 0.10·REG + 0.04·VOL − wEXT·EXT   (each input 0..1)
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
- *     TRD — r3m/r6m blend percentile (the move is real and sustained)
+ *     TRD — 0.45·p3m + 0.15·p6m + 0.40·SHA  (risk-adjusted trend; M3: SHA raised 30%→40%)
  *     REG — regime: pctile(price/MA200−1) graduated (far above=high, below=low, null=0.5)
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
@@ -108,7 +108,9 @@ export const ACCEL_LIMIT = 8;
 // actually qualify — it can be 3 in a shock or 20 in a broad rally. This only
 // prevents the list from ballooning to the entire universe in a mega-bull;
 // names are ranked by score, so the strongest always come first.
-export const ACCEL_MAX = 25;
+// M3: reduced from 25 → 12 to concentrate picks in highest-conviction names.
+// 1Y backtest showed top-10 picks contained 9 winners; diluting to 25 adds noise.
+export const ACCEL_MAX = 12;
 
 export interface ModelInput {
   symbol: string;
@@ -262,10 +264,12 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const accPctile  = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
     const p3m        = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
     // TRD = composite trend signal with three legs:
-    //   p3m     (50%) — raw 3M return rank (recent momentum)
-    //   p6m_trd (20%) — raw 6M return rank (medium-term trend continuity)
-    //   pSharpe (30%) — r3m/monthlyVol rank (risk-adjusted: rewards smooth trends
+    //   p3m     (45%) — raw 3M return rank (recent momentum)
+    //   p6m_trd (15%) — raw 6M return rank (medium-term trend continuity)
+    //   pSharpe (40%) — r3m/monthlyVol rank (risk-adjusted: rewards smooth trends
     //                    over noisy spikes of the same raw magnitude)
+    // M3: raised SHA weight 30%→40% to better penalise spike-and-reverse plays
+    // (commodity event spikes, meme pumps) vs genuine durable uptrends.
     // Null-vol items get pSharpe=0.5 (neutral) — backtest and assets without vol
     // history are unaffected.
     const p6m_trd  = item.r6m != null && n6m > 0 ? toP(rankR6mAsc.get(item.symbol) ?? 0, n6m) : p3m;
@@ -274,8 +278,8 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       ? toP(rankSharpeAsc.get(item.symbol) ?? 0, nSharpe)
       : 0.5;
     const pTrend   = item.r6m != null
-      ? 0.50 * p3m + 0.20 * p6m_trd + 0.30 * pSharpe
-      : 0.70 * p3m + 0.30 * pSharpe;
+      ? 0.45 * p3m + 0.15 * p6m_trd + 0.40 * pSharpe
+      : 0.60 * p3m + 0.40 * pSharpe;
     const pStretch   = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
     const pR1mAbs    = toP(rankR1mAbsAsc.get(item.symbol) ?? 0, n);
     // EXT = worst of: (a) price stretched far above MA200 in vol units, or
