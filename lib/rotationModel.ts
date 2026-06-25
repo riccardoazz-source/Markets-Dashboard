@@ -117,6 +117,46 @@ export const ACCEL_LIMIT = 8;
 // winners caught, while the LEAD quality factor lifts precision per pick.
 export const ACCEL_MAX = 20;
 
+// ── Group diversity caps (M5) ─────────────────────────────────────────────────
+// Without caps, momentum signals cluster: at peak-momentum moments the model
+// fills 5–6 slots with correlated thematic ETFs (WCLD + CIBR + AIQ + XLK…) that
+// all peaked together in Jun 2021 and all crashed together. Individual winners
+// (NVDA, PLTR, MU) were buried below the ETF cluster even when they outscored
+// most of it, because the ETFs occupied every high slot. A per-group cap breaks
+// the cluster: once 3 Sector ETFs are chosen, the 4th-best slot goes to the next
+// group (Stocks, Crypto, Index) regardless of raw score. Stocks have no cap since
+// individual names are far less correlated than thematic ETF baskets.
+export const GROUP_CAPS: Partial<Record<string, number>> = {
+  sectors:     3,
+  indexes:     3,
+  crypto:      3,
+  commodities: 2,
+};
+
+// Group-aware pick selector — replaces a plain `.slice(0, maxTotal)`.
+// Returns the top maxTotal passing items by score, respecting per-group caps so
+// correlated ETF clusters can't crowd out other asset classes.
+export function selectWithGroupCap<T extends ModelInput>(
+  scored: ScoredItem<T>[],
+  maxTotal: number,
+): ScoredItem<T>[] {
+  const passing = scored
+    .filter(s => s.passesGate && s.score >= 0)
+    .sort((a, b) => b.score - a.score);
+  const groupCount = new Map<string, number>();
+  const selected: ScoredItem<T>[] = [];
+  for (const s of passing) {
+    if (selected.length >= maxTotal) break;
+    const grp = (s.item.group ?? '').toLowerCase();
+    const cap = GROUP_CAPS[grp];
+    const count = groupCount.get(grp) ?? 0;
+    if (cap != null && count >= cap) continue;
+    groupCount.set(grp, count + 1);
+    selected.push(s);
+  }
+  return selected;
+}
+
 export interface ModelInput {
   symbol: string;
   r1m: number | null;

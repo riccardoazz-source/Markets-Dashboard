@@ -54,9 +54,13 @@ Verifica su dati reali — vince la CATTURA, non il rendimento:
 | M1 (25 pick) | modesto | **36/105 (34%)** | **22.8 ★** |
 | M2 (25 pick) | buono | 23/80 (29%) | 18.7 |
 | M3 (12 pick) | +167% a 1Y! | 13/53 (25%) | 18.0 |
+| M4 (20 pick) | 103% a 5Y | 24/85 (28%) | 19.3 |
 
 M3 aveva i rendimenti più alti ma ha preso MENO vincitori → meno affidabile.
-Per questo M4 riallarga i pick (12→20): più ampiezza = più vincitori catturati.
+M4 riallargò i pick (12→20) e aggiunse LEAD (pos52w + trendR2), ma a 5Y il modello
+comprava 5+ Sector ETF correlati (Cloud Computing, Cybersecurity, AI&ML, Technology)
+che picchiavano insieme a giu-2021 e crollavano insieme — prendendo solo 4/20 vincitori.
+M5 aggiunge cap per gruppo: max 3 Sectors, 3 Indexes, 3 Crypto, 2 Commodities.
 
 ---
 

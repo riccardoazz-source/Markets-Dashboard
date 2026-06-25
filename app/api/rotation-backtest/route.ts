@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { scoreRotation, ACCEL_LIMIT, ACCEL_MAX, realizedMonthlyVol, trendQualityR2 } from '@/lib/rotationModel';
+import { scoreRotation, selectWithGroupCap, ACCEL_LIMIT, ACCEL_MAX, realizedMonthlyVol, trendQualityR2 } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -145,15 +145,11 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
 
   const scored = scoreRotation(rows);
   const gateMap = new Map(scored.map(s => [s.item.symbol, s.passesGate]));
-  // Picks = EVERY asset that clears the gate, ranked by score. No fixed top-N cap:
-  // the gate is the quality filter, so the basket holds however many genuinely
-  // qualify (few in a shock, many in a broad rally). ACCEL_MAX is only a safety
-  // ceiling so the basket can't silently become the whole universe in a mega-bull.
-  const pickItems = scored
-    .filter(s => s.passesGate)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, ACCEL_MAX)
-    .map(s => s.item);
+  // Picks = gate-passing assets ranked by score, with per-group diversity caps
+  // (M5: max 3 Sectors, 3 Indexes, 3 Crypto, 2 Commodities, unlimited Stocks).
+  // Without caps, correlated ETF clusters (5+ thematic tech ETFs) crowd out
+  // individual winners. ACCEL_MAX remains the absolute ceiling.
+  const pickItems = selectWithGroupCap(scored, ACCEL_MAX).map(s => s.item);
   const pickedSet = new Set(pickItems.map(r => r.symbol));
 
   const picks: Pick[] = pickItems.map((r): Pick => ({

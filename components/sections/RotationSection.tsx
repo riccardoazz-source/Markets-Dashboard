@@ -6,7 +6,7 @@ import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS, assetNavTarget } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData, QuadrantPoint } from '@/lib/gist';
-import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_MAX } from '@/lib/rotationModel';
+import { scoreRotation, selectWithGroupCap, ScoredItem, MODEL_WEIGHTS, ACCEL_MAX } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
@@ -194,7 +194,11 @@ Score = ${pct(W.acceleration)} · ACC   (3-horizon acceleration percentile)
 Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
        AND  price ≥ 200-day MA   (regime confirmation — uses daily close, matches backtest)
        (cap = 50% · commodities 25%)
-       aBuild / aLong: ranking signals, not gate blockers`}
+       aBuild / aLong: ranking signals, not gate blockers
+
+Group diversity caps (M5 — full-universe "All" view only):
+  Sectors  ≤ 3   Indexes  ≤ 3   Crypto  ≤ 3   Commodities  ≤ 2   Stocks: unlimited
+  Prevents correlated ETF clusters from filling every slot at momentum peaks.`}
           </pre>
           <p className="mt-1.5 text-gray-500"><span className="text-gray-300">Regime confirmation</span>: a pick must trade at/above its 200-day MA — this filters low-quality momentum pops that flash up while still below trend (and then revert), while keeping genuine rebounds that have reclaimed the MA. aLong is a <span className="text-gray-300">brake, not a booster</span>: a maturing trend (1Y pace &gt; 6M pace → aLong&lt;0) is demoted, but a dormant asset that just popped gets no bonus. EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). VOL rewards breakouts on elevated volume (backtest-neutral when volume history is unavailable). Every input is point-in-time, so the backtest stays honest.</p>
         </div>
@@ -453,19 +457,25 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
     ? rows
     : rows.filter(i => i.group === groupFilter);
 
-  // Accelerating: EVERY name that clears the gate (r1m>0, r3m>0, aRecent>0,
-  // r1m<cap), ranked by composite RotationScore. No fixed top-N — the gate is the
-  // quality filter, so the list is as long as the market warrants (few in a shock,
-  // many in a broad rally). ACCEL_MAX is only a safety ceiling.
+  // Accelerating: names that clear the gate, ranked by RotationScore.
+  // When viewing ALL groups: apply per-group diversity caps (M5 — max 3 Sectors,
+  // 3 Indexes, 3 Crypto, 2 Commodities) so correlated ETF clusters can't crowd out
+  // other asset classes. When filtered to a specific group: show every qualifying
+  // name in that group with no cap (the user is explicitly browsing one class).
   const accelItems = useMemo(() => {
     if (rollingLoading) return [];
-    return groupFiltered
+    const scored = groupFiltered
       .map(i => scoreMap.get(i.symbol))
-      .filter((s): s is ScoredItem<RotationItem> => s != null && s.passesGate)
+      .filter((s): s is ScoredItem<RotationItem> => s != null);
+    if (groupFilter === 'all') {
+      return selectWithGroupCap(scored, ACCEL_MAX).map(s => s.item);
+    }
+    return scored
+      .filter(s => s.passesGate)
       .sort((a, b) => b.score - a.score)
       .slice(0, ACCEL_MAX)
       .map(s => s.item);
-  }, [groupFiltered, scoreMap, rollingLoading]);
+  }, [groupFiltered, scoreMap, rollingLoading, groupFilter]);
 
   let filteredItems = accelOnly ? accelItems : groupFiltered;
   if (pinnedOnly) filteredItems = filteredItems.filter(i => pins.has(i.symbol));
