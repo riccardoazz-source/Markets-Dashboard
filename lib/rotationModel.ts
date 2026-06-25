@@ -55,7 +55,7 @@
  *   Score = 0.45·ACC + 0.25·TRD + 0.10·REG + 0.04·VOL − wEXT·EXT   (each input 0..1)
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
  *     TRD — r3m/r6m blend percentile (the move is real and sustained)
- *     REG — regime: price above its 200-day MA (1.0) / below (0.2) / no data (0.5)
+ *     REG — regime: pctile(price/MA200−1) graduated (far above=high, below=low, null=0.5)
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
  *     wEXT: 0.20 standard · 0.32 commodities
@@ -215,6 +215,18 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const rankAccelAsc   = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
   const rankStretchAsc = new Map(byStretchAsc.map((r, i) => [r.symbol, i]));
   const rankR1mAbsAsc  = new Map(byR1mAbsAsc.map((r, i) => [r.symbol, i]));
+  // Graduated REG: percentile of (price/MA200 − 1) across universe.
+  // M1 gave all above-MA200 assets REG=1.0 (no discrimination). Graduated REG
+  // distinguishes a structural bull leader (far above MA200) from a fresh breakout
+  // (barely above). Assets below MA200 rank low but the gate already hard-excludes them.
+  // Null MA200 → 0.5 neutral (no data is not punished).
+  const regValOf = (i: ModelInput): number | null =>
+    i.price != null && i.ma200 != null && i.ma200 > 0 ? (i.price / i.ma200 - 1) * 100 : null;
+  const validWithReg  = valid.filter(i => regValOf(i) != null);
+  const nReg          = validWithReg.length;
+  const byRegAsc      = [...validWithReg].sort((a, b) => (regValOf(a) ?? 0) - (regValOf(b) ?? 0));
+  const rankRegAsc    = new Map(byRegAsc.map((r, i) => [r.symbol, i]));
+
   // Volume confirmation: cross-sectional percentile of latestVol/avg20dVol.
   // Only items with a real volRatio participate; items without (backtest, most
   // crypto) get the neutral 0.5 rank — so the backtest is completely unaffected
@@ -272,10 +284,12 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // by a sector-wide rally (e.g., all commodities extended together).
     const pExt = Math.max(pStretch, pR1mAbs);
 
-    // Regime: above the 200-day MA = structural tailwind. 200-day (not 200W) is
-    // used because it is computable identically in the historical backtest.
-    const above200d = item.price != null && item.ma200 != null && item.price > item.ma200;
-    const reg = above200d ? 1.0 : item.ma200 == null ? 0.5 : 0.2;
+    // Graduated REG: percentile of (price/MA200 − 1). Null MA200 → 0.5 neutral.
+    // Far above MA200 = high rank, just above = mid, below = low rank.
+    // The gate still hard-excludes below-MA200 assets from the shortlist;
+    // graduated REG only refines the score among assets that PASS the gate.
+    const regRaw = regValOf(item);
+    const reg = regRaw != null && nReg > 0 ? toP(rankRegAsc.get(item.symbol) ?? 0, nReg) : 0.5;
 
     // Commodities carry a heavier over-extension penalty (they snap back harder),
     // but because the penalty scales with pExt a commodity that is only modestly

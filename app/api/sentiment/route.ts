@@ -78,6 +78,26 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'bad_request' }, { status: 400 });
   }
 
+  // Fetch CNN Fear & Greed index (non-fatal — if it fails, omit from the report).
+  let fgScore: number | null = null;
+  let fgLabel = '';
+  try {
+    const fgCtrl = new AbortController();
+    const fgTimer = setTimeout(() => fgCtrl.abort(), 6000);
+    const fgRes = await fetch('https://production.dataviz.cnn.io/index/fearandgreed/graphdata', {
+      signal: fgCtrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    clearTimeout(fgTimer);
+    if (fgRes.ok) {
+      const fgJson = await fgRes.json() as { fear_and_greed?: { score?: number; rating?: string } };
+      if (fgJson.fear_and_greed?.score != null) {
+        fgScore = Math.round(fgJson.fear_and_greed.score);
+        fgLabel = fgJson.fear_and_greed.rating ?? '';
+      }
+    }
+  } catch { /* non-fatal */ }
+
   const table = snap.table ?? [];
 
   const levelsStr = Object.entries(snap.levels ?? {})
@@ -98,8 +118,11 @@ export async function POST(req: Request) {
     return `=== ${g.toUpperCase()} (${rows.length}) ===\n` + rows.map(m => `  ${fmtRow(m)}`).join('\n');
   }).join('\n\n');
 
+  const fgLine = fgScore != null ? `CNN FEAR & GREED INDEX: ${fgScore}/100 — ${fgLabel}\n` : '';
+
   const dataBlock =
     `DATE: ${snap.date}\n` +
+    (fgLine ? fgLine : '') +
     `KEY PRICE LEVELS: ${levelsStr}\n\n` +
     `TODAY'S BIGGEST MOVES (anchor the headline + macro_note here FIRST):\n` +
     `  UP:   ${topUp || 'n/a'}\n` +
@@ -182,6 +205,13 @@ export async function POST(req: Request) {
     const parsed = parseKV(text);
     if (!parsed.regime_now && !parsed.headline) {
       return NextResponse.json({ error: 'unparsed', raw: text.slice(0, 500) }, { status: 200 });
+    }
+
+    // Append Fear & Greed as structured data fields so the UI can render them
+    // without asking Gemini to re-state exact numbers it might hallucinate.
+    if (fgScore != null) {
+      parsed.fear_greed_score = String(fgScore);
+      parsed.fear_greed_label = fgLabel;
     }
 
     return NextResponse.json({ data: parsed, generatedAt: new Date().toISOString() });

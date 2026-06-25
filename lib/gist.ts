@@ -37,6 +37,7 @@ export interface SentimentRecord {
   generatedAt: string; // ISO timestamp of the reading
   data: Record<string, string>;
   quadrant?: QuadrantPoint[]; // snapshot of the Rotation Quadrant at reading time
+  modelId?: number;    // rotation model version active at generation time (for the quadrant label)
 }
 
 export interface GistData {

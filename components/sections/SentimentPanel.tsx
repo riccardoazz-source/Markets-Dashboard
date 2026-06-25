@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useGistData, SentimentRecord, QuadrantPoint, makeId } from '@/lib/gist';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
+import { MODEL_VERSIONS } from '@/lib/modelVersions';
 
 interface SnapshotMover {
   name: string; group: string;
@@ -36,6 +37,9 @@ interface SentimentData {
   commodities_note?: string;
   sectors_note?: string;
   stocks_note?: string;
+  // Fear & Greed index (CNN, fetched server-side and injected)
+  fear_greed_score?: string;
+  fear_greed_label?: string;
 }
 
 // Per-asset-class note key → display label + emoji.
@@ -46,6 +50,15 @@ const CLASS_NOTES: { key: keyof SentimentData; label: string }[] = [
   { key: 'sectors_note',     label: '🏭 Sectors'     },
   { key: 'stocks_note',      label: '🏷️ Stocks'      },
 ];
+
+// Fear & Greed score → colour bucket.
+function fgColor(score: number): string {
+  if (score <= 25) return 'border-red-500/50 bg-red-500/10 text-red-300';
+  if (score <= 45) return 'border-orange-500/50 bg-orange-500/10 text-orange-300';
+  if (score <= 55) return 'border-gray-500/50 bg-gray-500/10 text-gray-300';
+  if (score <= 75) return 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300';
+  return 'border-emerald-600/50 bg-emerald-600/15 text-emerald-200';
+}
 
 // Regime → colour. Unknown labels fall back to neutral.
 const REGIME_CLS: Record<string, string> = {
@@ -84,7 +97,7 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
         <p className={clsx('font-semibold text-gray-100 leading-snug', compact ? 'text-xs' : 'text-sm')}>{d.headline}</p>
       )}
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className={clsx('grid gap-2', d.fear_greed_score ? 'grid-cols-3' : 'grid-cols-2')}>
         <div className={clsx('rounded-lg border p-2.5', regimeCls(d.regime_now))}>
           <p className="text-[9px] uppercase tracking-widest opacity-60 mb-0.5">Now</p>
           <p className={clsx('font-black leading-tight', compact ? 'text-sm' : 'text-base')}>{d.regime_now ?? '—'}</p>
@@ -93,6 +106,13 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
           <p className="text-[9px] uppercase tracking-widest opacity-60 mb-0.5">Next ~month</p>
           <p className={clsx('font-black leading-tight', compact ? 'text-sm' : 'text-base')}>{d.regime_next ?? '—'}</p>
         </div>
+        {d.fear_greed_score && (
+          <div className={clsx('rounded-lg border p-2.5', fgColor(Number(d.fear_greed_score)))}>
+            <p className="text-[9px] uppercase tracking-widest opacity-60 mb-0.5">Fear &amp; Greed</p>
+            <p className={clsx('font-black leading-tight tabular-nums', compact ? 'text-sm' : 'text-base')}>{d.fear_greed_score}</p>
+            {d.fear_greed_label && <p className="text-[9px] opacity-70 leading-tight mt-0.5">{d.fear_greed_label}</p>}
+          </div>
+        )}
       </div>
 
       <div className="space-y-2 text-xs leading-relaxed">
@@ -136,12 +156,19 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
 
 // Re-draws a saved Rotation Quadrant from stored points. Collapsed by default so
 // the history stays scannable; expand to see that day's full rotation picture.
-function SavedQuadrant({ points }: { points: QuadrantPoint[] }) {
+function SavedQuadrant({ points, modelId }: { points: QuadrantPoint[]; modelId?: number }) {
   const [open, setOpen] = useState(false);
   const assets = useMemo<QuadrantAsset[]>(
     () => points.map(p => ({ ...p, isSelected: false })),
     [points],
   );
+  const currentModelId = MODEL_VERSIONS.find(v => v.current)?.id;
+  const modelLabel = modelId != null
+    ? modelId === currentModelId
+      ? `M${modelId} (current model)`
+      : `M${modelId} — current is M${currentModelId ?? '?'}`
+    : null;
+
   return (
     <div className="mt-3 rounded-lg border border-border bg-bg-input/30 overflow-hidden">
       <button
@@ -150,6 +177,16 @@ function SavedQuadrant({ points }: { points: QuadrantPoint[] }) {
       >
         {open ? <ChevronDown size={12} className="shrink-0 text-gray-600" /> : <ChevronRight size={12} className="shrink-0 text-gray-600" />}
         <span className="text-[11px] font-medium text-gray-400">🧭 Rotation Quadrant — that day</span>
+        {modelLabel && (
+          <span className={clsx(
+            'ml-auto text-[9px] px-1.5 py-0.5 rounded border leading-none',
+            modelId === currentModelId
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+              : 'border-amber-500/40 bg-amber-500/10 text-amber-400',
+          )}>
+            {modelLabel}
+          </span>
+        )}
       </button>
       {open && (
         <div className="px-1.5 pb-2">
@@ -208,12 +245,14 @@ export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun 
       // Save to the gist database, one record per day (a same-day refresh replaces it).
       const today = new Date().toISOString().slice(0, 10);
       const quadrant = getQuadrant?.();
+      const activeModelId = MODEL_VERSIONS.find(v => v.current)?.id;
       const record: SentimentRecord = {
         id: makeId(),
         date: today,
         generatedAt: json.generatedAt ?? new Date().toISOString(),
         data: json.data,
         ...(quadrant && quadrant.length ? { quadrant } : {}),
+        ...(activeModelId != null ? { modelId: activeModelId } : {}),
       };
       const prior = (gistData.sentiments ?? []).filter(r => r.date !== today);
       const nextList = [record, ...prior]
@@ -278,7 +317,7 @@ export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun 
       {d && showLatest && (
         <div className={clsx(loading && 'opacity-50')}>
           <SentimentBody d={d} />
-          {latest?.quadrant && latest.quadrant.length > 0 && <SavedQuadrant points={latest.quadrant} />}
+          {latest?.quadrant && latest.quadrant.length > 0 && <SavedQuadrant points={latest.quadrant} modelId={latest.modelId} />}
           <p className="mt-3 text-[10px] text-gray-600 italic text-right">AI + web search — not financial advice.</p>
         </div>
       )}
@@ -318,7 +357,7 @@ export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun 
                     {isOpen && (
                       <div className="px-2.5 pb-2.5 pt-1 border-t border-border">
                         <SentimentBody d={rd} compact />
-                        {rec.quadrant && rec.quadrant.length > 0 && <SavedQuadrant points={rec.quadrant} />}
+                        {rec.quadrant && rec.quadrant.length > 0 && <SavedQuadrant points={rec.quadrant} modelId={rec.modelId} />}
                       </div>
                     )}
                   </div>
