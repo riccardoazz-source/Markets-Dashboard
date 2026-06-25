@@ -187,7 +187,10 @@ export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch)
 //   bonus    = REBOUND_WEIGHT · oversold · pCyc   (added to score, quality-scaled)
 export const OVERSOLD_RSI_START = 40;   // bonus starts when RSI drops below 40
 export const OVERSOLD_RSI_FLOOR = 10;   // full bonus at RSI 10 (deeply oversold)
-export const REBOUND_WEIGHT = 0.10;     // max lift for a deeply-oversold top-quality secular
+export const REBOUND_WEIGHT = 0.20;     // M20: 0.10→0.20. The rebound is THE lever that
+// lifts a falling quality engine into the main top-25 (where the sleeve kept failing to
+// reach). At 0.10·oversold·pCyc the bonus was ~0.013 for CRDO — invisible. Doubled AND
+// re-scaled by pVQ (below), it now meaningfully out-ranks the low-beta defensives.
 
 // Cyclical asset classes: they mean-revert hardest off an overbought RSI, so the
 // overheat guard bites them. Commodities (supply/demand & fear spikes) and crypto
@@ -221,6 +224,17 @@ function isCommodity(i: ModelInput): boolean {
 // in the universe) topped the VQ rank and crowded the top 25 in every selloff, since
 // the overheat guard only fires at RSI>70 and never bites in a downturn.
 export const CYCLICAL_VQ_DISCOUNT = 0.5;
+
+// M20 — low-VQ defensive penalty. In a selloff the top 25 was filling with low-beta
+// names that simply fell LEAST (US Treasury 1-3yr, S&P 500, MSCI World, Dow Jones,
+// Energy & Utilities) — they beat SPX but are NEVER top-25 GAINERS, so they burn
+// capture slots. Every real winner is a high-beta upside engine (high pVQ). This
+// penalty subtracts from any name whose upside-vol percentile sits below the floor,
+// scaled by how far below — a bond (pVQ≈0.05) is sunk hard, a broad index (≈0.15)
+// moderately, a real engine (≥FLOOR) untouched. It is the symmetric partner to the
+// rebound bonus: lift the high-vol oversold engines, sink the no-engine defensives.
+export const LOWVQ_FLOOR  = 0.35;
+export const LOWVQ_WEIGHT = 0.16;
 
 // Size of the "who actually won" leaderboard in the backtest (top N by forward
 // return). This is a BENCHMARK size, NOT a cap on the model's picks.
@@ -521,15 +535,21 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
     // M13 — RSI oversold REBOUND bonus (the buy-the-dip half of RSI). Mirrors the
     // overheat penalty: zero until RSI drops below 40, full at RSI 10. Added ONLY
-    // for quality seculars in a structural uptrend (scaled by pCyc), so an oversold
-    // compounder (MU/CRDO before its next leg) gets lifted while an oversold cyclical
-    // or a name with no year-long uptrend gets nothing — no falling knives.
+    // for quality seculars in a structural uptrend, so an oversold compounder
+    // (MU/CRDO before its next leg) gets lifted while an oversold cyclical or a name
+    // with no year-long uptrend gets nothing — no falling knives.
+    // M20 — scaled by pVQ, NOT pCyc. The deepest-drawdown winners (CRDO, RIOT) are
+    // VOLATILE engines: HIGH pVQ (upside vol) but only MODERATE pCyc (jumpy chart →
+    // low trend-R²). Scaling by pCyc made the bonus ~0.013 (invisible) for exactly
+    // these names. pVQ — the trait every real winner shares — makes the bonus land
+    // where it should. r1y>0 + non-cyclical still gate out true falling knives, so
+    // an oversold high-vol JUNK name (no year-long uptrend) gets nothing.
     const oversold = item.rsi != null
       ? Math.max(0, Math.min(1, (OVERSOLD_RSI_START - item.rsi) / (OVERSOLD_RSI_START - OVERSOLD_RSI_FLOOR)))
       : 0;
     const structuralUptrend = item.r1y != null && item.r1y > 0;
     const reboundWeight = (!isCyclical(item) && structuralUptrend) ? REBOUND_WEIGHT : 0;
-    const reboundBonus = reboundWeight * oversold * pCyc;
+    const reboundBonus = reboundWeight * oversold * pVQ;
 
     const W = MODEL_WEIGHTS;
     const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
@@ -542,10 +562,14 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // This is the missing daily-direction guard: overheat only fires at RSI>70 (never
     // in a selloff), so nothing was demoting the falling-modestly crypto until now.
     const vqWeight = isCyclical(item) ? W.volQuality * CYCLICAL_VQ_DISCOUNT : W.volQuality;
+    // M20 — low-VQ defensive penalty: sink names with no upside engine (bonds, broad
+    // indexes) that only ranked because they fell least in a selloff. Scales with how
+    // far pVQ sits below the floor; a real engine (pVQ ≥ FLOOR) pays nothing.
+    const lowVQpenalty = LOWVQ_WEIGHT * Math.max(0, LOWVQ_FLOOR - pVQ);
     const score = hasReturns
       ? W.acceleration * accPctile + vqWeight * pVQ + W.trend * pTrend + W.cycle * pCyc
         + W.lead * lead + W.regime * reg + W.volume * pVol + W.macd * pMacd
-        - extWeight * pExt - ohWeight * overheat + reboundBonus
+        - extWeight * pExt - ohWeight * overheat + reboundBonus - lowVQpenalty
       : -1;
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
