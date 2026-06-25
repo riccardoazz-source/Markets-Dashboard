@@ -240,6 +240,22 @@ export const CYCLICAL_VQ_DISCOUNT = 0.5;
 export const LOWVQ_FLOOR  = 0.45;
 export const LOWVQ_WEIGHT = 0.32;
 
+// M23 — the secular-cyclical exemption (the "gold rush" fix). The blanket cyclical
+// brakes (half VQ, heavy RSI-overheat, heavy commodity blow-off EXT) treat EVERY
+// commodity/crypto as a reflexive pop. But a genuine SECULAR commodity bull — the
+// 2024-25 gold run: smooth, persistent, marching up for a year+ → HIGH long-horizon
+// trend persistence (trendR2Long / pCyc) — is NOT a fear-spike, and penalising it the
+// same way would have MISSED the whole move. So the cyclical brakes now FADE OUT as
+// pCyc rises: a jumpy pop (low pCyc) gets the full brake, a durable secular trend
+// (high pCyc) is treated like any other secular engine (full VQ, light overheat,
+// standard EXT). This is the trait that separates the two: a silver fear-spike or a
+// crypto pump has low pCyc (flat base + vertical spike); a multi-year gold/uptrend has
+// high pCyc. Crucially it PRESERVES the M19 crypto-selloff fix: crypto falling in a
+// selloff has LOW pCyc (broken/choppy chart) → still fully discounted. Only a cyclical
+// that has EARNED secular trend quality is exempted.
+export const SECULAR_CYC_LOW  = 0.55; // pCyc ≤ this → full cyclical brake (pop)
+export const SECULAR_CYC_HIGH = 0.75; // pCyc ≥ this → no cyclical brake (secular engine)
+
 // Size of the "who actually won" leaderboard in the backtest (top N by forward
 // return). This is a BENCHMARK size, NOT a cap on the model's picks.
 export const ACCEL_LIMIT = 8;
@@ -535,7 +551,17 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const overheat = item.rsi != null
       ? Math.max(0, Math.min(1, (item.rsi - OVERHEAT_RSI_START) / (100 - OVERHEAT_RSI_START)))
       : 0;
-    const ohWeight = isCyclical(item) ? OVERHEAT_WEIGHT_CYCLICAL : OVERHEAT_WEIGHT_DEFAULT;
+    // M23 — secularness: 0 = jumpy cyclical pop (full brake), 1 = secular bull (no brake).
+    // Linear ramp over pCyc between the two thresholds. Non-cyclicals never use it.
+    const secularness = isCyclical(item)
+      ? Math.max(0, Math.min(1, (pCyc - SECULAR_CYC_LOW) / (SECULAR_CYC_HIGH - SECULAR_CYC_LOW)))
+      : 0;
+    // Overheat brake fades from the heavy cyclical weight (a fear-spike at RSI 90) to the
+    // light default (a secular grower can run hot for months — gold/NVDA alike) as the
+    // trend earns secular quality.
+    const ohWeight = isCyclical(item)
+      ? OVERHEAT_WEIGHT_CYCLICAL + (OVERHEAT_WEIGHT_DEFAULT - OVERHEAT_WEIGHT_CYCLICAL) * secularness
+      : OVERHEAT_WEIGHT_DEFAULT;
 
     // M13 — RSI oversold REBOUND bonus (the buy-the-dip half of RSI). Mirrors the
     // overheat penalty: zero until RSI drops below 40, full at RSI 10. Added ONLY
@@ -556,7 +582,13 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const reboundBonus = reboundWeight * oversold * pVQ;
 
     const W = MODEL_WEIGHTS;
-    const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
+    // Commodity blow-off EXT fades from the heavy commodity weight (a reflexive spike)
+    // to the standard weight as the trend earns secular quality (M23). The pExt stretch
+    // term still catches a genuine parabolic top regardless — this only stops a steady
+    // secular commodity bull from being over-penalised as if it were a fear-spike.
+    const extWeight = isCommodity(item)
+      ? W.extension + (COMMODITY_EXT_WEIGHT - W.extension) * (1 - secularness)
+      : W.extension;
     // M19 — VQ is HALVED for cyclicals. VQ = net upside volatility is the single
     // biggest score driver (0.26). Crypto coins have the highest raw upside vol in
     // the universe, so in any selloff they TOP the VQ rank and crowd the top 25 —
@@ -565,7 +597,11 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // tech (secular engines) high upside vol IS the engine, so they keep full VQ.
     // This is the missing daily-direction guard: overheat only fires at RSI>70 (never
     // in a selloff), so nothing was demoting the falling-modestly crypto until now.
-    const vqWeight = isCyclical(item) ? W.volQuality * CYCLICAL_VQ_DISCOUNT : W.volQuality;
+    // M23 — the discount FADES OUT as the cyclical earns secular trend quality (pCyc):
+    // a 2024-25 gold-style secular bull keeps its FULL VQ (mult→1), a jumpy pop keeps
+    // the half discount (mult→0.5). secularness=0 for non-cyclicals, so they're full.
+    const cyclicalVqMult = CYCLICAL_VQ_DISCOUNT + (1 - CYCLICAL_VQ_DISCOUNT) * secularness;
+    const vqWeight = isCyclical(item) ? W.volQuality * cyclicalVqMult : W.volQuality;
     // M20/M21 — low-VQ defensive penalty: sink names with no upside engine (bonds, broad
     // indexes) that only ranked because they fell least in a selloff. Scales with how
     // far pVQ sits below the floor; a real engine (pVQ ≥ FLOOR) pays nothing.
@@ -647,24 +683,19 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     //   MSCI World pVQ≈0.15 → REJECTED (no upside engine). ✓
     //   CRDO pVQ≈0.75, pCyc≈0.40 → ACCEPTED. ✓   RIOT pVQ≈0.85, pCyc≈0.45 → ACCEPTED. ✓
     //
-    // M22 — TWO sleeve profiles, because the misses come in two shapes:
-    //   (a) DEEP DRAWDOWN (CRDO −22.9%, RIOT −25.1%): high pVQ, moderate pCyc, LOW pPos
-    //       (fell near its 52w low). Caught by the original clause above.
-    //   (b) COILED SPRING (MU −2.3%, AVGO −1.2% at Jun 2021): a SHALLOW pullback near
-    //       the 52w high in a strong smooth uptrend — moderate pVQ, HIGH pCyc, HIGH pPos.
-    //       These are the biggest 5Y misses (MU +1388%, AVGO +721%). The deep-drawdown
-    //       clause REJECTS them: in the 2020-21 crypto bull, crypto's enormous upside vol
-    //       pushes MU/AVGO's pVQ PERCENTILE below 0.60 even though they ARE high-vol semis.
-    //       So a second clause admits the coiled spring on its OWN signature — a genuine
-    //       engine (pVQ ≥ 0.45, the LOWVQ engine floor) that is near its 52w high (pPos ≥
-    //       0.55) in an above-median smooth uptrend (pCyc ≥ 0.55). Defensives (MSCI World,
-    //       Treasury: pVQ ≈ 0.15) fail the pVQ floor; jumpy crypto-as-Stocks fail the pCyc
-    //       floor; deep-drawdown names (low pPos) fail pPos but pass via clause (a). The two
-    //       clauses are disjoint by pPos, so neither widens the other into defensive territory.
-    //       In a selloff (3M) engines are NOT near their highs (pPos < 0.55) so clause (b) is
-    //       dormant there — it only fires for bull-market pullbacks, exactly the MU/AVGO case.
-    const preQualityOk = (pVQ >= 0.60 && pCyc >= 0.30)
-      || (pVQ >= 0.45 && pCyc >= 0.55 && pPos >= 0.55);
+    // M22 REVERTED in M23 — a second "coiled spring" clause (pVQ≥0.45 ∧ pCyc≥0.55 ∧
+    // pPos≥0.55) was added to catch the shallow-pullback mega-winners MU (−2.3%) and
+    // AVGO (−1.2%) at Jun 2021. It FAILED on both counts: it did NOT catch MU/AVGO
+    // (their COVID-era trendR2Long is too choppy to clear pCyc≥0.55) yet it DID admit
+    // other, non-winning coiled springs — and because every reserved sleeve slot is
+    // taken from the main top-25, each junk admission DISPLACED a winning main pick,
+    // dropping 5Y capture 10→9 and the basket +126%→+118%. Net negative, so reverted.
+    // The honest limitation: a name that was only −2% at the pick date carries almost
+    // no distinguishing signal — it is neither oversold (no rebound flag) nor a deep
+    // drawdown (no sleeve flag) — so a momentum model cannot separate the eventual
+    // 10-bagger from a dozen look-alike mild pullbacks without buying all of them and
+    // diluting the rest. Back to the single drawdown gate that the backtest prefers.
+    const preQualityOk = pVQ >= 0.60 && pCyc >= 0.30;
     const passesPreBreakout = hasReturns && !passesGate && !isCyclical(item)
       && item.r1y != null && item.r1y > 0
       && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
