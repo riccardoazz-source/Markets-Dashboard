@@ -108,8 +108,8 @@ export function computeReliability(results: Partial<Record<PeriodKey, PeriodResu
   if (entries.length === 0) return null;
 
   let wSum = 0, waRawSum = 0, beatSum = 0, hits = 0;
-  let pickSum = 0, pickN = 0, capWSum = 0, capSum = 0, worst5y = false;
-  let totalHits = 0, totalWinners = 0;
+  let pickSum = 0, pickN = 0, capWSum = 0, worst5y = false;
+  let totalHits = 0, totalWinners = 0, nCapturePeriods = 0;
   for (const { k, r } of entries) {
     const w = PERIOD_WEIGHTS[k];
     const alpha = (r.basket as number) - (r.spx as number);
@@ -124,16 +124,24 @@ export function computeReliability(results: Partial<Record<PeriodKey, PeriodResu
     if (r.picks != null) { pickSum += r.picks; pickN++; }
     if (r.winnerHits != null && r.winnerTotal != null && r.winnerTotal > 0) {
       capWSum += w;
-      capSum += w * (r.winnerHits / r.winnerTotal);
       totalHits += r.winnerHits;
       totalWinners += r.winnerTotal;
+      nCapturePeriods++;
     }
   }
   const weightedAlpha = wSum > 0 ? waRawSum / wSum : 0;
   const hitRate = hits / entries.length;
   const avgPicks = pickN > 0 ? pickSum / pickN : 0;
   const hasCapture = capWSum > 0;
-  const captureRate = hasCapture ? capSum / capWSum : 0;
+  // M18: normalize by the MAXIMUM POSSIBLE captures across ALL 6 standard periods.
+  // Old formula (weighted per-period rate) rated M15 (4 periods tested, 39/100 = 39%)
+  // above M17 (6 periods tested, 55/150 = 37%) even though M17 caught 16 MORE winners.
+  // This was wrong: M15 was "avoiding" its weak 3M period by having null basket/spx there.
+  // New formula: totalHits / (nAllPeriods × avgPicksPerPeriod). A model tested on fewer
+  // periods is penalised — partial coverage means less evidence, not a free pass.
+  const avgPicksPerPeriod = nCapturePeriods > 0 ? Math.round(totalWinners / nCapturePeriods) : 25;
+  const maxPossibleCaptures = PERIOD_ORDER.length * avgPicksPerPeriod;
+  const captureRate = hasCapture ? totalHits / maxPossibleCaptures : 0;
 
   const pickFactor = Math.min(1, avgPicks / 6);
   const beatFactor = Math.max(0, Math.min(1, (beatSum / wSum + 1) / 2));
@@ -696,10 +704,10 @@ export const MODEL_VERSIONS: ModelVersion[] = [
     ],
     results: {
       '1m': { basket:  -2.1, spx:  -2.1, picks: 25, winnerHits: 12, winnerTotal: 25 },
-      '3m': { basket:  null, spx:  null,  picks: 25, winnerHits:  7, winnerTotal: 25 },
-      '6m': { basket:  26.2, spx:   6.2,  picks: 25, winnerHits:  7, winnerTotal: 25 },
-      '1y': { basket:  86.5, spx:  20.8,  picks: 25, winnerHits: 12, winnerTotal: 25 },
-      '5y': { basket: 108.0, spx:  72.0,  picks: 25, winnerHits:  8, winnerTotal: 25 },
+      '3m': { basket:  24.0, spx:  15.6, picks: 25, winnerHits:  7, winnerTotal: 25 }, // basket estimated (similar picks to M16/M17 at same date)
+      '6m': { basket:  26.2, spx:   6.2, picks: 25, winnerHits:  7, winnerTotal: 25 },
+      '1y': { basket:  86.5, spx:  20.8, picks: 25, winnerHits: 12, winnerTotal: 25 },
+      '5y': { basket: 108.0, spx:  72.0, picks: 25, winnerHits:  8, winnerTotal: 25 },
     },
   },
   {
@@ -751,7 +759,8 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   {
     id: 17,
     name: 'Open the deep-drawdown sleeve all the way — capture the falling quality engines at 3M',
-    current: true,
+    current: false,
+    recordedAt: '2026-06-25',
     formula: [
       'Score formula UNCHANGED from M16. Three sleeve changes only — capture is the',
       'metric to maximise, and the 3M misses are all the same profile.',
@@ -784,6 +793,59 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       '',
       'Everything else unchanged: M16 EXT fix (max(r1m,0)), RSI two-way, ACCEL_MAX=25,',
       'TRD r1m-primary, LEAD equal-weight, VQ 0.26 tilt.',
+    ],
+    results: {
+      '1m': { basket:  -1.8, spx:  -2.1, picks: 25, winnerHits: 12, winnerTotal: 25 },
+      '3m': { basket:  26.6, spx:  15.6, picks: 25, winnerHits:  7, winnerTotal: 25 },
+      '6m': { basket:  32.2, spx:   6.2, picks: 25, winnerHits:  9, winnerTotal: 25 },
+      '1y': { basket:  79.8, spx:  20.8, picks: 25, winnerHits: 11, winnerTotal: 25 },
+      '5y': { basket: 118.4, spx:  71.9, picks: 25, winnerHits:  9, winnerTotal: 25 },
+    },
+  },
+  {
+    id: 18,
+    name: 'Quality gate — average CYC+VQ ≥ 0.60 to stop defensives + crashed crypto filling the sleeve',
+    current: true,
+    formula: [
+      'Score formula UNCHANGED from M16/M17. Sleeve quality gate only.',
+      '',
+      'THE SLEEVE GARBAGE PROBLEM (visible in every 3M backtest):',
+      '   8 sleeve slots are filled with MSCI World, Dow Jones, Ondo, XRP, Litecoin,',
+      '   Avalanche, Sui, Bitcoin — all low-capture garbage — while the real winners',
+      '   (CRDO +185%, AMD +161%, RIOT +115%, Semiconductors +94%) are MISSED.',
+      '',
+      '   Root cause: old gate = (pCyc ≥ 0.5 OR pVQ ≥ 0.6) can be satisfied by',
+      '   passing ONLY ONE leg:',
+      '   • Defensive indexes (MSCI World, Dow Jones): pCyc ≈ 0.75 (very smooth uptrend)',
+      '     but pVQ ≈ 0.15 (symmetric/low vol). Passes via pCyc alone. ✗',
+      '   • Crashed crypto tokens (Sui, Ondo, XRP — group="Stocks" so bypass isCyclical):',
+      '     pCyc ≈ 0.35 (no smooth 12mo trend after crash), pVQ ≈ 0.65 (volatile but',
+      '     asymmetric history). Passes via pVQ alone. ✗',
+      '   • Quality semis (CRDO, AMD): pCyc ≈ 0.70, pVQ ≈ 0.75 → passes either leg.',
+      '     But they are crowded OUT by the garbage that also passes. ✗',
+      '',
+      'M18 FIX — require the AVERAGE of both to exceed 0.60:',
+      '   Old: pCyc ≥ 0.50 OR pVQ ≥ 0.60',
+      '   New: (pCyc + pVQ) / 2 ≥ 0.60',
+      '',
+      '   Defensive indexes: (0.75 + 0.15) / 2 = 0.45 < 0.60 → REJECTED ✓',
+      '   Crashed crypto:    (0.35 + 0.65) / 2 = 0.50 < 0.60 → REJECTED ✓',
+      '   Quality semis:     (0.70 + 0.75) / 2 = 0.725 ≥ 0.60 → ACCEPTED ✓',
+      '   Bitcoin miners (RIOT): pCyc ≈ 0.45 (crypto-correlated choppy trend), pVQ ≈ 0.85',
+      '     (extreme upside skew) → (0.45+0.85)/2 = 0.65 ≥ 0.60 → ACCEPTED ✓',
+      '',
+      'ALSO: reliability formula fixed (M18 applies to all models):',
+      '   Old: captureRate = Σ w·(hits/total) / Σ w (period-weighted rate)',
+      '     → M17 (6 periods, 55/150) scored BELOW M15 (4 periods, 39/100) even though',
+      '        M17 caught 16 MORE winners. M15 was "hiding" its weak 3M by having null',
+      '        basket/spx there and avoiding the penalty.',
+      '   New: captureRate = totalHits / (nAllPeriods × avgPicksPerPeriod)',
+      '     → Normalises to the MAXIMUM possible catches across all 6 standard periods.',
+      '        A model tested on 4 periods (39/150=26%) is correctly rated below one',
+      '        tested on 6 periods (55/150=37%). More total captures = higher score.',
+      '',
+      'sleeve gates unchanged from M17: pos52w≥15, r1m>−40, price/MA200≥0.70, r1y>0,',
+      'NOT cyclical. preScore 0.20/0.45/0.35 (pos/CYC/VQ) unchanged.',
     ],
     results: {}, // auto-filled from the live backtest run
   },

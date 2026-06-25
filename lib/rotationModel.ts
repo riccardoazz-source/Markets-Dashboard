@@ -590,7 +590,14 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // the gates AND adds a hard quality bar so only genuine engines (above-median
     // secular trend OR strong upside-vol) can use the wider room — junk that merely
     // fell is filtered by preQualityOk and then out-ranked by preScore.
-    const preQualityOk = pCyc >= 0.5 || pVQ >= 0.6;
+    // M18: OR gate (pCyc≥0.5 OR pVQ≥0.6) was letting in defensive indexes (MSCI World,
+    // Dow Jones: pCyc≈0.75 — smooth trend — but pVQ≈0.15 → passes OR, fills sleeve slots)
+    // AND crashed crypto tokens (pCyc≈0.35, pVQ≈0.65 → passes OR via VQ leg).
+    // Average gate requires BOTH dimensions to be genuinely above-average. Defensive
+    // indexes average (0.75+0.15)/2=0.45 → fails. Crashed crypto averages (0.35+0.65)/2=0.50
+    // → fails. Quality semis (CRDO/AMD: both 0.65-0.80) average 0.70+ → passes. Bitcoin
+    // miners (RIOT: pCyc≈0.45 but pVQ≈0.85) average 0.65 → passes. More discriminating.
+    const preQualityOk = (pCyc + pVQ) / 2 >= 0.60;
     const passesPreBreakout = hasReturns && !passesGate && !isCyclical(item)
       && item.r1y != null && item.r1y > 0
       && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
