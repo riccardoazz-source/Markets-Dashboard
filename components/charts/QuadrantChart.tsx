@@ -18,7 +18,9 @@ import {
 //
 // Every asset is plotted as a dot:
 //   X = 3-month return (%) — shows where the asset has been
-//   Y = acceleration score (0–100 percentile) — shows if capital is rotating IN now
+//   Y = model SCORE (0–100 percentile) — the full rotation formula's verdict NOW.
+//       Same number selectPicks ranks on, so the quadrant moves with every formula
+//       change exactly as the Accelerating list and the backtest do.
 //
 // Quadrant split at X=0 (zero 3M return) and Y=50 (median acceleration):
 //   Top-right   → Trending:   strong 3M + accelerating (confirmed uptrend)
@@ -43,7 +45,7 @@ export interface QuadrantAsset {
   name: string;
   group: string;
   r3m: number;       // x-axis: 3M return %
-  accScore: number;  // y-axis: accPctile × 100 (0–100)
+  accScore: number;  // y-axis: full model-score percentile × 100 (0–100)
   accel?: number;    // raw acceleration in percentage points (last month vs prior two)
   r1m: number | null;
   r1y: number | null;
@@ -95,7 +97,7 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
       <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">Accel: <span className="text-gray-100">{p.accScore.toFixed(0)}/100</span>{p.accel != null && <span className={p.accel >= 0 ? 'text-green-400' : 'text-red-400'}> ({p.accel >= 0 ? '+' : ''}{p.accel.toFixed(1)}pp)</span>}</p>
+      <p className="text-gray-300">Score: <span className="text-gray-100">{p.accScore.toFixed(0)}/100</span>{p.accel != null && <span className={p.accel >= 0 ? 'text-green-400' : 'text-red-400'}> (accel {p.accel >= 0 ? '+' : ''}{p.accel.toFixed(1)}pp)</span>}</p>
       {p.isAccel && <p className="text-green-400 font-semibold">🌱 Accelerating</p>}
     </div>
   );
@@ -285,7 +287,7 @@ export function QuadrantChart({ assets, loading, onAssetClick }: Props) {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-[10px] text-gray-600 px-1">
-        <span>X = 3-month return · Y = acceleration vs universe (0–100)</span>
+        <span>X = 3-month return · Y = model score vs universe (0–100)</span>
         <div className="flex items-center gap-3">
           {Object.entries(GROUP_COLORS).map(([g, c]) => (
             <span key={g} className="flex items-center gap-1">
@@ -318,13 +320,13 @@ export function QuadrantChart({ assets, loading, onAssetClick }: Props) {
           <YAxis
             dataKey="accScore"
             type="number"
-            name="Acceleration"
+            name="Model score"
             domain={[0, 100]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${v}`}
-            label={{ value: 'Accel', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
+            label={{ value: 'Score', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
             width={36}
           />
 

@@ -510,26 +510,34 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
   };
 
   // Build quadrant chart data from the currently filtered view.
+  // Y-axis = the FULL model score as a cross-sectional percentile (0–100), NOT just
+  // acceleration. This is the same number selectPicks ranks on, so the quadrant, the
+  // Accelerating list and the backtest all read ONE formula: change a weight and the
+  // dots move vertically, the highlighted picks change, and the backtest changes —
+  // together. (X stays 3M return: where the asset has BEEN; Y: what the model says now.)
   const quadrantAssets = useMemo<QuadrantAsset[]>(() => {
     const accelSet = new Set(accelItems.map(i => i.symbol));
-    const result: QuadrantAsset[] = [];
-    for (const item of groupFiltered) {
-      const s = scoreMap.get(item.symbol);
-      if (!s || item.r3m == null) continue;
-      result.push({
-        symbol: item.symbol,
-        name: item.name,
-        group: item.group as string,
-        r3m: item.r3m,
-        accScore: Math.round(s.accPctile * 100),
-        accel: s.accel,
-        r1m: item.r1m,
-        r1y: item.r1y,
-        isAccel: accelSet.has(item.symbol),
-        isSelected: selectedSymbols.has(item.symbol),
-      });
-    }
-    return result;
+    const candidates = groupFiltered
+      .map(item => ({ item, s: scoreMap.get(item.symbol) }))
+      .filter((c): c is { item: RotationItem; s: ScoredItem<RotationItem> } =>
+        c.s != null && c.s.score > -1 && c.item.r3m != null);
+    // Rank scores ascending → percentile, so Y reflects the whole formula.
+    const byScoreAsc = [...candidates].sort((a, b) => a.s.score - b.s.score);
+    const scorePct = new Map<string, number>();
+    const m = byScoreAsc.length;
+    byScoreAsc.forEach((c, i) => scorePct.set(c.item.symbol, m > 1 ? (i / (m - 1)) * 100 : 50));
+    return candidates.map(({ item, s }) => ({
+      symbol: item.symbol,
+      name: item.name,
+      group: item.group as string,
+      r3m: item.r3m as number,
+      accScore: Math.round(scorePct.get(item.symbol) ?? 50),
+      accel: s.accel,
+      r1m: item.r1m,
+      r1y: item.r1y,
+      isAccel: accelSet.has(item.symbol),
+      isSelected: selectedSymbols.has(item.symbol),
+    }));
   }, [groupFiltered, scoreMap, accelItems, selectedSymbols]);
 
   // When the user hits Refresh on the sentiment panel, snap the table back to the

@@ -534,12 +534,22 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 }
 
 // ── Pick selection (shared by the live list and the backtest) ────────────────
-// Fills up to `maxTotal` slots: first reserve up to `preSlots` for the highest-
-// ranked pre-breakout (coiled-spring) names, then fill the remainder with the
-// highest-scoring names that clear the main momentum gate. Reserving the sleeve
-// slots GUARANTEES the basing-near-high winners get in even when the momentum
-// names would otherwise fill every slot. Sharing this helper keeps the live
-// shortlist and the backtest identical.
+// M10: PURE SCORE. There is no binary gate gating membership any more — the SCORE
+// alone decides. Top `maxTotal` by score = the Accelerating list = the backtest's
+// picks = the top of the Quadrant. This is the "one formula" the whole tool is
+// built on: change ANY weight and the membership, the ordering AND the quadrant
+// positions all move together, because they all read this one number.
+//
+// Why the gate is gone: a binary gate (r1m>0 ∧ r3m>0 ∧ price≥MA200) FROZE the list
+// — in a bull market ~25 names passed it and the same 22 always showed, so tuning
+// the score weights changed nothing visible. The score already rewards rising,
+// accelerating, above-MA200 names (that's what ACC/REG/LEAD are), so the gate was
+// redundant AND it hid every formula change. Removing it makes the model fully
+// responsive: the formula is the score, end to end.
+//
+// The pre-breakout sleeve is kept: up to `preSlots` reserved for the highest-
+// ranked coiled-spring names (year-long uptrend basing near its 52w high), which
+// can score mid-pack yet are the profile of the biggest 5Y winners at their base.
 export function selectPicks<T extends ModelInput>(
   scored: ScoredItem<T>[],
   maxTotal = ACCEL_MAX,
@@ -551,8 +561,10 @@ export function selectPicks<T extends ModelInput>(
     .slice(0, preSlots);
   const preSet = new Set(pre.map(s => s.item.symbol));
   const mainSlots = Math.max(0, maxTotal - pre.length);
+  // Pure score ranking. score === -1 marks items with no return data (scoreRotation
+  // sentinel) — exclude them so only real, scorable assets fill the slots.
   const main = scored
-    .filter(s => s.passesGate && !preSet.has(s.item.symbol))
+    .filter(s => s.score > -1 && !preSet.has(s.item.symbol))
     .sort((a, b) => b.score - a.score)
     .slice(0, mainSlots);
   return [...main, ...pre];
