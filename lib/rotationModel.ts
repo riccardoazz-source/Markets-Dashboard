@@ -108,11 +108,11 @@
  *   by trendR2 (LEAD) and trendR2Long (CYC), which are close-only.
  *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = 0.34·ACC + 0.22·VQ + 0.10·TRD + 0.08·CYC + 0.12·LEAD + 0.06·REG
- *           + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH
+ *   Score = 0.34·ACC + 0.26·VQ + 0.08·TRD + 0.08·CYC + 0.12·LEAD + 0.04·REG
+ *           + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH + REBOUND
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
  *           M9: aLong now SYMMETRIC (0.50·aRecent + 0.35·aBuild + 0.15·aLong)
- *     VQ  — net upside volatility percentile (M6 engine; M7 raised 0.18→0.22)
+ *     VQ  — net upside volatility percentile (M6 engine; M14 raised 0.22→0.26)
  *     TRD — 0.70·r1m-pctile + 0.30·r3m-pctile (M11: r1m primary → enables Recovering quadrant)
  *           M8 trimmed 0.14→0.10. r6m leaves TRD; it lives in ACC (aBuild) and CYC.
  *           An asset turning up (r1m>0, r3m<0) now scores near-neutral on TRD instead of
@@ -147,11 +147,11 @@
 
 export const MODEL_WEIGHTS = {
   acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar: how & how much it accelerated)
-  volQuality:   0.22, // VQ  — net upside volatility (M7: 0.18→0.22; favours volatile semis over smooth software)
-  trend:        0.10, // TRD — near-term direction: 0.70·r1m-pctile + 0.30·r3m-pctile (M11: r1m primary → enables Recovering quadrant)
+  volQuality:   0.26, // VQ  — net upside volatility (M14: 0.22→0.26; every real top-25 winner is a high-beta upside engine — semis, miners, high-vol crypto — so tilt harder here to sink low-vol defensives that beat SPX but never lead)
+  trend:        0.08, // TRD — near-term direction: 0.70·r1m-pctile + 0.30·r3m-pctile (M14: 0.10→0.08, 0.02 to VQ)
   cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R² (M7: 0.12→0.08; it had over-rewarded smooth toppers)
   lead:         0.12, // LEAD — quality leadership: 52w-range position + short-trend smoothness (M9: 0.10→0.12)
-  regime:       0.06, // REG — price vs 200-day MA (M9: 0.08→0.06; gate already ensures above MA200, LEAD is more predictive)
+  regime:       0.04, // REG — price vs 200-day MA (M14: 0.06→0.04, 0.02 to VQ; gate already ensures above MA200, LEAD is more predictive)
   volume:       0.04, // VOL — volume confirmation (null→0.5 neutral, so backtest unaffected)
   macd:         0.04, // MACD — histogram/price percentile (M8 acceleration confirmation; null→0.5 neutral)
   extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
@@ -249,7 +249,7 @@ export const ACCEL_MAX = 25;
 // but is still in a structural uptrend (r1y>0). The preScore ranking (CYC+VQ
 // heavier than pos52w) ensures genuine engines (semis: high CYC, high VQ) outrank
 // cyclical names (crypto: low CYC) when both qualify for the sleeve.
-export const PRE_BREAKOUT_SLOTS = 4;     // slots reserved for coiled-spring / quality-pullback names
+export const PRE_BREAKOUT_SLOTS = 6;     // M14: 4→6. The sleeve holds the biggest missed winners (semis/miners falling at the pick date — MU, AVGO, CRDO). Now that crypto coins are excluded, the extra slots go to quality seculars, not cyclical pops.
 export const PRE_BREAKOUT_POS52W_MIN = 40; // M12: 60→40 — quality pullbacks allowed, not just near-52w-high names
 export const PRE_BREAKOUT_R1M_FLOOR = -25; // M12: -20→-25 — catches CRDO-type −22.9% monthly drops
 
@@ -568,7 +568,14 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // the bottom of the range), and the MA200 proximity check (price/MA200 ≥ 0.87).
     const preRegimeOk = item.ma200 != null && item.price != null
       && item.price / item.ma200 >= 0.87; // M12: allows pullbacks up to ~13% below MA200 (was strict ≥)
-    const passesPreBreakout = hasReturns && !passesGate && !isCommodity(item)
+    // M14: exclude ALL cyclicals (crypto coins AND commodities), not just commodities.
+    // The 3M backtest showed the sleeve filling with crypto-coin "rebounds" (Ondo,
+    // Tron, Bitcoin, Litecoin, Sui) that DON'T lead the next leg — a basing crypto
+    // coin is a cyclical top, not a coiled spring. They ate slots while the real
+    // winners (CRDO, AMD, Semiconductors) were missed. isCyclical catches group
+    // 'Crypto' (the coins) but NOT group 'Stocks' — so the winning bitcoin MINERS
+    // (RIOT, IREN, WULF, CIFR, all 'Stocks') stay fully eligible for the sleeve.
+    const passesPreBreakout = hasReturns && !passesGate && !isCyclical(item)
       && item.r1y != null && item.r1y > 0
       && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
       && item.r1m != null && item.r1m > PRE_BREAKOUT_R1M_FLOOR
