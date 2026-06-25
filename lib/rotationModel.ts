@@ -214,6 +214,14 @@ function isCommodity(i: ModelInput): boolean {
   return (i.group ?? '').toLowerCase().startsWith('commodit');
 }
 
+// M19 — cyclicals get only half the VQ reward. Net upside volatility is the model's
+// biggest single driver (0.26); for a secular engine (semis/tech) it IS the upside
+// engine, but for a cyclical (crypto/commodity) the same high vol is double-edged —
+// it crashes as hard as it pumps. Without this, crypto coins (highest raw upside vol
+// in the universe) topped the VQ rank and crowded the top 25 in every selloff, since
+// the overheat guard only fires at RSI>70 and never bites in a downturn.
+export const CYCLICAL_VQ_DISCOUNT = 0.5;
+
 // Size of the "who actually won" leaderboard in the backtest (top N by forward
 // return). This is a BENCHMARK size, NOT a cap on the model's picks.
 export const ACCEL_LIMIT = 8;
@@ -525,8 +533,17 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
     const W = MODEL_WEIGHTS;
     const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
+    // M19 — VQ is HALVED for cyclicals. VQ = net upside volatility is the single
+    // biggest score driver (0.26). Crypto coins have the highest raw upside vol in
+    // the universe, so in any selloff they TOP the VQ rank and crowd the top 25 —
+    // even though for a CYCLICAL that volatility is double-edged (it crashes as hard
+    // as it pumps), NOT the durable upside engine VQ is meant to reward. For semis/
+    // tech (secular engines) high upside vol IS the engine, so they keep full VQ.
+    // This is the missing daily-direction guard: overheat only fires at RSI>70 (never
+    // in a selloff), so nothing was demoting the falling-modestly crypto until now.
+    const vqWeight = isCyclical(item) ? W.volQuality * CYCLICAL_VQ_DISCOUNT : W.volQuality;
     const score = hasReturns
-      ? W.acceleration * accPctile + W.volQuality * pVQ + W.trend * pTrend + W.cycle * pCyc
+      ? W.acceleration * accPctile + vqWeight * pVQ + W.trend * pTrend + W.cycle * pCyc
         + W.lead * lead + W.regime * reg + W.volume * pVol + W.macd * pMacd
         - extWeight * pExt - ohWeight * overheat + reboundBonus
       : -1;
@@ -590,14 +607,17 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // the gates AND adds a hard quality bar so only genuine engines (above-median
     // secular trend OR strong upside-vol) can use the wider room — junk that merely
     // fell is filtered by preQualityOk and then out-ranked by preScore.
-    // M18: OR gate (pCyc≥0.5 OR pVQ≥0.6) was letting in defensive indexes (MSCI World,
-    // Dow Jones: pCyc≈0.75 — smooth trend — but pVQ≈0.15 → passes OR, fills sleeve slots)
-    // AND crashed crypto tokens (pCyc≈0.35, pVQ≈0.65 → passes OR via VQ leg).
-    // Average gate requires BOTH dimensions to be genuinely above-average. Defensive
-    // indexes average (0.75+0.15)/2=0.45 → fails. Crashed crypto averages (0.35+0.65)/2=0.50
-    // → fails. Quality semis (CRDO/AMD: both 0.65-0.80) average 0.70+ → passes. Bitcoin
-    // miners (RIOT: pCyc≈0.45 but pVQ≈0.85) average 0.65 → passes. More discriminating.
-    const preQualityOk = (pCyc + pVQ) / 2 >= 0.60;
+    // M19 — require HIGH UPSIDE VOL (pVQ), the one trait EVERY real winner shares,
+    // plus a not-broken trend (pCyc floor). M18's average gate ((pCyc+pVQ)/2≥0.60)
+    // was wrong: the volatile semis we most want (CRDO, RIOT — jumpy IPO/miner charts)
+    // have HIGH pVQ≈0.75-0.85 but only MODERATE pCyc≈0.40 (low trend-R²), so their
+    // average ≈0.57 FAILED — the gate was excluding exactly the names the sleeve exists
+    // to catch. Defensive indexes (MSCI World, Dow Jones) are the opposite — high pCyc,
+    // pVQ≈0.15 — and must still be rejected. So gate on VQ as the hard requirement and
+    // use pCyc only as a low floor (keep out genuinely broken charts), not a co-equal:
+    //   MSCI World pVQ≈0.15 → REJECTED (no upside engine). ✓
+    //   CRDO pVQ≈0.75, pCyc≈0.40 → ACCEPTED. ✓   RIOT pVQ≈0.85, pCyc≈0.45 → ACCEPTED. ✓
+    const preQualityOk = pVQ >= 0.60 && pCyc >= 0.30;
     const passesPreBreakout = hasReturns && !passesGate && !isCyclical(item)
       && item.r1y != null && item.r1y > 0
       && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
