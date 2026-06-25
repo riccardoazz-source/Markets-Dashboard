@@ -125,6 +125,10 @@
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
  *     MACD— pctile(histogram/price) (M8 acceleration confirmation; null→0.5 neutral)
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
+ *           M16: EXT uses pctile(max(r1m,0)) instead of pctile(|r1m|) — only UPSIDE
+ *           outliers (+40-80%) trigger the blow-off leg; a falling asset (CRDO −22.9%)
+ *           gets pR1mPos≈0 instead of a large structural penalty. pStretch (MA200 distance
+ *           in vol units) already handles overbought position for rising assets.
  *     OH  — RSI overheat (SUBTRACTED): clamp((rsi−70)/30,0,1), the cyclical guard
  *     wEXT: 0.20 standard · 0.32 commodities
  *     wOH : 0.12 cyclicals (commodities, crypto) · 0.03 everything else
@@ -356,22 +360,24 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
   const accelOf = (i: ModelInput) => computeAccel(i.r1m as number, i.r3m as number, i.r6m, i.r1y).accel;
   const stretchOf = (i: ModelInput) => computeStretch(i.price, i.ma200, i.vol);
-  // Absolute r1m magnitude: penalises extreme recent movers regardless of direction.
-  // Assets with very high r1m (blow-off months like +60%) tend to mean-revert; those
-  // with moderate r1m (+5-20%) tend to continue. This is the key pattern the backtest exposed.
-  const r1mAbsOf = (i: ModelInput) => Math.abs(i.r1m ?? 0);
+  // M16 FIX — only the UPSIDE magnitude triggers the blow-off guard.
+  // Old: |r1m| penalised CRDO (−22.9%) the same as a +22.9% blow-off — a falling
+  // asset is not in a blow-off; the EXT guard was designed for parabolic RISES.
+  // New: max(r1m, 0) — negative-return assets get pR1mPos ≈ 0 (no EXT from r1m),
+  // while upside outliers (+40-80%) still rank high and get penalised.
+  const r1mPosOf = (i: ModelInput) => Math.max(i.r1m ?? 0, 0);
 
   // Ascending-rank helpers (rank 0 = worst, rank n-1 = best) → cross-sectional percentiles.
   const byR3mAsc     = [...valid].sort((a, b) => a.r3m! - b.r3m!);
   const byR1mAsc     = [...valid].sort((a, b) => a.r1m! - b.r1m!);
   const byAccelAsc   = [...valid].sort((a, b) => accelOf(a) - accelOf(b));
   const byStretchAsc = [...valid].sort((a, b) => stretchOf(a) - stretchOf(b));
-  const byR1mAbsAsc  = [...valid].sort((a, b) => r1mAbsOf(a) - r1mAbsOf(b));
+  const byR1mPosAsc  = [...valid].sort((a, b) => r1mPosOf(a) - r1mPosOf(b));
   const rankR3mAsc     = new Map(byR3mAsc.map((r, i) => [r.symbol, i]));
   const rankR1mAsc     = new Map(byR1mAsc.map((r, i) => [r.symbol, i]));
   const rankAccelAsc   = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
   const rankStretchAsc = new Map(byStretchAsc.map((r, i) => [r.symbol, i]));
-  const rankR1mAbsAsc  = new Map(byR1mAbsAsc.map((r, i) => [r.symbol, i]));
+  const rankR1mPosAsc  = new Map(byR1mPosAsc.map((r, i) => [r.symbol, i]));
   // Graduated REG: percentile of (price/MA200 − 1) across universe.
   // M1 gave all above-MA200 assets REG=1.0 (no discrimination). Graduated REG
   // distinguishes a structural bull leader (far above MA200) from a fresh breakout
@@ -452,12 +458,13 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const p1m_trd  = toP(rankR1mAsc.get(item.symbol) ?? 0, n);
     const pTrend   = 0.70 * p1m_trd + 0.30 * p3m;
     const pStretch   = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
-    const pR1mAbs    = toP(rankR1mAbsAsc.get(item.symbol) ?? 0, n);
+    const pR1mPos    = toP(rankR1mPosAsc.get(item.symbol) ?? 0, n);
     // EXT = worst of: (a) price stretched far above MA200 in vol units, or
-    // (b) extreme recent 1M magnitude. The backtest showed that top r1m gainers
+    // (b) extreme UPSIDE recent 1M return. The backtest showed top r1m gainers
     // (+40-80%) reliably reverse — this catches them even when stretch is diluted
-    // by a sector-wide rally (e.g., all commodities extended together).
-    const pExt = Math.max(pStretch, pR1mAbs);
+    // by a sector-wide rally. M16: using max(r1m,0) so a falling asset (CRDO
+    // at −22.9%) gets pR1mPos≈0 — no blow-off penalty for a drawdown.
+    const pExt = Math.max(pStretch, pR1mPos);
 
     // Graduated REG: percentile of (price/MA200 − 1). Null MA200 → 0.5 neutral.
     // Far above MA200 = high rank, just above = mid, below = low rank.
