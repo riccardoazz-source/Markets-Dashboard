@@ -30,7 +30,7 @@
  *   aBuild  = p3 − p6    (quarter vs half-year → building)
  *   aLong   = p6 − p1y   (half-year vs annual  → the whole curve is re-accelerating)
  *
- *   ACCEL = 0.50·aRecent + 0.30·aBuild + 0.20·aLong  (3-horizon; all data available)
+ *   ACCEL = 0.50·aRecent + 0.35·aBuild + 0.15·aLong  (3-horizon, M9 symmetric aLong)
  *   ACCEL = 0.60·aRecent + 0.40·aBuild               (fallback when r1y absent)
  *
  * aLong distinguishes a maturing trend (1Y pace > 6M pace → the run is winding
@@ -108,20 +108,22 @@
  *   by trendR2 (LEAD) and trendR2Long (CYC), which are close-only.
  *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = 0.34·ACC + 0.22·VQ + 0.10·TRD + 0.08·CYC + 0.10·LEAD + 0.08·REG
+ *   Score = 0.34·ACC + 0.22·VQ + 0.10·TRD + 0.08·CYC + 0.12·LEAD + 0.06·REG
  *           + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
+ *           M9: aLong now SYMMETRIC (0.50·aRecent + 0.35·aBuild + 0.15·aLong)
  *     VQ  — net upside volatility percentile (M6 engine; M7 raised 0.18→0.22)
  *     TRD — 0.6·p3m + 0.4·p6m percentile (raw durable momentum; M8 trimmed 0.14→0.10)
  *     CYC — long-horizon (~12mo) trend-persistence R² percentile (M7 cut 0.12→0.08)
- *     LEAD— 0.6·pos52w + 0.4·trendR2 percentile (quality leadership for winner capture)
- *     REG — regime: pctile(price/MA200−1) graduated (far above=high, below=low, null=0.5)
+ *     LEAD— 0.6·pos52w + 0.4·trendR2 percentile (M9: 0.10→0.12; best predictor of continued winner status)
+ *     REG — regime: pctile(price/MA200−1) graduated (M9: 0.08→0.06; gate already ensures above MA200)
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
  *     MACD— pctile(histogram/price) (M8 acceleration confirmation; null→0.5 neutral)
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
  *     OH  — RSI overheat (SUBTRACTED): clamp((rsi−70)/30,0,1), the cyclical guard
  *     wEXT: 0.20 standard · 0.32 commodities
  *     wOH : 0.12 cyclicals (commodities, crypto) · 0.03 everything else
+ *   Picks: top 22 by score from gate-passers + 4 coiled-spring sleeve = up to 22 total
  *
  *   Gate (shown in the Accelerating shortlist only if):
  *     r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
@@ -143,8 +145,8 @@ export const MODEL_WEIGHTS = {
   volQuality:   0.22, // VQ  — net upside volatility (M7: 0.18→0.22; favours volatile semis over smooth software)
   trend:        0.10, // TRD — raw 3M/6M momentum percentile (M8: 0.14→0.10, 0.04 moved to MACD confirmation)
   cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R² (M7: 0.12→0.08; it had over-rewarded smooth toppers)
-  lead:         0.10, // LEAD — quality leadership: 52w-range position + short-trend smoothness
-  regime:       0.08, // REG — price vs 200-day MA (graduated percentile)
+  lead:         0.12, // LEAD — quality leadership: 52w-range position + short-trend smoothness (M9: 0.10→0.12)
+  regime:       0.06, // REG — price vs 200-day MA (M9: 0.08→0.06; gate already ensures above MA200, LEAD is more predictive)
   volume:       0.04, // VOL — volume confirmation (null→0.5 neutral, so backtest unaffected)
   macd:         0.04, // MACD — histogram/price percentile (M8 acceleration confirmation; null→0.5 neutral)
   extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
@@ -191,7 +193,7 @@ function isCommodity(i: ModelInput): boolean {
 export const ACCEL_LIMIT = 8;
 
 // Safety ceiling on the Accelerating shortlist. The GATE decides how many names
-// actually qualify — it can be 3 in a shock or 20 in a broad rally. This only
+// actually qualify — it can be 3 in a shock or 22 in a broad rally. This only
 // prevents the list from ballooning to the entire universe in a mega-bull;
 // names are ranked by score, so the strongest always come first.
 // History: M3 cut this 25→12 to chase basket RETURN. But the capture-first
@@ -201,7 +203,10 @@ export const ACCEL_LIMIT = 8;
 // but that just "shot into the crowd" (forced diversification dilutes conviction).
 // M6 drops the caps entirely and instead fixes the ROOT cause — the model was
 // picking low-volatility losers over high-volatility winners (see volQuality).
-export const ACCEL_MAX = 20;
+// M9 raises to 22: at 1Y backtest, MU passed the main gate but was ranked 21st+
+// by score and was cut. Two extra slots reduce "gate-passed but ranked out" misses
+// without shooting into the crowd — breadth has consistently helped capture rate.
+export const ACCEL_MAX = 22;
 
 // ── Pre-breakout sleeve (M7) ──────────────────────────────────────────────────
 // The backtest's biggest blind spot: the largest 5Y winners were FALLING at the
@@ -271,7 +276,7 @@ export interface AccelParts { accel: number; aRecent: number; aBuild: number; aL
 // r6m: needed for the build leg (3M vs 6M). Without it build leg = 0.
 // r1y: needed for the long leg (6M vs 1Y). Without it aLong = null.
 //
-// With full data:   ACCEL = 0.50·aRecent + 0.30·aBuild + 0.20·aLong
+// With full data:   ACCEL = 0.50·aRecent + 0.35·aBuild + 0.15·aLong  (M9 symmetric)
 // Without r1y:      ACCEL = 0.60·aRecent + 0.40·aBuild  (v4 formula)
 // Without r6m:      ACCEL = aRecent
 //
@@ -294,12 +299,14 @@ export function computeAccel(r1m: number, r3m: number, r6m?: number | null, r1y?
   }
   const p1y  = paceMonthly(r1y, 12);
   const aLong = p6 - p1y;
-  // aLong is a BRAKE, never a booster: only its NEGATIVE side feeds the score.
-  // A maturing trend (1Y pace > 6M pace → aLong<0) is demoted, but a dormant asset
-  // that just woke up (flat 1Y, recent pop → aLong>0) gets NO bonus — otherwise the
-  // pace ladder would reward exactly the commodity pops (Sugar/Wheat/Corn) that
-  // mean-revert. The recent/build legs already capture genuine acceleration.
-  const accel = 0.55 * aRecent + 0.35 * aBuild + 0.20 * Math.min(0, aLong);
+  // aLong is now SYMMETRIC (M9). aLong > 0 means "6M monthly pace > 1Y monthly
+  // pace" — the WHOLE curve is bending up, a genuine new leg is starting (NVDA
+  // entering the AI era). We no longer suppress the positive side, because M8's
+  // RSI overheat guard + commodity EXT penalties already handle the cyclical-pop
+  // risk (Sugar/Wheat/Corn getting RSI 90 then crashing). Weight slightly reduced
+  // 0.20→0.15 since the signal now contributes on both sides. aLong<0 (winding-
+  // down trend) still brakes the score — just a bit less aggressively.
+  const accel = 0.50 * aRecent + 0.35 * aBuild + 0.15 * aLong;
   return { accel, aRecent, aBuild, aLong };
 }
 
