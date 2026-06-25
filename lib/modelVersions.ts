@@ -211,6 +211,12 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       'Gate: r1m>0 ∧ r3m>0 ∧ aRecent>0 ∧ r1m<cap ∧ price ≥ MA200',
       '   cap = 50%   ·   commodities 25%',
     ],
-    results: {}, // auto-filled from the live backtest run
+    results: {
+      '1m': { basket:   0.7, spx: -2.1, picks: 12, winnerHits: 3, winnerTotal: 12 },
+      '3m': { basket:  -7.3, spx: 15.5, picks:  5, winnerHits: 0, winnerTotal:  5 },
+      '6m': { basket:  28.1, spx:  6.1, picks: 12, winnerHits: 2, winnerTotal: 12 },
+      '1y': { basket: 166.9, spx: 20.8, picks: 12, winnerHits: 6, winnerTotal: 12 },
+      '5y': { basket: 135.1, spx: 71.9, picks: 12, winnerHits: 2, winnerTotal: 12 },
+    },
   },
 ];
