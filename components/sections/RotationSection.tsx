@@ -6,7 +6,7 @@ import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS, assetNavTarget } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData, QuadrantPoint } from '@/lib/gist';
-import { scoreRotation, ScoredItem, MODEL_WEIGHTS, ACCEL_MAX } from '@/lib/rotationModel';
+import { scoreRotation, selectPicks, ScoredItem, MODEL_WEIGHTS, PRE_BREAKOUT_SLOTS, PRE_BREAKOUT_POS52W_MIN, PRE_BREAKOUT_R1M_FLOOR } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
@@ -208,7 +208,14 @@ Score = ${pct(W.acceleration)} · ACC   (3-horizon acceleration percentile — a
 Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
        AND  price ≥ 200-day MA   (regime confirmation — uses daily close, matches backtest)
        (cap = 50% · commodities 25%)
-       aBuild / aLong: ranking signals, not gate blockers`}
+       aBuild / aLong: ranking signals, not gate blockers
+
+Pre-breakout sleeve (M7) — ${PRE_BREAKOUT_SLOTS} reserved "coiled spring" slots 🔒:
+  r1y > 0  AND  pos52w ≥ ${PRE_BREAKOUT_POS52W_MIN}  AND  price ≥ 200-day MA  AND  r1m > ${PRE_BREAKOUT_R1M_FLOOR}%
+  → a year-long uptrend basing near its 52w high, last month flat/down so it
+    FAILS the momentum gate. Catches the next-leg winners (semis pre-AI-run) the
+    pure-acceleration gate would reject. Commodities excluded (their high bases
+    are cyclical tops). Ranked by 52w-high closeness + secular trend + upside vol.`}
           </pre>
           <p className="mt-1.5 text-gray-500"><span className="text-gray-300">Regime confirmation</span>: a pick must trade at/above its 200-day MA — this filters low-quality momentum pops that flash up while still below trend (and then revert), while keeping genuine rebounds that have reclaimed the MA. aLong is a <span className="text-gray-300">brake, not a booster</span>: a maturing trend (1Y pace &gt; 6M pace → aLong&lt;0) is demoted, but a dormant asset that just popped gets no bonus. EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). VOL rewards breakouts on elevated volume (backtest-neutral when volume history is unavailable). Every input is point-in-time, so the backtest stays honest.</p>
         </div>
@@ -467,18 +474,16 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
     ? rows
     : rows.filter(i => i.group === groupFilter);
 
-  // Accelerating: EVERY name that clears the gate (r1m>0, r3m>0, aRecent>0,
-  // r1m<cap), ranked by composite RotationScore. No fixed top-N — the gate is the
-  // quality filter, so the list is as long as the market warrants (few in a shock,
-  // many in a broad rally). ACCEL_MAX is only a safety ceiling.
+  // Accelerating: momentum names that clear the gate (ranked by RotationScore)
+  // PLUS a few reserved pre-breakout "coiled spring" slots (M7) — selectPicks()
+  // is the SAME selector the backtest uses, so the live list and the backtest are
+  // identical. The list is as long as the market warrants (few in a shock).
   const accelItems = useMemo(() => {
     if (rollingLoading) return [];
-    return groupFiltered
+    const scored = groupFiltered
       .map(i => scoreMap.get(i.symbol))
-      .filter((s): s is ScoredItem<RotationItem> => s != null && s.passesGate)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, ACCEL_MAX)
-      .map(s => s.item);
+      .filter((s): s is ScoredItem<RotationItem> => s != null);
+    return selectPicks(scored).map(s => s.item);
   }, [groupFiltered, scoreMap, rollingLoading]);
 
   let filteredItems = accelOnly ? accelItems : groupFiltered;
@@ -769,6 +774,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
                     ((item.r6m != null && item.r6m < 0) || (item.r1y != null && item.r1y < 0));
                   const isSolid    = accelOnly && !isRebound &&
                     item.r6m != null && item.r6m > 0 && item.r1y != null && item.r1y > 0;
+                  // Pre-breakout "coiled spring": picked by the reserved sleeve, NOT the
+                  // momentum gate — a year-long uptrend basing near its 52w high (M7).
+                  const isCoiled   = accelOnly && (scored?.passesPreBreakout ?? false) && !(scored?.passesGate ?? false);
                   // Above 200W = structural long-term bull (mega-cycle confirmed).
                   const above200w  = item.price != null && item.sma200w != null && item.price > item.sma200w;
                   const isPinned   = pins.has(item.symbol);
@@ -807,9 +815,14 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
                               ↩ rebound
                             </span>
                           )}
-                          {isSolid && (
+                          {isSolid && !isCoiled && (
                             <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-300 leading-none" title="Up across every horizon — a confirmed trend, not just a bounce">
                               ✓ trend
+                            </span>
+                          )}
+                          {isCoiled && (
+                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300 leading-none" title="Coiled spring — a year-long uptrend basing near its 52-week high, not accelerating yet. Reserved pre-breakout slot (M7).">
+                              🔒 coiled
                             </span>
                           )}
                           {above200w && !rollingLoading && (

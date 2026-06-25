@@ -76,6 +76,19 @@ volatili. M6 lo elimina e aggiunge:
 - **ACC** resta il pilastro #1 (peso 0.34, il più alto) E un gate: un asset non è
   un vincitore se non accelera (serve aRecent>0 per qualificarsi).
 
+**M7 — la sleeve pre-breakout.** Il backtest di M6 ha rivelato il muro vero: i più
+grandi vincitori a 5Y **stavano scendendo** al momento del pick (MU −2.3%, AVGO
+−1.2%, TSMC −5.1% nel mese prima di giu-2021). Il gate li scartava — giustamente,
+perché non acceleravano *ancora*. Nessun ritocco al momentum può comprare un asset
+in calo, quindi M7 aggiunge una **sleeve separata** con 4 slot riservati ai "coiled
+spring": trend annuale positivo (`r1y>0`), che fa **base vicino ai massimi 52w**
+(`pos52w≥60`), sopra la MA200, pullback normale (`r1m>−20%`), non commodity, e che
+**fallisce** il gate del momentum. È il profilo dei semi a metà-2021 prima della
+corsa AI. `selectPicks()` riempie prima i 4 slot della sleeve, poi i nomi momentum.
+In un crash quasi nulla sta vicino ai massimi sopra la MA200 → la sleeve si auto-
+limita, non prende coltelli che cadono. Inoltre M7 alza VQ (0.18→0.22) e abbassa
+CYC (0.12→0.08): CYC premiava il software liscio (ADBE/INTU) sopra i semi volatili.
+
 ---
 
 ## Tabella Backtest

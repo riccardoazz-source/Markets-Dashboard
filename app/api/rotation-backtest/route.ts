@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { scoreRotation, ACCEL_LIMIT, ACCEL_MAX, realizedMonthlyVol, upsideVolEdge, trendQualityR2 } from '@/lib/rotationModel';
+import { scoreRotation, selectPicks, ACCEL_LIMIT, realizedMonthlyVol, upsideVolEdge, trendQualityR2 } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -147,14 +147,9 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
 
   const scored = scoreRotation(rows);
   const gateMap = new Map(scored.map(s => [s.item.symbol, s.passesGate]));
-  // Picks = EVERY asset that clears the gate, ranked by score (M6 dropped the M5
-  // group caps — forced diversification just diluted conviction). ACCEL_MAX is
-  // only a safety ceiling so the basket can't become the whole universe.
-  const pickItems = scored
-    .filter(s => s.passesGate)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, ACCEL_MAX)
-    .map(s => s.item);
+  // Picks = momentum names that clear the gate (ranked by score) PLUS a few
+  // reserved pre-breakout "coiled spring" slots (M7) — see selectPicks().
+  const pickItems = selectPicks(scored).map(s => s.item);
   const pickedSet = new Set(pickItems.map(r => r.symbol));
 
   const picks: Pick[] = pickItems.map((r): Pick => ({

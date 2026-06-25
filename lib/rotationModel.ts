@@ -76,12 +76,22 @@
  * it counterweights VQ so peak-cycle pops (high upside vol, low long-trend R²)
  * are demoted, while genuine compounders (high on both) are rewarded.
  *
+ * ── Pre-breakout sleeve (M7) ─────────────────────────────────────────────────
+ * The momentum gate by design rejects an asset that is not accelerating RIGHT
+ * NOW — but the backtest showed the biggest 5Y winners were falling at the pick
+ * date (MU −2.3%, AVGO −1.2% the month before Jun 2021) and only accelerated
+ * later. So a few slots are reserved for "coiled springs": a real year-long
+ * uptrend (r1y>0) pausing near its 52-week high, above its 200-day MA, whose flat
+ * last month makes it FAIL the momentum gate. selectPicks() fills these reserved
+ * slots first, then the momentum names. Commodities are excluded (their high
+ * bases are cyclical tops). See PRE_BREAKOUT_* constants.
+ *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = 0.34·ACC + 0.18·VQ + 0.14·TRD + 0.12·CYC + 0.10·LEAD + 0.08·REG + 0.04·VOL − wEXT·EXT
+ *   Score = 0.34·ACC + 0.22·VQ + 0.14·TRD + 0.08·CYC + 0.10·LEAD + 0.08·REG + 0.04·VOL − wEXT·EXT
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
- *     VQ  — net upside volatility percentile (M6: the "good volatility" engine)
+ *     VQ  — net upside volatility percentile (M6 engine; M7 raised 0.18→0.22)
  *     TRD — 0.6·p3m + 0.4·p6m percentile (raw durable momentum; SHA removed)
- *     CYC — long-horizon (~12mo) trend-persistence R² percentile (secular vs cyclical)
+ *     CYC — long-horizon (~12mo) trend-persistence R² percentile (M7 cut 0.12→0.08)
  *     LEAD— 0.6·pos52w + 0.4·trendR2 percentile (quality leadership for winner capture)
  *     REG — regime: pctile(price/MA200−1) graduated (far above=high, below=low, null=0.5)
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
@@ -105,9 +115,9 @@
 
 export const MODEL_WEIGHTS = {
   acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar: how & how much it accelerated)
-  volQuality:   0.18, // VQ  — net upside volatility (M6: the "good volatility" engine — replaces SHA, flipped sign)
+  volQuality:   0.22, // VQ  — net upside volatility (M7: 0.18→0.22; favours volatile semis over smooth software)
   trend:        0.14, // TRD — raw 3M/6M momentum percentile (SHA removed; vol now lives in VQ)
-  cycle:        0.12, // CYC — long-horizon (~12mo) trend-persistence R² (M6: secular compounder vs cyclical pop)
+  cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R² (M7: 0.12→0.08; it had over-rewarded smooth toppers)
   lead:         0.10, // LEAD — quality leadership: 52w-range position + short-trend smoothness
   regime:       0.08, // REG — price vs 200-day MA (graduated percentile)
   extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
@@ -148,6 +158,21 @@ export const ACCEL_LIMIT = 8;
 // picking low-volatility losers over high-volatility winners (see volQuality).
 export const ACCEL_MAX = 20;
 
+// ── Pre-breakout sleeve (M7) ──────────────────────────────────────────────────
+// The backtest's biggest blind spot: the largest 5Y winners were FALLING at the
+// pick date (MU −2.3%, AVGO −1.2%, TSMC −5.1% the month before Jun 2021), so the
+// acceleration gate correctly rejected them — they hadn't accelerated YET. To
+// catch this profile we reserve a few slots for "coiled spring" names: a real
+// year-long uptrend (r1y>0), still basing near its 52-week high (not a falling
+// knife), structurally intact (price ≥ MA200), that the MAIN momentum gate
+// rejected because its last month was flat/down. These are the pullbacks-within-
+// uptrends that precede the next leg. Commodities are excluded (their "bases" are
+// cyclical tops that break DOWN). In a crash almost nothing sits near its high
+// above MA200, so the sleeve self-limits — it doesn't add falling knives.
+export const PRE_BREAKOUT_SLOTS = 4;     // slots reserved for coiled-spring names
+export const PRE_BREAKOUT_POS52W_MIN = 60; // must sit in the upper ~40% of its 52w range
+export const PRE_BREAKOUT_R1M_FLOOR = -20; // a normal pullback, not a crash
+
 export interface ModelInput {
   symbol: string;
   r1m: number | null;
@@ -176,6 +201,8 @@ export interface ScoredItem<T extends ModelInput> {
   aLong: number | null; // p6 − p1y_pace (long leg; null when r1y unavailable)
   stretch: number;      // monthly-σ above the 200-day MA (blow-off measure)
   passesGate: boolean;  // r1m>0 AND r3m>0 AND aRecent>0 AND r1m<cap
+  passesPreBreakout: boolean; // coiled-spring sleeve: year-long uptrend basing near its 52w high (M7)
+  preScore: number;     // ranking score WITHIN the pre-breakout sleeve (0..1)
 }
 
 function toP(rank: number, n: number): number {
@@ -403,12 +430,55 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const passesGate = hasReturns && item.r1m! > 0 && item.r1m! < r1mCap && item.r3m! > 0
       && parts.aRecent > 0 && regimeOk;
 
+    // ── Pre-breakout sleeve (M7) ──────────────────────────────────────────────
+    // A "coiled spring": a genuine year-long uptrend (r1y>0) that is PAUSING near
+    // its 52-week high (pos52w high, last month flat/down so it FAILS the main
+    // gate) but is structurally intact (strictly above its 200-day MA). This is
+    // the profile of the biggest 5Y winners at their pick date — semis basing in
+    // mid-2021 before the AI run. Commodities are excluded (their "bases" near the
+    // high are cyclical tops that break down). Falling knives are excluded by the
+    // 52w-high floor + the r1m floor + the strict MA200 requirement.
+    const preRegimeOk = item.ma200 != null && item.price != null && item.price >= item.ma200;
+    const passesPreBreakout = hasReturns && !passesGate && !isCommodity(item)
+      && item.r1y != null && item.r1y > 0
+      && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
+      && item.r1m != null && item.r1m > PRE_BREAKOUT_R1M_FLOOR
+      && preRegimeOk;
+    // Rank within the sleeve: closeness to the 52w high + secular trend persistence
+    // + upside-vol capacity. (Not the main score — these names fail the momentum gate.)
+    const preScore = 0.5 * pPos + 0.3 * pCyc + 0.2 * pVQ;
+
     return {
       item, score, accel: parts.accel, accPctile,
       aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
-      stretch, passesGate,
+      stretch, passesGate, passesPreBreakout, preScore,
     };
   });
+}
+
+// ── Pick selection (shared by the live list and the backtest) ────────────────
+// Fills up to `maxTotal` slots: first reserve up to `preSlots` for the highest-
+// ranked pre-breakout (coiled-spring) names, then fill the remainder with the
+// highest-scoring names that clear the main momentum gate. Reserving the sleeve
+// slots GUARANTEES the basing-near-high winners get in even when the momentum
+// names would otherwise fill every slot. Sharing this helper keeps the live
+// shortlist and the backtest identical.
+export function selectPicks<T extends ModelInput>(
+  scored: ScoredItem<T>[],
+  maxTotal = ACCEL_MAX,
+  preSlots = PRE_BREAKOUT_SLOTS,
+): ScoredItem<T>[] {
+  const pre = scored
+    .filter(s => s.passesPreBreakout)
+    .sort((a, b) => b.preScore - a.preScore)
+    .slice(0, preSlots);
+  const preSet = new Set(pre.map(s => s.item.symbol));
+  const mainSlots = Math.max(0, maxTotal - pre.length);
+  const main = scored
+    .filter(s => s.passesGate && !preSet.has(s.item.symbol))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, mainSlots);
+  return [...main, ...pre];
 }
 
 // ── Realized volatility helper ──────────────────────────────────────────────
