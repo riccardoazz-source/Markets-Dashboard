@@ -222,11 +222,15 @@ export const ACCEL_MAX = 22;
 // knife), structurally intact (price ≥ MA200), that the MAIN momentum gate
 // rejected because its last month was flat/down. These are the pullbacks-within-
 // uptrends that precede the next leg. Commodities are excluded (their "bases" are
-// cyclical tops that break DOWN). In a crash almost nothing sits near its high
-// above MA200, so the sleeve self-limits — it doesn't add falling knives.
-export const PRE_BREAKOUT_SLOTS = 4;     // slots reserved for coiled-spring names
-export const PRE_BREAKOUT_POS52W_MIN = 60; // must sit in the upper ~40% of its 52w range
-export const PRE_BREAKOUT_R1M_FLOOR = -20; // a normal pullback, not a crash
+// cyclical tops that break DOWN). M12: the sleeve now covers TWO profiles under
+// the same criteria: (a) the original coiled spring near its 52w high, and (b) a
+// quality pullback — a secular engine (high CYC/VQ) that has corrected more deeply
+// but is still in a structural uptrend (r1y>0). The preScore ranking (CYC+VQ
+// heavier than pos52w) ensures genuine engines (semis: high CYC, high VQ) outrank
+// cyclical names (crypto: low CYC) when both qualify for the sleeve.
+export const PRE_BREAKOUT_SLOTS = 4;     // slots reserved for coiled-spring / quality-pullback names
+export const PRE_BREAKOUT_POS52W_MIN = 40; // M12: 60→40 — quality pullbacks allowed, not just near-52w-high names
+export const PRE_BREAKOUT_R1M_FLOOR = -25; // M12: -20→-25 — catches CRDO-type −22.9% monthly drops
 
 export interface ModelInput {
   symbol: string;
@@ -512,22 +516,34 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       && parts.aRecent > 0 && regimeOk;
 
     // ── Pre-breakout sleeve (M7) ──────────────────────────────────────────────
-    // A "coiled spring": a genuine year-long uptrend (r1y>0) that is PAUSING near
-    // its 52-week high (pos52w high, last month flat/down so it FAILS the main
-    // gate) but is structurally intact (strictly above its 200-day MA). This is
-    // the profile of the biggest 5Y winners at their pick date — semis basing in
-    // mid-2021 before the AI run. Commodities are excluded (their "bases" near the
-    // high are cyclical tops that break down). Falling knives are excluded by the
-    // 52w-high floor + the r1m floor + the strict MA200 requirement.
-    const preRegimeOk = item.ma200 != null && item.price != null && item.price >= item.ma200;
+    // M12 pre-breakout sleeve: two profiles, one set of criteria.
+    //   (a) Coiled spring (original M7): r1y>0, still near 52w high, structurally intact.
+    //   (b) Quality pullback (new M12): a secular engine (semis, tech) in a deeper
+    //       correction. Same r1y>0 quality bar; pos52w ≥ 40 (not at absolute bottom);
+    //       price within 13% of MA200 (genuine dip, not a structural breakdown).
+    //       This catches MU/CRDO-type names that have corrected 15-25% from highs
+    //       before their next rocket leg — the single biggest source of missed winners.
+    //
+    // The preScore ranking (CYC+VQ weighted heavier than pos52w) sorts the sleeve
+    // so secular engines (semis: high CYC + high VQ) always win over cyclicals
+    // (crypto: low CYC) even if both qualify. A crypto name near its 52w high scores
+    // high on pPos but low on pCyc; MU after a correction scores low on pPos but
+    // high on pCyc + pVQ and therefore ranks first.
+    //
+    // Falling knives are rejected by the r1y>0 floor (structural uptrend must exist),
+    // the r1m floor (−25%: a correction, not a crash), the pos52w floor (40%: not at
+    // the bottom of the range), and the MA200 proximity check (price/MA200 ≥ 0.87).
+    const preRegimeOk = item.ma200 != null && item.price != null
+      && item.price / item.ma200 >= 0.87; // M12: allows pullbacks up to ~13% below MA200 (was strict ≥)
     const passesPreBreakout = hasReturns && !passesGate && !isCommodity(item)
       && item.r1y != null && item.r1y > 0
       && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
       && item.r1m != null && item.r1m > PRE_BREAKOUT_R1M_FLOOR
       && preRegimeOk;
-    // Rank within the sleeve: closeness to the 52w high + secular trend persistence
-    // + upside-vol capacity. (Not the main score — these names fail the momentum gate.)
-    const preScore = 0.5 * pPos + 0.3 * pCyc + 0.2 * pVQ;
+    // Rank within the sleeve: CYC (secular quality) + VQ (upside engine) heavy,
+    // pos52w light. M12: 0.5/0.3/0.2 → 0.3/0.4/0.3. Semis beat crypto in this ranking
+    // because semis have far higher CYC (12mo trend R²) and VQ (upside vol dominance).
+    const preScore = 0.30 * pPos + 0.40 * pCyc + 0.30 * pVQ;
 
     return {
       item, score, accel: parts.accel, accPctile,
