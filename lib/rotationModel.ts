@@ -168,6 +168,23 @@ export const OVERHEAT_RSI_START = 70;   // penalty starts here, full at RSI 100
 export const OVERHEAT_WEIGHT_CYCLICAL = 0.12; // commodities + crypto
 export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch)
 
+// ── M13: RSI oversold REBOUND bonus (the other half of RSI) ──────────────────
+// RSI is symmetric: overbought (>70) flags a blow-off, oversold (<40) flags a
+// buy-the-dip. M8 only used the overbought side as a penalty. M13 adds the
+// oversold side as a BONUS — but only where mean-reversion goes UP, never down:
+//   • QUALITY SECULAR names only (scaled by CYC = 12mo trend persistence). A
+//     genuine compounder oversold after a pullback (MU/CRDO at −16/−23% the month
+//     before a +200% leg) snaps back; an oversold junk name keeps falling.
+//   • Requires a structural year-long uptrend (r1y > 0) — no falling knives.
+//   • Cyclicals get NOTHING (oversold crypto/commodity keeps crashing; their
+//     overheat penalty stays, so RSI is a pure brake on them, a two-way signal
+//     only on quality seculars). This mirrors the overheat asymmetry exactly.
+//   oversold = clamp((40 − rsi)/(40 − 10), 0, 1)
+//   bonus    = REBOUND_WEIGHT · oversold · pCyc   (added to score, quality-scaled)
+export const OVERSOLD_RSI_START = 40;   // bonus starts when RSI drops below 40
+export const OVERSOLD_RSI_FLOOR = 10;   // full bonus at RSI 10 (deeply oversold)
+export const REBOUND_WEIGHT = 0.10;     // max lift for a deeply-oversold top-quality secular
+
 // Cyclical asset classes: they mean-revert hardest off an overbought RSI, so the
 // overheat guard bites them. Commodities (supply/demand & fear spikes) and crypto
 // (pump-and-dump cycles) are the two most reflexive classes in the universe.
@@ -211,7 +228,11 @@ export const ACCEL_LIMIT = 8;
 // M9 raises to 22: at 1Y backtest, MU passed the main gate but was ranked 21st+
 // by score and was cut. Two extra slots reduce "gate-passed but ranked out" misses
 // without shooting into the crowd — breadth has consistently helped capture rate.
-export const ACCEL_MAX = 22;
+// M13 raises to 25: capture rate was still 5-10/22; three more slots catch more of
+// the real winners ranked just below the cut. pickFactor (min(1,avgPicks/6)) is
+// already maxed at 6, so wider picks don't dilute the reliability score — and the
+// names are score-ranked, so the strongest always come first.
+export const ACCEL_MAX = 25;
 
 // ── Pre-breakout sleeve (M7) ──────────────────────────────────────────────────
 // The backtest's biggest blind spot: the largest 5Y winners were FALLING at the
@@ -483,12 +504,24 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       : 0;
     const ohWeight = isCyclical(item) ? OVERHEAT_WEIGHT_CYCLICAL : OVERHEAT_WEIGHT_DEFAULT;
 
+    // M13 — RSI oversold REBOUND bonus (the buy-the-dip half of RSI). Mirrors the
+    // overheat penalty: zero until RSI drops below 40, full at RSI 10. Added ONLY
+    // for quality seculars in a structural uptrend (scaled by pCyc), so an oversold
+    // compounder (MU/CRDO before its next leg) gets lifted while an oversold cyclical
+    // or a name with no year-long uptrend gets nothing — no falling knives.
+    const oversold = item.rsi != null
+      ? Math.max(0, Math.min(1, (OVERSOLD_RSI_START - item.rsi) / (OVERSOLD_RSI_START - OVERSOLD_RSI_FLOOR)))
+      : 0;
+    const structuralUptrend = item.r1y != null && item.r1y > 0;
+    const reboundWeight = (!isCyclical(item) && structuralUptrend) ? REBOUND_WEIGHT : 0;
+    const reboundBonus = reboundWeight * oversold * pCyc;
+
     const W = MODEL_WEIGHTS;
     const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
     const score = hasReturns
       ? W.acceleration * accPctile + W.volQuality * pVQ + W.trend * pTrend + W.cycle * pCyc
         + W.lead * lead + W.regime * reg + W.volume * pVol + W.macd * pMacd
-        - extWeight * pExt - ohWeight * overheat
+        - extWeight * pExt - ohWeight * overheat + reboundBonus
       : -1;
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
