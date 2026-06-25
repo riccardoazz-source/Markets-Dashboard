@@ -86,17 +86,42 @@
  * slots first, then the momentum names. Commodities are excluded (their high
  * bases are cyclical tops). See PRE_BREAKOUT_* constants.
  *
+ * ── M8: RSI overheat guard (the cyclical adjustment) + MACD confirmation ──────
+ * Two classic close-only indicators, used the RIGHT way:
+ *
+ *   MACD (12/26/9): the histogram (macdLine − signal) IS a momentum-change
+ *   measure — the same family as ACC. So it does NOT get its own pillar; it folds
+ *   in as a small CONFIRMATION leg (pctile of histogram/price). It corroborates
+ *   acceleration rather than adding a new axis.
+ *
+ *   RSI (Wilder 14): naively "buy low RSI" is ANTI-momentum — it would tell us to
+ *   avoid the very winners that are accelerating. The valuable use is the cyclical
+ *   adjustment we kept circling: an OVERBOUGHT cyclical is about to mean-revert
+ *   (oil at RSI ~90 right before the Iran-war crash), while a secular compounder
+ *   can sit at RSI 80 for months and keep winning. So RSI feeds an OVERHEAT PENALTY
+ *   that bites HARD on cyclicals (commodities, crypto) and barely on everything
+ *   else: overheat = clamp((rsi−70)/30, 0, 1), subtracted with a class-dependent
+ *   weight. NVDA running hot is untouched; an oil/crypto blow-off is demoted.
+ *
+ *   ADX is intentionally NOT added: the true ADX needs intraday high/low we don't
+ *   have in the backtest, and its job (trend strength/cleanliness) is already done
+ *   by trendR2 (LEAD) and trendR2Long (CYC), which are close-only.
+ *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = 0.34·ACC + 0.22·VQ + 0.14·TRD + 0.08·CYC + 0.10·LEAD + 0.08·REG + 0.04·VOL − wEXT·EXT
+ *   Score = 0.34·ACC + 0.22·VQ + 0.10·TRD + 0.08·CYC + 0.10·LEAD + 0.08·REG
+ *           + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
  *     VQ  — net upside volatility percentile (M6 engine; M7 raised 0.18→0.22)
- *     TRD — 0.6·p3m + 0.4·p6m percentile (raw durable momentum; SHA removed)
+ *     TRD — 0.6·p3m + 0.4·p6m percentile (raw durable momentum; M8 trimmed 0.14→0.10)
  *     CYC — long-horizon (~12mo) trend-persistence R² percentile (M7 cut 0.12→0.08)
  *     LEAD— 0.6·pos52w + 0.4·trendR2 percentile (quality leadership for winner capture)
  *     REG — regime: pctile(price/MA200−1) graduated (far above=high, below=low, null=0.5)
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
+ *     MACD— pctile(histogram/price) (M8 acceleration confirmation; null→0.5 neutral)
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
+ *     OH  — RSI overheat (SUBTRACTED): clamp((rsi−70)/30,0,1), the cyclical guard
  *     wEXT: 0.20 standard · 0.32 commodities
+ *     wOH : 0.12 cyclicals (commodities, crypto) · 0.03 everything else
  *
  *   Gate (shown in the Accelerating shortlist only if):
  *     r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
@@ -116,13 +141,33 @@
 export const MODEL_WEIGHTS = {
   acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar: how & how much it accelerated)
   volQuality:   0.22, // VQ  — net upside volatility (M7: 0.18→0.22; favours volatile semis over smooth software)
-  trend:        0.14, // TRD — raw 3M/6M momentum percentile (SHA removed; vol now lives in VQ)
+  trend:        0.10, // TRD — raw 3M/6M momentum percentile (M8: 0.14→0.10, 0.04 moved to MACD confirmation)
   cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R² (M7: 0.12→0.08; it had over-rewarded smooth toppers)
   lead:         0.10, // LEAD — quality leadership: 52w-range position + short-trend smoothness
   regime:       0.08, // REG — price vs 200-day MA (graduated percentile)
-  extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
   volume:       0.04, // VOL — volume confirmation (null→0.5 neutral, so backtest unaffected)
+  macd:         0.04, // MACD — histogram/price percentile (M8 acceleration confirmation; null→0.5 neutral)
+  extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
 } as const;
+
+// ── M8: RSI overheat guard (the cyclical adjustment) ─────────────────────────
+// An OVERBOUGHT cyclical is about to mean-revert (oil at RSI ~90 right before the
+// Iran-war crash); a secular compounder can run hot for months and keep winning.
+// So overheat = clamp((rsi − 70)/30, 0, 1) is SUBTRACTED with a class-dependent
+// weight: heavy on cyclicals (commodities + crypto, which blow off hardest), light
+// on everything else (so NVDA at RSI 80 is barely touched). RSI is close-only, so
+// it computes identically live and in the backtest with no look-ahead.
+export const OVERHEAT_RSI_START = 70;   // penalty starts here, full at RSI 100
+export const OVERHEAT_WEIGHT_CYCLICAL = 0.12; // commodities + crypto
+export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch)
+
+// Cyclical asset classes: they mean-revert hardest off an overbought RSI, so the
+// overheat guard bites them. Commodities (supply/demand & fear spikes) and crypto
+// (pump-and-dump cycles) are the two most reflexive classes in the universe.
+function isCyclical(i: ModelInput): boolean {
+  const g = (i.group ?? '').toLowerCase();
+  return g.startsWith('commodit') || g === 'crypto';
+}
 
 // ── Commodity blow-off control (v4) ──────────────────────────────────────────
 // Commodities mean-revert HARDER than equities: their momentum is driven by
@@ -187,6 +232,8 @@ export interface ModelInput {
   pos52w?: number | null;  // 0–100 position of the latest close in its 52-week range (LEAD signal)
   trendR2?: number | null; // 0–1 smoothness of the trailing ~6mo uptrend (LEAD signal; 0 if downtrend)
   trendR2Long?: number | null; // 0–1 ~12mo trend persistence (CYC signal; secular vs cyclical)
+  rsi?: number | null;      // Wilder 14-day RSI 0–100 (M8 overheat guard; null → no penalty)
+  macdHist?: number | null; // MACD histogram as % of price (M8 acceleration confirmation; null → 0.5)
   sma200w?: number | null;  // kept for callers; not used by the score (backtest can't compute it)
   volRatio?: number | null; // kept for callers; not used by the score (no historical volume)
 }
@@ -203,6 +250,8 @@ export interface ScoredItem<T extends ModelInput> {
   passesGate: boolean;  // r1m>0 AND r3m>0 AND aRecent>0 AND r1m<cap
   passesPreBreakout: boolean; // coiled-spring sleeve: year-long uptrend basing near its 52w high (M7)
   preScore: number;     // ranking score WITHIN the pre-breakout sleeve (0..1)
+  rsi: number | null;   // Wilder 14-day RSI (M8; null when unavailable)
+  overheat: number;     // 0..1 RSI-overheat amount actually penalised (M8 cyclical guard)
 }
 
 function toP(rank: number, n: number): number {
@@ -341,6 +390,14 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const nCyc          = validWithCyc.length;
   const byCycAsc      = [...validWithCyc].sort((a, b) => (a.trendR2Long ?? 0) - (b.trendR2Long ?? 0));
   const rankCycAsc    = new Map(byCycAsc.map((r, i) => [r.symbol, i]));
+  // MACD (M8) — histogram/price percentile, a CONFIRMATION of acceleration (same
+  // family as ACC, so small weight). A rising/positive histogram = momentum still
+  // building; negative = the trend is rolling over. Null → 0.5 neutral (backtest/
+  // asset-safe), so items without enough history aren't penalised.
+  const validWithMacd = valid.filter(i => i.macdHist != null);
+  const nMacd         = validWithMacd.length;
+  const byMacdAsc     = [...validWithMacd].sort((a, b) => (a.macdHist ?? 0) - (b.macdHist ?? 0));
+  const rankMacdAsc   = new Map(byMacdAsc.map((r, i) => [r.symbol, i]));
 
   return items.map(item => {
     const hasReturns = item.r1m != null && item.r3m != null;
@@ -398,12 +455,24 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     const pVQ  = item.volEdge != null && nVQ > 0 ? toP(rankVQAsc.get(item.symbol) ?? 0, nVQ) : 0.5;
     // CYC — long-horizon trend persistence percentile (secular vs cyclical).
     const pCyc = item.trendR2Long != null && nCyc > 0 ? toP(rankCycAsc.get(item.symbol) ?? 0, nCyc) : 0.5;
+    // MACD — acceleration confirmation percentile (M8). Null → 0.5 neutral.
+    const pMacd = item.macdHist != null && nMacd > 0 ? toP(rankMacdAsc.get(item.symbol) ?? 0, nMacd) : 0.5;
+
+    // OH — RSI overheat (M8 cyclical guard). Zero until RSI clears 70, full at 100.
+    // Subtracted with a class-dependent weight: heavy on cyclicals (commodities,
+    // crypto), light elsewhere — an overbought oil/crypto blow-off is demoted while
+    // a secular grower running hot is barely touched. Null RSI → no penalty.
+    const overheat = item.rsi != null
+      ? Math.max(0, Math.min(1, (item.rsi - OVERHEAT_RSI_START) / (100 - OVERHEAT_RSI_START)))
+      : 0;
+    const ohWeight = isCyclical(item) ? OVERHEAT_WEIGHT_CYCLICAL : OVERHEAT_WEIGHT_DEFAULT;
 
     const W = MODEL_WEIGHTS;
     const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
     const score = hasReturns
       ? W.acceleration * accPctile + W.volQuality * pVQ + W.trend * pTrend + W.cycle * pCyc
-        + W.lead * lead + W.regime * reg + W.volume * pVol - extWeight * pExt
+        + W.lead * lead + W.regime * reg + W.volume * pVol + W.macd * pMacd
+        - extWeight * pExt - ohWeight * overheat
       : -1;
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
@@ -452,6 +521,7 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       item, score, accel: parts.accel, accPctile,
       aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
       stretch, passesGate, passesPreBreakout, preScore,
+      rsi: item.rsi ?? null, overheat: hasReturns ? overheat : 0,
     };
   });
 }
@@ -558,4 +628,57 @@ export function trendQualityR2(closes: number[], lookback = 126): number | null 
   }
   if (ssTot === 0) return 0;
   return Math.max(0, Math.min(1, 1 - ssRes / ssTot));
+}
+
+// ── RSI (Wilder, close-only) — the overheat guard's input (M8) ───────────────
+// Classic 14-day Wilder RSI from daily closes: seed with the simple average gain/
+// loss over the first `period` changes, then Wilder-smooth across the rest. 0–100.
+// Computed identically live and in the backtest (both feed closes up to the as-of
+// date) so it never look-aheads. null when there isn't enough history.
+export function rsiWilder(closes: number[], period = 14): number | null {
+  if (closes.length < period + 1) return null;
+  let gain = 0, loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d >= 0) gain += d; else loss -= d;
+  }
+  let avgGain = gain / period, avgLoss = loss / period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    const g = d >= 0 ? d : 0, l = d < 0 ? -d : 0;
+    avgGain = (avgGain * (period - 1) + g) / period;
+    avgLoss = (avgLoss * (period - 1) + l) / period;
+  }
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  const rs = avgGain / avgLoss;
+  return 100 - 100 / (1 + rs);
+}
+
+// ── MACD histogram (close-only) — the acceleration confirmation (M8) ─────────
+// Standard 12/26/9 MACD: histogram = (EMA12 − EMA26) − signal(EMA9 of that line),
+// returned as a % of the latest price so it's comparable across assets at any
+// scale. Positive = trend accelerating up; negative = momentum rolling over. The
+// EMAs seed from the first close and converge well within our 400+-day window.
+// Close-only → identical live and in the backtest, no look-ahead. null when short.
+export function macdHistogram(closes: number[], fast = 12, slow = 26, signal = 9): number | null {
+  if (closes.length < slow + signal) return null;
+  const ema = (period: number): number[] => {
+    const k = 2 / (period + 1);
+    const out: number[] = [];
+    let prev = closes[0];
+    for (let i = 0; i < closes.length; i++) {
+      prev = i === 0 ? closes[0] : closes[i] * k + prev * (1 - k);
+      out.push(prev);
+    }
+    return out;
+  };
+  const emaFast = ema(fast), emaSlow = ema(slow);
+  const macdLine = closes.map((_, i) => emaFast[i] - emaSlow[i]);
+  const k = 2 / (signal + 1);
+  let sig = macdLine[0];
+  for (let i = 1; i < macdLine.length; i++) sig = macdLine[i] * k + sig * (1 - k);
+  const last = closes[closes.length - 1];
+  if (last <= 0) return null;
+  const hist = macdLine[macdLine.length - 1] - sig;
+  return (hist / last) * 100;
 }

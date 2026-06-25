@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { scoreRotation, selectPicks, ACCEL_LIMIT, realizedMonthlyVol, upsideVolEdge, trendQualityR2 } from '@/lib/rotationModel';
+import { scoreRotation, selectPicks, ACCEL_LIMIT, realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -139,6 +139,8 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
       pos52w: pos52wAtDate(h, asOf),
       trendR2: trendQualityR2(closesAsOf),
       trendR2Long: trendQualityR2(closesAsOf, 252),
+      rsi: rsiWilder(closesAsOf),
+      macdHist: macdHistogram(closesAsOf),
       sma200w: null as number | null, // 200W SMA not computed in backtest (too expensive)
       volRatio: null as number | null, // volume history not available in backtest
       fwd: retBetween(h, asOf, todayStr),

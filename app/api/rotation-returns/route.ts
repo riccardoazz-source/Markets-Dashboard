@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { realizedMonthlyVol, upsideVolEdge, trendQualityR2 } from '@/lib/rotationModel';
+import { realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -21,6 +21,8 @@ interface RollingReturn {
   pos52w: number | null; // 0–100 position of the latest close within the 52W range
   trendR2: number | null; // 0–1 smoothness of the trailing ~6mo uptrend (LEAD signal)
   trendR2Long: number | null; // 0–1 ~12mo trend persistence (CYC signal)
+  rsi: number | null;     // Wilder 14-day RSI (M8 overheat guard)
+  macdHist: number | null; // MACD histogram as % of price (M8 acceleration confirmation)
   lastClose: number | null; // most recent daily close — use for regime gate (not intraday)
 }
 
@@ -100,6 +102,8 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     pos52w: r.pos52w,
     trendR2: trendQualityR2(history.map(p => p.close)),
     trendR2Long: trendQualityR2(history.map(p => p.close), 252),
+    rsi: rsiWilder(history.map(p => p.close)),
+    macdHist: macdHistogram(history.map(p => p.close)),
     lastClose: history.length > 0 ? history[history.length - 1].close : null,
   };
 }

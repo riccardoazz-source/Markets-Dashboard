@@ -38,6 +38,8 @@ interface RotationItem {
   pos52wRaw: number | null;// route-computed 52W range position (fallback)
   trendR2: number | null;  // 0–1 trailing ~6mo trend smoothness (from rotation-returns; LEAD signal)
   trendR2Long: number | null; // 0–1 ~12mo trend persistence (from rotation-returns; CYC signal)
+  rsi: number | null;      // Wilder 14-day RSI (from rotation-returns; M8 overheat guard)
+  macdHist: number | null; // MACD histogram %/price (from rotation-returns; M8 confirmation)
   pos52w?: number | null;  // resolved 0–100 range position fed to the model (set at scoring time)
 }
 
@@ -56,6 +58,8 @@ interface RollingReturn {
   pos52w: number | null;
   trendR2: number | null;
   trendR2Long: number | null;
+  rsi: number | null;
+  macdHist: number | null;
   lastClose: number | null;
 }
 
@@ -320,7 +324,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           fiveYPct: q?.fiveYearChangePercent ?? null,
           ma200: r?.ma200 ?? null, vol: r?.vol ?? null, volEdge: r?.volEdge ?? null, sma200w: q?.sma200w ?? null, volRatio: r?.volRatio ?? null,
           high52w: r?.high52w ?? q?.high52w ?? null, low52w: r?.low52w ?? q?.low52w ?? null, pos52wRaw: r?.pos52w ?? null,
-          trendR2: r?.trendR2 ?? null, trendR2Long: r?.trendR2Long ?? null,
+          trendR2: r?.trendR2 ?? null, trendR2Long: r?.trendR2Long ?? null, rsi: r?.rsi ?? null, macdHist: r?.macdHist ?? null,
         };
       });
       setStockItems(built);
@@ -369,7 +373,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             fiveYPct: q?.fiveYearChangePercent ?? null,
             ma200: null, vol: null, volEdge: null, sma200w: q?.sma200w ?? null, volRatio: null,
             high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
-            trendR2: null, trendR2Long: null,
+            trendR2: null, trendR2Long: null, rsi: null, macdHist: null,
           };
         });
 
@@ -383,7 +387,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             fiveYPct: q?.fiveYearChangePercent ?? null,
             ma200: null, vol: null, volEdge: null, sma200w: q?.sma200w ?? null, volRatio: null,
             high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
-            trendR2: null, trendR2Long: null,
+            trendR2: null, trendR2Long: null, rsi: null, macdHist: null,
           };
         });
 
@@ -401,7 +405,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             fiveYPct: c?.fiveYearChangePercent ?? null,
             ma200: null, vol: null, volEdge: null, sma200w: c?.sma200w ?? null, volRatio: null,
             high52w: null, low52w: null, pos52wRaw: null,
-            trendR2: null, trendR2Long: null,
+            trendR2: null, trendR2Long: null, rsi: null, macdHist: null,
           };
         });
 
@@ -413,7 +417,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           fiveYPct: s.fiveYearReturn,
           ma200: null, vol: null, volEdge: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null, volRatio: null,
           high52w: null, low52w: null, pos52wRaw: null,
-          trendR2: null, trendR2Long: null,
+          trendR2: null, trendR2Long: null, rsi: null, macdHist: null,
         }));
 
         const allItems = [...indexItems, ...commItems, ...cryptoItems, ...sectorItems];
@@ -433,7 +437,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             ...item,
             r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, vol: r.vol, volEdge: r.volEdge ?? null, volRatio: r.volRatio,
             lastClose: r.lastClose ?? null,
-            trendR2: r.trendR2 ?? null, trendR2Long: r.trendR2Long ?? null,
+            trendR2: r.trendR2 ?? null, trendR2Long: r.trendR2Long ?? null, rsi: r.rsi ?? null, macdHist: r.macdHist ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -777,6 +781,10 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
                   // Pre-breakout "coiled spring": picked by the reserved sleeve, NOT the
                   // momentum gate — a year-long uptrend basing near its 52w high (M7).
                   const isCoiled   = accelOnly && (scored?.passesPreBreakout ?? false) && !(scored?.passesGate ?? false);
+                  // Overheated cyclical (M8): RSI is hot AND the overheat guard is
+                  // actively demoting it (so the badge only shows on the cyclicals it bites).
+                  const isHot      = accelOnly && (scored?.overheat ?? 0) > 0.33 && (scored?.rsi ?? 0) >= 70
+                    && (item.group === 'Commodities' || item.group === 'Crypto');
                   // Above 200W = structural long-term bull (mega-cycle confirmed).
                   const above200w  = item.price != null && item.sma200w != null && item.price > item.sma200w;
                   const isPinned   = pins.has(item.symbol);
@@ -823,6 +831,11 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
                           {isCoiled && (
                             <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300 leading-none" title="Coiled spring — a year-long uptrend basing near its 52-week high, not accelerating yet. Reserved pre-breakout slot (M7).">
                               🔒 coiled
+                            </span>
+                          )}
+                          {isHot && (
+                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-red-500/15 text-red-300 leading-none" title="Overheated cyclical — RSI in the overbought zone on a commodity/crypto. The M8 overheat guard demotes it (these mean-revert hardest off an overbought RSI, like oil before the Iran-war crash). A secular grower running hot is barely touched.">
+                              🔥 hot
                             </span>
                           )}
                           {above200w && !rollingLoading && (
