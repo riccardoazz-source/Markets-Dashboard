@@ -835,6 +835,11 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
                               {accel.arrow}
                             </span>
                           )}
+                          {accelOnly && !rollingLoading && scored && !isCoiled && (
+                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-accent/15 text-accent leading-none tabular-nums" title="Composite RotationScore (0–100) from the CURRENT model — this is what changes when the model changes. The list is ordered by it.">
+                              {Math.round(scored.score * 100)}
+                            </span>
+                          )}
                           <button
                             onClick={(e) => { e.stopPropagation(); togglePin(item.symbol); }}
                             className={clsx('shrink-0 ml-auto p-0.5 rounded transition-colors',
