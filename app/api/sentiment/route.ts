@@ -24,7 +24,7 @@ interface Snapshot {
 const CLASS_FIELDS = ['indexes_note', 'crypto_note', 'commodities_note', 'sectors_note', 'stocks_note'];
 const FIELDS = [
   'headline', 'regime_now', 'regime_next', 'macro_note', 'macro_backdrop',
-  'outlook_note', 'rotation_note', 'risk_note', 'confidence',
+  'outlook_note', 'rotation_note', 'risk_note', 'confidence', 'fear_greed',
   ...CLASS_FIELDS,
 ];
 
@@ -146,9 +146,10 @@ export async function POST(req: Request) {
     'You are a markets desk analyst writing a DAILY BRIEF from a live table you have been given. Style: Bloomberg terminal flash, not a research essay. ' +
     'READ THE FULL TABLE BELOW — it is exactly what the user sees on screen. Every field has a strict WORD LIMIT you must never exceed. ' +
     'Always name specific assets and exact numbers FROM THE TABLE. ' +
-    'You MUST do TWO web searches before writing:\n' +
+    'You MUST do THREE web searches before writing:\n' +
     '  1. Search for the catalyst behind today\'s biggest daily movers shown in the data below (the names with the largest day % move).\n' +
     '  2. Search for today\'s key macro backdrop: Fed/ECB/BoJ stance, latest inflation print, and the most important geopolitical development.\n' +
+    '  3. Search for "CNN Fear and Greed Index today" and read the CURRENT numeric value (0-100) and its label (Extreme Fear / Fear / Neutral / Greed / Extreme Greed).\n' +
     'Both searches feed different fields — macro_note covers the daily moves, macro_backdrop covers rates/inflation/geopolitics. Be punchy and specific, never vague. ' +
     'Distinguish the regime RIGHT NOW from the next ~month. ' +
     'Use one of these exact labels: Risk-On, Risk-Off, Stagflation Risk, Soft Landing, Transition, Reflation, Goldilocks.\n\n' +
@@ -162,6 +163,7 @@ export async function POST(req: Request) {
     'rotation_note: <MAX 25 WORDS. Where capital is rotating — name the strongest and weakest asset classes today.>\n' +
     classInstr + '\n' +
     'risk_note: <MAX 20 WORDS. Single biggest risk combining market + macro.>\n' +
+    'fear_greed: <From search #3: the CURRENT CNN Fear & Greed Index as "NUMBER — LABEL", e.g. "63 — Greed". Number 0-100 only. If you cannot find it, write "n/a".>\n' +
     'confidence: <Low | Medium | High>';
 
   const userMessage =
@@ -207,12 +209,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'unparsed', raw: text.slice(0, 500) }, { status: 200 });
     }
 
-    // Append Fear & Greed as structured data fields so the UI can render them
-    // without asking Gemini to re-state exact numbers it might hallucinate.
+    // Fear & Greed: prefer the authoritative direct CNN fetch (exact number).
+    // When that's unavailable (CNN blocks datacenter IPs), fall back to the value
+    // Gemini read from its grounded search #3 ("63 — Greed").
     if (fgScore != null) {
       parsed.fear_greed_score = String(fgScore);
       parsed.fear_greed_label = fgLabel;
+    } else if (parsed.fear_greed && parsed.fear_greed.toLowerCase() !== 'n/a') {
+      const m = parsed.fear_greed.match(/(\d{1,3})\s*[—–\-]?\s*(.*)/);
+      if (m && Number(m[1]) >= 0 && Number(m[1]) <= 100) {
+        parsed.fear_greed_score = String(Number(m[1]));
+        parsed.fear_greed_label = (m[2] || '').trim();
+      }
     }
+    delete parsed.fear_greed; // raw line not needed by the UI
 
     return NextResponse.json({ data: parsed, generatedAt: new Date().toISOString() });
   } catch (e) {
