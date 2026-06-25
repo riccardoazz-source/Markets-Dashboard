@@ -35,6 +35,8 @@ interface RotationItem {
   high52w: number | null;  // 52-week high (from rotation-returns)
   low52w: number | null;   // 52-week low (from rotation-returns)
   pos52wRaw: number | null;// route-computed 52W range position (fallback)
+  trendR2: number | null;  // 0–1 trailing-trend smoothness (from rotation-returns; LEAD signal)
+  pos52w?: number | null;  // resolved 0–100 range position fed to the model (set at scoring time)
 }
 
 interface RollingReturn {
@@ -49,6 +51,7 @@ interface RollingReturn {
   high52w: number | null;
   low52w: number | null;
   pos52w: number | null;
+  trendR2: number | null;
   lastClose: number | null;
 }
 
@@ -296,6 +299,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           fiveYPct: q?.fiveYearChangePercent ?? null,
           ma200: r?.ma200 ?? null, vol: r?.vol ?? null, sma200w: q?.sma200w ?? null, volRatio: r?.volRatio ?? null,
           high52w: r?.high52w ?? q?.high52w ?? null, low52w: r?.low52w ?? q?.low52w ?? null, pos52wRaw: r?.pos52w ?? null,
+          trendR2: r?.trendR2 ?? null,
         };
       });
       setStockItems(built);
@@ -344,6 +348,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             fiveYPct: q?.fiveYearChangePercent ?? null,
             ma200: null, vol: null, sma200w: q?.sma200w ?? null, volRatio: null,
             high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
+            trendR2: null,
           };
         });
 
@@ -357,6 +362,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             fiveYPct: q?.fiveYearChangePercent ?? null,
             ma200: null, vol: null, sma200w: q?.sma200w ?? null, volRatio: null,
             high52w: q?.high52w ?? null, low52w: q?.low52w ?? null, pos52wRaw: null,
+            trendR2: null,
           };
         });
 
@@ -374,6 +380,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             fiveYPct: c?.fiveYearChangePercent ?? null,
             ma200: null, vol: null, sma200w: c?.sma200w ?? null, volRatio: null,
             high52w: null, low52w: null, pos52wRaw: null,
+            trendR2: null,
           };
         });
 
@@ -385,6 +392,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
           fiveYPct: s.fiveYearReturn,
           ma200: null, vol: null, sma200w: (s as { sma200w?: number | null }).sma200w ?? null, volRatio: null,
           high52w: null, low52w: null, pos52wRaw: null,
+          trendR2: null,
         }));
 
         const allItems = [...indexItems, ...commItems, ...cryptoItems, ...sectorItems];
@@ -404,6 +412,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             ...item,
             r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, vol: r.vol, volRatio: r.volRatio,
             lastClose: r.lastClose ?? null,
+            trendR2: r.trendR2 ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -433,6 +442,9 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
     const forScoring: RotationItem[] = rows.map(item => ({
       ...item,
       price: item.lastClose ?? item.price,
+      // Resolve the 52W range position the model scores on (live price-based when
+      // available, else the route value). trendR2 already rides along on the item.
+      pos52w: pos52w(item),
     }));
     return new Map(scoreRotation(forScoring).map(s => [s.item.symbol, s]));
   }, [rows, rollingLoading]);

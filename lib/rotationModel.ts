@@ -52,9 +52,10 @@
  *   stretch = max(0, price/MA200 − 1)·100 / monthlyVol    (monthly-σ above MA200)
  *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = 0.45·ACC + 0.25·TRD + 0.10·REG + 0.04·VOL − wEXT·EXT   (each input 0..1)
+ *   Score = 0.38·ACC + 0.22·TRD + 0.12·LEAD + 0.10·REG + 0.04·VOL − wEXT·EXT   (each input 0..1)
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
  *     TRD — 0.45·p3m + 0.15·p6m + 0.40·SHA  (risk-adjusted trend; M3: SHA raised 30%→40%)
+ *     LEAD— 0.6·pos52w + 0.4·trendR2 percentile (M4: quality leadership for winner capture)
  *     REG — regime: pctile(price/MA200−1) graduated (far above=high, below=low, null=0.5)
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
  *     EXT — over-extension percentile (SUBTRACTED): the blow-off guard
@@ -76,9 +77,10 @@
  */
 
 export const MODEL_WEIGHTS = {
-  acceleration: 0.45, // ACC — 3-horizon pace-ladder percentile
-  trend:        0.25, // TRD — r3m/r6m blend + risk-adjusted SHA (inside TRD: 50%/20%/30%)
-  regime:       0.10, // REG — price vs 200-day MA
+  acceleration: 0.38, // ACC — 3-horizon pace-ladder percentile (M4: 0.45→0.38, ACC over-rewards short spikes)
+  trend:        0.22, // TRD — r3m/r6m blend + risk-adjusted SHA (inside TRD: 45%/15%/40%) (M4: 0.25→0.22)
+  lead:         0.12, // LEAD — quality leadership: 52w-range position + trend smoothness (M4 new)
+  regime:       0.10, // REG — price vs 200-day MA (graduated percentile)
   extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
   volume:       0.04, // VOL — volume confirmation (null→0.5 neutral, so backtest unaffected)
 } as const;
@@ -108,9 +110,12 @@ export const ACCEL_LIMIT = 8;
 // actually qualify — it can be 3 in a shock or 20 in a broad rally. This only
 // prevents the list from ballooning to the entire universe in a mega-bull;
 // names are ranked by score, so the strongest always come first.
-// M3: reduced from 25 → 12 to concentrate picks in highest-conviction names.
-// 1Y backtest showed top-10 picks contained 9 winners; diluting to 25 adds noise.
-export const ACCEL_MAX = 12;
+// History: M3 cut this 25→12 to chase basket RETURN. But the capture-first
+// reliability later showed M3 caught the FEWEST real winners (13/53) — the
+// concentration optimised the wrong thing. Since capturing many winners now
+// matters more than headline return, M4 widens back to 20: more breadth = more
+// winners caught, while the LEAD quality factor lifts precision per pick.
+export const ACCEL_MAX = 20;
 
 export interface ModelInput {
   symbol: string;
@@ -122,6 +127,8 @@ export interface ModelInput {
   ma200: number | null;    // 200-day SMA (null → data unavailable, not "below")
   group?: string;          // asset class (e.g. 'Commodities') → enables class-aware blow-off control
   vol?: number | null;     // realized MONTHLY volatility in % (null → unavailable)
+  pos52w?: number | null;  // 0–100 position of the latest close in its 52-week range (LEAD signal)
+  trendR2?: number | null; // 0–1 smoothness of the trailing uptrend (LEAD signal; 0 if downtrend)
   sma200w?: number | null;  // kept for callers; not used by the score (backtest can't compute it)
   volRatio?: number | null; // kept for callers; not used by the score (no historical volume)
 }
@@ -229,6 +236,18 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const byRegAsc      = [...validWithReg].sort((a, b) => (regValOf(a) ?? 0) - (regValOf(b) ?? 0));
   const rankRegAsc    = new Map(byRegAsc.map((r, i) => [r.symbol, i]));
 
+  // LEAD inputs — cross-sectional percentiles of 52w-range position and trend R².
+  // Each only ranks items that actually have the datum; missing → 0.5 neutral, so
+  // assets without the data (and any caller that doesn't supply it) are unaffected.
+  const validWithPos  = valid.filter(i => i.pos52w != null);
+  const nPos          = validWithPos.length;
+  const byPosAsc      = [...validWithPos].sort((a, b) => (a.pos52w ?? 0) - (b.pos52w ?? 0));
+  const rankPosAsc    = new Map(byPosAsc.map((r, i) => [r.symbol, i]));
+  const validWithTq   = valid.filter(i => i.trendR2 != null);
+  const nTq           = validWithTq.length;
+  const byTqAsc       = [...validWithTq].sort((a, b) => (a.trendR2 ?? 0) - (b.trendR2 ?? 0));
+  const rankTqAsc     = new Map(byTqAsc.map((r, i) => [r.symbol, i]));
+
   // Volume confirmation: cross-sectional percentile of latestVol/avg20dVol.
   // Only items with a real volRatio participate; items without (backtest, most
   // crypto) get the neutral 0.5 rank — so the backtest is completely unaffected
@@ -305,10 +324,21 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       ? toP(rankVolRatioAsc.get(item.symbol) ?? 0, nVol)
       : 0.5;
 
+    // LEAD — quality-leadership: rewards names that are BOTH near their 52-week
+    // highs (leadership: 52w-high momentum persists — George & Hwang 2004) AND
+    // climbing in a smooth, persistent trend (high trend R²: jumpy momentum
+    // reverses, smooth momentum continues — "frog in the pan", Da et al. 2014).
+    // This targets durable winner CAPTURE: the AI-era compounders (semis, NVDA)
+    // were steady 52w-high leaders, while the 2021 software the model bought was
+    // spiky and rolling over. Missing data → 0.5 neutral (backtest/asset-safe).
+    const pPos = item.pos52w != null && nPos > 0 ? toP(rankPosAsc.get(item.symbol) ?? 0, nPos) : 0.5;
+    const pTq  = item.trendR2 != null && nTq  > 0 ? toP(rankTqAsc.get(item.symbol) ?? 0, nTq) : 0.5;
+    const lead = 0.6 * pPos + 0.4 * pTq;
+
     const W = MODEL_WEIGHTS;
     const extWeight = isCommodity(item) ? COMMODITY_EXT_WEIGHT : W.extension;
     const score = hasReturns
-      ? W.acceleration * accPctile + W.trend * pTrend + W.regime * reg + W.volume * pVol - extWeight * pExt
+      ? W.acceleration * accPctile + W.trend * pTrend + W.lead * lead + W.regime * reg + W.volume * pVol - extWeight * pExt
       : -1;
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
@@ -360,4 +390,39 @@ export function realizedMonthlyVol(closes: number[], lookback = 63): number | nu
   const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
   const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
   return Math.sqrt(variance) * Math.sqrt(21) * 100;
+}
+
+// ── Trend quality (the "smooth trend" / frog-in-the-pan signal) ──────────────
+// R² of an OLS fit of log(close) on time over the trailing window. A high R²
+// means the uptrend is smooth and persistent (a durable compounder marching up
+// in small steps — the kind that keeps winning); a low R² means the gain came
+// from a few violent jumps (a pump prone to reverse). We only credit UPtrends:
+// a smooth DOWNtrend would also have high R², so when the fitted slope ≤ 0 we
+// return 0. Computed identically live and in the backtest (both feed it closes
+// up to the as-of date), so it never look-aheads. ~126 closes ≈ 6 trading months,
+// which fits inside the live route's 375-day fetch.
+export function trendQualityR2(closes: number[], lookback = 126): number | null {
+  const w = closes.slice(-lookback).filter(c => c > 0);
+  const n = w.length;
+  if (n < 40) return null;
+  const ys = w.map(c => Math.log(c));
+  // x = 0..n-1; closed-form OLS slope + R².
+  const sumX = (n - 1) * n / 2;
+  const sumX2 = (n - 1) * n * (2 * n - 1) / 6;
+  let sumY = 0, sumXY = 0;
+  for (let i = 0; i < n; i++) { sumY += ys[i]; sumXY += i * ys[i]; }
+  const denomX = n * sumX2 - sumX * sumX;
+  if (denomX === 0) return null;
+  const slope = (n * sumXY - sumX * sumY) / denomX;
+  if (slope <= 0) return 0; // only reward genuine uptrends
+  const meanY = sumY / n;
+  const intercept = meanY - slope * (sumX / n);
+  let ssRes = 0, ssTot = 0;
+  for (let i = 0; i < n; i++) {
+    const pred = intercept + slope * i;
+    ssRes += (ys[i] - pred) ** 2;
+    ssTot += (ys[i] - meanY) ** 2;
+  }
+  if (ssTot === 0) return 0;
+  return Math.max(0, Math.min(1, 1 - ssRes / ssTot));
 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
-import { scoreRotation, ACCEL_LIMIT, ACCEL_MAX, realizedMonthlyVol } from '@/lib/rotationModel';
+import { scoreRotation, ACCEL_LIMIT, ACCEL_MAX, realizedMonthlyVol, trendQualityR2 } from '@/lib/rotationModel';
 
 export const runtime = 'edge';
 
@@ -100,6 +100,19 @@ function ma200AtDate(history: Hist, dateStr: string): number | null {
   return closes.slice(-200).reduce((s, c) => s + c, 0) / 200;
 }
 
+// 52-week range position as of a past date (trailing 365 calendar days, no look-ahead).
+function pos52wAtDate(history: Hist, dateStr: string): number | null {
+  const d = new Date(dateStr); d.setDate(d.getDate() - 365);
+  const cutoff = d.toISOString().slice(0, 10);
+  const window = history.filter(p => p.date >= cutoff && p.date <= dateStr);
+  if (window.length < 2) return null;
+  let hi = -Infinity, lo = Infinity;
+  for (const p of window) { if (p.close > hi) hi = p.close; if (p.close < lo) lo = p.close; }
+  const cur = priceAsOf(history, dateStr);
+  if (cur == null || hi <= lo) return null;
+  return Math.max(0, Math.min(100, ((cur - lo) / (hi - lo)) * 100));
+}
+
 function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: string, key: string, label: string, days: number): Scenario {
   const asOfDate = subDays(new Date(), days);
   const asOf = fmt(asOfDate);
@@ -122,6 +135,8 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
       price: priceAsOf(h, asOf),
       ma200: ma200AtDate(h, asOf),
       vol: realizedMonthlyVol(closesAsOf),
+      pos52w: pos52wAtDate(h, asOf),
+      trendR2: trendQualityR2(closesAsOf),
       sma200w: null as number | null, // 200W SMA not computed in backtest (too expensive)
       volRatio: null as number | null, // volume history not available in backtest
       fwd: retBetween(h, asOf, todayStr),

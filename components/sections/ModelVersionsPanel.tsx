@@ -60,7 +60,8 @@ export function ModelVersionsPanel({ liveResults }: Props) {
         📊 Model versions &amp; backtest results
         {best?.rel && (
           <span className="ml-auto text-[10px] text-gray-500">
-            best: <span className="text-green-300 font-semibold">Model {best.v.id}</span> (rel {best.rel.reliability.toFixed(1)})
+            best: <span className="text-green-300 font-semibold">Model {best.v.id}</span> (rel {best.rel.reliability.toFixed(1)}
+            {best.rel.hasCapture ? ` · caught ${best.rel.totalHits}/${best.rel.totalWinners} winners` : ''})
           </span>
         )}
       </summary>
@@ -69,10 +70,10 @@ export function ModelVersionsPanel({ liveResults }: Props) {
         <p className="text-[10px] text-gray-500 leading-relaxed">
           The <span className="text-gray-300">current model</span> row auto-fills from the last backtest you run — no manual transcription needed.
           Each cell shows <span className="text-gray-300">basket %</span> · <span className="text-gray-500">vs S&amp;P 500</span> · picks · α (alpha vs SPX).
-          <span className="text-gray-300">Reliability</span> gives <span className="text-gray-300">priority to capturing real winners</span> (Capt column) and
-          penalises underperformance vs S&amp;P with increasing severity by horizon:
-          1D irrelevant · 1M acceptable · <span className="text-red-300">5Y below S&amp;P = garbage</span> (penalty ×5).
-          Few picks or few real winners caught further lower the score.
+          <span className="text-gray-300">Reliability (0–100) is capture-FIRST</span>: it is driven by <span className="text-gray-300">how many real winners the model catches</span> (Capt column),
+          not by basket return — beating SPX counts as a flat win, so <span className="text-gray-300">one monster pick can&apos;t inflate it</span>.
+          Going below S&amp;P lowers it with increasing severity by horizon: 1D irrelevant · 1M acceptable · <span className="text-red-300">5Y below S&amp;P = garbage</span> (×5).
+          Reliability = 100 · captureRate · beatFactor · pickFactor.
         </p>
 
         <div className="overflow-x-auto">
@@ -85,9 +86,9 @@ export function ModelVersionsPanel({ liveResults }: Props) {
                 ))}
                 <th className="px-2 py-1.5 text-right" title="Weighted average alpha vs S&P 500 (raw)">α w.</th>
                 <th className="px-2 py-1.5 text-right" title="% of periods where the basket beat SPX">Hit</th>
-                <th className="px-2 py-1.5 text-right" title="Weighted avg % of real top performers caught by the model">Capt</th>
-                <th className="px-2 py-1.5 text-right" title="Media picks">Picks</th>
-                <th className="px-2 py-1.5 text-right" title="Reliability ratio">Rel.</th>
+                <th className="px-2 py-1.5 text-right" title="Real winners caught (weighted % across horizons, and total hits/total winners). THE primary driver of reliability.">Capt</th>
+                <th className="px-2 py-1.5 text-right" title="Average picks per period">Picks</th>
+                <th className="px-2 py-1.5 text-right" title="Reliability 0–100 = 100 · captureRate · beatFactor · pickFactor. Capture-first: catching many real winners matters more than basket return.">Rel.</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -112,8 +113,13 @@ export function ModelVersionsPanel({ liveResults }: Props) {
                     <td className="px-2 py-2 text-right align-top text-[11px] tabular-nums text-gray-300">
                       {rel ? `${Math.round(rel.hitRate * 100)}%` : '—'}
                     </td>
-                    <td className={clsx('px-2 py-2 text-right align-top text-[11px] tabular-nums', rel && rel.hasCapture ? 'text-gray-200 font-semibold' : 'text-gray-600')}>
-                      {rel && rel.hasCapture ? `${Math.round(rel.captureRate * 100)}%` : '—'}
+                    <td className={clsx('px-2 py-2 text-right align-top tabular-nums', rel && rel.hasCapture ? 'text-gray-200' : 'text-gray-600')}>
+                      {rel && rel.hasCapture ? (
+                        <div className="flex flex-col items-end leading-tight">
+                          <span className="text-[11px] font-semibold">{Math.round(rel.captureRate * 100)}%</span>
+                          <span className="text-[9px] text-gray-500" title="Total real winners caught across all periods">{rel.totalHits}/{rel.totalWinners}</span>
+                        </div>
+                      ) : '—'}
                     </td>
                     <td className="px-2 py-2 text-right align-top text-[11px] tabular-nums text-gray-300">
                       {rel ? rel.avgPicks.toFixed(1) : '—'}

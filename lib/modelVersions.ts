@@ -69,17 +69,37 @@ export const PERIOD_LABELS: Record<PeriodKey, string> = {
 export const PERIOD_ORDER: PeriodKey[] = ['1d', '1m', '3m', '6m', '1y', '5y'];
 
 export interface Reliability {
-  weightedAlpha: number;    // weighted avg of raw (basket − spx) — for reading
-  weightedAlphaEff: number; // weighted avg with horizon-scaled loss amplification — drives score
+  weightedAlpha: number;    // weighted avg of raw (basket − spx) — for reading only
   hitRate: number;          // fraction of periods where basket beat spx
   avgPicks: number;         // mean pick count across periods with data
-  captureRate: number;      // weighted avg of winnerHits/winnerTotal (0..1)
+  captureRate: number;      // weighted avg of winnerHits/winnerTotal (0..1) — THE driver
   hasCapture: boolean;      // whether any period had winner-capture data
+  totalHits: number;        // total real winners caught across all periods
+  totalWinners: number;     // total real winners available across all periods
+  beatFactor: number;       // 0..1 — did it beat SPX broadly (horizon-asymmetric loss penalty)
   worst5y: boolean;         // 5Y present AND below SPX → flagged as garbage
-  reliability: number;      // final ratio (see formula above)
+  reliability: number;      // 0..100 — capture-primary trust score (see below)
   nPeriods: number;         // how many periods had usable data
 }
 
+/**
+ * Reliability (v3) — capture-PRIMARY. A model that nails one monster winner but
+ * misses the rest is LUCKY, not reliable; reliability must reward catching MANY
+ * of the real winners, not the size of the basket return (which one pick inflates).
+ *
+ *   CaptureRate = Σ w·(winnerHits/winnerTotal) / Σ w        ← THE driver (0..1)
+ *   beatScore_p = alpha_p ≥ 0 ? +1 : −lossSeverity_p        ← WIN credit is flat
+ *                 (upside magnitude IGNORED → no monster-pick inflation;
+ *                  downside scaled by horizon: a 5Y miss craters it)
+ *   beatFactor  = clamp( (Σ w·beatScore_p / Σ w + 1) / 2 , 0, 1 )   (0..1)
+ *   pickFactor  = min(1, avgPicks / 6)
+ *
+ *   Reliability = 100 · CaptureRate · beatFactor · pickFactor
+ *
+ * So doubling the return of a single pick does NOTHING; catching one more real
+ * winner raises it proportionally. Going below SPX (especially at 5Y) pushes
+ * beatFactor down hard. No capture data → neutral 0.5 so manual rows aren't zeroed.
+ */
 export function computeReliability(results: Partial<Record<PeriodKey, PeriodResult>>): Reliability | null {
   const entries = PERIOD_ORDER
     .map(k => ({ k, r: results[k] }))
@@ -87,14 +107,17 @@ export function computeReliability(results: Partial<Record<PeriodKey, PeriodResu
       e.r != null && e.r.basket != null && e.r.spx != null);
   if (entries.length === 0) return null;
 
-  let wSum = 0, waRawSum = 0, waEffSum = 0, hits = 0;
+  let wSum = 0, waRawSum = 0, beatSum = 0, hits = 0;
   let pickSum = 0, pickN = 0, capWSum = 0, capSum = 0, worst5y = false;
+  let totalHits = 0, totalWinners = 0;
   for (const { k, r } of entries) {
     const w = PERIOD_WEIGHTS[k];
     const alpha = (r.basket as number) - (r.spx as number);
-    const eff = alpha >= 0 ? alpha : alpha * PERIOD_LOSS_SEVERITY[k];
+    // WIN = flat +1 (magnitude ignored, so one huge pick can't inflate trust);
+    // LOSS = −severity (horizon-scaled: 5Y miss is catastrophic, 1D is noise).
+    const beatScore = alpha >= 0 ? 1 : -PERIOD_LOSS_SEVERITY[k];
     waRawSum += w * alpha;
-    waEffSum += w * eff;
+    beatSum += w * beatScore;
     wSum += w;
     if (alpha > 0) hits++;
     if (k === '5y' && alpha < 0) worst5y = true;
@@ -102,30 +125,27 @@ export function computeReliability(results: Partial<Record<PeriodKey, PeriodResu
     if (r.winnerHits != null && r.winnerTotal != null && r.winnerTotal > 0) {
       capWSum += w;
       capSum += w * (r.winnerHits / r.winnerTotal);
+      totalHits += r.winnerHits;
+      totalWinners += r.winnerTotal;
     }
   }
   const weightedAlpha = wSum > 0 ? waRawSum / wSum : 0;
-  const weightedAlphaEff = wSum > 0 ? waEffSum / wSum : 0;
   const hitRate = hits / entries.length;
   const avgPicks = pickN > 0 ? pickSum / pickN : 0;
   const hasCapture = capWSum > 0;
   const captureRate = hasCapture ? capSum / capWSum : 0;
 
   const pickFactor = Math.min(1, avgPicks / 6);
-  // Capture is the PRIORITY lever: catching the real winners scales the score from
-  // 0.35× (caught none / no data) up to 1.0× (caught them all). When no capture
-  // data exists at all, stay neutral (1.0) so manually-entered rows aren't punished.
-  const captureMult = hasCapture ? 0.35 + 0.65 * captureRate : 1.0;
-  const qualityMult = captureMult * pickFactor;
-  // Good model: capture+picks modulate how good. Bad model: weak capture/picks
-  // make the negative WORSE (2 − qualityMult ∈ [1, ~2)).
-  const reliability = weightedAlphaEff >= 0
-    ? weightedAlphaEff * qualityMult
-    : weightedAlphaEff * (2 - qualityMult);
+  const beatFactor = Math.max(0, Math.min(1, (beatSum / wSum + 1) / 2));
+  // Capture is the PRIMARY lever. No capture data → neutral 0.5 so manually-entered
+  // rows (no winner leaderboard) aren't zeroed out.
+  const effCapture = hasCapture ? captureRate : 0.5;
+  const reliability = 100 * effCapture * beatFactor * pickFactor;
 
   return {
-    weightedAlpha, weightedAlphaEff, hitRate, avgPicks,
-    captureRate, hasCapture, worst5y, reliability, nPeriods: entries.length,
+    weightedAlpha, hitRate, avgPicks, captureRate, hasCapture,
+    totalHits, totalWinners, beatFactor, worst5y,
+    reliability, nPeriods: entries.length,
   };
 }
 
@@ -194,7 +214,8 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   {
     id: 3,
     name: 'SHA priority + concentrated 12 picks',
-    current: true,
+    current: false,
+    recordedAt: '2026-06-25',
     formula: [
       'Score = 0.45·ACC + 0.25·TRD + 0.10·REG + 0.04·VOL − wEXT·EXT',
       '',
@@ -218,5 +239,32 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       '1y': { basket: 166.9, spx: 20.8, picks: 12, winnerHits: 6, winnerTotal: 12 },
       '5y': { basket: 135.1, spx: 71.9, picks: 12, winnerHits: 2, winnerTotal: 12 },
     },
+  },
+  {
+    id: 4,
+    name: 'Quality leadership — 52w-high position + trend smoothness',
+    current: true,
+    formula: [
+      'Score = 0.38·ACC + 0.22·TRD + 0.12·LEAD + 0.10·REG + 0.04·VOL − wEXT·EXT',
+      '',
+      'NEW: LEAD = 0.6·pos52w + 0.4·trendR2   (cross-sectional percentiles)',
+      '   pos52w  = position of price in its 52-week range (0=low, 100=high)',
+      '             → 52-week-high momentum persists (George & Hwang 2004)',
+      '   trendR2 = R² of log-price trend over trailing ~6mo (0=jumpy, 1=smooth)',
+      '             → smooth trends continue, jumpy ones reverse ("frog in the pan")',
+      '   Both target durable winner CAPTURE: steady 52w-high leaders (semis, NVDA)',
+      '   over spiky software that spikes then rolls over. null → 0.5 neutral.',
+      '',
+      'ACC weight 0.45→0.38 (it over-rewarded short blow-off spikes)',
+      'TRD weight 0.25→0.22  ·  rest unchanged from M3',
+      '',
+      'Picks: top 12 → 20. Capture-first reliability showed M3 (12 picks) caught',
+      '   the FEWEST winners (13/53). More breadth catches more winners; LEAD',
+      '   lifts precision so the extra picks are still quality.',
+      '',
+      'Gate: r1m>0 ∧ r3m>0 ∧ aRecent>0 ∧ r1m<cap ∧ price ≥ MA200',
+      '   cap = 50%   ·   commodities 25%   ·   picks: top 20',
+    ],
+    results: {}, // auto-filled from the live backtest run
   },
 ];

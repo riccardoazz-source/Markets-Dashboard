@@ -25,35 +25,38 @@ Ogni volta che cambiamo la formula del modello:
 2. Si descrive la nuova versione nella sezione Formule
 3. Dopo aver eseguito il backtest nell'app, si aggiornano i valori nella tabella
 
-**Reliability Ratio** — misura quanto ci si può fidare di una versione. Due principi:
-
-1. **Priorità alla cattura dei winner reali** — quanti dei top performer effettivi
-   del periodo il modello ha preso (non solo "ha battuto SPX").
-2. **Penalità asimmetrica per orizzonte** quando va sotto S&P 500:
-   - 1D sotto SPX → non muore nessuno (severità 0.2)
-   - 1M sotto SPX → accettabile (severità 0.6)
-   - 5Y sotto SPX → spazzatura (severità 5.0, affossa il punteggio)
+**Reliability Ratio v3 — CAPTURE-FIRST** (0–100). Un modello che azzecca un solo
+mostro (NVDA +945%) ma manca gli altri 11 vincitori è FORTUNATO, non affidabile.
+La reliability premia **quanti vincitori reali cattura**, non il rendimento del
+paniere (che un singolo titolo può gonfiare).
 
 ```
-alpha_p     = basket_p − spx_p
-effAlpha_p  = alpha_p ≥ 0 ? alpha_p : alpha_p × lossSeverity_p
-WeightedAlphaEff = Σ w_p · effAlpha_p / Σ w_p
-CaptureRate = Σ w_p · (winnerHits_p / winnerTotal_p) / Σ w_p
+CaptureRate = Σ w_p · (winnerHits_p / winnerTotal_p) / Σ w_p      ← IL motore (0..1)
+beatScore_p = alpha_p ≥ 0 ? +1 : −lossSeverity_p                 ← vittoria = +1 piatto
+              (grandezza del guadagno IGNORATA → niente gonfiaggio da un mostro;
+               la perdita scala con l'orizzonte: un miss a 5Y affossa tutto)
+beatFactor  = clamp( (Σ w_p · beatScore_p / Σ w_p + 1) / 2 , 0, 1 )   (0..1)
 PickFactor  = min(1, AvgPicks / 6)
-qualityMult = (0.35 + 0.65 · CaptureRate) · PickFactor
 
-Reliability = WeightedAlphaEff ≥ 0
-              ? WeightedAlphaEff × qualityMult        (modello buono)
-              : WeightedAlphaEff × (2 − qualityMult)  (modello scarso → peggiora)
+Reliability = 100 · CaptureRate · beatFactor · PickFactor
 ```
 
 - **Pesi orizzonte** w_p: 1D=5%, 1M=10%, 3M=20%, 6M=20%, 1Y=25%, 5Y=20%
 - **lossSeverity** (solo se alpha<0): 1D=0.2, 1M=0.6, 3M=1.0, 6M=1.5, 1Y=2.5, 5Y=5.0
-- **CaptureRate** è la leva prioritaria: catturare i winner reali scala il punteggio
-  da 0.35× (nessuno) a 1.0× (tutti). Senza dati di cattura → neutro (1.0).
+- Raddoppiare il rendimento di un singolo pick non cambia NULLA; catturare un
+  vincitore reale in più alza il punteggio in proporzione.
+- Senza dati di cattura → 0.5 neutro (righe a mano non azzerate).
 
-Cattura alta + batte SPX (soprattutto a lungo) + molti picks → Reliability alta.
-Una sola sottoperformance a 5Y → Reliability negativa = spazzatura.
+Verifica su dati reali — vince la CATTURA, non il rendimento:
+
+| Modello | Rendimento | Vincitori presi | Reliability |
+|---|---|---|---|
+| M1 (25 pick) | modesto | **36/105 (34%)** | **22.8 ★** |
+| M2 (25 pick) | buono | 23/80 (29%) | 18.7 |
+| M3 (12 pick) | +167% a 1Y! | 13/53 (25%) | 18.0 |
+
+M3 aveva i rendimenti più alti ma ha preso MENO vincitori → meno affidabile.
+Per questo M4 riallarga i pick (12→20): più ampiezza = più vincitori catturati.
 
 ---
 
