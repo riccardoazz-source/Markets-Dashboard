@@ -113,9 +113,14 @@
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
  *           M9: aLong now SYMMETRIC (0.50·aRecent + 0.35·aBuild + 0.15·aLong)
  *     VQ  — net upside volatility percentile (M6 engine; M7 raised 0.18→0.22)
- *     TRD — 0.6·p3m + 0.4·p6m percentile (raw durable momentum; M8 trimmed 0.14→0.10)
+ *     TRD — 0.70·r1m-pctile + 0.30·r3m-pctile (M11: r1m primary → enables Recovering quadrant)
+ *           M8 trimmed 0.14→0.10. r6m leaves TRD; it lives in ACC (aBuild) and CYC.
+ *           An asset turning up (r1m>0, r3m<0) now scores near-neutral on TRD instead of
+ *           being penalised, letting ACC carry the recovering signal to the top-left quadrant.
  *     CYC — long-horizon (~12mo) trend-persistence R² percentile (M7 cut 0.12→0.08)
- *     LEAD— 0.6·pos52w + 0.4·trendR2 percentile (M9: 0.10→0.12; best predictor of continued winner status)
+ *     LEAD— 0.50·pos52w + 0.50·trendR2 percentile (M11: trendR2 equal to pos52w;
+ *           a smooth recovery earns trend quality even without 52w-high leadership)
+ *           M9: 0.10→0.12; best predictor of continued winner status
  *     REG — regime: pctile(price/MA200−1) graduated (M9: 0.08→0.06; gate already ensures above MA200)
  *     VOL — volume confirmation: latestVol/avg20dVol percentile (null→0.5 neutral)
  *     MACD— pctile(histogram/price) (M8 acceleration confirmation; null→0.5 neutral)
@@ -143,7 +148,7 @@
 export const MODEL_WEIGHTS = {
   acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar: how & how much it accelerated)
   volQuality:   0.22, // VQ  — net upside volatility (M7: 0.18→0.22; favours volatile semis over smooth software)
-  trend:        0.10, // TRD — raw 3M/6M momentum percentile (M8: 0.14→0.10, 0.04 moved to MACD confirmation)
+  trend:        0.10, // TRD — near-term direction: 0.70·r1m-pctile + 0.30·r3m-pctile (M11: r1m primary → enables Recovering quadrant)
   cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R² (M7: 0.12→0.08; it had over-rewarded smooth toppers)
   lead:         0.12, // LEAD — quality leadership: 52w-range position + short-trend smoothness (M9: 0.10→0.12)
   regime:       0.06, // REG — price vs 200-day MA (M9: 0.08→0.06; gate already ensures above MA200, LEAD is more predictive)
@@ -333,10 +338,12 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
   // Ascending-rank helpers (rank 0 = worst, rank n-1 = best) → cross-sectional percentiles.
   const byR3mAsc     = [...valid].sort((a, b) => a.r3m! - b.r3m!);
+  const byR1mAsc     = [...valid].sort((a, b) => a.r1m! - b.r1m!);
   const byAccelAsc   = [...valid].sort((a, b) => accelOf(a) - accelOf(b));
   const byStretchAsc = [...valid].sort((a, b) => stretchOf(a) - stretchOf(b));
   const byR1mAbsAsc  = [...valid].sort((a, b) => r1mAbsOf(a) - r1mAbsOf(b));
   const rankR3mAsc     = new Map(byR3mAsc.map((r, i) => [r.symbol, i]));
+  const rankR1mAsc     = new Map(byR1mAsc.map((r, i) => [r.symbol, i]));
   const rankAccelAsc   = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
   const rankStretchAsc = new Map(byStretchAsc.map((r, i) => [r.symbol, i]));
   const rankR1mAbsAsc  = new Map(byR1mAbsAsc.map((r, i) => [r.symbol, i]));
@@ -372,12 +379,8 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
   const nVol           = validWithVol.length;
   const byVolRatioAsc  = [...validWithVol].sort((a, b) => (a.volRatio ?? 0) - (b.volRatio ?? 0));
   const rankVolRatioAsc = new Map(byVolRatioAsc.map((r, i) => [r.symbol, i]));
-  // r6m rank — used as secondary trend signal in TRD. Only items with r6m data
-  // participate (their pool is n6m, not n), so null-r6m items aren't penalised.
-  const validWith6m  = valid.filter(i => i.r6m != null);
-  const n6m          = validWith6m.length;
-  const byR6mAsc     = [...validWith6m].sort((a, b) => a.r6m! - b.r6m!);
-  const rankR6mAsc   = new Map(byR6mAsc.map((r, i) => [r.symbol, i]));
+  // r6m is no longer ranked in TRD (M11). It still feeds ACC (aBuild = p3 − p6)
+  // and CYC (12mo trend R²), where its 6-month durability signal belongs.
   // VQ — net upside volatility (M6). The biggest winners are HIGH-volatility
   // assets; a low-vol asset (bond, utility) literally cannot 10× because its
   // volatility caps it. The OLD model divided return by vol (Sharpe), rewarding
@@ -415,12 +418,14 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
 
     const accPctile  = hasReturns ? toP(rankAccelAsc.get(item.symbol) ?? 0, n) : 0;
     const p3m        = toP(rankR3mAsc.get(item.symbol) ?? 0, n);
-    // TRD = raw durable momentum: 0.6·3M-rank + 0.4·6M-rank. M6 removed the
-    // Sharpe leg (r3m/vol) — that risk-adjustment penalised exactly the volatile
-    // winners we want; volatility now lives in VQ with the CORRECT sign. Null-r6m
-    // items use p3m for the 6M leg so they aren't penalised for missing history.
-    const p6m_trd  = item.r6m != null && n6m > 0 ? toP(rankR6mAsc.get(item.symbol) ?? 0, n6m) : p3m;
-    const pTrend   = 0.60 * p3m + 0.40 * p6m_trd;
+    // TRD = near-term direction (M11): 0.70·r1m-pctile + 0.30·r3m-pctile.
+    // r1m is the primary signal: an asset turning up (r1m>0, r3m<0) scores near-
+    // neutral on TRD instead of being penalised. The 3M leg acts as a quality filter
+    // only — it keeps dead-cat bounces (good r1m on a still-crashing 3M) from scoring
+    // too high on TRD, but it no longer dominates. r6m leaves TRD entirely; its
+    // durability signal lives in ACC (aBuild = p3 − p6) and CYC (12mo trend R²).
+    const p1m_trd  = toP(rankR1mAsc.get(item.symbol) ?? 0, n);
+    const pTrend   = 0.70 * p1m_trd + 0.30 * p3m;
     const pStretch   = toP(rankStretchAsc.get(item.symbol) ?? 0, n);
     const pR1mAbs    = toP(rankR1mAbsAsc.get(item.symbol) ?? 0, n);
     // EXT = worst of: (a) price stretched far above MA200 in vol units, or
@@ -446,16 +451,16 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       ? toP(rankVolRatioAsc.get(item.symbol) ?? 0, nVol)
       : 0.5;
 
-    // LEAD — quality-leadership: rewards names that are BOTH near their 52-week
-    // highs (leadership: 52w-high momentum persists — George & Hwang 2004) AND
-    // climbing in a smooth, persistent trend (high trend R²: jumpy momentum
-    // reverses, smooth momentum continues — "frog in the pan", Da et al. 2014).
-    // This targets durable winner CAPTURE: the AI-era compounders (semis, NVDA)
-    // were steady 52w-high leaders, while the 2021 software the model bought was
-    // spiky and rolling over. Missing data → 0.5 neutral (backtest/asset-safe).
+    // LEAD — quality-leadership: 0.50·pos52w + 0.50·trendR2 (M11: equal weight).
+    // pos52w: 52w-high momentum persists — George & Hwang 2004. High for trending names.
+    // trendR2: smooth trends continue, jumpy ones reverse — "frog in the pan", Da et al.
+    //   2014. A recovering asset can earn high trendR2 even when its pos52w is low.
+    // M11 gives trendR2 equal weight so quality-of-recovery (smooth reversal) can lift
+    // LEAD for turning assets. Trending leaders still score high on BOTH legs.
+    // Missing data → 0.5 neutral (backtest/asset-safe).
     const pPos = item.pos52w != null && nPos > 0 ? toP(rankPosAsc.get(item.symbol) ?? 0, nPos) : 0.5;
     const pTq  = item.trendR2 != null && nTq  > 0 ? toP(rankTqAsc.get(item.symbol) ?? 0, nTq) : 0.5;
-    const lead = 0.6 * pPos + 0.4 * pTq;
+    const lead = 0.50 * pPos + 0.50 * pTq;
 
     // VQ — net upside volatility percentile (the "good volatility" engine). High =
     // capacity for big moves with an upside tilt; null → 0.5 neutral.
