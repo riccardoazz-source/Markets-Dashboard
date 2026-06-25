@@ -646,7 +646,25 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // use pCyc only as a low floor (keep out genuinely broken charts), not a co-equal:
     //   MSCI World pVQ≈0.15 → REJECTED (no upside engine). ✓
     //   CRDO pVQ≈0.75, pCyc≈0.40 → ACCEPTED. ✓   RIOT pVQ≈0.85, pCyc≈0.45 → ACCEPTED. ✓
-    const preQualityOk = pVQ >= 0.60 && pCyc >= 0.30;
+    //
+    // M22 — TWO sleeve profiles, because the misses come in two shapes:
+    //   (a) DEEP DRAWDOWN (CRDO −22.9%, RIOT −25.1%): high pVQ, moderate pCyc, LOW pPos
+    //       (fell near its 52w low). Caught by the original clause above.
+    //   (b) COILED SPRING (MU −2.3%, AVGO −1.2% at Jun 2021): a SHALLOW pullback near
+    //       the 52w high in a strong smooth uptrend — moderate pVQ, HIGH pCyc, HIGH pPos.
+    //       These are the biggest 5Y misses (MU +1388%, AVGO +721%). The deep-drawdown
+    //       clause REJECTS them: in the 2020-21 crypto bull, crypto's enormous upside vol
+    //       pushes MU/AVGO's pVQ PERCENTILE below 0.60 even though they ARE high-vol semis.
+    //       So a second clause admits the coiled spring on its OWN signature — a genuine
+    //       engine (pVQ ≥ 0.45, the LOWVQ engine floor) that is near its 52w high (pPos ≥
+    //       0.55) in an above-median smooth uptrend (pCyc ≥ 0.55). Defensives (MSCI World,
+    //       Treasury: pVQ ≈ 0.15) fail the pVQ floor; jumpy crypto-as-Stocks fail the pCyc
+    //       floor; deep-drawdown names (low pPos) fail pPos but pass via clause (a). The two
+    //       clauses are disjoint by pPos, so neither widens the other into defensive territory.
+    //       In a selloff (3M) engines are NOT near their highs (pPos < 0.55) so clause (b) is
+    //       dormant there — it only fires for bull-market pullbacks, exactly the MU/AVGO case.
+    const preQualityOk = (pVQ >= 0.60 && pCyc >= 0.30)
+      || (pVQ >= 0.45 && pCyc >= 0.55 && pPos >= 0.55);
     const passesPreBreakout = hasReturns && !passesGate && !isCyclical(item)
       && item.r1y != null && item.r1y > 0
       && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
