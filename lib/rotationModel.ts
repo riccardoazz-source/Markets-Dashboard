@@ -187,10 +187,12 @@ export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch)
 //   bonus    = REBOUND_WEIGHT · oversold · pCyc   (added to score, quality-scaled)
 export const OVERSOLD_RSI_START = 40;   // bonus starts when RSI drops below 40
 export const OVERSOLD_RSI_FLOOR = 10;   // full bonus at RSI 10 (deeply oversold)
-export const REBOUND_WEIGHT = 0.30;     // M21: 0.20→0.30. M20's spread between a falling quality
-// engine (CRDO: bonus=0.080) and a defensive (S&P 500: bonus=0) was too small to reliably
-// displace defensives that win on ACC/TRD (fell less). At 0.30 CRDO gets 0.120 — strong
-// enough to overcome the momentum deficit vs a defensive that barely fell.
+export const REBOUND_WEIGHT = 0.10;     // M24: restart from M19 — rebound back to 0.10·oversold·pCyc.
+// M19 (the highest-reliability version, tied with M21 at 34.0) scaled the oversold buy-the-dip
+// bonus by pCyc (12mo trend persistence — a quality-secular filter) at weight 0.10. M20/M21 had
+// raised it to 0.20→0.30 and re-scaled it by pVQ to chase the falling engines (CRDO/RIOT); that
+// matched M19 on the metric but didn't beat it. Per the user, M24 restarts from the M19 peak.
+// reboundWeight stays a tunable param, so the optimizer can re-raise it from this M19 baseline.
 
 // Cyclical asset classes: they mean-revert hardest off an overbought RSI, so the
 // overheat guard bites them. Commodities (supply/demand & fear spikes) and crypto
@@ -237,8 +239,12 @@ export const CYCLICAL_VQ_DISCOUNT = 0.5;
 // (double the penalty). M20's spread CRDO vs S&P 500 was 0.024 — too small. At 0.32
 // S&P 500 (pVQ≈0.20) gets −0.080, MSCI World −0.096, US Treasury −0.128. Combined
 // with the stronger REBOUND the total spread nearly doubles, reliably displacing defensives.
+// M24 — restart from M19: M19 (the reliability peak) had NO low-VQ penalty (it was added
+// in M20). So the default weight is 0 → OFF for the live model, faithful to M19. It stays a
+// tunable param (bounds [0,0.50]), so the optimizer can re-introduce it from this M19 baseline
+// if it earns its keep. The floor is kept at the M21 value (inert while weight is 0).
 export const LOWVQ_FLOOR  = 0.45;
-export const LOWVQ_WEIGHT = 0.32;
+export const LOWVQ_WEIGHT = 0.0;
 
 // M23 — the secular-cyclical exemption (the "gold rush" fix). The blanket cyclical
 // brakes (half VQ, heavy RSI-overheat, heavy commodity blow-off EXT) treat EVERY
@@ -692,7 +698,10 @@ export function scoreFromFeatures<T extends ModelInput>(
       ? P.overheatCyclical + (P.overheatDefault - P.overheatCyclical) * secularness
       : P.overheatDefault;
     const reboundWeight = (!f.isCyc && f.structuralUptrend) ? P.reboundWeight : 0;
-    const reboundBonus = reboundWeight * f.oversold * f.pVQ;
+    // M24: M19-form rebound — scaled by pCyc (12mo trend persistence), the quality-secular
+    // filter. A genuine compounder oversold after a pullback snaps back; oversold junk keeps
+    // falling. (M20/M21 had re-scaled this by pVQ; M24 restarts from the M19 peak.)
+    const reboundBonus = reboundWeight * f.oversold * f.pCyc;
     const extWeight = f.isCommod
       ? P.wExt + (P.commodityExtWeight - P.wExt) * (1 - secularness)
       : P.wExt;
