@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { assetNavTarget } from '@/lib/config';
 import { ModelVersionsPanel } from '@/components/sections/ModelVersionsPanel';
+import { OptimizerPanel } from '@/components/sections/OptimizerPanel';
 import type { PeriodKey, PeriodResult } from '@/lib/modelVersions';
 
 interface Pick {
@@ -289,6 +290,9 @@ export function BacktestPanel({ stockSymbols = [], onNavigate }: { stockSymbols?
       {/* Model version history + reliability — auto-fills the current model row
           from the latest run; frozen snapshots accumulate as we iterate. */}
       <ModelVersionsPanel liveResults={liveResults} />
+
+      {/* Massive backtest: sweep thousands of weight combinations for the best capture. */}
+      <OptimizerPanel stockSymbols={stockSymbols} />
     </div>
   );
 }
