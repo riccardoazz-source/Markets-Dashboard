@@ -298,6 +298,17 @@ export const ACCEL_MAX = 25;
 export const PRE_BREAKOUT_SLOTS = 8;     // M17: 6→8. At 3M the main ranking ALWAYS favours names that fell LESS (crypto coins −2/−7%) over the deep quality drawdowns (CRDO −22.9%, RIOT −25.1%) that actually win — momentum can't catch a falling name. The sleeve is the only mechanism; give it enough slots to hold ALL the falling quality engines (CRDO, AMD, RIOT, Semiconductors, MU, AVGO) instead of losing the deepest to crowding.
 export const PRE_BREAKOUT_POS52W_MIN = 15; // M17: 25→15 — a name down 22-25% in a month sits NEAR its 52w low; that IS the deep-drawdown buy. pos52w 25 was still excluding the very names we built the sleeve for. preQualityOk + r1y>0 + preScore are the real junk filters, not 52w position.
 export const PRE_BREAKOUT_R1M_FLOOR = -40; // M15: -25→-40 — catches RIOT-type −25%+ drawdowns. A high-beta engine routinely corrects 30-40% before its next leg; the r1y>0 + MA200 + quality gates keep out true falling knives.
+// M24 — the sleeve's remaining hand-tuned thresholds, promoted to live constants so
+// DEFAULT_PARAMS can carry them and the optimizer can tune the WHOLE sleeve, not just
+// the score weights. The sleeve is the only lever that catches FALLING winners
+// (MU/AVGO/CRDO were all down at the pick date), so leaving it frozen capped how much
+// the optimizer could ever find. These are the M19/M17 values, unchanged → byte-identical live.
+export const PRE_BREAKOUT_VQ_MIN  = 0.60; // pVQ hard floor — the upside-engine bar EVERY real winner clears
+export const PRE_BREAKOUT_CYC_MIN = 0.30; // pCyc low floor — keep out genuinely broken charts (not a co-equal to VQ)
+export const PRE_BREAKOUT_MA200_MIN = 0.70; // price/MA200 floor — structurally intact, a deep dip not a breakdown
+export const PRE_SCORE_POS = 0.20; // sleeve RANKING weight on 52w position (shallow pullbacks)
+export const PRE_SCORE_CYC = 0.45; // sleeve RANKING weight on long-trend persistence (secular quality)
+export const PRE_SCORE_VQ  = 0.35; // sleeve RANKING weight on upside-vol engine
 
 export interface ModelInput {
   symbol: string;
@@ -410,6 +421,13 @@ export interface ModelParams {
   overheatCyclical: number; overheatDefault: number; reboundWeight: number;
   cyclicalVqDiscount: number; lowVqFloor: number; lowVqWeight: number;
   secularLow: number; secularHigh: number; commodityExtWeight: number;
+  // M24 — pre-breakout sleeve, now tunable. preSlots is the count of reserved
+  // coiled-spring slots (rounded to an int where used); the rest are the sleeve's
+  // eligibility gates + ranking weights. This is the ONLY group of params that can
+  // move a FALLING winner into the picks — weight-tuning can't rank a falling asset high.
+  preSlots: number; prePos52wMin: number; preR1mFloor: number;
+  preVqMin: number; preCycMin: number; preMa200Min: number;
+  preScorePos: number; preScoreCyc: number; preScoreVq: number;
 }
 
 export const DEFAULT_PARAMS: ModelParams = {
@@ -421,6 +439,9 @@ export const DEFAULT_PARAMS: ModelParams = {
   lowVqFloor: LOWVQ_FLOOR, lowVqWeight: LOWVQ_WEIGHT,
   secularLow: SECULAR_CYC_LOW, secularHigh: SECULAR_CYC_HIGH,
   commodityExtWeight: COMMODITY_EXT_WEIGHT,
+  preSlots: PRE_BREAKOUT_SLOTS, prePos52wMin: PRE_BREAKOUT_POS52W_MIN, preR1mFloor: PRE_BREAKOUT_R1M_FLOOR,
+  preVqMin: PRE_BREAKOUT_VQ_MIN, preCycMin: PRE_BREAKOUT_CYC_MIN, preMa200Min: PRE_BREAKOUT_MA200_MIN,
+  preScorePos: PRE_SCORE_POS, preScoreCyc: PRE_SCORE_CYC, preScoreVq: PRE_SCORE_VQ,
 };
 
 // ── Param-INDEPENDENT features (computed once) ───────────────────────────────
@@ -434,10 +455,13 @@ export interface RotationFeature<T extends ModelInput> {
   item: T; hasReturns: boolean;
   accel: number; accPctile: number; aRecent: number; aBuild: number; aLong: number | null;
   stretch: number;
-  pVQ: number; pTrend: number; pCyc: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
+  pVQ: number; pTrend: number; pCyc: number; pPos: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
   overheat: number; oversold: number;
   isCyc: boolean; isCommod: boolean; structuralUptrend: boolean;
-  passesGate: boolean; passesPreBreakout: boolean; preScore: number;
+  // passesGate is param-independent (cap/aRecent/regime). The pre-breakout sleeve
+  // (passesPreBreakout/preScore) is NOT here any more — its gates became tunable
+  // params, so it is computed per-trial in scoreFromFeatures (M24).
+  passesGate: boolean;
   rsi: number | null;
 }
 
@@ -630,88 +654,21 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const passesGate = hasReturns && item.r1m! > 0 && item.r1m! < r1mCap && item.r3m! > 0
       && parts.aRecent > 0 && regimeOk;
 
-    // ── Pre-breakout sleeve (M7) ──────────────────────────────────────────────
-    // M12 pre-breakout sleeve: two profiles, one set of criteria.
-    //   (a) Coiled spring (original M7): r1y>0, still near 52w high, structurally intact.
-    //   (b) Quality pullback (new M12): a secular engine (semis, tech) in a deeper
-    //       correction. Same r1y>0 quality bar; pos52w ≥ 40 (not at absolute bottom);
-    //       price within 13% of MA200 (genuine dip, not a structural breakdown).
-    //       This catches MU/CRDO-type names that have corrected 15-25% from highs
-    //       before their next rocket leg — the single biggest source of missed winners.
-    //
-    // The preScore ranking (CYC+VQ weighted heavier than pos52w) sorts the sleeve
-    // so secular engines (semis: high CYC + high VQ) always win over cyclicals
-    // (crypto: low CYC) even if both qualify. A crypto name near its 52w high scores
-    // high on pPos but low on pCyc; MU after a correction scores low on pPos but
-    // high on pCyc + pVQ and therefore ranks first.
-    //
-    // Falling knives are rejected by the r1y>0 floor (structural uptrend must exist),
-    // the r1m floor (−25%: a correction, not a crash), the pos52w floor (40%: not at
-    // the bottom of the range), and the MA200 proximity check (price/MA200 ≥ 0.87).
-    const preRegimeOk = item.ma200 != null && item.price != null
-      && item.price / item.ma200 >= 0.70; // M17: 0.80→0.70 — a high-beta engine that drops 22-25% in a month (CRDO, RIOT) prints 25-30% below its 200d MA at the trough; 0.80 was STILL excluding exactly the names the sleeve exists to catch. preQualityOk (pCyc≥0.5 OR pVQ≥0.6) + r1y>0 are the breakdown filters now, not a tight MA200 band.
-    // M14: exclude ALL cyclicals (crypto coins AND commodities), not just commodities.
-    // The 3M backtest showed the sleeve filling with crypto-coin "rebounds" (Ondo,
-    // Tron, Bitcoin, Litecoin, Sui) that DON'T lead the next leg — a basing crypto
-    // coin is a cyclical top, not a coiled spring. They ate slots while the real
-    // winners (CRDO, AMD, Semiconductors) were missed. isCyclical catches group
-    // 'Crypto' (the coins) but NOT group 'Stocks' — so the winning bitcoin MINERS
-    // (RIOT, IREN, WULF, CIFR, all 'Stocks') stay fully eligible for the sleeve.
-    //
-    // M15 — the sleeve now catches DEEP quality drawdowns. The study of missed
-    // winners is unambiguous: every one (CRDO −22.9%, RIOT −25.1%, AMD, MU, AVGO,
-    // Semiconductors) was a high-beta QUALITY engine FALLING at the pick date. The
-    // old tight gates (pos52w≥40, r1m>−25, MA200) excluded exactly these. M15 widens
-    // the gates AND adds a hard quality bar so only genuine engines (above-median
-    // secular trend OR strong upside-vol) can use the wider room — junk that merely
-    // fell is filtered by preQualityOk and then out-ranked by preScore.
-    // M19 — require HIGH UPSIDE VOL (pVQ), the one trait EVERY real winner shares,
-    // plus a not-broken trend (pCyc floor). M18's average gate ((pCyc+pVQ)/2≥0.60)
-    // was wrong: the volatile semis we most want (CRDO, RIOT — jumpy IPO/miner charts)
-    // have HIGH pVQ≈0.75-0.85 but only MODERATE pCyc≈0.40 (low trend-R²), so their
-    // average ≈0.57 FAILED — the gate was excluding exactly the names the sleeve exists
-    // to catch. Defensive indexes (MSCI World, Dow Jones) are the opposite — high pCyc,
-    // pVQ≈0.15 — and must still be rejected. So gate on VQ as the hard requirement and
-    // use pCyc only as a low floor (keep out genuinely broken charts), not a co-equal:
-    //   MSCI World pVQ≈0.15 → REJECTED (no upside engine). ✓
-    //   CRDO pVQ≈0.75, pCyc≈0.40 → ACCEPTED. ✓   RIOT pVQ≈0.85, pCyc≈0.45 → ACCEPTED. ✓
-    //
-    // M22 REVERTED in M23 — a second "coiled spring" clause (pVQ≥0.45 ∧ pCyc≥0.55 ∧
-    // pPos≥0.55) was added to catch the shallow-pullback mega-winners MU (−2.3%) and
-    // AVGO (−1.2%) at Jun 2021. It FAILED on both counts: it did NOT catch MU/AVGO
-    // (their COVID-era trendR2Long is too choppy to clear pCyc≥0.55) yet it DID admit
-    // other, non-winning coiled springs — and because every reserved sleeve slot is
-    // taken from the main top-25, each junk admission DISPLACED a winning main pick,
-    // dropping 5Y capture 10→9 and the basket +126%→+118%. Net negative, so reverted.
-    // The honest limitation: a name that was only −2% at the pick date carries almost
-    // no distinguishing signal — it is neither oversold (no rebound flag) nor a deep
-    // drawdown (no sleeve flag) — so a momentum model cannot separate the eventual
-    // 10-bagger from a dozen look-alike mild pullbacks without buying all of them and
-    // diluting the rest. Back to the single drawdown gate that the backtest prefers.
-    const preQualityOk = pVQ >= 0.60 && pCyc >= 0.30;
-    const passesPreBreakout = hasReturns && !passesGate && !isCyclical(item)
-      && item.r1y != null && item.r1y > 0
-      && item.pos52w != null && item.pos52w >= PRE_BREAKOUT_POS52W_MIN
-      && item.r1m != null && item.r1m > PRE_BREAKOUT_R1M_FLOOR
-      && preQualityOk
-      && preRegimeOk;
-    // Rank within the sleeve: CYC (secular quality) + VQ (upside engine) heavy,
-    // pos52w light. M12: 0.5/0.3/0.2 → 0.3/0.4/0.3. M17: 0.3/0.4/0.3 → 0.20/0.45/0.35.
-    // With the gates now open to deep drawdowns (pos52w≥15, MA200≥0.70), the SLEEVE
-    // can hold both mild pullbacks (high pPos) and deep quality drawdowns (low pPos,
-    // high pCyc+pVQ). The deep ones are the bigger winners (CRDO +185%, RIOT +115%),
-    // so pos52w weight is cut further and the quality legs raised — a deep-but-quality
-    // engine now out-ranks a shallow pullback for the limited slots.
-    const preScore = 0.20 * pPos + 0.45 * pCyc + 0.35 * pVQ;
+    // NOTE — the pre-breakout sleeve (passesPreBreakout / preScore) used to be
+    // computed HERE, but M24 promoted its gates (pos52w/r1m/MA200/VQ/CYC floors) and
+    // ranking weights to tunable params, so it now lives in scoreFromFeatures (the
+    // per-trial half) where it can read those params. All the raw ingredients it
+    // needs — pVQ, pCyc, pPos, passesGate, isCyc, and item.{r1y,pos52w,r1m,price,ma200}
+    // — are param-independent and emitted below, so the sweep still pays for them once.
 
     return {
       item, hasReturns,
       accel: parts.accel, accPctile, aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
       stretch,
-      pVQ, pTrend, pCyc, lead, reg, pVol, pMacd, pExt,
+      pVQ, pTrend, pCyc, pPos, lead, reg, pVol, pMacd, pExt,
       overheat: hasReturns ? overheat : 0, oversold,
       isCyc, isCommod, structuralUptrend,
-      passesGate, passesPreBreakout, preScore,
+      passesGate,
       rsi: item.rsi ?? null,
     };
   });
@@ -747,11 +704,34 @@ export function scoreFromFeatures<T extends ModelInput>(
         + P.wLead * f.lead + P.wRegime * f.reg + P.wVolume * f.pVol + P.wMacd * f.pMacd
         - extWeight * f.pExt - ohWeight * f.overheat + reboundBonus - lowVQpenalty
       : -1;
+
+    // ── Pre-breakout sleeve (M7; M24: now param-tunable) ──────────────────────
+    // The ONLY mechanism that catches FALLING winners (MU/AVGO/CRDO were all down
+    // at the pick date) — momentum can't rank a falling asset high. A reserved slot
+    // goes to a quality engine (pVQ ≥ preVqMin: the trait EVERY winner shares) in a
+    // structural uptrend (r1y>0), still above a fraction of its MA200 (preMa200Min),
+    // not at the bottom of its range (pos52w ≥ prePos52wMin) and not crashing (r1m >
+    // preR1mFloor), that the momentum gate rejected. pCyc ≥ preCycMin is a low floor
+    // to keep out genuinely broken charts. Every threshold here is a tunable param so
+    // the optimizer can shape the sleeve itself. Cyclicals (crypto/commodities) are
+    // excluded structurally — a basing crypto coin is a cyclical top, not a spring.
+    const it = f.item;
+    const preRegimeOk = it.ma200 != null && it.price != null && it.price / it.ma200 >= P.preMa200Min;
+    const preQualityOk = f.pVQ >= P.preVqMin && f.pCyc >= P.preCycMin;
+    const passesPreBreakout = f.hasReturns && !f.passesGate && !f.isCyc
+      && it.r1y != null && it.r1y > 0
+      && it.pos52w != null && it.pos52w >= P.prePos52wMin
+      && it.r1m != null && it.r1m > P.preR1mFloor
+      && preQualityOk && preRegimeOk;
+    // Rank within the sleeve: quality legs (CYC+VQ) heavy, pos52w light — a deep-but-
+    // quality drawdown out-ranks a shallow pullback for the limited slots.
+    const preScore = P.preScorePos * f.pPos + P.preScoreCyc * f.pCyc + P.preScoreVq * f.pVQ;
+
     return {
       item: f.item, score, accel: f.accel, accPctile: f.accPctile,
       aRecent: f.aRecent, aBuild: f.aBuild, aLong: f.aLong,
-      stretch: f.stretch, passesGate: f.passesGate, passesPreBreakout: f.passesPreBreakout,
-      preScore: f.preScore, rsi: f.rsi, overheat: f.overheat,
+      stretch: f.stretch, passesGate: f.passesGate, passesPreBreakout,
+      preScore, rsi: f.rsi, overheat: f.overheat,
     };
   });
 }

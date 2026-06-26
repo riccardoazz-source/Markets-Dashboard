@@ -23,6 +23,10 @@ const LABELS: Record<keyof ModelParams, string> = {
   overheatCyclical: 'Overheat cyclicals', overheatDefault: 'Overheat default', reboundWeight: 'Rebound bonus',
   cyclicalVqDiscount: 'Cyclical VQ discount', lowVqFloor: 'Low-VQ floor', lowVqWeight: 'Low-VQ penalty',
   secularLow: 'Secular (low)', secularHigh: 'Secular (high)', commodityExtWeight: 'Commodity EXT',
+  // M24 — pre-breakout sleeve (the falling-winner catcher), now tunable too
+  preSlots: 'Sleeve slots', prePos52wMin: 'Sleeve 52w floor', preR1mFloor: 'Sleeve r1m floor',
+  preVqMin: 'Sleeve VQ gate', preCycMin: 'Sleeve CYC floor', preMa200Min: 'Sleeve MA200 floor',
+  preScorePos: 'Sleeve rank·pos', preScoreCyc: 'Sleeve rank·CYC', preScoreVq: 'Sleeve rank·VQ',
 };
 const KEYS = Object.keys(LABELS) as (keyof ModelParams)[];
 
@@ -128,8 +132,8 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
     }
   };
 
-  // Coordinate descent: scan each of the 18 params one by one, best others fixed.
-  // Yields between params so the UI shows progress. ~80 steps per param × 18 = 1440 evaluations total.
+  // Coordinate descent: scan each param one by one, best others fixed (now 27 params
+  // incl. the pre-breakout sleeve). Yields between params so the UI shows progress.
   const runCoord = async () => {
     setRunning(true); setError(''); stopRef.current = false;
     setCoordSteps(null); setCoordParam(null);
@@ -229,7 +233,7 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
         </div>
         {mode === 'coord' && (
           <span className="text-[10px] text-gray-500">
-            Tunes one parameter at a time (others fixed) — 18 passes, ~120 steps each
+            Tunes one parameter at a time (others fixed) — {KEYS.length} passes, ~120 steps each
             {best && <span className="text-violet-300"> · starts from current best</span>}
           </span>
         )}

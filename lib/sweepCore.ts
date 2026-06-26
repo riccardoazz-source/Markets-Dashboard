@@ -4,7 +4,7 @@
 // CLI sweep (scripts/sweep.ts) and the in-app optimizer (/api/rotation-sweep)
 // import from here so they tune the exact same way.
 import { subDays } from 'date-fns';
-import { computeRotationFeatures, scoreFromFeatures, selectPicks, ModelParams, DEFAULT_PARAMS, ACCEL_MAX, PRE_BREAKOUT_SLOTS, RotationFeature } from './rotationModel';
+import { computeRotationFeatures, scoreFromFeatures, selectPicks, ModelParams, DEFAULT_PARAMS, ACCEL_MAX, RotationFeature } from './rotationModel';
 import { buildInputsAsOf, retBetween, fmt, BtMeta, BtInput, Hist } from './backtestCore';
 
 export const SPX = '^GSPC';
@@ -159,7 +159,9 @@ export function evaluate(slices: DateSlice[], params: ModelParams, kwin = 25, np
     const scored = sl.features
       ? scoreFromFeatures(sl.features, params)
       : scoreFromFeatures(computeRotationFeatures(sl.inputs), params);
-    const picks = selectPicks(scored, npicks, PRE_BREAKOUT_SLOTS).map(s => s.item.symbol).filter(s => s !== SPX);
+    // M24: the sleeve slot count is now a tunable param — round to an int, clamp ≥ 0.
+    const preSlots = Math.max(0, Math.round(params.preSlots));
+    const picks = selectPicks(scored, npicks, preSlots).map(s => s.item.symbol).filter(s => s !== SPX);
     for (const w of sl.windows) {
       let hits = 0, fwdSum = 0, fwdN = 0;
       for (const sym of picks) {
@@ -220,6 +222,12 @@ export const BOUNDS: Record<keyof ModelParams, [number, number]> = {
   reboundWeight: [0.0, 0.50], cyclicalVqDiscount: [0.30, 1.0], lowVqFloor: [0.0, 0.60],
   lowVqWeight: [0.0, 0.50], secularLow: [0.40, 0.70], secularHigh: [0.70, 0.90],
   commodityExtWeight: [0.20, 0.45],
+  // M24 — the pre-breakout sleeve, now tunable. Centred on the live M17/M19 values,
+  // wide enough to let the optimizer open the sleeve up OR shut it down if it doesn't
+  // pay. preSlots is a float here (rounded to an int at use); 0 = sleeve disabled.
+  preSlots: [0, 12], prePos52wMin: [0, 45], preR1mFloor: [-55, -10],
+  preVqMin: [0.40, 0.85], preCycMin: [0.0, 0.55], preMa200Min: [0.55, 0.92],
+  preScorePos: [0.0, 0.6], preScoreCyc: [0.0, 0.7], preScoreVq: [0.0, 0.7],
 };
 
 const KEYS = Object.keys(BOUNDS) as (keyof ModelParams)[];
