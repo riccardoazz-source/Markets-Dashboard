@@ -157,6 +157,47 @@ export function sampleParams(around?: ModelParams, jitter = 0.25): ModelParams {
   return p;
 }
 
+// Coordinate descent: for each parameter in order, scan STEPS evenly-spaced values
+// across its full BOUNDS range while holding all other params fixed, keep the best.
+// One full pass covers all 18 parameters. Multiple passes refine further.
+// Returns per-parameter results so the UI can show which param moved and by how much.
+export interface CoordStep {
+  key: keyof ModelParams;
+  oldVal: number;
+  newVal: number;
+  oldCapture: number;
+  newCapture: number;
+}
+export function coordinateDescent(
+  slices: DateSlice[],
+  startParams: ModelParams,
+  kwin: number,
+  npicks: number,
+  stepsPerParam = 80,
+): { params: ModelParams; steps: CoordStep[]; finalEval: SweepEval } {
+  let p = { ...startParams };
+  const steps: CoordStep[] = [];
+  for (const k of KEYS) {
+    const [lo, hi] = BOUNDS[k];
+    const oldVal = p[k];
+    let bestCapture = evaluate(slices, p, kwin, npicks).capture;
+    let bestVal = oldVal;
+    for (let i = 0; i <= stepsPerParam; i++) {
+      const v = lo + (i / stepsPerParam) * (hi - lo);
+      const candidate = { ...p, [k]: v };
+      // Enforce secularHigh > secularLow + 0.05
+      if (k === 'secularLow' && candidate.secularHigh <= v + 0.05) candidate.secularHigh = Math.min(v + 0.1, 0.9);
+      if (k === 'secularHigh' && v <= p.secularLow + 0.05) continue;
+      const cap = evaluate(slices, candidate, kwin, npicks).capture;
+      if (cap > bestCapture) { bestCapture = cap; bestVal = v; }
+    }
+    const oldCapture = evaluate(slices, p, kwin, npicks).capture;
+    p = { ...p, [k]: bestVal };
+    steps.push({ key: k, oldVal, newVal: bestVal, oldCapture, newCapture: bestCapture });
+  }
+  return { params: p, steps, finalEval: evaluate(slices, p, kwin, npicks) };
+}
+
 // Run a batch of trials within a wall-clock budget, refining around `best`. Returns the
 // best params/eval found (including the incoming best) and how many trials were run.
 export function runBatch(
