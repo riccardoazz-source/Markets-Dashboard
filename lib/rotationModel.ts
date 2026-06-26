@@ -396,7 +396,37 @@ function computeStretch(price: number | null, ma200: number | null, vol: number 
   return abovePct / denom;
 }
 
-export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[] {
+// ── Tunable parameters (the massive-backtest interface) ──────────────────────
+// Every number the score formula reads, collected into ONE object so a parameter
+// sweep can run thousands of variations of the SAME formula without touching any
+// module constant. scoreRotation() takes an optional Partial<ModelParams>; what
+// is not supplied falls back to DEFAULT_PARAMS, which is built FROM the live
+// constants above — so scoreRotation() called with no params is byte-identical to
+// before. This is what keeps "one formula" true while enabling the sweep: the live
+// app passes nothing (→ defaults), the sweep passes overrides.
+export interface ModelParams {
+  wAcc: number; wVQ: number; wTrend: number; wCycle: number; wLead: number;
+  wRegime: number; wVolume: number; wMacd: number; wExt: number;
+  overheatCyclical: number; overheatDefault: number; reboundWeight: number;
+  cyclicalVqDiscount: number; lowVqFloor: number; lowVqWeight: number;
+  secularLow: number; secularHigh: number; commodityExtWeight: number;
+}
+
+export const DEFAULT_PARAMS: ModelParams = {
+  wAcc: MODEL_WEIGHTS.acceleration, wVQ: MODEL_WEIGHTS.volQuality, wTrend: MODEL_WEIGHTS.trend,
+  wCycle: MODEL_WEIGHTS.cycle, wLead: MODEL_WEIGHTS.lead, wRegime: MODEL_WEIGHTS.regime,
+  wVolume: MODEL_WEIGHTS.volume, wMacd: MODEL_WEIGHTS.macd, wExt: MODEL_WEIGHTS.extension,
+  overheatCyclical: OVERHEAT_WEIGHT_CYCLICAL, overheatDefault: OVERHEAT_WEIGHT_DEFAULT,
+  reboundWeight: REBOUND_WEIGHT, cyclicalVqDiscount: CYCLICAL_VQ_DISCOUNT,
+  lowVqFloor: LOWVQ_FLOOR, lowVqWeight: LOWVQ_WEIGHT,
+  secularLow: SECULAR_CYC_LOW, secularHigh: SECULAR_CYC_HIGH,
+  commodityExtWeight: COMMODITY_EXT_WEIGHT,
+};
+
+export function scoreRotation<T extends ModelInput>(items: T[], params?: Partial<ModelParams>): ScoredItem<T>[] {
+  // Resolve tunables once: live callers pass nothing → DEFAULT_PARAMS (identical to
+  // the module constants); the sweep passes overrides for the params it is varying.
+  const P: ModelParams = params ? { ...DEFAULT_PARAMS, ...params } : DEFAULT_PARAMS;
   const valid = items.filter(i => i.r1m != null && i.r3m != null);
   const n = valid.length;
 
@@ -554,14 +584,14 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // M23 — secularness: 0 = jumpy cyclical pop (full brake), 1 = secular bull (no brake).
     // Linear ramp over pCyc between the two thresholds. Non-cyclicals never use it.
     const secularness = isCyclical(item)
-      ? Math.max(0, Math.min(1, (pCyc - SECULAR_CYC_LOW) / (SECULAR_CYC_HIGH - SECULAR_CYC_LOW)))
+      ? Math.max(0, Math.min(1, (pCyc - P.secularLow) / (P.secularHigh - P.secularLow)))
       : 0;
     // Overheat brake fades from the heavy cyclical weight (a fear-spike at RSI 90) to the
     // light default (a secular grower can run hot for months — gold/NVDA alike) as the
     // trend earns secular quality.
     const ohWeight = isCyclical(item)
-      ? OVERHEAT_WEIGHT_CYCLICAL + (OVERHEAT_WEIGHT_DEFAULT - OVERHEAT_WEIGHT_CYCLICAL) * secularness
-      : OVERHEAT_WEIGHT_DEFAULT;
+      ? P.overheatCyclical + (P.overheatDefault - P.overheatCyclical) * secularness
+      : P.overheatDefault;
 
     // M13 — RSI oversold REBOUND bonus (the buy-the-dip half of RSI). Mirrors the
     // overheat penalty: zero until RSI drops below 40, full at RSI 10. Added ONLY
@@ -578,17 +608,16 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
       ? Math.max(0, Math.min(1, (OVERSOLD_RSI_START - item.rsi) / (OVERSOLD_RSI_START - OVERSOLD_RSI_FLOOR)))
       : 0;
     const structuralUptrend = item.r1y != null && item.r1y > 0;
-    const reboundWeight = (!isCyclical(item) && structuralUptrend) ? REBOUND_WEIGHT : 0;
+    const reboundWeight = (!isCyclical(item) && structuralUptrend) ? P.reboundWeight : 0;
     const reboundBonus = reboundWeight * oversold * pVQ;
 
-    const W = MODEL_WEIGHTS;
     // Commodity blow-off EXT fades from the heavy commodity weight (a reflexive spike)
     // to the standard weight as the trend earns secular quality (M23). The pExt stretch
     // term still catches a genuine parabolic top regardless — this only stops a steady
     // secular commodity bull from being over-penalised as if it were a fear-spike.
     const extWeight = isCommodity(item)
-      ? W.extension + (COMMODITY_EXT_WEIGHT - W.extension) * (1 - secularness)
-      : W.extension;
+      ? P.wExt + (P.commodityExtWeight - P.wExt) * (1 - secularness)
+      : P.wExt;
     // M19 — VQ is HALVED for cyclicals. VQ = net upside volatility is the single
     // biggest score driver (0.26). Crypto coins have the highest raw upside vol in
     // the universe, so in any selloff they TOP the VQ rank and crowd the top 25 —
@@ -600,16 +629,16 @@ export function scoreRotation<T extends ModelInput>(items: T[]): ScoredItem<T>[]
     // M23 — the discount FADES OUT as the cyclical earns secular trend quality (pCyc):
     // a 2024-25 gold-style secular bull keeps its FULL VQ (mult→1), a jumpy pop keeps
     // the half discount (mult→0.5). secularness=0 for non-cyclicals, so they're full.
-    const cyclicalVqMult = CYCLICAL_VQ_DISCOUNT + (1 - CYCLICAL_VQ_DISCOUNT) * secularness;
-    const vqWeight = isCyclical(item) ? W.volQuality * cyclicalVqMult : W.volQuality;
+    const cyclicalVqMult = P.cyclicalVqDiscount + (1 - P.cyclicalVqDiscount) * secularness;
+    const vqWeight = isCyclical(item) ? P.wVQ * cyclicalVqMult : P.wVQ;
     // M20/M21 — low-VQ defensive penalty: sink names with no upside engine (bonds, broad
     // indexes) that only ranked because they fell least in a selloff. Scales with how
     // far pVQ sits below the floor; a real engine (pVQ ≥ FLOOR) pays nothing.
     // M21: floor 0.35→0.45, weight 0.16→0.32 — doubled impact on S&P 500/Treasury/MSCI World.
-    const lowVQpenalty = LOWVQ_WEIGHT * Math.max(0, LOWVQ_FLOOR - pVQ);
+    const lowVQpenalty = P.lowVqWeight * Math.max(0, P.lowVqFloor - pVQ);
     const score = hasReturns
-      ? W.acceleration * accPctile + vqWeight * pVQ + W.trend * pTrend + W.cycle * pCyc
-        + W.lead * lead + W.regime * reg + W.volume * pVol + W.macd * pMacd
+      ? P.wAcc * accPctile + vqWeight * pVQ + P.wTrend * pTrend + P.wCycle * pCyc
+        + P.wLead * lead + P.wRegime * reg + P.wVolume * pVol + P.wMacd * pMacd
         - extWeight * pExt - ohWeight * overheat + reboundBonus - lowVQpenalty
       : -1;
 
