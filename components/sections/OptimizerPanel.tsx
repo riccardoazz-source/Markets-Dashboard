@@ -4,14 +4,13 @@ import { useRef, useState } from 'react';
 import clsx from 'clsx';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { DEFAULT_PARAMS, ModelParams, ACCEL_MAX } from '@/lib/rotationModel';
-import { evaluate, sampleParams, SweepEval, DateSlice, DEFAULT_SLICE_OPTS } from '@/lib/sweepCore';
+import { evaluate, sampleParams, precomputeFeatures, SweepEval, DateSlice, DEFAULT_SLICE_OPTS } from '@/lib/sweepCore';
 
+interface WireWindow { horizonDays: number; fwd: [string, number][]; winners: string[]; spxFwd: number | null }
 interface WireSlice {
   asOf: string;
   inputs: DateSlice['inputs'];
-  fwd: [string, number][];
-  winners: string[];
-  spxFwd: number | null;
+  windows: WireWindow[];
 }
 interface SliceResp {
   ok: boolean; universeSize: number; symbolsWithData: number; dates: number; kwin: number; slices: WireSlice[];
@@ -27,23 +26,27 @@ const LABELS: Record<keyof ModelParams, string> = {
 };
 const KEYS = Object.keys(LABELS) as (keyof ModelParams)[];
 
-const TARGETS = [1000, 3000, 10000];
+const TARGETS = [50000, 1000000, 10000000];
+const fmtN = (n: number) => n >= 1000000 ? `${n / 1000000}M` : n >= 1000 ? `${n / 1000}K` : `${n}`;
 
 // Rehydrate the JSON slices (Map/Set were sent as arrays) into what evaluate() expects.
 function rehydrate(wire: WireSlice[]): DateSlice[] {
   return wire.map(s => ({
     asOf: s.asOf,
     inputs: s.inputs,
-    fwd: new Map(s.fwd),
-    winners: new Set(s.winners),
-    spxFwd: s.spxFwd,
+    windows: s.windows.map(w => ({
+      horizonDays: w.horizonDays,
+      fwd: new Map(w.fwd),
+      winners: new Set(w.winners),
+      spxFwd: w.spxFwd,
+    })),
   }));
 }
 
 export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] }) {
   const [running, setRunning] = useState(false);
   const [trials, setTrials] = useState(0);
-  const [target, setTarget] = useState(3000);
+  const [target, setTarget] = useState(50000);
   const [best, setBest] = useState<{ params: ModelParams; eval: SweepEval } | null>(null);
   const [baseline, setBaseline] = useState<SweepEval | null>(null);
   const [status, setStatus] = useState('');
@@ -67,9 +70,11 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
       const d: SliceResp = await res.json();
       setMeta({ dates: d.dates, symbolsWithData: d.symbolsWithData, universeSize: d.universeSize });
       const slices = rehydrate(d.slices);
-      if (slices.length === 0 || !slices.some(s => s.winners.size > 0)) {
+      if (slices.length === 0 || !slices.some(s => s.windows.some(w => w.winners.size > 0))) {
         throw new Error('No market data returned by the server.');
       }
+      // Precompute the per-date percentile features ONCE — every trial below reuses them.
+      precomputeFeatures(slices);
       const kwin = d.kwin || DEFAULT_SLICE_OPTS.kwin;
 
       // 2) Everything below is pure local math in your browser — no more network.
@@ -80,31 +85,38 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
       setBest({ params: cur.params, eval: cur.e });
 
       let done = 0;
-      const CHUNK = 120; // trials per frame — keeps the UI responsive + Stop snappy
+      const t0 = Date.now();
+      const FRAME_MS = 40; // run trials for ~40ms, then yield so the UI stays smooth & Stop is instant
 
       await new Promise<void>((resolve) => {
         const runChunk = () => {
           if (stopRef.current) return resolve();
-          const end = Math.min(done + CHUNK, target);
-          for (; done < end; done++) {
-            // 60% explore globally, 40% refine around the current best.
+          const frameDeadline = Date.now() + FRAME_MS;
+          while (done < target && Date.now() < frameDeadline) {
+            // EVERY parameter is perturbed together each trial (a whole random combination),
+            // not one at a time. 60% explore globally, 40% refine around the current best.
             const around = Math.random() < 0.4 ? cur.params : undefined;
             const p = sampleParams(around, 0.2);
             const e = evaluate(slices, p, kwin, ACCEL_MAX);
             if (e.capture > cur.e.capture || (e.capture === cur.e.capture && e.basketVsSpx > cur.e.basketVsSpx)) {
               cur = { params: p, e };
             }
+            done++;
           }
           setTrials(done);
           setBest({ params: cur.params, eval: cur.e });
-          setStatus(`${done.toLocaleString()} parameter sets tested`);
+          const secs = (Date.now() - t0) / 1000;
+          const rate = done / Math.max(0.001, secs);
+          const etaSec = rate > 0 ? Math.max(0, (target - done) / rate) : 0;
+          const eta = etaSec > 90 ? `${Math.ceil(etaSec / 60)}m` : `${Math.ceil(etaSec)}s`;
+          setStatus(`${done.toLocaleString()} / ${target.toLocaleString()} · ${Math.round(rate).toLocaleString()}/s · ~${eta} left`);
           if (done >= target) return resolve();
           setTimeout(runChunk, 0);
         };
         runChunk();
       });
 
-      setStatus(stopRef.current ? 'Stopped.' : 'Done.');
+      setStatus(stopRef.current ? `Stopped at ${done.toLocaleString()} sets.` : `Done — ${done.toLocaleString()} sets tested.`);
     } catch (e) {
       setError((e as Error).message || 'Error during optimization.');
     } finally {
@@ -150,7 +162,7 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
             <button key={t} disabled={running} onClick={() => setTarget(t)}
               className={clsx('px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all',
                 target === t ? 'bg-violet-600 text-white' : 'text-gray-400 hover:text-gray-100')}>
-              {t.toLocaleString()}
+              {fmtN(t)}
             </button>
           ))}
         </div>

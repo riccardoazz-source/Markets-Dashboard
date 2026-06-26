@@ -423,10 +423,25 @@ export const DEFAULT_PARAMS: ModelParams = {
   commodityExtWeight: COMMODITY_EXT_WEIGHT,
 };
 
-export function scoreRotation<T extends ModelInput>(items: T[], params?: Partial<ModelParams>): ScoredItem<T>[] {
-  // Resolve tunables once: live callers pass nothing → DEFAULT_PARAMS (identical to
-  // the module constants); the sweep passes overrides for the params it is varying.
-  const P: ModelParams = params ? { ...DEFAULT_PARAMS, ...params } : DEFAULT_PARAMS;
+// ── Param-INDEPENDENT features (computed once) ───────────────────────────────
+// Every cross-sectional percentile below depends ONLY on the inputs, never on the
+// tunable weights. A parameter sweep re-scoring the SAME date thousands of times
+// would otherwise redo all this sorting every trial. So we split scoring in two:
+//   computeRotationFeatures(items)  — the expensive percentile work, done ONCE
+//   scoreFromFeatures(features, P)  — the cheap weighted combination, per trial
+// scoreRotation() composes them, so live callers are byte-identical to before.
+export interface RotationFeature<T extends ModelInput> {
+  item: T; hasReturns: boolean;
+  accel: number; accPctile: number; aRecent: number; aBuild: number; aLong: number | null;
+  stretch: number;
+  pVQ: number; pTrend: number; pCyc: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
+  overheat: number; oversold: number;
+  isCyc: boolean; isCommod: boolean; structuralUptrend: boolean;
+  passesGate: boolean; passesPreBreakout: boolean; preScore: number;
+  rsi: number | null;
+}
+
+export function computeRotationFeatures<T extends ModelInput>(items: T[]): RotationFeature<T>[] {
   const valid = items.filter(i => i.r1m != null && i.r3m != null);
   const n = valid.length;
 
@@ -581,66 +596,15 @@ export function scoreRotation<T extends ModelInput>(items: T[], params?: Partial
     const overheat = item.rsi != null
       ? Math.max(0, Math.min(1, (item.rsi - OVERHEAT_RSI_START) / (100 - OVERHEAT_RSI_START)))
       : 0;
-    // M23 — secularness: 0 = jumpy cyclical pop (full brake), 1 = secular bull (no brake).
-    // Linear ramp over pCyc between the two thresholds. Non-cyclicals never use it.
-    const secularness = isCyclical(item)
-      ? Math.max(0, Math.min(1, (pCyc - P.secularLow) / (P.secularHigh - P.secularLow)))
-      : 0;
-    // Overheat brake fades from the heavy cyclical weight (a fear-spike at RSI 90) to the
-    // light default (a secular grower can run hot for months — gold/NVDA alike) as the
-    // trend earns secular quality.
-    const ohWeight = isCyclical(item)
-      ? P.overheatCyclical + (P.overheatDefault - P.overheatCyclical) * secularness
-      : P.overheatDefault;
-
-    // M13 — RSI oversold REBOUND bonus (the buy-the-dip half of RSI). Mirrors the
-    // overheat penalty: zero until RSI drops below 40, full at RSI 10. Added ONLY
-    // for quality seculars in a structural uptrend, so an oversold compounder
-    // (MU/CRDO before its next leg) gets lifted while an oversold cyclical or a name
-    // with no year-long uptrend gets nothing — no falling knives.
-    // M20 — scaled by pVQ, NOT pCyc. The deepest-drawdown winners (CRDO, RIOT) are
-    // VOLATILE engines: HIGH pVQ (upside vol) but only MODERATE pCyc (jumpy chart →
-    // low trend-R²). Scaling by pCyc made the bonus ~0.013 (invisible) for exactly
-    // these names. pVQ — the trait every real winner shares — makes the bonus land
-    // where it should. r1y>0 + non-cyclical still gate out true falling knives, so
-    // an oversold high-vol JUNK name (no year-long uptrend) gets nothing.
+    // RSI oversold amount (buy-the-dip half) — zero until RSI<40, full at RSI 10. The
+    // param-dependent rebound WEIGHTING + cyclical/secular brakes are applied later in
+    // scoreFromFeatures (they read the tunable weights, so they vary per sweep trial).
     const oversold = item.rsi != null
       ? Math.max(0, Math.min(1, (OVERSOLD_RSI_START - item.rsi) / (OVERSOLD_RSI_START - OVERSOLD_RSI_FLOOR)))
       : 0;
     const structuralUptrend = item.r1y != null && item.r1y > 0;
-    const reboundWeight = (!isCyclical(item) && structuralUptrend) ? P.reboundWeight : 0;
-    const reboundBonus = reboundWeight * oversold * pVQ;
-
-    // Commodity blow-off EXT fades from the heavy commodity weight (a reflexive spike)
-    // to the standard weight as the trend earns secular quality (M23). The pExt stretch
-    // term still catches a genuine parabolic top regardless — this only stops a steady
-    // secular commodity bull from being over-penalised as if it were a fear-spike.
-    const extWeight = isCommodity(item)
-      ? P.wExt + (P.commodityExtWeight - P.wExt) * (1 - secularness)
-      : P.wExt;
-    // M19 — VQ is HALVED for cyclicals. VQ = net upside volatility is the single
-    // biggest score driver (0.26). Crypto coins have the highest raw upside vol in
-    // the universe, so in any selloff they TOP the VQ rank and crowd the top 25 —
-    // even though for a CYCLICAL that volatility is double-edged (it crashes as hard
-    // as it pumps), NOT the durable upside engine VQ is meant to reward. For semis/
-    // tech (secular engines) high upside vol IS the engine, so they keep full VQ.
-    // This is the missing daily-direction guard: overheat only fires at RSI>70 (never
-    // in a selloff), so nothing was demoting the falling-modestly crypto until now.
-    // M23 — the discount FADES OUT as the cyclical earns secular trend quality (pCyc):
-    // a 2024-25 gold-style secular bull keeps its FULL VQ (mult→1), a jumpy pop keeps
-    // the half discount (mult→0.5). secularness=0 for non-cyclicals, so they're full.
-    const cyclicalVqMult = P.cyclicalVqDiscount + (1 - P.cyclicalVqDiscount) * secularness;
-    const vqWeight = isCyclical(item) ? P.wVQ * cyclicalVqMult : P.wVQ;
-    // M20/M21 — low-VQ defensive penalty: sink names with no upside engine (bonds, broad
-    // indexes) that only ranked because they fell least in a selloff. Scales with how
-    // far pVQ sits below the floor; a real engine (pVQ ≥ FLOOR) pays nothing.
-    // M21: floor 0.35→0.45, weight 0.16→0.32 — doubled impact on S&P 500/Treasury/MSCI World.
-    const lowVQpenalty = P.lowVqWeight * Math.max(0, P.lowVqFloor - pVQ);
-    const score = hasReturns
-      ? P.wAcc * accPctile + vqWeight * pVQ + P.wTrend * pTrend + P.wCycle * pCyc
-        + P.wLead * lead + P.wRegime * reg + P.wVolume * pVol + P.wMacd * pMacd
-        - extWeight * pExt - ohWeight * overheat + reboundBonus - lowVQpenalty
-      : -1;
+    const isCyc = isCyclical(item);
+    const isCommod = isCommodity(item);
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
     // aRecent > 0 (last month faster than the quarter → acceleration signal).
@@ -741,12 +705,61 @@ export function scoreRotation<T extends ModelInput>(items: T[], params?: Partial
     const preScore = 0.20 * pPos + 0.45 * pCyc + 0.35 * pVQ;
 
     return {
-      item, score, accel: parts.accel, accPctile,
-      aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
-      stretch, passesGate, passesPreBreakout, preScore,
-      rsi: item.rsi ?? null, overheat: hasReturns ? overheat : 0,
+      item, hasReturns,
+      accel: parts.accel, accPctile, aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
+      stretch,
+      pVQ, pTrend, pCyc, lead, reg, pVol, pMacd, pExt,
+      overheat: hasReturns ? overheat : 0, oversold,
+      isCyc, isCommod, structuralUptrend,
+      passesGate, passesPreBreakout, preScore,
+      rsi: item.rsi ?? null,
     };
   });
+}
+
+// ── The cheap per-trial combination ──────────────────────────────────────────
+// Takes the precomputed (param-independent) features and applies the tunable
+// weights + the cyclical/secular brakes. This is ALL a parameter sweep re-runs per
+// trial — no sorting, just arithmetic — which is what makes millions of trials
+// feasible. Mathematically identical to the inline scoring it replaces.
+export function scoreFromFeatures<T extends ModelInput>(
+  features: RotationFeature<T>[], params?: Partial<ModelParams>,
+): ScoredItem<T>[] {
+  const P: ModelParams = params ? { ...DEFAULT_PARAMS, ...params } : DEFAULT_PARAMS;
+  return features.map(f => {
+    // secularness: 0 = jumpy cyclical pop (full brake), 1 = secular bull (no brake).
+    const secularness = f.isCyc
+      ? Math.max(0, Math.min(1, (f.pCyc - P.secularLow) / (P.secularHigh - P.secularLow)))
+      : 0;
+    const ohWeight = f.isCyc
+      ? P.overheatCyclical + (P.overheatDefault - P.overheatCyclical) * secularness
+      : P.overheatDefault;
+    const reboundWeight = (!f.isCyc && f.structuralUptrend) ? P.reboundWeight : 0;
+    const reboundBonus = reboundWeight * f.oversold * f.pVQ;
+    const extWeight = f.isCommod
+      ? P.wExt + (P.commodityExtWeight - P.wExt) * (1 - secularness)
+      : P.wExt;
+    const cyclicalVqMult = P.cyclicalVqDiscount + (1 - P.cyclicalVqDiscount) * secularness;
+    const vqWeight = f.isCyc ? P.wVQ * cyclicalVqMult : P.wVQ;
+    const lowVQpenalty = P.lowVqWeight * Math.max(0, P.lowVqFloor - f.pVQ);
+    const score = f.hasReturns
+      ? P.wAcc * f.accPctile + vqWeight * f.pVQ + P.wTrend * f.pTrend + P.wCycle * f.pCyc
+        + P.wLead * f.lead + P.wRegime * f.reg + P.wVolume * f.pVol + P.wMacd * f.pMacd
+        - extWeight * f.pExt - ohWeight * f.overheat + reboundBonus - lowVQpenalty
+      : -1;
+    return {
+      item: f.item, score, accel: f.accel, accPctile: f.accPctile,
+      aRecent: f.aRecent, aBuild: f.aBuild, aLong: f.aLong,
+      stretch: f.stretch, passesGate: f.passesGate, passesPreBreakout: f.passesPreBreakout,
+      preScore: f.preScore, rsi: f.rsi, overheat: f.overheat,
+    };
+  });
+}
+
+// The one public entry point — composes the two halves. Live callers (Accelerating
+// list, Quadrant, backtest) use this and are byte-identical to before the split.
+export function scoreRotation<T extends ModelInput>(items: T[], params?: Partial<ModelParams>): ScoredItem<T>[] {
+  return scoreFromFeatures(computeRotationFeatures(items), params);
 }
 
 // ── Pick selection (shared by the live list and the backtest) ────────────────

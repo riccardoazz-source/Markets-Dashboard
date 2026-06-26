@@ -23,12 +23,11 @@ const BASE_UNIVERSE: BtMeta[] = [
 ];
 
 // Serialized slice (Map/Set aren't JSON — send arrays, rehydrate on the client).
+interface WireWindow { horizonDays: number; fwd: [string, number][]; winners: string[]; spxFwd: number | null }
 interface WireSlice {
   asOf: string;
   inputs: ReturnType<typeof buildSlices>[number]['inputs'];
-  fwd: [string, number][];
-  winners: string[];
-  spxFwd: number | null;
+  windows: WireWindow[];
 }
 interface Prepared { universeSize: number; symbolsWithData: number; slices: WireSlice[]; ts: number }
 
@@ -38,7 +37,7 @@ const PREP_TTL = 30 * 60_000;
 async function prepare(stocks: string[], sliceOpts: SliceOpts): Promise<Prepared> {
   const baseSet = new Set(BASE_UNIVERSE.map(m => m.symbol));
   const uniqStocks = [...new Set(stocks)].filter(s => s && !baseSet.has(s));
-  const key = `${uniqStocks.slice().sort().join(',')}|${sliceOpts.fwd}_${sliceOpts.kwin}_${sliceOpts.step}_${sliceOpts.maxDays}`;
+  const key = `${uniqStocks.slice().sort().join(',')}|${sliceOpts.minBack}_${sliceOpts.kwin}_${sliceOpts.step}_${sliceOpts.maxDays}_${sliceOpts.nFwd}`;
   const hit = prepCache.get(key);
   if (hit && Date.now() - hit.ts < PREP_TTL) return hit;
 
@@ -54,9 +53,12 @@ async function prepare(stocks: string[], sliceOpts: SliceOpts): Promise<Prepared
   const wire: WireSlice[] = slices.map(s => ({
     asOf: s.asOf,
     inputs: s.inputs,
-    fwd: [...s.fwd.entries()],
-    winners: [...s.winners],
-    spxFwd: s.spxFwd,
+    windows: s.windows.map(w => ({
+      horizonDays: w.horizonDays,
+      fwd: [...w.fwd.entries()],
+      winners: [...w.winners],
+      spxFwd: w.spxFwd,
+    })),
   }));
   const prep: Prepared = { universeSize: universe.length, symbolsWithData, slices: wire, ts: Date.now() };
   prepCache.set(key, prep);

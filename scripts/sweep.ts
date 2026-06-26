@@ -17,20 +17,19 @@ import { fetchYahooChart } from '../lib/yahoo';
 import { fetchSp500 } from '../lib/sp500';
 import { DEFAULT_PARAMS, ModelParams, ACCEL_MAX } from '../lib/rotationModel';
 import { fmt, BtMeta, Hist } from '../lib/backtestCore';
-import { buildSlices, evaluate, sampleParams, SPX, SliceOpts } from '../lib/sweepCore';
+import { buildSlices, evaluate, sampleParams, precomputeFeatures, SPX, SliceOpts } from '../lib/sweepCore';
 
 const CACHE_DIR = process.env.SCRATCH ?? '.';
-// FWD=today (default) optimizes the SAME forward-to-today metric as the on-screen
-// backtest; set FWD to a number for a legacy fixed N-day window.
-const FWD: number | 'today' = process.env.FWD ? Number(process.env.FWD) : 'today';
 const MINBACK = Number(process.env.MINBACK ?? 30);
+const NFWD = Number(process.env.NFWD ?? 4);     // random forward windows per past date
+const MINFWD = Number(process.env.MINFWD ?? 25); // shortest forward horizon (days)
 const KWIN = Number(process.env.KWIN ?? 25);
 const NPICKS = Number(process.env.NPICKS ?? ACCEL_MAX);
 const TRIALS = Number(process.env.TRIALS ?? 1000);
 const STEP = Number(process.env.STEP ?? 30);
 const MAXDAYS = 5 * 365 + 120;
 const FETCH_CONC = 8;
-const SLICE_OPTS: SliceOpts = { fwd: FWD, minBack: MINBACK, kwin: KWIN, step: STEP, maxDays: MAXDAYS };
+const SLICE_OPTS: SliceOpts = { minBack: MINBACK, kwin: KWIN, step: STEP, maxDays: MAXDAYS, nFwd: NFWD, minFwd: MINFWD };
 
 const CURATED = ['MU','AVGO','NVDA','AMD','CRDO','RIOT','CIFR','WULF','IREN','SNDK','META','PLTR',
   'GOOG','MSFT','INTU','ADBE','TSM','AAPL','AMZN','TSLA','SMCI','MRVL','ARM','ASML','QCOM','NOK',
@@ -82,13 +81,14 @@ async function main() {
   const from = subDays(to, MAXDAYS + 365 + 150);
   const sp500 = process.env.SP500 ? await fetchSp500().catch(() => []) : [];
   const universe = buildUniverse(sp500);
-  console.log(`[universe] ${universe.length} symbols | FWD=${FWD}d K=${KWIN} picks=${NPICKS} step=${STEP}d trials=${TRIALS}`);
+  console.log(`[universe] ${universe.length} symbols | nFwd=${NFWD} minFwd=${MINFWD}d K=${KWIN} picks=${NPICKS} step=${STEP}d trials=${TRIALS}`);
 
   const histMap = await fetchAll(universe, from, to);
   const have = [...histMap.values()].filter(h => h.length > 50).length;
   console.log(`[data] ${have}/${universe.length} symbols with usable history`);
 
   const slices = buildSlices(universe, histMap, SLICE_OPTS);
+  precomputeFeatures(slices); // compute per-date percentile features ONCE → fast trials
   console.log(`[slices] ${slices.length} dates from ${slices[slices.length-1]?.asOf} to ${slices[0]?.asOf}`);
 
   const base = evaluate(slices, DEFAULT_PARAMS, KWIN, NPICKS);

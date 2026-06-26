@@ -4,54 +4,89 @@
 // CLI sweep (scripts/sweep.ts) and the in-app optimizer (/api/rotation-sweep)
 // import from here so they tune the exact same way.
 import { subDays } from 'date-fns';
-import { scoreRotation, selectPicks, ModelParams, DEFAULT_PARAMS, ACCEL_MAX, PRE_BREAKOUT_SLOTS } from './rotationModel';
-import { buildInputsAsOf, retBetween, fmt, BtMeta, Hist } from './backtestCore';
+import { computeRotationFeatures, scoreFromFeatures, selectPicks, ModelParams, DEFAULT_PARAMS, ACCEL_MAX, PRE_BREAKOUT_SLOTS, RotationFeature } from './rotationModel';
+import { buildInputsAsOf, retBetween, fmt, BtMeta, BtInput, Hist } from './backtestCore';
 
 export const SPX = '^GSPC';
 
-// `fwd` is the forward MEASUREMENT MODE, not a fixed window:
-//   'today'  → forward return from each as-of date to TODAY (end of data). This is
-//              EXACTLY what the on-screen backtest cards measure, so the optimizer
-//              tunes the same yardstick you judge — and crucially it REWARDS catching
-//              the multi-year 10-baggers (MU, AVGO at the 5Y as-of date), which a
-//              fixed short window can never see.
-//   number   → legacy fixed N-day forward window (kept for the offline CLI).
-// `minBack` is how close to today the nearest as-of date sits (a 30-day-back slice
-//   measures ~1-month forward, a 1825-day-back slice measures ~5-year forward — so a
-//   single 'today' mode over a dense as-of grid covers 1M…5Y in one objective).
-export interface SliceOpts { fwd: number | 'today'; minBack: number; kwin: number; step: number; maxDays: number }
-export const DEFAULT_SLICE_OPTS: SliceOpts = { fwd: 'today', minBack: 30, kwin: 25, step: 45, maxDays: 5 * 365 + 120 };
+// ── The objective, exactly as described ──────────────────────────────────────
+// You are at a RANDOM date in the past. From there you look to a RANDOM date in
+// the future (still ≤ today, since that's all the data we have). Over that span,
+// WHO WON = the names with the biggest returns (top-K). The model, using only data
+// up to the past date, makes its picks; a pick "hits" if it's among those winners.
+// Fitness = fraction of winners intercepted, averaged over MANY such (past→future)
+// pairs. The sweep then perturbs ALL params together at random and keeps whatever
+// combination intercepts the most winners.
+//
+// Each past date carries SEVERAL random forward windows (a short, a medium, a long
+// one), so one as-of date is judged against several different futures — that's the
+// "random future dates" part, and it stops the score from overfitting to a single
+// endpoint. Inputs are scored ONCE per past date (they don't depend on the future),
+// then checked against every window — cheap.
+export interface SliceOpts { minBack: number; kwin: number; step: number; maxDays: number; nFwd: number; minFwd: number }
+// Dense by design: a past date every ~3 weeks over ~6 years (≈100 as-of dates), each
+// with 6 random futures ≈ 600 (past→future) winner-tests. More dates = a fitness that
+// can't be gamed by luck on a few lucky periods; the model must catch winners broadly.
+export const DEFAULT_SLICE_OPTS: SliceOpts = { minBack: 25, kwin: 25, step: 21, maxDays: 6 * 365, nFwd: 6, minFwd: 21 };
 
+// One random future relative to a past date: who won, and by how much.
+export interface ForwardWindow {
+  horizonDays: number;
+  fwd: Map<string, number>;   // symbol -> return over THIS window
+  winners: Set<string>;       // top-K by that return
+  spxFwd: number | null;
+}
 export interface DateSlice {
   asOf: string;
   inputs: ReturnType<typeof buildInputsAsOf>;
-  fwd: Map<string, number>;   // symbol -> forward return %
-  winners: Set<string>;       // top-K by forward return
-  spxFwd: number | null;
+  windows: ForwardWindow[];   // several random futures from this past date
+  features?: RotationFeature<BtInput>[]; // param-independent percentiles, computed ONCE (see precomputeFeatures)
 }
 
-// Precompute, ONCE per as-of date: model inputs + forward returns + actual top-K
-// winners. Parameter sweeps reuse these slices — only the (cheap) re-scoring varies.
+// Compute each date's param-independent percentile features ONCE so the sweep's
+// per-trial cost collapses to pure arithmetic. Call after the slices are built
+// (CLI) or rehydrated from the wire (browser), before running trials.
+export function precomputeFeatures(slices: DateSlice[]): void {
+  for (const sl of slices) sl.features = computeRotationFeatures(sl.inputs);
+}
+
+function buildWindow(universe: BtMeta[], histMap: Map<string, Hist>, asOfStr: string, fwdStr: string, horizonDays: number, kwin: number): ForwardWindow {
+  const fwd = new Map<string, number>();
+  for (const m of universe) {
+    const h = histMap.get(m.symbol) ?? [];
+    const r = retBetween(h, asOfStr, fwdStr);
+    if (r != null) fwd.set(m.symbol, r);
+  }
+  const ranked = [...fwd.entries()].filter(([s]) => s !== SPX).sort((a, b) => b[1] - a[1]);
+  const winners = new Set(ranked.slice(0, kwin).map(([s]) => s));
+  return { horizonDays, fwd, winners, spxFwd: fwd.get(SPX) ?? null };
+}
+
+// Precompute, ONCE per past date: model inputs + a handful of RANDOM forward
+// windows (each with its own winners). Parameter sweeps reuse these — only the
+// (cheap) re-scoring varies.
 export function buildSlices(universe: BtMeta[], histMap: Map<string, Hist>, opts: SliceOpts = DEFAULT_SLICE_OPTS): DateSlice[] {
-  const { fwd: FWD, kwin: KWIN, step: STEP, maxDays } = opts;
-  const minBack = opts.minBack ?? (typeof FWD === 'number' ? FWD + 5 : 30);
+  const { minBack, kwin: KWIN, step: STEP, maxDays, nFwd, minFwd } = opts;
   const today = new Date();
-  const todayStr = fmt(today);
   const slices: DateSlice[] = [];
   for (let days = minBack; days <= maxDays; days += STEP) {
     const asOfDate = subDays(today, days);
-    // Forward window ends TODAY (showcase metric) unless a fixed N-day legacy window is requested.
-    const fwdStr = FWD === 'today' ? todayStr : fmt(subDays(today, Math.max(0, days - FWD)));
+    const asOfStr = fmt(asOfDate);
     const inputs = buildInputsAsOf(universe, histMap, asOfDate);
-    const fwd = new Map<string, number>();
-    for (const m of universe) {
-      const h = histMap.get(m.symbol) ?? [];
-      const r = retBetween(h, fmt(asOfDate), fwdStr);
-      if (r != null) fwd.set(m.symbol, r);
+    const span = days - minFwd; // largest forward horizon available from this date
+    const windows: ForwardWindow[] = [];
+    if (span > 0) {
+      // Stratified-random horizons: split [minFwd, days] into nFwd bands, pick one
+      // random horizon in each. Near-today dates only get short futures; deep-past
+      // dates get everything up to multi-year — exactly the real shape.
+      for (let k = 0; k < nFwd; k++) {
+        const frac = (k + Math.random()) / nFwd;
+        const horizon = Math.round(minFwd + frac * span);
+        const fwdStr = fmt(subDays(today, Math.max(0, days - horizon)));
+        windows.push(buildWindow(universe, histMap, asOfStr, fwdStr, horizon, KWIN));
+      }
     }
-    const ranked = [...fwd.entries()].filter(([s]) => s !== SPX).sort((a, b) => b[1] - a[1]);
-    const winners = new Set(ranked.slice(0, KWIN).map(([s]) => s));
-    slices.push({ asOf: fmt(asOfDate), inputs, fwd, winners, spxFwd: fwd.get(SPX) ?? null });
+    slices.push({ asOf: asOfStr, inputs, windows });
   }
   return slices;
 }
@@ -59,27 +94,33 @@ export function buildSlices(universe: BtMeta[], histMap: Map<string, Hist>, opts
 export interface SweepEval { capture: number; beatSpx: number; basketVsSpx: number; nDates: number }
 
 export function evaluate(slices: DateSlice[], params: ModelParams, kwin = 25, npicks = ACCEL_MAX): SweepEval {
-  let capSum = 0, beatSum = 0, basketVsSpxSum = 0, nWithSpx = 0;
+  let capSum = 0, capN = 0, beatSum = 0, basketVsSpxSum = 0, nWithSpx = 0;
   for (const sl of slices) {
-    const scored = scoreRotation(sl.inputs, params);
+    if (sl.windows.length === 0) continue;
+    // Score the past date ONCE — picks don't depend on which future we measure. Use the
+    // precomputed features when available (the per-trial fast path); fall back otherwise.
+    const scored = sl.features
+      ? scoreFromFeatures(sl.features, params)
+      : scoreFromFeatures(computeRotationFeatures(sl.inputs), params);
     const picks = selectPicks(scored, npicks, PRE_BREAKOUT_SLOTS).map(s => s.item.symbol).filter(s => s !== SPX);
-    let hits = 0, fwdSum = 0, fwdN = 0;
-    for (const sym of picks) {
-      if (sl.winners.has(sym)) hits++;
-      const f = sl.fwd.get(sym);
-      if (f != null) { fwdSum += f; fwdN++; }
-    }
-    capSum += hits / kwin;
-    if (sl.spxFwd != null && fwdN > 0) {
-      const basket = fwdSum / fwdN;
-      basketVsSpxSum += basket - sl.spxFwd;
-      if (basket > sl.spxFwd) beatSum++;
-      nWithSpx++;
+    for (const w of sl.windows) {
+      let hits = 0, fwdSum = 0, fwdN = 0;
+      for (const sym of picks) {
+        if (w.winners.has(sym)) hits++;
+        const f = w.fwd.get(sym);
+        if (f != null) { fwdSum += f; fwdN++; }
+      }
+      capSum += hits / kwin; capN++;
+      if (w.spxFwd != null && fwdN > 0) {
+        const basket = fwdSum / fwdN;
+        basketVsSpxSum += basket - w.spxFwd;
+        if (basket > w.spxFwd) beatSum++;
+        nWithSpx++;
+      }
     }
   }
-  const n = slices.length || 1;
   return {
-    capture: capSum / n,
+    capture: capN ? capSum / capN : 0,
     beatSpx: nWithSpx ? beatSum / nWithSpx : 0,
     basketVsSpx: nWithSpx ? basketVsSpxSum / nWithSpx : 0,
     nDates: slices.length,
