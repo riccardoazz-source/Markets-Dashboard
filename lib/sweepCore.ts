@@ -27,7 +27,11 @@ export interface SliceOpts { minBack: number; kwin: number; step: number; maxDay
 // Dense by design: a past date every ~3 weeks over ~6 years (≈100 as-of dates), each
 // with 6 random futures ≈ 600 (past→future) winner-tests. More dates = a fitness that
 // can't be gamed by luck on a few lucky periods; the model must catch winners broadly.
-export const DEFAULT_SLICE_OPTS: SliceOpts = { minBack: 25, kwin: 25, step: 21, maxDays: 6 * 365, nFwd: 6, minFwd: 21 };
+// nFwd raised 6→9: with the horizon-WEIGHTED objective the long buckets (1Y/5Y)
+// carry the most weight, so they need enough windows to not be noise. More forward
+// draws per deep-past date fills the 1Y/5Y buckets densely; the per-trial cost is
+// unchanged (scoring is once-per-date, windows are a cheap inner loop).
+export const DEFAULT_SLICE_OPTS: SliceOpts = { minBack: 25, kwin: 25, step: 21, maxDays: 6 * 365, nFwd: 9, minFwd: 21 };
 
 // One random future relative to a past date: who won, and by how much.
 export interface ForwardWindow {
@@ -91,10 +95,44 @@ export function buildSlices(universe: BtMeta[], histMap: Map<string, Hist>, opts
   return slices;
 }
 
-export interface SweepEval { capture: number; beatSpx: number; basketVsSpx: number; nDates: number }
+// ── Horizon buckets ─────────────────────────────────────────────────────────
+// The live backtest CARDS judge the model at five fixed horizons (1M…5Y) and the
+// reliability score weights the LONG ones heaviest (5Y/1Y span full cycles; a
+// short window is mostly noise). The old objective took a FLAT average over all
+// random forward windows — but those windows are overwhelmingly SHORT (only the
+// deepest-past dates can host a multi-year window), so the flat average was ~98%
+// driven by short horizons. The optimizer then happily traded away the rare
+// multi-year monster-winners (MU +1379%, AVGO +719%) for marginal short-horizon
+// gains — "winning" on a number disconnected from the cards. We now bucket each
+// window by its horizon and weight it EXACTLY like the cards' reliability score,
+// so optimizing this capture optimizes what the user actually reads.
+export type HorizonKey = '1m' | '3m' | '6m' | '1y' | '5y';
+const HORIZON_ORDER: HorizonKey[] = ['1m', '3m', '6m', '1y', '5y'];
+// Same spirit as modelVersions PERIOD_WEIGHTS, renormalised over the 5 horizons a
+// forward window can fall into (1d is excluded — minFwd ≥ 21 days).
+export const HORIZON_WEIGHTS: Record<HorizonKey, number> = {
+  '1m': 0.10, '3m': 0.20, '6m': 0.20, '1y': 0.25, '5y': 0.25,
+};
+function horizonBucket(days: number): HorizonKey {
+  if (days < 45) return '1m';
+  if (days < 135) return '3m';
+  if (days < 270) return '6m';
+  if (days < 540) return '1y';
+  return '5y';
+}
+
+export interface SweepEval {
+  capture: number;                          // HORIZON-WEIGHTED capture (the objective — matches the cards)
+  captureFlat: number;                      // old flat average, kept for reference
+  beatSpx: number; basketVsSpx: number; nDates: number;
+  byHorizon: Record<HorizonKey, { capture: number; n: number }>; // per-card capture so the 5Y/1Y number is VISIBLE
+}
 
 export function evaluate(slices: DateSlice[], params: ModelParams, kwin = 25, npicks = ACCEL_MAX): SweepEval {
   let capSum = 0, capN = 0, beatSum = 0, basketVsSpxSum = 0, nWithSpx = 0;
+  // Per-horizon accumulators — both for the weighted objective and for reporting.
+  const hCapSum: Record<HorizonKey, number> = { '1m': 0, '3m': 0, '6m': 0, '1y': 0, '5y': 0 };
+  const hCapN:   Record<HorizonKey, number> = { '1m': 0, '3m': 0, '6m': 0, '1y': 0, '5y': 0 };
   for (const sl of slices) {
     if (sl.windows.length === 0) continue;
     // Score the past date ONCE — picks don't depend on which future we measure. Use the
@@ -110,7 +148,10 @@ export function evaluate(slices: DateSlice[], params: ModelParams, kwin = 25, np
         const f = w.fwd.get(sym);
         if (f != null) { fwdSum += f; fwdN++; }
       }
-      capSum += hits / kwin; capN++;
+      const cap = hits / kwin;
+      capSum += cap; capN++;
+      const hk = horizonBucket(w.horizonDays);
+      hCapSum[hk] += cap; hCapN[hk]++;
       if (w.spxFwd != null && fwdN > 0) {
         const basket = fwdSum / fwdN;
         basketVsSpxSum += basket - w.spxFwd;
@@ -119,11 +160,23 @@ export function evaluate(slices: DateSlice[], params: ModelParams, kwin = 25, np
       }
     }
   }
+  // Horizon-weighted capture: average WITHIN each bucket, then weight buckets like
+  // the cards. A bucket with no windows is simply dropped (weights renormalise).
+  const byHorizon = {} as Record<HorizonKey, { capture: number; n: number }>;
+  let wCapSum = 0, wSum = 0;
+  for (const hk of HORIZON_ORDER) {
+    const n = hCapN[hk];
+    const c = n ? hCapSum[hk] / n : 0;
+    byHorizon[hk] = { capture: c, n };
+    if (n > 0) { wCapSum += HORIZON_WEIGHTS[hk] * c; wSum += HORIZON_WEIGHTS[hk]; }
+  }
   return {
-    capture: capN ? capSum / capN : 0,
+    capture: wSum ? wCapSum / wSum : 0,
+    captureFlat: capN ? capSum / capN : 0,
     beatSpx: nWithSpx ? beatSum / nWithSpx : 0,
     basketVsSpx: nWithSpx ? basketVsSpxSum / nWithSpx : 0,
     nDates: slices.length,
+    byHorizon,
   };
 }
 

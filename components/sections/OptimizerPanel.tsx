@@ -4,7 +4,7 @@ import { useRef, useState } from 'react';
 import clsx from 'clsx';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { DEFAULT_PARAMS, ModelParams, ACCEL_MAX } from '@/lib/rotationModel';
-import { evaluate, sampleParams, precomputeFeatures, CoordStep, SweepEval, DateSlice, DEFAULT_SLICE_OPTS, BOUNDS } from '@/lib/sweepCore';
+import { evaluate, sampleParams, precomputeFeatures, CoordStep, SweepEval, DateSlice, DEFAULT_SLICE_OPTS, BOUNDS, HorizonKey } from '@/lib/sweepCore';
 
 interface WireWindow { horizonDays: number; fwd: [string, number][]; winners: string[]; spxFwd: number | null }
 interface WireSlice {
@@ -26,6 +26,7 @@ const LABELS: Record<keyof ModelParams, string> = {
 };
 const KEYS = Object.keys(LABELS) as (keyof ModelParams)[];
 
+const HKEYS: HorizonKey[] = ['1m', '3m', '6m', '1y', '5y'];
 const TARGETS = [50000, 1000000, 10000000];
 const fmtN = (n: number) => n >= 1000000 ? `${n / 1000000}M` : n >= 1000 ? `${n / 1000}K` : `${n}`;
 
@@ -305,9 +306,27 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
               </div>
               {improved && <div className="text-green-400 font-semibold text-xs">+{capGain.toFixed(1)} pp capture</div>}
               <div className="ml-auto text-[10px] text-gray-500 text-right">
-                beats S&P {(best.eval.beatSpx * 100).toFixed(0)}% of the time<br />
-                basket −S&P {best.eval.basketVsSpx >= 0 ? '+' : ''}{best.eval.basketVsSpx.toFixed(1)}pp
+                horizon-weighted (5Y/1Y heavy, like the cards)<br />
+                beats S&P {(best.eval.beatSpx * 100).toFixed(0)}% · basket −S&P {best.eval.basketVsSpx >= 0 ? '+' : ''}{best.eval.basketVsSpx.toFixed(1)}pp
               </div>
+            </div>
+            {/* Per-horizon capture — so the 5Y/1Y number is VISIBLE, not blended away */}
+            <div className="mt-2 pt-2 border-t border-border/40 flex gap-3 flex-wrap text-[10px]">
+              {HKEYS.map(hk => {
+                const b = best.eval.byHorizon?.[hk];
+                const base = baseline.byHorizon?.[hk];
+                if (!b || b.n === 0) return null;
+                const dv = base && base.n > 0 ? (b.capture - base.capture) * 100 : 0;
+                return (
+                  <div key={hk} className="text-center">
+                    <div className="text-gray-500 uppercase">{hk}</div>
+                    <div className="tabular-nums text-gray-300 font-semibold">{(b.capture * 100).toFixed(0)}%</div>
+                    <div className={clsx('tabular-nums text-[9px]', dv > 0.5 ? 'text-green-500' : dv < -0.5 ? 'text-red-500' : 'text-gray-600')}>
+                      {dv > 0 ? '+' : ''}{dv.toFixed(1)}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

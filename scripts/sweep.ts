@@ -91,9 +91,13 @@ async function main() {
   precomputeFeatures(slices); // compute per-date percentile features ONCE → fast trials
   console.log(`[slices] ${slices.length} dates from ${slices[slices.length-1]?.asOf} to ${slices[0]?.asOf}`);
 
+  const byH = (e: ReturnType<typeof evaluate>) =>
+    (['1m','3m','6m','1y','5y'] as const).map(h => `${h}:${(e.byHorizon[h].capture*100).toFixed(0)}%(${e.byHorizon[h].n})`).join(' ');
+
   const base = evaluate(slices, DEFAULT_PARAMS, KWIN, NPICKS);
   console.log(`\n=== BASELINE (live model) ===`);
-  console.log(`capture=${(base.capture*100).toFixed(1)}%  beatSPX=${(base.beatSpx*100).toFixed(0)}%  basket−SPX=${base.basketVsSpx.toFixed(1)}pp  over ${base.nDates} dates`);
+  console.log(`capture=${(base.capture*100).toFixed(1)}% (weighted) flat=${(base.captureFlat*100).toFixed(1)}%  beatSPX=${(base.beatSpx*100).toFixed(0)}%  basket−SPX=${base.basketVsSpx.toFixed(1)}pp  over ${base.nDates} dates`);
+  console.log(`per-horizon: ${byH(base)}`);
 
   console.log(`\n[sweep] ${TRIALS} parameter sets…`);
   const results: { p: ModelParams; e: ReturnType<typeof evaluate> }[] = [{ p: DEFAULT_PARAMS, e: base }];
@@ -112,6 +116,7 @@ async function main() {
   results.slice(0, 10).forEach((r, i) => {
     const tag = r.p === DEFAULT_PARAMS ? ' (BASELINE)' : '';
     console.log(`#${i+1} capture=${(r.e.capture*100).toFixed(1)}%  beatSPX=${(r.e.beatSpx*100).toFixed(0)}%  basket−SPX=${r.e.basketVsSpx.toFixed(1)}pp${tag}`);
+    console.log(`     per-horizon: ${byH(r.e)}`);
   });
 
   const out = `${CACHE_DIR}/sweep-best.json`;
