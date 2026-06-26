@@ -20,14 +20,17 @@ import { fmt, BtMeta, Hist } from '../lib/backtestCore';
 import { buildSlices, evaluate, sampleParams, SPX, SliceOpts } from '../lib/sweepCore';
 
 const CACHE_DIR = process.env.SCRATCH ?? '.';
-const FWD = Number(process.env.FWD ?? 180);
+// FWD=today (default) optimizes the SAME forward-to-today metric as the on-screen
+// backtest; set FWD to a number for a legacy fixed N-day window.
+const FWD: number | 'today' = process.env.FWD ? Number(process.env.FWD) : 'today';
+const MINBACK = Number(process.env.MINBACK ?? 30);
 const KWIN = Number(process.env.KWIN ?? 25);
 const NPICKS = Number(process.env.NPICKS ?? ACCEL_MAX);
 const TRIALS = Number(process.env.TRIALS ?? 1000);
 const STEP = Number(process.env.STEP ?? 30);
 const MAXDAYS = 5 * 365 + 120;
 const FETCH_CONC = 8;
-const SLICE_OPTS: SliceOpts = { fwd: FWD, kwin: KWIN, step: STEP, maxDays: MAXDAYS };
+const SLICE_OPTS: SliceOpts = { fwd: FWD, minBack: MINBACK, kwin: KWIN, step: STEP, maxDays: MAXDAYS };
 
 const CURATED = ['MU','AVGO','NVDA','AMD','CRDO','RIOT','CIFR','WULF','IREN','SNDK','META','PLTR',
   'GOOG','MSFT','INTU','ADBE','TSM','AAPL','AMZN','TSLA','SMCI','MRVL','ARM','ASML','QCOM','NOK',

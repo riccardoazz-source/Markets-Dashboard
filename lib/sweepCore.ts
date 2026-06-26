@@ -9,8 +9,18 @@ import { buildInputsAsOf, retBetween, fmt, BtMeta, Hist } from './backtestCore';
 
 export const SPX = '^GSPC';
 
-export interface SliceOpts { fwd: number; kwin: number; step: number; maxDays: number }
-export const DEFAULT_SLICE_OPTS: SliceOpts = { fwd: 180, kwin: 25, step: 45, maxDays: 5 * 365 + 120 };
+// `fwd` is the forward MEASUREMENT MODE, not a fixed window:
+//   'today'  → forward return from each as-of date to TODAY (end of data). This is
+//              EXACTLY what the on-screen backtest cards measure, so the optimizer
+//              tunes the same yardstick you judge — and crucially it REWARDS catching
+//              the multi-year 10-baggers (MU, AVGO at the 5Y as-of date), which a
+//              fixed short window can never see.
+//   number   → legacy fixed N-day forward window (kept for the offline CLI).
+// `minBack` is how close to today the nearest as-of date sits (a 30-day-back slice
+//   measures ~1-month forward, a 1825-day-back slice measures ~5-year forward — so a
+//   single 'today' mode over a dense as-of grid covers 1M…5Y in one objective).
+export interface SliceOpts { fwd: number | 'today'; minBack: number; kwin: number; step: number; maxDays: number }
+export const DEFAULT_SLICE_OPTS: SliceOpts = { fwd: 'today', minBack: 30, kwin: 25, step: 45, maxDays: 5 * 365 + 120 };
 
 export interface DateSlice {
   asOf: string;
@@ -24,16 +34,19 @@ export interface DateSlice {
 // winners. Parameter sweeps reuse these slices — only the (cheap) re-scoring varies.
 export function buildSlices(universe: BtMeta[], histMap: Map<string, Hist>, opts: SliceOpts = DEFAULT_SLICE_OPTS): DateSlice[] {
   const { fwd: FWD, kwin: KWIN, step: STEP, maxDays } = opts;
+  const minBack = opts.minBack ?? (typeof FWD === 'number' ? FWD + 5 : 30);
   const today = new Date();
+  const todayStr = fmt(today);
   const slices: DateSlice[] = [];
-  for (let days = FWD + 5; days <= maxDays; days += STEP) {
+  for (let days = minBack; days <= maxDays; days += STEP) {
     const asOfDate = subDays(today, days);
-    const fwdDate = subDays(today, days - FWD);
+    // Forward window ends TODAY (showcase metric) unless a fixed N-day legacy window is requested.
+    const fwdStr = FWD === 'today' ? todayStr : fmt(subDays(today, Math.max(0, days - FWD)));
     const inputs = buildInputsAsOf(universe, histMap, asOfDate);
     const fwd = new Map<string, number>();
     for (const m of universe) {
       const h = histMap.get(m.symbol) ?? [];
-      const r = retBetween(h, fmt(asOfDate), fmt(fwdDate));
+      const r = retBetween(h, fmt(asOfDate), fwdStr);
       if (r != null) fwd.set(m.symbol, r);
     }
     const ranked = [...fwd.entries()].filter(([s]) => s !== SPX).sort((a, b) => b[1] - a[1]);
