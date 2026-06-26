@@ -2,13 +2,17 @@ import { NextResponse } from 'next/server';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { fetchYahooChart } from '@/lib/yahoo';
-import { DEFAULT_PARAMS, ModelParams, ACCEL_MAX } from '@/lib/rotationModel';
-import { BtMeta, Hist, fmt } from '@/lib/backtestCore';
-import { buildSlices, evaluate, runBatch, DateSlice, SPX, SliceOpts, DEFAULT_SLICE_OPTS } from '@/lib/sweepCore';
+import { BtMeta, Hist } from '@/lib/backtestCore';
+import { buildSlices, SPX, SliceOpts, DEFAULT_SLICE_OPTS } from '@/lib/sweepCore';
 
-// CPU-heavy: thousands of re-scorings. Node runtime + a real duration budget.
-export const runtime = 'nodejs';
-export const maxDuration = 60;
+// The ONLY job of this route is to download the market history ONCE and hand back
+// the precomputed as-of date slices (inputs + forward winners). The actual sweep —
+// generating thousands of parameter sets and re-scoring them — runs in the BROWSER,
+// because that is microsecond-cheap pure math and needs no server time budget.
+//
+// Edge runtime + the same fetch path as /api/rotation-backtest (which is proven to
+// reach Yahoo); the old nodejs runtime is what failed to download data.
+export const runtime = 'edge';
 
 const BASE_UNIVERSE: BtMeta[] = [
   { symbol: SPX, name: 'S&P 500', group: 'Indexes' },
@@ -18,10 +22,16 @@ const BASE_UNIVERSE: BtMeta[] = [
   ...SECTORS.map(s => ({ symbol: s.symbol, name: s.name, group: 'Sectors' })),
 ];
 
-// The expensive history + precomputed date slices, cached in module memory so only
-// the FIRST sweep call on a warm instance pays the fetch; later calls go straight to
-// trials. Keyed by the active-stocks signature.
-interface Prepared { universe: BtMeta[]; slices: DateSlice[]; ts: number }
+// Serialized slice (Map/Set aren't JSON — send arrays, rehydrate on the client).
+interface WireSlice {
+  asOf: string;
+  inputs: ReturnType<typeof buildSlices>[number]['inputs'];
+  fwd: [string, number][];
+  winners: string[];
+  spxFwd: number | null;
+}
+interface Prepared { universeSize: number; symbolsWithData: number; slices: WireSlice[]; ts: number }
+
 const prepCache = new Map<string, Prepared>();
 const PREP_TTL = 30 * 60_000;
 
@@ -38,51 +48,35 @@ async function prepare(stocks: string[], sliceOpts: SliceOpts): Promise<Prepared
   const results = await Promise.allSettled(universe.map(m => fetchYahooChart(m.symbol, from, to, '1d').catch(() => [] as Hist)));
   const histMap = new Map<string, Hist>();
   universe.forEach((m, i) => histMap.set(m.symbol, results[i].status === 'fulfilled' ? (results[i] as PromiseFulfilledResult<Hist>).value : []));
+
   const slices = buildSlices(universe, histMap, sliceOpts);
-  const prep: Prepared = { universe, slices, ts: Date.now() };
+  const symbolsWithData = [...new Set(slices.flatMap(s => s.inputs.filter(i => i.r1m != null).map(i => i.symbol)))].length;
+  const wire: WireSlice[] = slices.map(s => ({
+    asOf: s.asOf,
+    inputs: s.inputs,
+    fwd: [...s.fwd.entries()],
+    winners: [...s.winners],
+    spxFwd: s.spxFwd,
+  }));
+  const prep: Prepared = { universeSize: universe.length, symbolsWithData, slices: wire, ts: Date.now() };
   prepCache.set(key, prep);
   return prep;
 }
 
 export async function POST(req: Request) {
-  const t0 = Date.now();
-  let body: { stocks?: string[]; best?: ModelParams; sliceOpts?: Partial<SliceOpts> } = {};
+  let body: { stocks?: string[]; sliceOpts?: Partial<SliceOpts> } = {};
   try { body = await req.json(); } catch { /* empty body ok */ }
 
   const sliceOpts: SliceOpts = { ...DEFAULT_SLICE_OPTS, ...(body.sliceOpts ?? {}) };
   const stocks = Array.isArray(body.stocks) ? body.stocks : [];
 
   const prep = await prepare(stocks, sliceOpts);
-  const usable = [...new Set(prep.slices.flatMap(s => s.inputs.map(i => i.symbol)))].length;
-  const dataReady = prep.slices.length > 0 && prep.slices.some(s => s.winners.size > 0);
-
-  // Baseline (live model) eval — cheap, recomputed each call so the client always
-  // has the current comparison even on a fresh instance.
-  const baseline = evaluate(prep.slices, DEFAULT_PARAMS, sliceOpts.kwin, ACCEL_MAX);
-
-  // Seed the search from the incoming best (carried by the client across calls so
-  // progress accumulates even when a cold instance handles the next request).
-  const incoming = body.best ? { ...DEFAULT_PARAMS, ...body.best } : DEFAULT_PARAMS;
-  const startBest = { params: incoming, e: evaluate(prep.slices, incoming, sliceOpts.kwin, ACCEL_MAX) };
-
-  // Run trials with whatever time remains under maxDuration (minus margin for fetch
-  // + serialization). On a cold instance that spent most of the budget fetching, this
-  // may be small or zero — the client just calls again against the now-warm cache.
-  const elapsed = Date.now() - t0;
-  const budgetMs = Math.max(0, maxDuration * 1000 - elapsed - 6000);
-  const { best, trials } = budgetMs > 200 && dataReady
-    ? runBatch(prep.slices, startBest, { budgetMs, kwin: sliceOpts.kwin, npicks: ACCEL_MAX })
-    : { best: startBest, trials: 0 };
-
   return NextResponse.json({
     ok: true,
-    dataReady,
-    universeSize: prep.universe.length,
-    symbolsWithData: usable,
+    universeSize: prep.universeSize,
+    symbolsWithData: prep.symbolsWithData,
     dates: prep.slices.length,
-    fetchMs: elapsed,
-    trials,
-    baseline,
-    best: { params: best.params, eval: best.e },
+    kwin: sliceOpts.kwin,
+    slices: prep.slices,
   });
 }
