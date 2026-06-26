@@ -107,15 +107,15 @@ async function main() {
     const p = sampleParams(around, 0.2);
     const e = evaluate(slices, p, KWIN, NPICKS);
     results.push({ p, e });
-    if (e.capture > best.e.capture || (e.capture === best.e.capture && e.basketVsSpx > best.e.basketVsSpx)) best = { p, e };
-    if ((t + 1) % 200 === 0) console.log(`[sweep] ${t + 1}/${TRIALS}  best capture=${(best.e.capture*100).toFixed(1)}%`);
+    if (e.fitness > best.e.fitness || (e.fitness === best.e.fitness && e.basketVsSpx > best.e.basketVsSpx)) best = { p, e };
+    if ((t + 1) % 200 === 0) console.log(`[sweep] ${t + 1}/${TRIALS}  best fitness=${(best.e.fitness*100).toFixed(1)} capture=${(best.e.capture*100).toFixed(1)}%`);
   }
-  results.sort((a, b) => (b.e.capture - a.e.capture) || (b.e.basketVsSpx - a.e.basketVsSpx));
+  results.sort((a, b) => (b.e.fitness - a.e.fitness) || (b.e.basketVsSpx - a.e.basketVsSpx));
 
-  console.log(`\n=== TOP 10 by mean capture ===`);
+  console.log(`\n=== TOP 10 by fitness (capture × loss aversion) ===`);
   results.slice(0, 10).forEach((r, i) => {
     const tag = r.p === DEFAULT_PARAMS ? ' (BASELINE)' : '';
-    console.log(`#${i+1} capture=${(r.e.capture*100).toFixed(1)}%  beatSPX=${(r.e.beatSpx*100).toFixed(0)}%  basket−SPX=${r.e.basketVsSpx.toFixed(1)}pp${tag}`);
+    console.log(`#${i+1} fitness=${(r.e.fitness*100).toFixed(1)}  capture=${(r.e.capture*100).toFixed(1)}%  beatFactor=${(r.e.beatFactor*100).toFixed(0)}%  basket−SPX=${r.e.basketVsSpx.toFixed(1)}pp${tag}`);
     console.log(`     per-horizon: ${byH(r.e)}`);
   });
 

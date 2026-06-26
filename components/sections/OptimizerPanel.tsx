@@ -100,7 +100,9 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
             const around = Math.random() < 0.4 ? cur.params : undefined;
             const p = sampleParams(around, 0.2);
             const e = evaluate(slices, p, kwin, ACCEL_MAX);
-            if (e.capture > cur.e.capture || (e.capture === cur.e.capture && e.basketVsSpx > cur.e.basketVsSpx)) {
+            // Maximize FITNESS (capture × loss aversion), not raw capture — so the
+            // optimizer can't "win" by stripping a guard and taking blow-off losses.
+            if (e.fitness > cur.e.fitness || (e.fitness === cur.e.fitness && e.basketVsSpx > cur.e.basketVsSpx)) {
               cur = { params: p, e };
             }
             done++;
@@ -151,18 +153,19 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
         await new Promise<void>(resolve => setTimeout(resolve, 0));
 
         const [lo, hi] = BOUNDS[k];
-        const oldCapture = evaluate(slices, cur, kwin, ACCEL_MAX).capture;
-        let bestCapture = oldCapture;
+        // Optimize FITNESS (capture × loss aversion), not raw capture.
+        const oldFitness = evaluate(slices, cur, kwin, ACCEL_MAX).fitness;
+        let bestFitness = oldFitness;
         let bestVal = cur[k];
         for (let j = 0; j <= STEPS; j++) {
           const v = lo + (j / STEPS) * (hi - lo);
           const candidate = { ...cur, [k]: v };
           if (k === 'secularLow' && candidate.secularHigh <= v + 0.05) candidate.secularHigh = Math.min(v + 0.1, 0.9);
           if (k === 'secularHigh' && v <= cur.secularLow + 0.05) continue;
-          const cap = evaluate(slices, candidate, kwin, ACCEL_MAX).capture;
-          if (cap > bestCapture) { bestCapture = cap; bestVal = v; }
+          const f = evaluate(slices, candidate, kwin, ACCEL_MAX).fitness;
+          if (f > bestFitness) { bestFitness = f; bestVal = v; }
         }
-        steps.push({ key: k, oldVal: cur[k], newVal: bestVal, oldCapture, newCapture: bestCapture });
+        steps.push({ key: k, oldVal: cur[k], newVal: bestVal, oldCapture: oldFitness, newCapture: bestFitness });
         cur = { ...cur, [k]: bestVal };
         setCoordSteps([...steps]);
         setBest({ params: cur, eval: evaluate(slices, cur, kwin, ACCEL_MAX) });
@@ -306,8 +309,8 @@ export function OptimizerPanel({ stockSymbols = [] }: { stockSymbols?: string[] 
               </div>
               {improved && <div className="text-green-400 font-semibold text-xs">+{capGain.toFixed(1)} pp capture</div>}
               <div className="ml-auto text-[10px] text-gray-500 text-right">
-                horizon-weighted (5Y/1Y heavy, like the cards)<br />
-                beats S&P {(best.eval.beatSpx * 100).toFixed(0)}% · basket −S&P {best.eval.basketVsSpx >= 0 ? '+' : ''}{best.eval.basketVsSpx.toFixed(1)}pp
+                maximizes <span className="text-violet-300">fitness</span> = capture × loss-aversion (no free guard-stripping)<br />
+                beatFactor {(best.eval.beatFactor * 100).toFixed(0)}% · beats S&P {(best.eval.beatSpx * 100).toFixed(0)}% · basket −S&P {best.eval.basketVsSpx >= 0 ? '+' : ''}{best.eval.basketVsSpx.toFixed(1)}pp
               </div>
             </div>
             {/* Per-horizon capture — so the 5Y/1Y number is VISIBLE, not blended away */}

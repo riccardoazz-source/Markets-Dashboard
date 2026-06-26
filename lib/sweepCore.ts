@@ -121,18 +121,37 @@ function horizonBucket(days: number): HorizonKey {
   return '5y';
 }
 
+// ── Loss aversion (why fitness ≠ capture) ────────────────────────────────────
+// Every GUARD in the model (rebound, overheat, blow-off EXT, cyclical-VQ discount)
+// exists to AVOID LOSSES, not to catch winners — so each guard costs a little
+// capture. A capture-only optimizer therefore STRIPS the guards for free, and then
+// a stripped guard lets a blow-off into the picks that craters a specific card
+// (M24 bought INTU −47%, ADBE −66% at 5Y). The app's own reliability score already
+// solves this: it multiplies capture by a beatFactor that punishes underperforming
+// SPX, ASYMMETRICALLY and horizon-scaled — a 5Y loss is catastrophic, a 1M loss is
+// noise. fitness mirrors that score, so the optimizer can no longer remove a guard
+// whose job is to prevent a 5Y blow-off without tanking its own number. Same numbers
+// as modelVersions PERIOD_LOSS_SEVERITY.
+const HORIZON_LOSS_SEVERITY: Record<HorizonKey, number> = {
+  '1m': 0.6, '3m': 1.0, '6m': 1.5, '1y': 2.5, '5y': 5.0,
+};
+
 export interface SweepEval {
-  capture: number;                          // HORIZON-WEIGHTED capture (the objective — matches the cards)
+  fitness: number;                          // THE OBJECTIVE — capture × loss-averse beatFactor (mirrors the app's reliability score)
+  capture: number;                          // HORIZON-WEIGHTED capture (matches the cards)
   captureFlat: number;                      // old flat average, kept for reference
+  beatFactor: number;                       // 0..1 — horizon-scaled "did it beat SPX without catastrophic losses"
   beatSpx: number; basketVsSpx: number; nDates: number;
   byHorizon: Record<HorizonKey, { capture: number; n: number }>; // per-card capture so the 5Y/1Y number is VISIBLE
 }
 
 export function evaluate(slices: DateSlice[], params: ModelParams, kwin = 25, npicks = ACCEL_MAX): SweepEval {
   let capSum = 0, capN = 0, beatSum = 0, basketVsSpxSum = 0, nWithSpx = 0;
-  // Per-horizon accumulators — both for the weighted objective and for reporting.
+  // Per-horizon accumulators — capture (objective + reporting) and beatScore (loss aversion).
   const hCapSum: Record<HorizonKey, number> = { '1m': 0, '3m': 0, '6m': 0, '1y': 0, '5y': 0 };
   const hCapN:   Record<HorizonKey, number> = { '1m': 0, '3m': 0, '6m': 0, '1y': 0, '5y': 0 };
+  const hBeatSum: Record<HorizonKey, number> = { '1m': 0, '3m': 0, '6m': 0, '1y': 0, '5y': 0 };
+  const hBeatN:   Record<HorizonKey, number> = { '1m': 0, '3m': 0, '6m': 0, '1y': 0, '5y': 0 };
   for (const sl of slices) {
     if (sl.windows.length === 0) continue;
     // Score the past date ONCE — picks don't depend on which future we measure. Use the
@@ -154,25 +173,38 @@ export function evaluate(slices: DateSlice[], params: ModelParams, kwin = 25, np
       hCapSum[hk] += cap; hCapN[hk]++;
       if (w.spxFwd != null && fwdN > 0) {
         const basket = fwdSum / fwdN;
-        basketVsSpxSum += basket - w.spxFwd;
-        if (basket > w.spxFwd) beatSum++;
+        const alpha = basket - w.spxFwd;
+        basketVsSpxSum += alpha;
+        if (alpha > 0) beatSum++;
         nWithSpx++;
+        // beatScore: WIN = flat +1 (magnitude ignored → one huge pick can't inflate),
+        // LOSS = −severity (horizon-scaled: a 5Y miss is catastrophic, a 1M miss noise).
+        hBeatSum[hk] += alpha >= 0 ? 1 : -HORIZON_LOSS_SEVERITY[hk];
+        hBeatN[hk]++;
       }
     }
   }
-  // Horizon-weighted capture: average WITHIN each bucket, then weight buckets like
-  // the cards. A bucket with no windows is simply dropped (weights renormalise).
+  // Horizon-weighted capture AND beatFactor: average WITHIN each bucket, then weight
+  // buckets like the cards. A bucket with no windows is dropped (weights renormalise).
   const byHorizon = {} as Record<HorizonKey, { capture: number; n: number }>;
-  let wCapSum = 0, wSum = 0;
+  let wCapSum = 0, wCapW = 0, wBeatSum = 0, wBeatW = 0;
   for (const hk of HORIZON_ORDER) {
     const n = hCapN[hk];
     const c = n ? hCapSum[hk] / n : 0;
     byHorizon[hk] = { capture: c, n };
-    if (n > 0) { wCapSum += HORIZON_WEIGHTS[hk] * c; wSum += HORIZON_WEIGHTS[hk]; }
+    if (n > 0) { wCapSum += HORIZON_WEIGHTS[hk] * c; wCapW += HORIZON_WEIGHTS[hk]; }
+    if (hBeatN[hk] > 0) { wBeatSum += HORIZON_WEIGHTS[hk] * (hBeatSum[hk] / hBeatN[hk]); wBeatW += HORIZON_WEIGHTS[hk]; }
   }
+  const capture = wCapW ? wCapSum / wCapW : 0;
+  // beatFactor maps the weighted mean beatScore (∈ [−severity, 1]) into [0,1], exactly
+  // like computeReliability: a set that loses badly at 5Y collapses it toward 0.
+  const meanBeat = wBeatW ? wBeatSum / wBeatW : 0;
+  const beatFactor = Math.max(0, Math.min(1, (meanBeat + 1) / 2));
   return {
-    capture: wSum ? wCapSum / wSum : 0,
+    fitness: capture * beatFactor, // capture you keep ONLY IF you also didn't take catastrophic losses
+    capture,
     captureFlat: capN ? capSum / capN : 0,
+    beatFactor,
     beatSpx: nWithSpx ? beatSum / nWithSpx : 0,
     basketVsSpx: nWithSpx ? basketVsSpxSum / nWithSpx : 0,
     nDates: slices.length,
@@ -218,8 +250,8 @@ export interface CoordStep {
   key: keyof ModelParams;
   oldVal: number;
   newVal: number;
-  oldCapture: number;
-  newCapture: number;
+  oldCapture: number;  // fitness before this param's scan (named *Capture for back-compat with the UI)
+  newCapture: number;  // fitness after
 }
 export function coordinateDescent(
   slices: DateSlice[],
@@ -233,7 +265,10 @@ export function coordinateDescent(
   for (const k of KEYS) {
     const [lo, hi] = BOUNDS[k];
     const oldVal = p[k];
-    let bestCapture = evaluate(slices, p, kwin, npicks).capture;
+    // Optimize FITNESS (capture × loss aversion), not raw capture — otherwise the scan
+    // would happily zero out a guard to gain a little capture and take blow-off losses.
+    const oldFitness = evaluate(slices, p, kwin, npicks).fitness;
+    let bestFitness = oldFitness;
     let bestVal = oldVal;
     for (let i = 0; i <= stepsPerParam; i++) {
       const v = lo + (i / stepsPerParam) * (hi - lo);
@@ -241,12 +276,11 @@ export function coordinateDescent(
       // Enforce secularHigh > secularLow + 0.05
       if (k === 'secularLow' && candidate.secularHigh <= v + 0.05) candidate.secularHigh = Math.min(v + 0.1, 0.9);
       if (k === 'secularHigh' && v <= p.secularLow + 0.05) continue;
-      const cap = evaluate(slices, candidate, kwin, npicks).capture;
-      if (cap > bestCapture) { bestCapture = cap; bestVal = v; }
+      const f = evaluate(slices, candidate, kwin, npicks).fitness;
+      if (f > bestFitness) { bestFitness = f; bestVal = v; }
     }
-    const oldCapture = evaluate(slices, p, kwin, npicks).capture;
     p = { ...p, [k]: bestVal };
-    steps.push({ key: k, oldVal, newVal: bestVal, oldCapture, newCapture: bestCapture });
+    steps.push({ key: k, oldVal, newVal: bestVal, oldCapture: oldFitness, newCapture: bestFitness });
   }
   return { params: p, steps, finalEval: evaluate(slices, p, kwin, npicks) };
 }
@@ -267,7 +301,7 @@ export function runBatch(
     const p = sampleParams(around, 0.2);
     const e = evaluate(slices, p, opts.kwin, opts.npicks);
     trials++;
-    if (e.capture > best.e.capture || (e.capture === best.e.capture && e.basketVsSpx > best.e.basketVsSpx)) {
+    if (e.fitness > best.e.fitness || (e.fitness === best.e.fitness && e.basketVsSpx > best.e.basketVsSpx)) {
       best = { params: p, e };
     }
   }
