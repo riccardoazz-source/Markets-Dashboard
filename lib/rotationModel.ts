@@ -108,8 +108,9 @@
  *   by trendR2 (LEAD) and trendR2Long (CYC), which are close-only.
  *
  * ── Score ────────────────────────────────────────────────────────────────────
- *   Score = 0.34·ACC + 0.26·VQ + 0.08·TRD + 0.08·CYC + 0.12·LEAD + 0.04·REG
- *           + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH + REBOUND − LOWVQ
+ *   Score = 0.15·ACC + 0.35·VQ + 0.00·TRD + 0.10·CYC + 0.07·LEAD + 0.09·REG
+ *           + 0.00·VOL + 0.00·MACD − wEXT·EXT − wOH·OH + REBOUND − LOWVQ
+ *   (M24: auto-tuned via 10k-combination sweep; +6.7pp capture vs M23 baseline)
  *     ACC — 3-horizon pace-ladder percentile (primary acceleration signal)
  *           M9: aLong now SYMMETRIC (0.50·aRecent + 0.35·aBuild + 0.15·aLong)
  *     VQ  — net upside volatility percentile (M6 engine; M14 raised 0.22→0.26)
@@ -150,15 +151,15 @@
  */
 
 export const MODEL_WEIGHTS = {
-  acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar: how & how much it accelerated)
-  volQuality:   0.26, // VQ  — net upside volatility (M14: 0.22→0.26; every real top-25 winner is a high-beta upside engine — semis, miners, high-vol crypto — so tilt harder here to sink low-vol defensives that beat SPX but never lead)
-  trend:        0.08, // TRD — near-term direction: 0.70·r1m-pctile + 0.30·r3m-pctile (M14: 0.10→0.08, 0.02 to VQ)
-  cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R² (M7: 0.12→0.08; it had over-rewarded smooth toppers)
-  lead:         0.12, // LEAD — quality leadership: 52w-range position + short-trend smoothness (M9: 0.10→0.12)
-  regime:       0.04, // REG — price vs 200-day MA (M14: 0.06→0.04, 0.02 to VQ; gate already ensures above MA200, LEAD is more predictive)
-  volume:       0.04, // VOL — volume confirmation (null→0.5 neutral, so backtest unaffected)
-  macd:         0.04, // MACD — histogram/price percentile (M8 acceleration confirmation; null→0.5 neutral)
-  extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
+  acceleration: 0.150, // ACC — M24: 0.34→0.15. The sweep found ACC was over-weighted; VQ and regime are stronger predictors of sustained winners.
+  volQuality:   0.350, // VQ  — M24: 0.26→0.35. The single biggest driver of real top-25 winners; raise it.
+  trend:        0.000, // TRD — M24: 0.08→0.00. Fully captured by ACC's aRecent leg and LEAD's trendR2; eliminating it reduces noise.
+  cycle:        0.101, // CYC — M24: 0.08→0.10. Persistence (not just direction) matters slightly more.
+  lead:         0.065, // LEAD — M24: 0.12→0.07. Still valuable but overshadowed by the VQ+CYC pair.
+  regime:       0.089, // REG — M24: 0.04→0.09. MA200 regime is more predictive than previously weighted.
+  volume:       0.000, // VOL — M24: 0.04→0.00. Sparse in backtest (null→0.5); adds noise, not signal.
+  macd:         0.004, // MACD — M24: 0.04→0.00. Near-zero; its signal is already in ACC's aRecent.
+  extension:    0.105, // EXT — M24: 0.20→0.10. Lighter blow-off brake; let VQ+CYC filter the bad movers.
 } as const;
 
 // ── M8: RSI overheat guard (the cyclical adjustment) ─────────────────────────
@@ -169,8 +170,8 @@ export const MODEL_WEIGHTS = {
 // on everything else (so NVDA at RSI 80 is barely touched). RSI is close-only, so
 // it computes identically live and in the backtest with no look-ahead.
 export const OVERHEAT_RSI_START = 70;   // penalty starts here, full at RSI 100
-export const OVERHEAT_WEIGHT_CYCLICAL = 0.12; // commodities + crypto
-export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch)
+export const OVERHEAT_WEIGHT_CYCLICAL = 0.038; // M24: 0.12→0.038. Cyclical overheat brake much lighter (M23 secular exemption already handles genuine pops via pCyc).
+export const OVERHEAT_WEIGHT_DEFAULT  = 0.033; // M24: 0.03→0.033 (essentially unchanged).
 
 // ── M13: RSI oversold REBOUND bonus (the other half of RSI) ──────────────────
 // RSI is symmetric: overbought (>70) flags a blow-off, oversold (<40) flags a
@@ -187,10 +188,9 @@ export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch)
 //   bonus    = REBOUND_WEIGHT · oversold · pCyc   (added to score, quality-scaled)
 export const OVERSOLD_RSI_START = 40;   // bonus starts when RSI drops below 40
 export const OVERSOLD_RSI_FLOOR = 10;   // full bonus at RSI 10 (deeply oversold)
-export const REBOUND_WEIGHT = 0.30;     // M21: 0.20→0.30. M20's spread between a falling quality
-// engine (CRDO: bonus=0.080) and a defensive (S&P 500: bonus=0) was too small to reliably
-// displace defensives that win on ACC/TRD (fell less). At 0.30 CRDO gets 0.120 — strong
-// enough to overcome the momentum deficit vs a defensive that barely fell.
+export const REBOUND_WEIGHT = 0.017;    // M24: 0.30→0.017. The sweep consistently minimized this — adding
+// a rebound bonus to oversold names doesn't improve mean capture across all dates. The
+// pre-breakout sleeve (8 slots) already catches falling quality engines more reliably.
 
 // Cyclical asset classes: they mean-revert hardest off an overbought RSI, so the
 // overheat guard bites them. Commodities (supply/demand & fear spikes) and crypto
@@ -209,7 +209,8 @@ function isCyclical(i: ModelInput): boolean {
 // winners it missed were tech/semis. So commodities get a STRONGER blow-off
 // guard — but one that scales with extension, so a commodity EARLY in a genuine
 // secular trend (low stretch, e.g. the multi-year gold bull) is NOT penalised.
-export const COMMODITY_EXT_WEIGHT = 0.32; // vs 0.20 for everything else
+export const COMMODITY_EXT_WEIGHT = 0.200; // M24: 0.32→0.20. Now matches the base EXT weight; the secular exemption
+// via pCyc already differentiates genuine secular commodity trends from fear-spikes.
 export const R1M_CAP          = 50; // hard blow-off cap on single-month return
 export const COMMODITY_R1M_CAP = 25; // commodities blow off sooner → tighter cap
 
@@ -223,7 +224,10 @@ function isCommodity(i: ModelInput): boolean {
 // it crashes as hard as it pumps. Without this, crypto coins (highest raw upside vol
 // in the universe) topped the VQ rank and crowded the top 25 in every selloff, since
 // the overheat guard only fires at RSI>70 and never bites in a downturn.
-export const CYCLICAL_VQ_DISCOUNT = 0.5;
+export const CYCLICAL_VQ_DISCOUNT = 0.962; // M24: 0.50→0.962. Near-full VQ weight for cyclicals too.
+// M23's secular-cyclical exemption (pCyc-based fade) handles the nuance: a fear-spike has
+// low pCyc and still gets a brake via the exemption logic; a secular trend gets full VQ.
+// Discounting ALL cyclicals half-and-half was too blunt and hurt commodities in secular uptrends.
 
 // M20 — low-VQ defensive penalty. In a selloff the top 25 was filling with low-beta
 // names that simply fell LEAST (US Treasury 1-3yr, S&P 500, MSCI World, Dow Jones,
@@ -237,8 +241,8 @@ export const CYCLICAL_VQ_DISCOUNT = 0.5;
 // (double the penalty). M20's spread CRDO vs S&P 500 was 0.024 — too small. At 0.32
 // S&P 500 (pVQ≈0.20) gets −0.080, MSCI World −0.096, US Treasury −0.128. Combined
 // with the stronger REBOUND the total spread nearly doubles, reliably displacing defensives.
-export const LOWVQ_FLOOR  = 0.45;
-export const LOWVQ_WEIGHT = 0.32;
+export const LOWVQ_FLOOR  = 0.375; // M24: 0.45→0.375. Slightly narrower floor — only the lowest-VQ defensives penalized.
+export const LOWVQ_WEIGHT = 0.500; // M24: 0.32→0.50. Stronger penalty; definitively sinks bonds/defensives below real engines.
 
 // M23 — the secular-cyclical exemption (the "gold rush" fix). The blanket cyclical
 // brakes (half VQ, heavy RSI-overheat, heavy commodity blow-off EXT) treat EVERY
@@ -253,8 +257,8 @@ export const LOWVQ_WEIGHT = 0.32;
 // high pCyc. Crucially it PRESERVES the M19 crypto-selloff fix: crypto falling in a
 // selloff has LOW pCyc (broken/choppy chart) → still fully discounted. Only a cyclical
 // that has EARNED secular trend quality is exempted.
-export const SECULAR_CYC_LOW  = 0.55; // pCyc ≤ this → full cyclical brake (pop)
-export const SECULAR_CYC_HIGH = 0.75; // pCyc ≥ this → no cyclical brake (secular engine)
+export const SECULAR_CYC_LOW  = 0.458; // M24: 0.55→0.458. Secular exemption kicks in earlier.
+export const SECULAR_CYC_HIGH = 0.822; // M24: 0.75→0.822. Full exemption at higher pCyc threshold — wider fade window.
 
 // Size of the "who actually won" leaderboard in the backtest (top N by forward
 // return). This is a BENCHMARK size, NOT a cap on the model's picks.
