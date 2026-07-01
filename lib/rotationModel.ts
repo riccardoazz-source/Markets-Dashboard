@@ -190,6 +190,33 @@ export const MODEL_WEIGHTS = {
 // data. The most recent quarter keeps its double weight exactly as documented.
 export const RS_W3M = 0.4, RS_W6M = 0.2, RS_W1Y = 0.2; // IBD weights (9m term omitted → renormalised over available)
 
+// ── M29 — the STAGE GATE on RS (the missing half of the O'Neil/Minervini discipline) ──
+// The M28 backtest exposed the classic raw-RS failure mode ON REAL CASES: after a
+// parabolic blow-off, trailing 3-12-month returns stay enormous while the asset is
+// CRASHING — so Dogecoin was the #1 pick at Jul 2021 (−42% on the month, ~−60% off its
+// high, post-May-2021 crash; Cardano/Solana close behind) and ASST at Jul 2025 (−46.6%
+// on the month, then −83%). The EXT guard can't catch these: a falling asset is not
+// "extended" (M16 uses max(r1m,0)) and often sits back near its MA200.
+// In the source systems RS is only actionable INSIDE a valid Stage-2 trend — Minervini's
+// template requires price within 25% of the 52-week high, well above the 52-week low,
+// and above the 200-day MA; O'Neil buys leaders near highs, never wreckage off a top.
+// M28 expressed the template as small ADDITIVE pillars (LEAD 0.16 + REG 0.08) — far too
+// weak to sink a 100th-percentile-RS post-crash crypto. M29 makes the template a
+// MULTIPLICATIVE gate on the RS credit itself:
+//   nearHigh = clamp((pos52w − 40) / (75 − 40), 0, 1)   null pos52w → 1 (missing ≠ bad)
+//     pos52w ≥ 75 ≈ template #7 "within 25% of the high" on our range-position scale;
+//     ≤ 40 = closer to the low than the high (fails the ≥30%-above-low spirit) → 0.
+//   aboveMA  = clamp((price/ma200 − 0.95) / 0.10, 0, 1)  null ma200 → 1
+//     graduated template #3: full credit ≥5% above the 200-day MA, zero ≤5% below.
+//   stageFactor = nearHigh × aboveMA          (conjunctive, like the template itself)
+//   RS term = wRS · pRS · stageFactor
+// Real-case check: Doge Jul 2021 pos52w≈27 → RS credit ZEROED; Cardano ≈51 → cut to
+// ~0.3; MU Jun 2021 (pos≈78), SNDK (96), CRDO Jul 2025 (near high) → FULL credit.
+// Deep quality drawdowns are unaffected on their own path — the sleeve (which ranks by
+// quality, not score) remains the falling-winner catcher, exactly the two-profile split.
+export const STAGE_POS_LO = 40, STAGE_POS_HI = 75;   // pos52w band (Minervini #7 graduated)
+export const STAGE_MA_LO  = 0.95, STAGE_MA_HI = 1.05; // price/MA200 band (template #3 graduated)
+
 // ── M8: RSI overheat guard (the cyclical adjustment) ─────────────────────────
 // An OVERBOUGHT cyclical is about to mean-revert (oil at RSI ~90 right before the
 // Iran-war crash); a secular compounder can run hot for months and keep winning.
@@ -523,6 +550,7 @@ export interface RotationFeature<T extends ModelInput> {
   pVQ: number; pTrend: number; pCyc: number; pPos: number; pTq: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
   pMom: number; pVolLow: number; // M27 academic composite: 12-1 momentum & low-vol percentiles
   pRS: number; // M28 — IBD Relative Strength blend percentile (0.4·r3m + 0.2·r6m + 0.2·r1y, renormalised over available horizons)
+  stageFactor: number; // M29 — 0..1 Stage-2 gate on the RS credit (near-high × above-MA200, graduated Minervini template)
   overheat: number; oversold: number;
   isCyc: boolean; isCommod: boolean; structuralUptrend: boolean;
   // passesGate is param-independent (cap/aRecent/regime). The pre-breakout sleeve
@@ -706,6 +734,16 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const pVolLow = item.vol != null && nVolLow > 0 ? toP(rankVolLowAsc.get(item.symbol) ?? 0, nVolLow) : 0.5;
     // M28 RS percentile — needs r3m at minimum, which `valid` guarantees for hasReturns items.
     const pRS = hasReturns ? toP(rankRsAsc.get(item.symbol) ?? 0, n) : 0.5;
+    // M29 stage gate on the RS credit (see STAGE_* constants). Missing data → neutral 1
+    // (a thin-history name must not lose its RS for lacking a datum — consistency with
+    // the renormalisation philosophy: missing ≠ bad).
+    const nearHigh = item.pos52w != null
+      ? Math.max(0, Math.min(1, (item.pos52w - STAGE_POS_LO) / (STAGE_POS_HI - STAGE_POS_LO)))
+      : 1;
+    const aboveMA = item.price != null && item.ma200 != null && item.ma200 > 0
+      ? Math.max(0, Math.min(1, (item.price / item.ma200 - STAGE_MA_LO) / (STAGE_MA_HI - STAGE_MA_LO)))
+      : 1;
+    const stageFactor = nearHigh * aboveMA;
 
     // VQ — net upside volatility percentile (the "good volatility" engine). High =
     // capacity for big moves with an upside tilt; null → 0.5 neutral.
@@ -768,7 +806,7 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
       accel: parts.accel, accPctile, aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
       stretch,
       pVQ, pTrend, pCyc, pPos, pTq, lead, reg, pVol, pMacd, pExt,
-      pMom, pVolLow, pRS,
+      pMom, pVolLow, pRS, stageFactor,
       overheat: hasReturns ? overheat : 0, oversold,
       isCyc, isCommod, structuralUptrend,
       passesGate,
@@ -905,8 +943,10 @@ export function scoreFromFeatures<T extends ModelInput>(
     const vqWeight = f.isCyc ? P.wVQ * cyclicalVqMult : P.wVQ;
     const lowVQpenalty = P.lowVqWeight * Math.max(0, P.lowVqFloor - f.pVQ);
     // M28 — RS (the IBD Relative Strength blend) is the backbone; ACC is the trigger.
+    // M29 — the RS credit is STAGE-GATED (× stageFactor): a post-blow-off name with huge
+    // trailing returns but far off its high / under its MA200 gets no leadership credit.
     const score = f.hasReturns
-      ? P.wRS * f.pRS
+      ? P.wRS * f.pRS * f.stageFactor
         + P.wAcc * f.accPctile + vqWeight * f.pVQ + P.wTrend * f.pTrend + P.wCycle * f.pCyc
         + P.wLead * f.lead + P.wRegime * f.reg + P.wVolume * f.pVol + P.wMacd * f.pMacd
         - extWeight * f.pExt - ohWeight * f.overheat + reboundBonus - lowVQpenalty
