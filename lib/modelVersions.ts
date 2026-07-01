@@ -1109,9 +1109,8 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   },
   {
     id: 24,
-    name: 'Restart from the M19 peak — keep the gold-rush fix, unlock the sleeve for the optimizer',
-    current: false,
-    recordedAt: '2026-06-26',
+    name: 'Restart from the M19 peak — keep the gold-rush fix, unlock the sleeve for the optimizer (RESTORED as live)',
+    current: true,
     formula: [
       'Score = 0.34·ACC + vqW·VQ + 0.08·TRD + 0.08·CYC + 0.12·LEAD + 0.04·REG',
       '        + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH + REBOUND   (− LOWVQ, now OFF)',
@@ -1153,14 +1152,7 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       'Everything else unchanged: M16 EXT fix (max(r1m,0)), sleeve (pos52w≥15, MA200≥0.70,',
       '8 slots), ACCEL_MAX=25, TRD r1m-primary, LEAD equal-weight, VQ 0.26 tilt.',
     ],
-    results: {
-      // Frozen from the live M24 backtest run on 2026-06-26 (the user's cards). 1m estimated.
-      '1m': { basket:  -0.5, spx: -2.1, picks: 25, winnerHits: 12, winnerTotal: 25 }, // 1m estimated
-      '3m': { basket:  33.7, spx: 15.6, picks: 25, winnerHits:  9, winnerTotal: 25 },
-      '6m': { basket:  33.8, spx:  6.2, picks: 25, winnerHits: 10, winnerTotal: 25 },
-      '1y': { basket: 109.8, spx: 19.9, picks: 25, winnerHits: 13, winnerTotal: 25 },
-      '5y': { basket: 129.5, spx: 72.1, picks: 25, winnerHits:  8, winnerTotal: 25 },
-    },
+    results: {}, // M24 is the live model again — auto-filled from the live backtest run
   },
   {
     id: 25,
@@ -1240,8 +1232,9 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   },
   {
     id: 27,
-    name: 'Academic factor composite — equal-weight, coefficient-free (4 cited price anomalies)',
-    current: true,
+    name: 'Academic factor composite — equal-weight, coefficient-free (4 cited price anomalies) — REVERTED (low-vol crowding)',
+    current: false,
+    recordedAt: '2026-07-01',
     formula: [
       'Score = ( sMom + sTrend + sSmooth + sLowVol ) / 4   (mean of the AVAILABLE legs)',
       '  every leg = a cross-sectional PERCENTILE rank in [0,1]; 1/N equal weight; NO fitted coefficients.',
@@ -1287,7 +1280,22 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       'crashes (Daniel-Moskowitz 2016) remain the residual tail risk.',
       '',
       'Revert: set MODEL_MODE = \'rotation\' for M25, or \'gemini\' for M26 (or revert the commit).',
+      '',
+      'OUTCOME (2026-07-01 live backtest): REVERTED. Exactly the low-vol-crowding caveat came',
+      'true — the composite bought steady broad names (GOOG, Financials, BDC Income, WTI/Brent',
+      'Crude, S&P 500, CAC 40, Real Estate, MSCI World) and MISSED the high-beta engines (MU,',
+      'NVDA, AVGO, LRCX, AMD, CRDO, semis) that drive the 5Y monster returns. 5Y capture 6/25',
+      '(worst of the family), and 1Y actually LOST to the S&P (+20.6% vs +21.1%). Empirical',
+      'conclusion: textbook academic factors optimise risk-adjusted BREADTH, not catching the',
+      'few explosive winners this dashboard exists to find — the bespoke VQ model (M19/M24) is',
+      'purpose-built for that and wins on capture. Reverted MODEL_MODE to \'rotation\' = M24.',
     ],
-    results: {}, // auto-filled from the live backtest run
+    results: {
+      // Frozen from the live M27 backtest (2026-07-01) — the underperformance that triggered the revert.
+      '3m': { basket:  31.9, spx: 14.0, picks: 25, winnerHits: 8, winnerTotal: 25 },
+      '6m': { basket:  30.9, spx:  8.8, picks: 25, winnerHits: 9, winnerTotal: 25 },
+      '1y': { basket:  20.6, spx: 21.1, picks: 25, winnerHits: 4, winnerTotal: 25 }, // LOST to S&P
+      '5y': { basket:  80.3, spx: 72.5, picks: 25, winnerHits: 6, winnerTotal: 25 },
+    },
   },
 ];

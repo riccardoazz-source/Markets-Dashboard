@@ -149,22 +149,20 @@
  * genuine secular trend (low stretch) is untouched.
  */
 
-// M25 — OPTIMIZER-TUNED weights (random sweep + coordinate descent over the full 27-param
-// space, including the now-unlocked sleeve; best fitness = capture × loss-aversion over ~100
-// backtest dates). This radically rebalanced the model from M24/M19: acceleration dropped to
-// its floor and good-volatility/leadership/cycle carry more, the optimizer's verdict on what
-// best CAPTURES the real winners across all horizons (not the 6 visible cards). Every number
-// here is the applied best-found value; see DEFAULT_PARAMS for the non-weight knobs.
+// M24 (M19 + gold fix) — RESTORED. The M25 optimizer rebalance (ACC floored, LOWVQ re-added)
+// and the M26 Gemini / M27 academic experiments all underperformed M24 on capture in the live
+// backtest (M27 academic even lost to the S&P at 1Y), so we reverted to the proven VQ-driven
+// engine-catcher. These are the M19 weights (VQ-tilted, acceleration as the #1 pillar).
 export const MODEL_WEIGHTS = {
-  acceleration: 0.150, // ACC (M25: 0.34→0.15, optimizer pushed to floor)
-  volQuality:   0.313, // VQ  (M25: 0.26→0.313)
-  trend:        0.082, // TRD (M25: 0.08→0.082)
-  cycle:        0.103, // CYC (M25: 0.08→0.103)
-  lead:         0.126, // LEAD (M25: 0.12→0.126)
-  regime:       0.036, // REG (M25: 0.04→0.036)
-  volume:       0.040, // VOL (M25: unchanged 0.04)
-  macd:         0.040, // MACD (M25: unchanged 0.04)
-  extension:    0.148, // EXT (M25: 0.20→0.148)
+  acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar: how & how much it accelerated)
+  volQuality:   0.26, // VQ  — net upside volatility (M14: 0.22→0.26; every real top-25 winner is a high-beta upside engine)
+  trend:        0.08, // TRD — near-term direction: 0.70·r1m-pctile + 0.30·r3m-pctile
+  cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R²
+  lead:         0.12, // LEAD — quality leadership: 52w-range position + short-trend smoothness
+  regime:       0.04, // REG — price vs 200-day MA
+  volume:       0.04, // VOL — volume confirmation (null→0.5 neutral)
+  macd:         0.04, // MACD — histogram/price percentile (null→0.5 neutral)
+  extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
 } as const;
 
 // ── M8: RSI overheat guard (the cyclical adjustment) ─────────────────────────
@@ -175,8 +173,8 @@ export const MODEL_WEIGHTS = {
 // on everything else (so NVDA at RSI 80 is barely touched). RSI is close-only, so
 // it computes identically live and in the backtest with no look-ahead.
 export const OVERHEAT_RSI_START = 70;   // penalty starts here, full at RSI 100
-export const OVERHEAT_WEIGHT_CYCLICAL = 0.142; // M25 (optimizer: 0.12→0.142) commodities + crypto
-export const OVERHEAT_WEIGHT_DEFAULT  = 0.024; // M25 (optimizer: 0.03→0.024) everything else (light touch)
+export const OVERHEAT_WEIGHT_CYCLICAL = 0.12; // commodities + crypto (M24 restored)
+export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch) (M24 restored)
 
 // ── M13: RSI oversold REBOUND bonus (the other half of RSI) ──────────────────
 // RSI is symmetric: overbought (>70) flags a blow-off, oversold (<40) flags a
@@ -217,7 +215,7 @@ function isCyclical(i: ModelInput): boolean {
 // winners it missed were tech/semis. So commodities get a STRONGER blow-off
 // guard — but one that scales with extension, so a commodity EARLY in a genuine
 // secular trend (low stretch, e.g. the multi-year gold bull) is NOT penalised.
-export const COMMODITY_EXT_WEIGHT = 0.300; // M25 (optimizer: 0.32→0.30) vs the base wEXT for everything else
+export const COMMODITY_EXT_WEIGHT = 0.32; // vs 0.20 for everything else (M24 restored)
 export const R1M_CAP          = 50; // hard blow-off cap on single-month return
 export const COMMODITY_R1M_CAP = 25; // commodities blow off sooner → tighter cap
 
@@ -231,7 +229,7 @@ function isCommodity(i: ModelInput): boolean {
 // it crashes as hard as it pumps. Without this, crypto coins (highest raw upside vol
 // in the universe) topped the VQ rank and crowded the top 25 in every selloff, since
 // the overheat guard only fires at RSI>70 and never bites in a downturn.
-export const CYCLICAL_VQ_DISCOUNT = 0.959; // M25 (optimizer: 0.5→0.959 — almost no VQ discount for cyclicals)
+export const CYCLICAL_VQ_DISCOUNT = 0.5; // M24 restored
 
 // M20 — low-VQ defensive penalty. In a selloff the top 25 was filling with low-beta
 // names that simply fell LEAST (US Treasury 1-3yr, S&P 500, MSCI World, Dow Jones,
@@ -249,8 +247,8 @@ export const CYCLICAL_VQ_DISCOUNT = 0.959; // M25 (optimizer: 0.5→0.959 — al
 // in M20). So the default weight is 0 → OFF for the live model, faithful to M19. It stays a
 // tunable param (bounds [0,0.50]), so the optimizer can re-introduce it from this M19 baseline
 // if it earns its keep. The floor is kept at the M21 value (inert while weight is 0).
-export const LOWVQ_FLOOR  = 0.450; // M25 (optimizer: unchanged 0.45)
-export const LOWVQ_WEIGHT = 0.479; // M25 (optimizer: 0→0.479 — it RE-INTRODUCED the defensive penalty M24 had removed, near the top of its range)
+export const LOWVQ_FLOOR  = 0.45;
+export const LOWVQ_WEIGHT = 0.0; // M24 restored — M19 had no LOWVQ penalty (still tunable; optimizer can re-add)
 
 // M23 — the secular-cyclical exemption (the "gold rush" fix). The blanket cyclical
 // brakes (half VQ, heavy RSI-overheat, heavy commodity blow-off EXT) treat EVERY
@@ -265,8 +263,8 @@ export const LOWVQ_WEIGHT = 0.479; // M25 (optimizer: 0→0.479 — it RE-INTROD
 // high pCyc. Crucially it PRESERVES the M19 crypto-selloff fix: crypto falling in a
 // selloff has LOW pCyc (broken/choppy chart) → still fully discounted. Only a cyclical
 // that has EARNED secular trend quality is exempted.
-export const SECULAR_CYC_LOW  = 0.700; // M25 (optimizer: 0.55→0.70) pCyc ≤ this → full cyclical brake (pop)
-export const SECULAR_CYC_HIGH = 0.898; // M25 (optimizer: 0.75→0.898) pCyc ≥ this → no cyclical brake (secular engine)
+export const SECULAR_CYC_LOW  = 0.55; // pCyc ≤ this → full cyclical brake (pop) (M24 restored)
+export const SECULAR_CYC_HIGH = 0.75; // pCyc ≥ this → no cyclical brake (secular engine) (M24 restored)
 
 // Size of the "who actually won" leaderboard in the backtest (top N by forward
 // return). This is a BENCHMARK size, NOT a cap on the model's picks.
@@ -307,20 +305,20 @@ export const ACCEL_MAX = 25;
 // but is still in a structural uptrend (r1y>0). The preScore ranking (CYC+VQ
 // heavier than pos52w) ensures genuine engines (semis: high CYC, high VQ) outrank
 // cyclical names (crypto: low CYC) when both qualify for the sleeve.
-export const PRE_BREAKOUT_SLOTS = 11;    // M25 (optimizer: 8→11, from raw 10.5 rounded). The sleeve is the only lever that catches FALLING winners; the optimizer reserved more slots for it.
-export const PRE_BREAKOUT_POS52W_MIN = 15; // M25 (optimizer: unchanged 15) — a name down 22-25% in a month sits NEAR its 52w low; that IS the deep-drawdown buy.
-export const PRE_BREAKOUT_R1M_FLOOR = -35.875; // M25 (optimizer: -40→-35.875) — a high-beta engine routinely corrects before its next leg; the r1y>0 + MA200 + quality gates keep out true falling knives.
+export const PRE_BREAKOUT_SLOTS = 8;     // M17: 6→8 — enough slots to hold ALL the falling quality engines (CRDO, AMD, RIOT, Semiconductors, MU, AVGO) (M24 restored)
+export const PRE_BREAKOUT_POS52W_MIN = 15; // M17: a deep-drawdown name sits NEAR its 52w low; that IS the buy
+export const PRE_BREAKOUT_R1M_FLOOR = -40; // M15 — catches RIOT-type −25%+ drawdowns; r1y>0 + MA200 + quality gates keep out falling knives (M24 restored)
 // M24 — the sleeve's remaining hand-tuned thresholds, promoted to live constants so
 // DEFAULT_PARAMS can carry them and the optimizer can tune the WHOLE sleeve, not just
 // the score weights. The sleeve is the only lever that catches FALLING winners
 // (MU/AVGO/CRDO were all down at the pick date), so leaving it frozen capped how much
 // the optimizer could ever find. These are the M19/M17 values, unchanged → byte-identical live.
-export const PRE_BREAKOUT_VQ_MIN  = 0.719; // M25 (optimizer: 0.60→0.719) pVQ hard floor — the upside-engine bar EVERY real winner clears, raised
-export const PRE_BREAKOUT_CYC_MIN = 0.303; // M25 (optimizer: 0.30→0.303) pCyc low floor — keep out genuinely broken charts
-export const PRE_BREAKOUT_MA200_MIN = 0.700; // M25 (optimizer: unchanged 0.70) price/MA200 floor — structurally intact, a deep dip not a breakdown
-export const PRE_SCORE_POS = 0.100; // M25 (optimizer: 0.20→0.10) sleeve RANKING weight on 52w position
-export const PRE_SCORE_CYC = 0.058; // M25 (optimizer: 0.45→0.058 — sleeve ranking now barely uses CYC)
-export const PRE_SCORE_VQ  = 0.350; // M25 (optimizer: unchanged 0.35) sleeve RANKING weight on upside-vol engine
+export const PRE_BREAKOUT_VQ_MIN  = 0.60; // pVQ hard floor — the upside-engine bar EVERY real winner clears (M24 restored)
+export const PRE_BREAKOUT_CYC_MIN = 0.30; // pCyc low floor — keep out genuinely broken charts (M24 restored)
+export const PRE_BREAKOUT_MA200_MIN = 0.70; // price/MA200 floor — structurally intact, a deep dip not a breakdown
+export const PRE_SCORE_POS = 0.20; // sleeve RANKING weight on 52w position (M24 restored)
+export const PRE_SCORE_CYC = 0.45; // sleeve RANKING weight on long-trend persistence (M24 restored)
+export const PRE_SCORE_VQ  = 0.35; // sleeve RANKING weight on upside-vol engine
 
 // ── M26 — the "Gemini model" (TSMOM + volatility scaling + weekly-ADX) ────────
 // A DISTINCT scoring philosophy, selectable via MODEL_MODE, so we can A/B it against
@@ -336,7 +334,7 @@ export const PRE_SCORE_VQ  = 0.350; // M25 (optimizer: unchanged 0.35) sleeve RA
 // Switch to 'rotation' to restore M25 (or revert the commit). Constants are named so
 // they could later be exposed to the optimizer, but for now they follow Gemini's spec.
 export type ModelMode = 'rotation' | 'gemini' | 'academic';
-export const MODEL_MODE: ModelMode = 'academic';
+export const MODEL_MODE: ModelMode = 'rotation'; // back to M24 (M19 + gold): the academic (M27) & Gemini (M26) experiments underperformed on capture
 
 export const GEMINI_ADX_LIMBO   = 20;  // ADX below this = consolidation → avoid (weekly context filter)
 export const GEMINI_ADX_BIRTH   = 25;  // ADX breaking up through this = momentum "just born" → buyable
