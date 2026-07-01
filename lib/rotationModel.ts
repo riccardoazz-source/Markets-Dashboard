@@ -335,8 +335,8 @@ export const PRE_SCORE_VQ  = 0.350; // M25 (optimizer: unchanged 0.35) sleeve RA
 //     (consolidation / false-breakout zone) → not tradable.
 // Switch to 'rotation' to restore M25 (or revert the commit). Constants are named so
 // they could later be exposed to the optimizer, but for now they follow Gemini's spec.
-export type ModelMode = 'rotation' | 'gemini';
-export const MODEL_MODE: ModelMode = 'gemini';
+export type ModelMode = 'rotation' | 'gemini' | 'academic';
+export const MODEL_MODE: ModelMode = 'academic';
 
 export const GEMINI_ADX_LIMBO   = 20;  // ADX below this = consolidation → avoid (weekly context filter)
 export const GEMINI_ADX_BIRTH   = 25;  // ADX breaking up through this = momentum "just born" → buyable
@@ -495,7 +495,8 @@ export interface RotationFeature<T extends ModelInput> {
   item: T; hasReturns: boolean;
   accel: number; accPctile: number; aRecent: number; aBuild: number; aLong: number | null;
   stretch: number;
-  pVQ: number; pTrend: number; pCyc: number; pPos: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
+  pVQ: number; pTrend: number; pCyc: number; pPos: number; pTq: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
+  pMom: number; pVolLow: number; // M27 academic composite: 12-1 momentum & low-vol percentiles
   overheat: number; oversold: number;
   isCyc: boolean; isCommod: boolean; structuralUptrend: boolean;
   // passesGate is param-independent (cap/aRecent/regime). The pre-breakout sleeve
@@ -529,6 +530,22 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
   const rankAccelAsc   = new Map(byAccelAsc.map((r, i) => [r.symbol, i]));
   const rankStretchAsc = new Map(byStretchAsc.map((r, i) => [r.symbol, i]));
   const rankR1mPosAsc  = new Map(byR1mPosAsc.map((r, i) => [r.symbol, i]));
+  // ── M27 academic composite inputs (param-independent percentiles, computed once) ──
+  // sMom: 12-1 relative momentum (Jegadeesh-Titman 1993) — trailing return t-12..t-1,
+  // compounding the most recent month OUT to purge 1-month short-term reversal.
+  const mom12_1Of = (i: ModelInput): number | null =>
+    i.r1y != null && i.r1m != null ? (1 + i.r1y / 100) / (1 + i.r1m / 100) - 1 : null;
+  const validWithMom = valid.filter(i => mom12_1Of(i) != null);
+  const nMom         = validWithMom.length;
+  const byMomAsc     = [...validWithMom].sort((a, b) => (mom12_1Of(a) ?? 0) - (mom12_1Of(b) ?? 0));
+  const rankMomAsc   = new Map(byMomAsc.map((r, i) => [r.symbol, i]));
+  // sLowVol: pctile(-vol) — the low-volatility anomaly (Ang-Hodrick-Xing-Zhang 2006;
+  // Frazzini-Pedersen 2014). Rank on -vol ascending (= vol DESCENDING) so the LOWEST-vol
+  // name gets the highest rank (0..n-1 → high percentile). i.e. low vol = high sLowVol.
+  const validWithVolLow = valid.filter(i => i.vol != null);
+  const nVolLow         = validWithVolLow.length;
+  const byNegVolAsc     = [...validWithVolLow].sort((a, b) => (b.vol ?? 0) - (a.vol ?? 0));
+  const rankVolLowAsc   = new Map(byNegVolAsc.map((r, i) => [r.symbol, i]));
   // Graduated REG: percentile of (price/MA200 − 1) across universe.
   // M1 gave all above-MA200 assets REG=1.0 (no discrimination). Graduated REG
   // distinguishes a structural bull leader (far above MA200) from a fresh breakout
@@ -645,6 +662,12 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const pTq  = item.trendR2 != null && nTq  > 0 ? toP(rankTqAsc.get(item.symbol) ?? 0, nTq) : 0.5;
     const lead = 0.50 * pPos + 0.50 * pTq;
 
+    // M27 academic composite percentiles (0.5 neutral when the datum is missing).
+    // pMom = 12-1 momentum (Jegadeesh-Titman 1993); pVolLow = pctile(-vol), low-vol
+    // anomaly (Ang et al 2006 / Frazzini-Pedersen 2014). Higher pVolLow = LOWER vol.
+    const pMom    = mom12_1Of(item) != null && nMom > 0 ? toP(rankMomAsc.get(item.symbol) ?? 0, nMom) : 0.5;
+    const pVolLow = item.vol != null && nVolLow > 0 ? toP(rankVolLowAsc.get(item.symbol) ?? 0, nVolLow) : 0.5;
+
     // VQ — net upside volatility percentile (the "good volatility" engine). High =
     // capacity for big moves with an upside tilt; null → 0.5 neutral.
     const pVQ  = item.volEdge != null && nVQ > 0 ? toP(rankVQAsc.get(item.symbol) ?? 0, nVQ) : 0.5;
@@ -705,7 +728,8 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
       item, hasReturns,
       accel: parts.accel, accPctile, aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
       stretch,
-      pVQ, pTrend, pCyc, pPos, lead, reg, pVol, pMacd, pExt,
+      pVQ, pTrend, pCyc, pPos, pTq, lead, reg, pVol, pMacd, pExt,
+      pMom, pVolLow,
       overheat: hasReturns ? overheat : 0, oversold,
       isCyc, isCommod, structuralUptrend,
       passesGate,
@@ -719,6 +743,42 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
 // weights + the cyclical/secular brakes. This is ALL a parameter sweep re-runs per
 // trial — no sorting, just arithmetic — which is what makes millions of trials
 // feasible. Mathematically identical to the inline scoring it replaces.
+// ── M27 Academic factor composite (equal-weight, coefficient-free) ───────────
+// A 1/N equal-weight average of four cross-sectional percentile ranks, each from a
+// distinct, correctly-cited price anomaly — NO fitted coefficients, NO tuned constants.
+// The four axes are deliberately different mechanisms (not three momentum horizons):
+//   1. sMom   = pctile(12-1 relative momentum)   — Jegadeesh & Titman (1993); skip-month
+//               per Fama-French (1996); cross-asset per Asness-Moskowitz-Pedersen (2013).
+//   2. sTrend = pctile(price/MA200 − 1)           — Faber (2007) "A Quantitative Approach
+//               to Tactical Asset Allocation"; Hurst-Ooi-Pedersen (2017). Absolute trend
+//               regime (own-history), distinct from the cross-sectional relative return.
+//   3. sSmooth= pctile(trendR2)                   — Da-Gurun-Warachka (2014) "Frog in the
+//               Pan". Path smoothness / gradual-information diffusion — a trend-QUALITY
+//               axis (shape), orthogonal to return magnitude.
+//   4. sLowVol= pctile(−vol)                      — Ang-Hodrick-Xing-Zhang (2006); Frazzini-
+//               Pedersen (2014) "Betting Against Beta". The low-volatility anomaly.
+// Combination: mean of the AVAILABLE legs (renormalise over present legs — no arbitrary
+// 0.5 fill, no clamp). Equal 1/N weight per DeMiguel-Garlappi-Uppal (2009) & AMP (2013).
+// Eligibility: needs r1m AND r1y (for the momentum anchor); else the -1 no-data sentinel.
+// Continuous score in [0,1]: a downtrend sinks to low percentiles but still plots.
+// (52-week-high / George-Hwang deliberately OMITTED — GH show it is the SAME anomaly as
+// JT momentum, so including it would double-count the momentum axis.)
+export function academicScore(f: RotationFeature<ModelInput>): number {
+  const it = f.item;
+  if (it.r1m == null || it.r1y == null) return -1; // no momentum anchor → excluded (sentinel)
+  const legs: number[] = [f.pMom]; // sMom is always present given eligibility
+  if (it.price != null && it.ma200 != null && it.ma200 > 0) legs.push(f.reg);   // sTrend
+  if (it.trendR2 != null) legs.push(f.pTq);                                     // sSmooth
+  if (it.vol != null) legs.push(f.pVolLow);                                     // sLowVol
+  return legs.reduce((s, v) => s + v, 0) / legs.length;
+}
+
+// M27 "winner" flag for quadrant/gate styling: a positive 12-1 relative momentum.
+export function academicIsBuy(it: ModelInput): boolean {
+  if (it.r1m == null || it.r1y == null) return false;
+  return (1 + it.r1y / 100) / (1 + it.r1m / 100) - 1 > 0;
+}
+
 // ── M26 Gemini buy flag — the strict "is this a confirmed long right now" test ─
 // Used for the gate/quadrant styling. A genuine Gemini buy: positive 12-month trend,
 // +DI leading −DI, and ADX above the limbo threshold (a real, non-consolidating trend).
@@ -764,6 +824,17 @@ export function scoreFromFeatures<T extends ModelInput>(
 ): ScoredItem<T>[] {
   const P: ModelParams = params ? { ...DEFAULT_PARAMS, ...params } : DEFAULT_PARAMS;
   return features.map(f => {
+    // ── M27 Academic mode: equal-weight 1/N composite of cited factor percentiles.
+    // Disables the sleeve; score is the mean of available academic legs (see academicScore).
+    if (MODEL_MODE === 'academic') {
+      const aScore = academicScore(f);
+      return {
+        item: f.item, score: aScore, accel: f.accel, accPctile: f.accPctile,
+        aRecent: f.aRecent, aBuild: f.aBuild, aLong: f.aLong,
+        stretch: f.stretch, passesGate: academicIsBuy(f.item), passesPreBreakout: false,
+        preScore: 0, rsi: f.rsi, overheat: f.overheat,
+      };
+    }
     // ── M26 Gemini mode: replace the composite score entirely, disable the sleeve.
     // We still return a full ScoredItem (accel/percentiles from the feature) so the
     // quadrant and diagnostics render; only `score` drives selection here.
