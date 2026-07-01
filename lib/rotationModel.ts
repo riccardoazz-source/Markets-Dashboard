@@ -149,21 +149,46 @@
  * genuine secular trend (low stretch) is untouched.
  */
 
-// M24 (M19 + gold fix) — RESTORED. The M25 optimizer rebalance (ACC floored, LOWVQ re-added)
-// and the M26 Gemini / M27 academic experiments all underperformed M24 on capture in the live
-// backtest (M27 academic even lost to the S&P at 1Y), so we reverted to the proven VQ-driven
-// engine-catcher. These are the M19 weights (VQ-tilted, acceleration as the #1 pillar).
+// ── M28 — "Stage-2 RS Leader" (reality-derived: O'Neil/IBD + Minervini/Weinstein) ──
+// Every prior backbone (ACC pace-ladder) was a bespoke construct. M28 rebuilds the
+// backbone on the frameworks that were themselves DERIVED FROM STUDYING REAL
+// SUPER-WINNERS, then checks the mapping against the real winners our own
+// real-price backtest surfaces:
+//   • O'Neil's Model Book studies (every top-performing US stock, 1880s→present) →
+//     the IBD Relative Strength rating: the single dominant screen; the average big
+//     winner had RS ≈ 87 BEFORE its major run. Documented formula (see RS below).
+//   • Minervini's Trend Template (audited real-money US Investing Champion) and
+//     Weinstein's Stage 2: buy only confirmed uptrends — price above a rising long
+//     MA, within 25% of the 52-week high, well off the 52-week low, orderly trend.
+//   • Real-case check from our own backtest (real Yahoo prices): MU at Jun 2021 was
+//     −2.5% on the month, basing NEAR its 52w high — a textbook template stock the
+//     old ACC backbone skipped; SNDK was an RS leader with thin history (the RS
+//     blend renormalises over available horizons, so it scores from day ~90).
+// Acceleration is DEMOTED from backbone (0.34) to entry-trigger weight (0.12) —
+// O'Neil buys the breakout, but the stock must ALREADY be a leader. Guards (EXT
+// blow-off = climax-top sell rule, RSI overheat, commodity caps), the rebound
+// bonus and the pre-breakout sleeve (base formation) are unchanged from M24.
 export const MODEL_WEIGHTS = {
-  acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar: how & how much it accelerated)
-  volQuality:   0.26, // VQ  — net upside volatility (M14: 0.22→0.26; every real top-25 winner is a high-beta upside engine)
-  trend:        0.08, // TRD — near-term direction: 0.70·r1m-pctile + 0.30·r3m-pctile
-  cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R²
-  lead:         0.12, // LEAD — quality leadership: 52w-range position + short-trend smoothness
-  regime:       0.04, // REG — price vs 200-day MA
-  volume:       0.04, // VOL — volume confirmation (null→0.5 neutral)
-  macd:         0.04, // MACD — histogram/price percentile (null→0.5 neutral)
-  extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
+  rs:           0.30, // RS  — IBD Relative Strength blend percentile (the documented #1 factor)
+  volQuality:   0.18, // VQ  — net upside volatility = close-only analogue of O'Neil's Accumulation/Distribution rating
+  lead:         0.16, // LEAD — 52w-range position + trend smoothness (template #7 + orderly trend)
+  acceleration: 0.12, // ACC — pace-ladder percentile, now the BREAKOUT TRIGGER, not the backbone
+  regime:       0.08, // REG — price vs 200-day MA graduated (the computable core of template #1-6 / Stage 2)
+  cycle:        0.08, // CYC — 12mo trend persistence (stage durability; secular vs pop)
+  trend:        0.04, // TRD — small near-term direction leg (keeps the Recovering quadrant alive — M11)
+  volume:       0.02, // VOL — volume confirmation (null→0.5 neutral)
+  macd:         0.02, // MACD — histogram/price percentile (null→0.5 neutral)
+  extension:    0.20, // EXT — over-extension penalty (climax-top guard; commodities 0.32)
 } as const;
+
+// ── M28 RS — the IBD Relative Strength blend (documented public formula) ──────
+// RS_raw = 0.4·ROC(3m) + 0.2·ROC(6m) + 0.2·ROC(9m) + 0.2·ROC(12m), then percentile-
+// ranked across the universe (IBD publishes it as a 1-99 rank). We have r3m/r6m/r1y
+// but no 9-month return, so the documented weights are RENORMALISED over the horizons
+// an asset actually has — full data → 0.5/0.25/0.25 on 3m/6m/12m; a recently-listed
+// name (SNDK post-spinoff) scores from r3m alone instead of being diluted by missing
+// data. The most recent quarter keeps its double weight exactly as documented.
+export const RS_W3M = 0.4, RS_W6M = 0.2, RS_W1Y = 0.2; // IBD weights (9m term omitted → renormalised over available)
 
 // ── M8: RSI overheat guard (the cyclical adjustment) ─────────────────────────
 // An OVERBOUGHT cyclical is about to mean-revert (oil at RSI ~90 right before the
@@ -454,6 +479,7 @@ function computeStretch(price: number | null, ma200: number | null, vol: number 
 // before. This is what keeps "one formula" true while enabling the sweep: the live
 // app passes nothing (→ defaults), the sweep passes overrides.
 export interface ModelParams {
+  wRS: number; // M28 — IBD Relative Strength blend percentile (the reality-derived backbone)
   wAcc: number; wVQ: number; wTrend: number; wCycle: number; wLead: number;
   wRegime: number; wVolume: number; wMacd: number; wExt: number;
   overheatCyclical: number; overheatDefault: number; reboundWeight: number;
@@ -469,6 +495,7 @@ export interface ModelParams {
 }
 
 export const DEFAULT_PARAMS: ModelParams = {
+  wRS: MODEL_WEIGHTS.rs,
   wAcc: MODEL_WEIGHTS.acceleration, wVQ: MODEL_WEIGHTS.volQuality, wTrend: MODEL_WEIGHTS.trend,
   wCycle: MODEL_WEIGHTS.cycle, wLead: MODEL_WEIGHTS.lead, wRegime: MODEL_WEIGHTS.regime,
   wVolume: MODEL_WEIGHTS.volume, wMacd: MODEL_WEIGHTS.macd, wExt: MODEL_WEIGHTS.extension,
@@ -495,6 +522,7 @@ export interface RotationFeature<T extends ModelInput> {
   stretch: number;
   pVQ: number; pTrend: number; pCyc: number; pPos: number; pTq: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
   pMom: number; pVolLow: number; // M27 academic composite: 12-1 momentum & low-vol percentiles
+  pRS: number; // M28 — IBD Relative Strength blend percentile (0.4·r3m + 0.2·r6m + 0.2·r1y, renormalised over available horizons)
   overheat: number; oversold: number;
   isCyc: boolean; isCommod: boolean; structuralUptrend: boolean;
   // passesGate is param-independent (cap/aRecent/regime). The pre-breakout sleeve
@@ -537,6 +565,17 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
   const nMom         = validWithMom.length;
   const byMomAsc     = [...validWithMom].sort((a, b) => (mom12_1Of(a) ?? 0) - (mom12_1Of(b) ?? 0));
   const rankMomAsc   = new Map(byMomAsc.map((r, i) => [r.symbol, i]));
+  // M28 RS: the IBD Relative Strength blend — 0.4·r3m + 0.2·r6m + 0.2·r1y, weights
+  // RENORMALISED over the horizons the asset actually has (r3m is guaranteed by `valid`;
+  // a recently-listed name scores from its available horizons instead of being diluted).
+  const rsRawOf = (i: ModelInput): number => {
+    let w = RS_W3M, sum = RS_W3M * (i.r3m as number);
+    if (i.r6m != null) { w += RS_W6M; sum += RS_W6M * i.r6m; }
+    if (i.r1y != null) { w += RS_W1Y; sum += RS_W1Y * i.r1y; }
+    return sum / w;
+  };
+  const byRsAsc  = [...valid].sort((a, b) => rsRawOf(a) - rsRawOf(b));
+  const rankRsAsc = new Map(byRsAsc.map((r, i) => [r.symbol, i]));
   // sLowVol: pctile(-vol) — the low-volatility anomaly (Ang-Hodrick-Xing-Zhang 2006;
   // Frazzini-Pedersen 2014). Rank on -vol ascending (= vol DESCENDING) so the LOWEST-vol
   // name gets the highest rank (0..n-1 → high percentile). i.e. low vol = high sLowVol.
@@ -665,6 +704,8 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     // anomaly (Ang et al 2006 / Frazzini-Pedersen 2014). Higher pVolLow = LOWER vol.
     const pMom    = mom12_1Of(item) != null && nMom > 0 ? toP(rankMomAsc.get(item.symbol) ?? 0, nMom) : 0.5;
     const pVolLow = item.vol != null && nVolLow > 0 ? toP(rankVolLowAsc.get(item.symbol) ?? 0, nVolLow) : 0.5;
+    // M28 RS percentile — needs r3m at minimum, which `valid` guarantees for hasReturns items.
+    const pRS = hasReturns ? toP(rankRsAsc.get(item.symbol) ?? 0, n) : 0.5;
 
     // VQ — net upside volatility percentile (the "good volatility" engine). High =
     // capacity for big moves with an upside tilt; null → 0.5 neutral.
@@ -727,7 +768,7 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
       accel: parts.accel, accPctile, aRecent: parts.aRecent, aBuild: parts.aBuild, aLong: parts.aLong,
       stretch,
       pVQ, pTrend, pCyc, pPos, pTq, lead, reg, pVol, pMacd, pExt,
-      pMom, pVolLow,
+      pMom, pVolLow, pRS,
       overheat: hasReturns ? overheat : 0, oversold,
       isCyc, isCommod, structuralUptrend,
       passesGate,
@@ -863,8 +904,10 @@ export function scoreFromFeatures<T extends ModelInput>(
     const cyclicalVqMult = P.cyclicalVqDiscount + (1 - P.cyclicalVqDiscount) * secularness;
     const vqWeight = f.isCyc ? P.wVQ * cyclicalVqMult : P.wVQ;
     const lowVQpenalty = P.lowVqWeight * Math.max(0, P.lowVqFloor - f.pVQ);
+    // M28 — RS (the IBD Relative Strength blend) is the backbone; ACC is the trigger.
     const score = f.hasReturns
-      ? P.wAcc * f.accPctile + vqWeight * f.pVQ + P.wTrend * f.pTrend + P.wCycle * f.pCyc
+      ? P.wRS * f.pRS
+        + P.wAcc * f.accPctile + vqWeight * f.pVQ + P.wTrend * f.pTrend + P.wCycle * f.pCyc
         + P.wLead * f.lead + P.wRegime * f.reg + P.wVolume * f.pVol + P.wMacd * f.pMacd
         - extWeight * f.pExt - ohWeight * f.overheat + reboundBonus - lowVQpenalty
       : -1;

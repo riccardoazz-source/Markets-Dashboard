@@ -18,6 +18,7 @@ interface SliceResp {
 
 // Human labels for the tunable parameters (the score-formula weights + guards).
 const LABELS: Record<keyof ModelParams, string> = {
+  wRS: 'Relative Strength', // M28 backbone (IBD RS blend)
   wAcc: 'Acceleration', wVQ: 'Good volatility', wTrend: 'Direction (TRD)', wCycle: 'Cycle (CYC)',
   wLead: 'Leadership', wRegime: 'MA200 regime', wVolume: 'Volume', wMacd: 'MACD', wExt: 'Anti blow-off',
   overheatCyclical: 'Overheat cyclicals', overheatDefault: 'Overheat default', reboundWeight: 'Rebound bonus',
