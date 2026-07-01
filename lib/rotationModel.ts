@@ -719,34 +719,44 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
 // weights + the cyclical/secular brakes. This is ALL a parameter sweep re-runs per
 // trial — no sorting, just arithmetic — which is what makes millions of trials
 // feasible. Mathematically identical to the inline scoring it replaces.
+// ── M26 Gemini buy flag — the strict "is this a confirmed long right now" test ─
+// Used for the gate/quadrant styling. A genuine Gemini buy: positive 12-month trend,
+// +DI leading −DI, and ADX above the limbo threshold (a real, non-consolidating trend).
+export function geminiIsBuy(it: ModelInput): boolean {
+  return it.r1y != null && it.r1y > 0
+    && it.adx != null && it.adx >= GEMINI_ADX_LIMBO
+    && it.plusDI != null && it.minusDI != null && it.plusDI > it.minusDI;
+}
+
 // ── M26 Gemini score (TSMOM × vol-scaling × weekly-ADX health) ───────────────
-// Returns a rankable score, or -1 for names that are not tradable long (so the shared
-// selectPicks — which drops score ≤ -1 — excludes them, exactly like the no-data
-// sentinel). Higher = a stronger, freshly-directed, vol-controlled weekly trend.
+// CONTINUOUS score so the quadrant stays populated: -1 ONLY when we truly can't
+// compute (no 12-month return or no weekly-ADX data — the same sentinel other signals
+// use). Everything else gets a real ≥0 score — high for a confirmed, vol-controlled
+// uptrend, near-0 for a downtrend/consolidation (so it still plots in Lagging/Fading
+// instead of vanishing). selectPicks ranks by this, so the picks are the true uptrends.
 export function geminiScore(it: ModelInput): number {
-  // 1. Time-Series Momentum direction — long only a positive 12-month trend.
-  if (it.r1y == null || it.r1y <= 0) return -1;
-  // 2. Weekly-ADX context + direction. Need ADX and +DI leading −DI (a real uptrend).
-  const adx = it.adx, plusDI = it.plusDI, minusDI = it.minusDI;
-  if (adx == null || plusDI == null || minusDI == null || plusDI <= minusDI) return -1;
-  const slope = it.adxSlope ?? 0;
-  // ADX health: <20 limbo (avoid), 20→25 birth ramp, ≥25 strong.
+  // Truly no data → sentinel (excluded like any no-data asset).
+  if (it.r1y == null || it.adx == null || it.plusDI == null || it.minusDI == null) return -1;
+  const adx = it.adx, slope = it.adxSlope ?? 0;
+  // Direction (0..1): how decisively +DI leads −DI. −DI leading → ~0, +DI leading → 1.
+  const dir = Math.max(0, Math.min(1, (it.plusDI - it.minusDI + 10) / 20));
+  // Time-Series Momentum sign: a positive 12-month trend gets full credit, a negative
+  // one is heavily damped (0.2) — still shown, but never near the top.
+  const tsmom = it.r1y > 0 ? 1 : 0.2;
+  // ADX health: <20 limbo (low floor so it still plots), 20→25 birth ramp, ≥25 strong;
+  // exhaustion decay when ADX is extreme AND its slope rolls over.
   let health: number;
-  if (adx < GEMINI_ADX_LIMBO) health = 0;
-  else if (adx < GEMINI_ADX_BIRTH) health = (adx - GEMINI_ADX_LIMBO) / (GEMINI_ADX_BIRTH - GEMINI_ADX_LIMBO);
+  if (adx < GEMINI_ADX_LIMBO) health = 0.15 * (adx / GEMINI_ADX_LIMBO);
+  else if (adx < GEMINI_ADX_BIRTH) health = 0.15 + 0.85 * (adx - GEMINI_ADX_LIMBO) / (GEMINI_ADX_BIRTH - GEMINI_ADX_LIMBO);
   else health = 1;
-  // Exhaustion: extreme altitude AND a down slope → the trend is losing propulsion.
   if (adx > GEMINI_ADX_EXHAUST && slope < 0) {
-    const over = Math.min(1, (adx - GEMINI_ADX_EXHAUST) / (100 - GEMINI_ADX_EXHAUST));
-    health *= 1 - over;
+    health *= 1 - Math.min(1, (adx - GEMINI_ADX_EXHAUST) / (100 - GEMINI_ADX_EXHAUST));
   }
-  if (health <= 0) return -1;
-  // 3. Volatility scaling — down-weight names whose current vol has exploded.
+  // Volatility scaling — down-weight names whose current vol has exploded.
   const volScale = it.vol != null && it.vol > 0
     ? Math.max(0.25, Math.min(2, GEMINI_VOL_TARGET / it.vol))
     : 1;
-  // Rank by trend strength (ADX level), modulated by birth/exhaustion health and vol control.
-  return (Math.min(adx, 100) / 100) * health * volScale;
+  return (Math.min(adx, 100) / 100) * dir * tsmom * health * volScale;
 }
 
 export function scoreFromFeatures<T extends ModelInput>(
@@ -762,7 +772,7 @@ export function scoreFromFeatures<T extends ModelInput>(
       return {
         item: f.item, score: gScore, accel: f.accel, accPctile: f.accPctile,
         aRecent: f.aRecent, aBuild: f.aBuild, aLong: f.aLong,
-        stretch: f.stretch, passesGate: gScore > -1, passesPreBreakout: false,
+        stretch: f.stretch, passesGate: geminiIsBuy(f.item), passesPreBreakout: false,
         preScore: 0, rsi: f.rsi, overheat: f.overheat,
       };
     }
