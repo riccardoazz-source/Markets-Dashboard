@@ -41,6 +41,10 @@ interface RotationItem {
   rsi: number | null;      // Wilder 14-day RSI (from rotation-returns; M8 overheat guard)
   macdHist: number | null; // MACD histogram %/price (from rotation-returns; M8 confirmation)
   pos52w?: number | null;  // resolved 0–100 range position fed to the model (set at scoring time)
+  adx?: number | null;      // weekly ADX (from rotation-returns; M26 Gemini model)
+  adxSlope?: number | null; // weekly ADX slope (M26)
+  plusDI?: number | null;   // weekly +DI (M26)
+  minusDI?: number | null;  // weekly −DI (M26)
 }
 
 interface RollingReturn {
@@ -61,6 +65,10 @@ interface RollingReturn {
   rsi: number | null;
   macdHist: number | null;
   lastClose: number | null;
+  adx: number | null;
+  adxSlope: number | null;
+  plusDI: number | null;
+  minusDI: number | null;
 }
 
 type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w' | '52w';
@@ -438,6 +446,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
             r1m: r.r1m, r3m: r.r3m, r6m: r.r6m, r1y: r.r1y, ma200: r.ma200, vol: r.vol, volEdge: r.volEdge ?? null, volRatio: r.volRatio,
             lastClose: r.lastClose ?? null,
             trendR2: r.trendR2 ?? null, trendR2Long: r.trendR2Long ?? null, rsi: r.rsi ?? null, macdHist: r.macdHist ?? null,
+            adx: r.adx ?? null, adxSlope: r.adxSlope ?? null, plusDI: r.plusDI ?? null, minusDI: r.minusDI ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;

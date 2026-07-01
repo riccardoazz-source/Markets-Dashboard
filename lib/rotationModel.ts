@@ -322,6 +322,27 @@ export const PRE_SCORE_POS = 0.100; // M25 (optimizer: 0.20→0.10) sleeve RANKI
 export const PRE_SCORE_CYC = 0.058; // M25 (optimizer: 0.45→0.058 — sleeve ranking now barely uses CYC)
 export const PRE_SCORE_VQ  = 0.350; // M25 (optimizer: unchanged 0.35) sleeve RANKING weight on upside-vol engine
 
+// ── M26 — the "Gemini model" (TSMOM + volatility scaling + weekly-ADX) ────────
+// A DISTINCT scoring philosophy, selectable via MODEL_MODE, so we can A/B it against
+// the rotation model (M25) and revert exactly (git or flip the flag). It is a faithful
+// cross-sectional adaptation of Gemini's single-asset strategy:
+//   • Time-Series Momentum: only long a positive 12-month trend (sgn(r1y) > 0).
+//   • Volatility scaling: weight ∝ σ_target/σ_t — trims names whose vol has exploded
+//     (late-cycle blow-off), the core of TSMOM risk control.
+//   • Weekly ADX (Wilder DMI): a trend is BORN when ADX breaks up through 25 with
+//     +DI leading −DI, and EXHAUSTED when ADX, after reaching extreme altitude (>50),
+//     rolls its slope over — momentum gone before price collapses. ADX < 20 = limbo
+//     (consolidation / false-breakout zone) → not tradable.
+// Switch to 'rotation' to restore M25 (or revert the commit). Constants are named so
+// they could later be exposed to the optimizer, but for now they follow Gemini's spec.
+export type ModelMode = 'rotation' | 'gemini';
+export const MODEL_MODE: ModelMode = 'gemini';
+
+export const GEMINI_ADX_LIMBO   = 20;  // ADX below this = consolidation → avoid (weekly context filter)
+export const GEMINI_ADX_BIRTH   = 25;  // ADX breaking up through this = momentum "just born" → buyable
+export const GEMINI_ADX_EXHAUST = 50;  // above this, a DOWN slope flags an exhausting trend → demote
+export const GEMINI_VOL_TARGET  = 8;   // σ_target in monthly % — the vol-scaling reference (≈ median equity)
+
 export interface ModelInput {
   symbol: string;
   r1m: number | null;
@@ -340,6 +361,13 @@ export interface ModelInput {
   macdHist?: number | null; // MACD histogram as % of price (M8 acceleration confirmation; null → 0.5)
   sma200w?: number | null;  // kept for callers; not used by the score (backtest can't compute it)
   volRatio?: number | null; // kept for callers; not used by the score (no historical volume)
+  // ── M26 "Gemini model" inputs (weekly ADX / Wilder DMI) ────────────────────
+  // Only the Gemini scoring mode reads these; the rotation model ignores them, so
+  // they're optional and null-safe. Computed from weekly bars up to the as-of date.
+  adx?: number | null;      // weekly ADX 0–100 (trend strength)
+  adxSlope?: number | null; // recent ADX slope (>0 building, <0 exhausting)
+  plusDI?: number | null;   // weekly +DI (up-pressure)
+  minusDI?: number | null;  // weekly −DI (down-pressure)
 }
 
 export interface ScoredItem<T extends ModelInput> {
@@ -691,11 +719,53 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
 // weights + the cyclical/secular brakes. This is ALL a parameter sweep re-runs per
 // trial — no sorting, just arithmetic — which is what makes millions of trials
 // feasible. Mathematically identical to the inline scoring it replaces.
+// ── M26 Gemini score (TSMOM × vol-scaling × weekly-ADX health) ───────────────
+// Returns a rankable score, or -1 for names that are not tradable long (so the shared
+// selectPicks — which drops score ≤ -1 — excludes them, exactly like the no-data
+// sentinel). Higher = a stronger, freshly-directed, vol-controlled weekly trend.
+export function geminiScore(it: ModelInput): number {
+  // 1. Time-Series Momentum direction — long only a positive 12-month trend.
+  if (it.r1y == null || it.r1y <= 0) return -1;
+  // 2. Weekly-ADX context + direction. Need ADX and +DI leading −DI (a real uptrend).
+  const adx = it.adx, plusDI = it.plusDI, minusDI = it.minusDI;
+  if (adx == null || plusDI == null || minusDI == null || plusDI <= minusDI) return -1;
+  const slope = it.adxSlope ?? 0;
+  // ADX health: <20 limbo (avoid), 20→25 birth ramp, ≥25 strong.
+  let health: number;
+  if (adx < GEMINI_ADX_LIMBO) health = 0;
+  else if (adx < GEMINI_ADX_BIRTH) health = (adx - GEMINI_ADX_LIMBO) / (GEMINI_ADX_BIRTH - GEMINI_ADX_LIMBO);
+  else health = 1;
+  // Exhaustion: extreme altitude AND a down slope → the trend is losing propulsion.
+  if (adx > GEMINI_ADX_EXHAUST && slope < 0) {
+    const over = Math.min(1, (adx - GEMINI_ADX_EXHAUST) / (100 - GEMINI_ADX_EXHAUST));
+    health *= 1 - over;
+  }
+  if (health <= 0) return -1;
+  // 3. Volatility scaling — down-weight names whose current vol has exploded.
+  const volScale = it.vol != null && it.vol > 0
+    ? Math.max(0.25, Math.min(2, GEMINI_VOL_TARGET / it.vol))
+    : 1;
+  // Rank by trend strength (ADX level), modulated by birth/exhaustion health and vol control.
+  return (Math.min(adx, 100) / 100) * health * volScale;
+}
+
 export function scoreFromFeatures<T extends ModelInput>(
   features: RotationFeature<T>[], params?: Partial<ModelParams>,
 ): ScoredItem<T>[] {
   const P: ModelParams = params ? { ...DEFAULT_PARAMS, ...params } : DEFAULT_PARAMS;
   return features.map(f => {
+    // ── M26 Gemini mode: replace the composite score entirely, disable the sleeve.
+    // We still return a full ScoredItem (accel/percentiles from the feature) so the
+    // quadrant and diagnostics render; only `score` drives selection here.
+    if (MODEL_MODE === 'gemini') {
+      const gScore = geminiScore(f.item);
+      return {
+        item: f.item, score: gScore, accel: f.accel, accPctile: f.accPctile,
+        aRecent: f.aRecent, aBuild: f.aBuild, aLong: f.aLong,
+        stretch: f.stretch, passesGate: gScore > -1, passesPreBreakout: false,
+        preScore: 0, rsi: f.rsi, overheat: f.overheat,
+      };
+    }
     // secularness: 0 = jumpy cyclical pop (full brake), 1 = secular bull (no brake).
     const secularness = f.isCyc
       ? Math.max(0, Math.min(1, (f.pCyc - P.secularLow) / (P.secularHigh - P.secularLow)))

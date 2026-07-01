@@ -8,8 +8,9 @@ import { subDays } from 'date-fns';
 import {
   ModelInput, realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram,
 } from './rotationModel';
+import { computeWeeklyADX } from './adx';
 
-export type Hist = { date: string; close: number }[];
+export type Hist = { date: string; close: number; high?: number; low?: number }[];
 export interface BtMeta { symbol: string; name: string; group: string }
 export type BtInput = ModelInput & { name: string; group: string };
 
@@ -63,7 +64,9 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
 
   return universe.map(m => {
     const h = histMap.get(m.symbol) ?? [];
-    const closesAsOf = h.filter(p => p.date <= asOf).map(p => p.close);
+    const upToAsOf = h.filter(p => p.date <= asOf);           // daily OHLC, no look-ahead
+    const closesAsOf = upToAsOf.map(p => p.close);
+    const adxState = computeWeeklyADX(upToAsOf);              // weekly ADX as of this date (M26)
     return {
       symbol: m.symbol, name: m.name, group: m.group,
       r1m: retBetween(h, d1m, asOf),
@@ -81,6 +84,10 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
       macdHist: macdHistogram(closesAsOf),
       sma200w: null,
       volRatio: null,
+      adx: adxState?.adx ?? null,
+      adxSlope: adxState?.adxSlope ?? null,
+      plusDI: adxState?.plusDI ?? null,
+      minusDI: adxState?.minusDI ?? null,
     };
   });
 }

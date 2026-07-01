@@ -3,6 +3,7 @@ import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
+import { computeWeeklyADX } from '@/lib/adx';
 
 export const runtime = 'edge';
 
@@ -24,6 +25,10 @@ interface RollingReturn {
   rsi: number | null;     // Wilder 14-day RSI (M8 overheat guard)
   macdHist: number | null; // MACD histogram as % of price (M8 acceleration confirmation)
   lastClose: number | null; // most recent daily close — use for regime gate (not intraday)
+  adx: number | null;      // weekly ADX (M26 Gemini model)
+  adxSlope: number | null; // weekly ADX slope (M26)
+  plusDI: number | null;   // weekly +DI (M26)
+  minusDI: number | null;  // weekly −DI (M26)
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -85,8 +90,9 @@ function range52w(history: { date: string; close: number }[]): { high52w: number
   return { high52w: hi, low52w: lo, pos52w: pos };
 }
 
-function buildRow(symbol: string, history: { date: string; close: number; volume?: number }[]): RollingReturn {
+function buildRow(symbol: string, history: { date: string; close: number; volume?: number; high?: number; low?: number }[]): RollingReturn {
   const r = range52w(history);
+  const adxState = computeWeeklyADX(history); // live weekly ADX (M26 Gemini model)
   return {
     symbol,
     r1m: rolling(history, 30),
@@ -105,6 +111,10 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     rsi: rsiWilder(history.map(p => p.close)),
     macdHist: macdHistogram(history.map(p => p.close)),
     lastClose: history.length > 0 ? history[history.length - 1].close : null,
+    adx: adxState?.adx ?? null,
+    adxSlope: adxState?.adxSlope ?? null,
+    plusDI: adxState?.plusDI ?? null,
+    minusDI: adxState?.minusDI ?? null,
   };
 }
 

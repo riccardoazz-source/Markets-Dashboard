@@ -3,6 +3,7 @@ import { fetchYahooChart } from '@/lib/yahoo';
 import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { scoreRotation, selectPicks, ACCEL_LIMIT, realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
+import { computeWeeklyADX } from '@/lib/adx';
 
 export const runtime = 'edge';
 
@@ -60,7 +61,7 @@ interface CacheEntry { data: Payload; ts: number }
 const cache = new Map<string, CacheEntry>();
 const TTL = 10 * 60_000;
 
-type Hist = { date: string; close: number }[];
+type Hist = { date: string; close: number; high?: number; low?: number }[];
 
 // Last close at or before a date string (history is ascending by date).
 function priceAsOf(history: Hist, dateStr: string): number | null {
@@ -125,7 +126,9 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
     const h = histMap.get(m.symbol) ?? [];
     // Realized vol from ONLY the closes up to the as-of date (no look-ahead),
     // so the blow-off guard sees the same σ it would have seen back then.
-    const closesAsOf = h.filter(p => p.date <= asOf).map(p => p.close);
+    const upToAsOf = h.filter(p => p.date <= asOf);
+    const closesAsOf = upToAsOf.map(p => p.close);
+    const adxState = computeWeeklyADX(upToAsOf); // weekly ADX as of this date (M26 Gemini model)
     return {
       ...m,
       r1m: retBetween(h, d1m, asOf),
@@ -143,6 +146,10 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
       macdHist: macdHistogram(closesAsOf),
       sma200w: null as number | null, // 200W SMA not computed in backtest (too expensive)
       volRatio: null as number | null, // volume history not available in backtest
+      adx: adxState?.adx ?? null,
+      adxSlope: adxState?.adxSlope ?? null,
+      plusDI: adxState?.plusDI ?? null,
+      minusDI: adxState?.minusDI ?? null,
       fwd: retBetween(h, asOf, todayStr),
     };
   });

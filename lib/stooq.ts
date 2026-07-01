@@ -4,6 +4,8 @@ export interface ChartPoint {
   date: string;
   close: number;
   volume?: number;
+  high?: number;   // daily high — kept for the weekly-ADX (Wilder DMI) computation (M26 Gemini model)
+  low?: number;    // daily low  — same; absent for sources that don't provide OHLC (falls back to close)
 }
 
 export interface MarketQuote {

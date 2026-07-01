@@ -379,6 +379,9 @@ export async function fetchYahooData(
   const quotes = (indicators?.quote as Array<Record<string, unknown>> | undefined) ?? [];
   const closes: number[] = (quotes[0]?.close as number[]) ?? [];
   const volumes: (number | null)[] = (quotes[0]?.volume as (number | null)[]) ?? [];
+  // High/low arrays — kept for the weekly-ADX (Wilder DMI) computation (M26 Gemini model).
+  const highs: (number | null)[] = (quotes[0]?.high as (number | null)[]) ?? [];
+  const lows:  (number | null)[] = (quotes[0]?.low  as (number | null)[]) ?? [];
   // adjclose is split + dividend adjusted — the correct total-return price.
   const adjCloses: number[] =
     ((indicators?.adjclose as Array<Record<string, unknown>> | undefined)?.[0]?.adjclose as number[]) ?? [];
@@ -390,7 +393,13 @@ export async function fetchYahooData(
     if (close == null || isNaN(close) || close <= 0) continue;
     const date = new Date(timestamps[i] * 1000).toISOString().slice(0, 10);
     const vol = volumes[i];
-    points.push({ date, close, ...(vol != null && vol > 0 ? { volume: vol } : {}) });
+    const hi = highs[i], lo = lows[i];
+    points.push({
+      date, close,
+      ...(vol != null && vol > 0 ? { volume: vol } : {}),
+      ...(hi != null && isFinite(hi) && hi > 0 ? { high: hi } : {}),
+      ...(lo != null && isFinite(lo) && lo > 0 ? { low: lo } : {}),
+    });
     const adj = adjCloses[i];
     if (adj != null && isFinite(adj) && adj > 0) adjPoints.push({ date, close: adj });
   }
