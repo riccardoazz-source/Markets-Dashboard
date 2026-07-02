@@ -216,7 +216,7 @@ export function evaluate(slices: DateSlice[], params: ModelParams, kwin = 25, np
 
 // Sweep bounds per parameter — centred near the live values, wide enough to explore.
 export const BOUNDS: Record<keyof ModelParams, [number, number]> = {
-  wRS: [0.10, 0.45], // M28 — the RS backbone can be tuned but not zeroed out
+  wRS: [0.0, 0.45], // M28 RS backbone — OFF by default (M24 restored); optimizer may re-introduce it
   wAcc: [0.05, 0.45], wVQ: [0.10, 0.35], wTrend: [0.0, 0.20], wCycle: [0.0, 0.16],
   wLead: [0.04, 0.28], wRegime: [0.0, 0.10], wVolume: [0.0, 0.08], wMacd: [0.0, 0.08],
   wExt: [0.05, 0.35], overheatCyclical: [0.0, 0.25], overheatDefault: [0.0, 0.10],

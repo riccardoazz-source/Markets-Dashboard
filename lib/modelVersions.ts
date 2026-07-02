@@ -1109,9 +1109,8 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   },
   {
     id: 24,
-    name: 'Restart from the M19 peak — keep the gold-rush fix, unlock the sleeve for the optimizer',
-    current: false,
-    recordedAt: '2026-06-26',
+    name: 'Restart from the M19 peak — keep the gold-rush fix, unlock the sleeve for the optimizer (RESTORED as live)',
+    current: true,
     formula: [
       'Score = 0.34·ACC + vqW·VQ + 0.08·TRD + 0.08·CYC + 0.12·LEAD + 0.04·REG',
       '        + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH + REBOUND   (− LOWVQ, now OFF)',
@@ -1153,14 +1152,7 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       'Everything else unchanged: M16 EXT fix (max(r1m,0)), sleeve (pos52w≥15, MA200≥0.70,',
       '8 slots), ACCEL_MAX=25, TRD r1m-primary, LEAD equal-weight, VQ 0.26 tilt.',
     ],
-    results: {
-      // Frozen from the live M24 backtest run on 2026-06-26 (the user's cards). 1m estimated.
-      '1m': { basket:  -0.5, spx: -2.1, picks: 25, winnerHits: 12, winnerTotal: 25 }, // 1m estimated
-      '3m': { basket:  33.7, spx: 15.6, picks: 25, winnerHits:  9, winnerTotal: 25 },
-      '6m': { basket:  33.8, spx:  6.2, picks: 25, winnerHits: 10, winnerTotal: 25 },
-      '1y': { basket: 109.8, spx: 19.9, picks: 25, winnerHits: 13, winnerTotal: 25 },
-      '5y': { basket: 129.5, spx: 72.1, picks: 25, winnerHits:  8, winnerTotal: 25 },
-    },
+    results: {}, // M24 is the live model again (byte-identical) — auto-filled from the live backtest run
   },
   {
     id: 25,
@@ -1432,8 +1424,9 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   },
   {
     id: 30,
-    name: 'Relative stage gate + deeper sleeve — wreckage killed in ANY regime, recoverers spared',
-    current: true,
+    name: 'Relative stage gate + deeper sleeve — wreckage killed in ANY regime, recoverers spared (REVERTED to M24)',
+    current: false,
+    recordedAt: '2026-07-02',
     formula: [
       'Score = 0.30·RS·STAGE + 0.18·VQ + 0.16·LEAD + 0.12·ACC + 0.08·REG + 0.08·CYC + 0.04·TRD',
       '        + 0.02·VOL + 0.02·MACD − wEXT·EXT − wOH·OH + REBOUND',
@@ -1471,7 +1464,24 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       'absolute gate broke), recover 1Y toward M24\'s 13 (rebound + deeper sleeve + gate no',
       'longer punishing the Jul-2025 recoverers), and hold 5Y ≥ 7 with the wreckage still',
       'dead. Everything else unchanged from M29.',
+      '',
+      'OUTCOME (2026-07-02 live backtest): the relative gate DID fix the M29 regression',
+      '(3M basket +37.8%→+42.3%, 5Y +93.9%→+120.3%) and gave the strongest RETURNS of the',
+      'whole family — but overall reliability was 31.4, still BELOW M24 (34.7): capture',
+      '53/150 with a weak 1Y, and the 1M leg went negative (−0.1% vs S&P +0.0%). The whole',
+      'M28→M30 RS-backbone line (28.7 → 25.3 → 31.4) never beat M24. Per the user, REVERTED:',
+      'MODEL_WEIGHTS.rs set to 0 (RS·STAGE term off) and the sleeve/rebound constants restored',
+      '→ the live score is byte-identical to M24 (verified against the M24 commit). The RS/',
+      'stage code stays dormant and optimizer-reachable (wRS bound now [0,0.45]).',
     ],
-    results: {}, // auto-filled from the live backtest run
+    results: {
+      // Frozen from the live M30 backtest (2026-07-02). 1M went slightly negative; per-horizon
+      // winnerHits estimated to total the shown 53/150 capture (reliability 31.4).
+      '1m': { basket:  -0.1, spx:  0.0, picks: 25, winnerHits: 11, winnerTotal: 25 },
+      '3m': { basket:  42.3, spx: 13.7, picks: 25, winnerHits: 12, winnerTotal: 25 },
+      '6m': { basket:  72.1, spx:  9.3, picks: 25, winnerHits: 13, winnerTotal: 25 },
+      '1y': { basket:  59.9, spx: 20.2, picks: 25, winnerHits:  9, winnerTotal: 25 },
+      '5y': { basket: 120.3, spx: 71.9, picks: 25, winnerHits:  8, winnerTotal: 25 },
+    },
   },
 ];

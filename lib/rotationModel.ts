@@ -168,17 +168,22 @@
 // O'Neil buys the breakout, but the stock must ALREADY be a leader. Guards (EXT
 // blow-off = climax-top sell rule, RSI overheat, commodity caps), the rebound
 // bonus and the pre-breakout sleeve (base formation) are unchanged from M24.
+// RESTORED to M24 (M19 + gold fix). The M28→M30 "Stage-2 RS Leader" line (RS backbone,
+// stage gate, deeper sleeve) improved SHORT-horizon capture but never beat M24's overall
+// reliability (M28 28.7, M29 25.3, M30 31.4 vs M24 34.7), so per the user we reverted.
+// The RS pillar is kept in the code but its weight is 0 → the live score is byte-identical
+// to M24; the RS/stage machinery stays dormant (and optimizer-reachable via wRS).
 export const MODEL_WEIGHTS = {
-  rs:           0.30, // RS  — IBD Relative Strength blend percentile (the documented #1 factor)
-  volQuality:   0.18, // VQ  — net upside volatility = close-only analogue of O'Neil's Accumulation/Distribution rating
-  lead:         0.16, // LEAD — 52w-range position + trend smoothness (template #7 + orderly trend)
-  acceleration: 0.12, // ACC — pace-ladder percentile, now the BREAKOUT TRIGGER, not the backbone
-  regime:       0.08, // REG — price vs 200-day MA graduated (the computable core of template #1-6 / Stage 2)
-  cycle:        0.08, // CYC — 12mo trend persistence (stage durability; secular vs pop)
-  trend:        0.04, // TRD — small near-term direction leg (keeps the Recovering quadrant alive — M11)
-  volume:       0.02, // VOL — volume confirmation (null→0.5 neutral)
-  macd:         0.02, // MACD — histogram/price percentile (null→0.5 neutral)
-  extension:    0.20, // EXT — over-extension penalty (climax-top guard; commodities 0.32)
+  rs:           0.0,  // RS  — M28-30 backbone, now OFF (wRS=0 → RS·STAGE term contributes nothing)
+  volQuality:   0.26, // VQ  — net upside volatility (M14: 0.22→0.26; every real top-25 winner is a high-beta upside engine)
+  lead:         0.12, // LEAD — quality leadership: 52w-range position + short-trend smoothness
+  acceleration: 0.34, // ACC — 3-horizon pace-ladder percentile (the #1 pillar again)
+  regime:       0.04, // REG — price vs 200-day MA
+  cycle:        0.08, // CYC — long-horizon (~12mo) trend-persistence R²
+  trend:        0.08, // TRD — near-term direction: 0.70·r1m-pctile + 0.30·r3m-pctile
+  volume:       0.04, // VOL — volume confirmation (null→0.5 neutral)
+  macd:         0.04, // MACD — histogram/price percentile (null→0.5 neutral)
+  extension:    0.20, // EXT — over-extension penalty (wEXT = 0.20; commodities 0.32)
 } as const;
 
 // ── M28 RS — the IBD Relative Strength blend (documented public formula) ──────
@@ -266,7 +271,7 @@ export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch) (
 //   bonus    = REBOUND_WEIGHT · oversold · pCyc   (added to score, quality-scaled)
 export const OVERSOLD_RSI_START = 40;   // bonus starts when RSI drops below 40
 export const OVERSOLD_RSI_FLOOR = 10;   // full bonus at RSI 10 (deeply oversold)
-export const REBOUND_WEIGHT = 0.15;     // M30: 0.10→0.15 — three independent optimizer runs converged on a stronger rebound (~0.158); adopted moderately. Was M19's 0.10·oversold·pCyc.
+export const REBOUND_WEIGHT = 0.10;     // M24 restored — M19's 0.10·oversold·pCyc.
 // M19 (the highest-reliability version, tied with M21 at 34.0) scaled the oversold buy-the-dip
 // bonus by pCyc (12mo trend persistence — a quality-secular filter) at weight 0.10. M20/M21 had
 // raised it to 0.20→0.30 and re-scaled it by pVQ to chase the falling engines (CRDO/RIOT); that
@@ -380,9 +385,9 @@ export const ACCEL_MAX = 25;
 // but is still in a structural uptrend (r1y>0). The preScore ranking (CYC+VQ
 // heavier than pos52w) ensures genuine engines (semis: high CYC, high VQ) outrank
 // cyclical names (crypto: low CYC) when both qualify for the sleeve.
-export const PRE_BREAKOUT_SLOTS = 10;    // M30: 8→10. THREE independent optimizer runs (on M23, M28 and M29 bases) all pushed the sleeve bigger (~10.5 slots) and deeper — a cross-run-stable, data-driven signal, adopted moderately. More room for the fallen engines that win the post-dip dates.
+export const PRE_BREAKOUT_SLOTS = 8;     // M17: 6→8 — enough slots to hold ALL the falling quality engines (M24 restored)
 export const PRE_BREAKOUT_POS52W_MIN = 15; // M17: a deep-drawdown name sits NEAR its 52w low; that IS the buy
-export const PRE_BREAKOUT_R1M_FLOOR = -50; // M30: −40→−50 (optimizer asked −55 across runs; adopted moderately). preQualityOk + r1y>0 + MA200 keep out true falling knives.
+export const PRE_BREAKOUT_R1M_FLOOR = -40; // M15 — catches RIOT-type −25%+ drawdowns; r1y>0 + MA200 + quality gates keep out falling knives (M24 restored)
 // M24 — the sleeve's remaining hand-tuned thresholds, promoted to live constants so
 // DEFAULT_PARAMS can carry them and the optimizer can tune the WHOLE sleeve, not just
 // the score weights. The sleeve is the only lever that catches FALLING winners
