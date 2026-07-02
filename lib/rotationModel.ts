@@ -214,8 +214,31 @@ export const RS_W3M = 0.4, RS_W6M = 0.2, RS_W1Y = 0.2; // IBD weights (9m term o
 // ~0.3; MU Jun 2021 (pos≈78), SNDK (96), CRDO Jul 2025 (near high) → FULL credit.
 // Deep quality drawdowns are unaffected on their own path — the sleeve (which ranks by
 // quality, not score) remains the falling-winner catcher, exactly the two-profile split.
-export const STAGE_POS_LO = 40, STAGE_POS_HI = 75;   // pos52w band (Minervini #7 graduated)
-export const STAGE_MA_LO  = 0.95, STAGE_MA_HI = 1.05; // price/MA200 band (template #3 graduated)
+//
+// M30 — the gate is now RELATIVE to the universe, not absolute. The M29 backtest showed
+// the absolute bands do the right thing at market highs (Doge/Solana killed, 5Y basket
+// +89.4%→+93.9%) but the WRONG thing at post-selloff dates: at Apr 2026 the whole market
+// was in drawdown, so the future winners (CIFR +78%, recovering semis) sat mid-range on
+// pos52w/MA200 and lost their RS credit to defensive ETFs that merely fell least — 3M
+// capture dropped 13→10 vs M28. Doge-at-market-highs is IDIOSYNCRATIC wreckage; CIFR-in-
+// a-broad-selloff is not. The distinction is the asset's standing RELATIVE TO THE
+// UNIVERSE — the same logic that makes RS itself a RELATIVE measure (and O'Neil's "M":
+// read every stock in the context of the market). So the two legs now read the existing
+// CROSS-SECTIONAL PERCENTILES (pPos, reg) instead of absolute levels: bottom-quartile
+// standing → no RS credit (wreckage in ANY regime), at/above the median → full credit.
+// Each leg is the MAX of the absolute Minervini band and the universe-relative
+// percentile band: a name keeps its RS credit if it is healthy by ITS OWN CHART
+// (absolute template standing — MU at pos52w 78 stays full even when the whole
+// universe sits at 85-95) OR healthy RELATIVE TO THE UNIVERSE (CIFR mid-pack in a
+// broad selloff). The credit dies only when BOTH flag it — which is exactly the
+// idiosyncratic-wreckage signature (Doge Jul 2021 / ASST Jul 2025: far off their own
+// highs AND in the bottom quartile of their cross-sections). Band edges: the absolute
+// bands are Minervini's published numbers (M29); the percentile bands are round
+// quartile/median cuts. None fitted.
+export const STAGE_POS_LO = 40, STAGE_POS_HI = 75;   // absolute pos52w band (Minervini #7 graduated)
+export const STAGE_MA_LO  = 0.95, STAGE_MA_HI = 1.05; // absolute price/MA200 band (template #3 graduated)
+export const STAGE_POS_PCTL_LO = 0.25, STAGE_POS_PCTL_HI = 0.60; // pPos percentile band (bottom quartile → 0, ≥60th → full)
+export const STAGE_MA_PCTL_LO  = 0.15, STAGE_MA_PCTL_HI  = 0.50; // reg percentile band (bottom 15% → 0, ≥median → full)
 
 // ── M8: RSI overheat guard (the cyclical adjustment) ─────────────────────────
 // An OVERBOUGHT cyclical is about to mean-revert (oil at RSI ~90 right before the
@@ -243,7 +266,7 @@ export const OVERHEAT_WEIGHT_DEFAULT  = 0.03; // everything else (light touch) (
 //   bonus    = REBOUND_WEIGHT · oversold · pCyc   (added to score, quality-scaled)
 export const OVERSOLD_RSI_START = 40;   // bonus starts when RSI drops below 40
 export const OVERSOLD_RSI_FLOOR = 10;   // full bonus at RSI 10 (deeply oversold)
-export const REBOUND_WEIGHT = 0.10;     // M24: restart from M19 — rebound back to 0.10·oversold·pCyc.
+export const REBOUND_WEIGHT = 0.15;     // M30: 0.10→0.15 — three independent optimizer runs converged on a stronger rebound (~0.158); adopted moderately. Was M19's 0.10·oversold·pCyc.
 // M19 (the highest-reliability version, tied with M21 at 34.0) scaled the oversold buy-the-dip
 // bonus by pCyc (12mo trend persistence — a quality-secular filter) at weight 0.10. M20/M21 had
 // raised it to 0.20→0.30 and re-scaled it by pVQ to chase the falling engines (CRDO/RIOT); that
@@ -357,9 +380,9 @@ export const ACCEL_MAX = 25;
 // but is still in a structural uptrend (r1y>0). The preScore ranking (CYC+VQ
 // heavier than pos52w) ensures genuine engines (semis: high CYC, high VQ) outrank
 // cyclical names (crypto: low CYC) when both qualify for the sleeve.
-export const PRE_BREAKOUT_SLOTS = 8;     // M17: 6→8 — enough slots to hold ALL the falling quality engines (CRDO, AMD, RIOT, Semiconductors, MU, AVGO) (M24 restored)
+export const PRE_BREAKOUT_SLOTS = 10;    // M30: 8→10. THREE independent optimizer runs (on M23, M28 and M29 bases) all pushed the sleeve bigger (~10.5 slots) and deeper — a cross-run-stable, data-driven signal, adopted moderately. More room for the fallen engines that win the post-dip dates.
 export const PRE_BREAKOUT_POS52W_MIN = 15; // M17: a deep-drawdown name sits NEAR its 52w low; that IS the buy
-export const PRE_BREAKOUT_R1M_FLOOR = -40; // M15 — catches RIOT-type −25%+ drawdowns; r1y>0 + MA200 + quality gates keep out falling knives (M24 restored)
+export const PRE_BREAKOUT_R1M_FLOOR = -50; // M30: −40→−50 (optimizer asked −55 across runs; adopted moderately). preQualityOk + r1y>0 + MA200 keep out true falling knives.
 // M24 — the sleeve's remaining hand-tuned thresholds, promoted to live constants so
 // DEFAULT_PARAMS can carry them and the optimizer can tune the WHOLE sleeve, not just
 // the score weights. The sleeve is the only lever that catches FALLING winners
@@ -734,14 +757,21 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const pVolLow = item.vol != null && nVolLow > 0 ? toP(rankVolLowAsc.get(item.symbol) ?? 0, nVolLow) : 0.5;
     // M28 RS percentile — needs r3m at minimum, which `valid` guarantees for hasReturns items.
     const pRS = hasReturns ? toP(rankRsAsc.get(item.symbol) ?? 0, n) : 0.5;
-    // M29 stage gate on the RS credit (see STAGE_* constants). Missing data → neutral 1
-    // (a thin-history name must not lose its RS for lacking a datum — consistency with
-    // the renormalisation philosophy: missing ≠ bad).
+    // M29/M30 stage gate on the RS credit (see STAGE_* constants). Each leg = MAX of
+    // the ABSOLUTE Minervini band (healthy by its own chart) and the RELATIVE
+    // percentile band (healthy vs the universe) — the credit dies only when BOTH flag
+    // the name, the idiosyncratic-wreckage signature. Missing data → neutral 1 (a
+    // thin-history name must not lose its RS for lacking a datum).
+    const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
     const nearHigh = item.pos52w != null
-      ? Math.max(0, Math.min(1, (item.pos52w - STAGE_POS_LO) / (STAGE_POS_HI - STAGE_POS_LO)))
+      ? Math.max(
+          clamp01((item.pos52w - STAGE_POS_LO) / (STAGE_POS_HI - STAGE_POS_LO)),
+          clamp01((pPos - STAGE_POS_PCTL_LO) / (STAGE_POS_PCTL_HI - STAGE_POS_PCTL_LO)))
       : 1;
-    const aboveMA = item.price != null && item.ma200 != null && item.ma200 > 0
-      ? Math.max(0, Math.min(1, (item.price / item.ma200 - STAGE_MA_LO) / (STAGE_MA_HI - STAGE_MA_LO)))
+    const aboveMA = regRaw != null && item.ma200 != null && item.ma200 > 0 && item.price != null
+      ? Math.max(
+          clamp01((item.price / item.ma200 - STAGE_MA_LO) / (STAGE_MA_HI - STAGE_MA_LO)),
+          clamp01((reg - STAGE_MA_PCTL_LO) / (STAGE_MA_PCTL_HI - STAGE_MA_PCTL_LO)))
       : 1;
     const stageFactor = nearHigh * aboveMA;
 
