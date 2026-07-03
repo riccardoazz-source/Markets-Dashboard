@@ -14,6 +14,7 @@ import clsx from 'clsx';
 import { ArrowRight, RefreshCw, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
+import { DetailModal } from '@/components/ui/DetailModal';
 
 interface CurrencyRate {
   from: string;
@@ -255,6 +256,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       )}
 
       {selected && (
+        <DetailModal onClose={() => setSelected(null)}>
         <div className="rounded-xl border border-border bg-bg-card p-5 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
@@ -377,6 +379,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
           {historical.length > 0 && <ChartDataTable data={historical} unit={`${selected?.from}/${selected?.to}`} />}
           {selected && <ChartNotes chartId={`${selected.from}/${selected.to}`} />}
         </div>
+        </DetailModal>
       )}
     </div>
   );

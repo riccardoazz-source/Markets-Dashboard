@@ -29,6 +29,7 @@ import clsx from 'clsx';
 import { Search, X, BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
+import { DetailModal } from '@/components/ui/DetailModal';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
 
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
@@ -1056,6 +1057,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       )}
 
       {selected && (
+        <DetailModal onClose={() => setSelected(null)}>
         <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
@@ -1391,6 +1393,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             Source: Yahoo Finance · Not financial advice.
           </p>
         </div>
+        </DetailModal>
       )}
     </div>
   );

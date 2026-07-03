@@ -15,6 +15,7 @@ import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
+import { DetailModal } from '@/components/ui/DetailModal';
 
 type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
@@ -285,6 +286,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
       )}
 
       {selected && selectedCrypto && (
+        <DetailModal onClose={() => setSelected(null)}>
         <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -366,6 +368,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           {historical.length > 0 && <ChartDataTable data={historical} />}
           {selected && <ChartNotes chartId={`crypto:${selected}`} />}
         </div>
+        </DetailModal>
       )}
     </div>
   );

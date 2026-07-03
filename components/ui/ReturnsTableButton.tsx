@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Table2, X } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { HistoricalPoint } from '@/lib/types';
@@ -113,26 +113,33 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
   const [data, setData] = useState<HistoricalPoint[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cache = useRef<Map<string, HistoricalPoint[]>>(new Map());
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      const res = await fetch(`/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=MAX`);
-      const json = await res.json() as HistoricalPoint[];
-      if (!Array.isArray(json) || json.length === 0) { setError('No price history available for this asset.'); setData([]); }
-      else setData(json);
-    } catch {
-      setError('Network error — could not load price history.');
-    } finally {
-      setLoading(false);
-    }
-  }, [symbol]);
+  const handleOpen = () => setOpen(o => !o);
 
-  const handleOpen = () => {
-    if (open) { setOpen(false); return; }
-    setOpen(true);
-    if (data === null && !loading) load();
-  };
+  // Clear any previous asset's table the moment the symbol changes, so a stale grid
+  // is never shown when switching assets (the bug: Nasdaq showing Russell's numbers).
+  useEffect(() => { setData(null); setError(null); }, [symbol]);
+
+  // Fetch (or reuse cached) full history whenever the modal is open for the CURRENT
+  // symbol. Keyed on [open, symbol] so switching assets always refetches.
+  useEffect(() => {
+    if (!open) return;
+    const cached = cache.current.get(symbol);
+    if (cached) { setData(cached); setError(null); return; }
+    let cancelled = false;
+    setData(null); setLoading(true); setError(null);
+    fetch(`/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=MAX`)
+      .then(r => r.json())
+      .then((json: HistoricalPoint[]) => {
+        if (cancelled) return;
+        if (!Array.isArray(json) || json.length === 0) { setError('No price history available for this asset.'); setData([]); }
+        else { cache.current.set(symbol, json); setData(json); }
+      })
+      .catch(() => { if (!cancelled) setError('Network error — could not load price history.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, symbol]);
 
   // Close on Escape.
   useEffect(() => {

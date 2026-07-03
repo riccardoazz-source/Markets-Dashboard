@@ -15,6 +15,7 @@ import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
+import { DetailModal } from '@/components/ui/DetailModal';
 
 type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
@@ -223,6 +224,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
       )}
 
       {selected && selectedQuote && (
+        <DetailModal onClose={() => setSelected(null)}>
         <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -306,6 +308,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
           {historical.length > 0 && <ChartDataTable data={historical} />}
           {selected && <ChartNotes chartId={selected} />}
         </div>
+        </DetailModal>
       )}
     </div>
   );
