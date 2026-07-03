@@ -19,6 +19,7 @@ import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react'
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
+import { useAvgYearly } from '@/lib/useAvgYearly';
 
 interface SectorLiveData {
   price: number | null;
@@ -44,7 +45,7 @@ const INITIAL: SectorLiveData = {
   high52w: null, low52w: null, dividendYield: null, sma200w: null, sma200d: null, currency: null,
 };
 
-type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn' | 'fiveYearCagr';
+type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn' | 'fiveYearCagr' | 'avgYearly';
 
 const SORT_OPTIONS: { value: SectorSortKey; label: string }[] = [
   { value: 'changePercent',  label: 'Day' },
@@ -52,6 +53,7 @@ const SORT_OPTIONS: { value: SectorSortKey; label: string }[] = [
   { value: 'ytdReturn',      label: 'YTD' },
   { value: 'fiveYearReturn', label: '5Y' },
   { value: 'fiveYearCagr',   label: 'CAGR' },
+  { value: 'avgYearly',      label: 'Avg Yr' },
 ];
 
 // Distinct categories from the SECTORS config, plus an 'All' option.
@@ -160,12 +162,16 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
       .catch(() => {});
   }, [selected, timeframe, customRange]);
 
+  // Full-history average yearly return (the Returns-table "Average"), loaded once & cached.
+  const avgYearlyMap = useAvgYearly(SECTORS.map(s => s.symbol));
+
   // Merge static config with live data — always renders every sector
   const merged = SECTORS.map(s => ({
     symbol: s.symbol,
     name: s.name,
     category: s.category,
     ...(live[s.symbol] ?? INITIAL),
+    avgYearly: avgYearlyMap[s.symbol] ?? null,
   }));
 
   const filteredSectors = selectedCategory === 'All'
@@ -315,6 +321,11 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                   {sector.fiveYearCagr != null && (
                     <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.fiveYearCagr))}>
                       5Y CAGR: {formatCagr(sector.fiveYearCagr, sector.fiveYearFull)}
+                    </p>
+                  )}
+                  {sector.avgYearly != null && (
+                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.avgYearly))}>
+                      Avg Yr: {formatPercent(sector.avgYearly, 1)}
                     </p>
                   )}
                   <Ma200dLine price={sector.price} sma200d={sector.sma200d} currency={sector.currency} />
