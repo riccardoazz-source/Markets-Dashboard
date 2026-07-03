@@ -13,6 +13,7 @@ import { LoadingSpinner, LoadingGrid } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { ArrowRight, RefreshCw, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
+import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 
 interface CurrencyRate {
   from: string;
@@ -278,6 +279,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                   Compare
                 </button>
               )}
+              <ReturnsTableButton name={`${selected.from}/${selected.to}`} symbol={`${selected.from}${selected.to}=X`} />
               <GeminiCommentButton
                 key={`${selected.from}${selected.to}`}
                 name={`${selected.from}/${selected.to}`}

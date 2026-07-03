@@ -17,6 +17,7 @@ import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
+import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 
 interface SectorLiveData {
   price: number | null;
@@ -353,6 +354,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                   Compare
                 </button>
               )}
+              <ReturnsTableButton name={selectedSector?.name ?? selected!} symbol={selected!} />
               <GeminiCommentButton
                 key={selected!}
                 name={selectedSector?.name ?? selected!}

@@ -14,6 +14,7 @@ import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
+import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 
 type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
 
@@ -245,6 +246,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                   Compare
                 </button>
               )}
+              <ReturnsTableButton name={selectedConfig?.name ?? selected!} symbol={selected!} />
               <GeminiCommentButton
                 key={selected!}
                 name={selectedConfig?.name ?? selected!}

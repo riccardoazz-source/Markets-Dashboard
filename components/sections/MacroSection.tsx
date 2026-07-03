@@ -19,6 +19,7 @@ import { loadSourcesConfig, SourcesConfig } from '@/lib/userSources';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2, Layers } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
+import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 
 const BUILTIN_CATS = ['All', 'Rates', 'Inflation', 'Growth', 'Employment', 'Real Estate', 'Money', 'Commodities', 'Currency', 'Sentiment', 'Crypto', 'Debt', 'Market Value', 'Recessions', 'Events'];
 
@@ -529,6 +530,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   Compare
                 </button>
               )}
+              <ReturnsTableButton name={selectedIndicator?.name ?? selected!} symbol={selected!} />
               <GeminiCommentButton
                 key={selected!}
                 name={selectedIndicator?.name ?? selected!}

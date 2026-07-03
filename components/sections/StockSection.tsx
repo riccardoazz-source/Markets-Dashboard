@@ -28,6 +28,7 @@ import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
 import { Search, X, BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
+import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
 
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
@@ -1079,6 +1080,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   Compare
                 </button>
               )}
+              <ReturnsTableButton name={selected.name} symbol={selected.symbol} />
               <GeminiCommentButton
                 key={selected.symbol}
                 name={selected.name}
