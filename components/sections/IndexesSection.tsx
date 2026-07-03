@@ -19,10 +19,11 @@ import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react'
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
+import { useAvgYearly } from '@/lib/useAvgYearly';
 
 const REGIONS = ['All', 'America', 'EU', 'Asia', 'Global', 'EM'];
 
-type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
+type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'changePercent',         label: 'Day' },
@@ -30,6 +31,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ytdChangePercent',      label: 'YTD' },
   { value: 'fiveYearChangePercent', label: '5Y' },
   { value: 'fiveYearCagrPercent',   label: 'CAGR' },
+  { value: 'avgYearly',             label: 'Avg Yr' },
 ];
 
 export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
@@ -136,12 +138,15 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     i => selectedRegion === 'All' || i.region === selectedRegion
   );
 
+  const avgYearlyMap = useAvgYearly(INDEXES.map(i => i.symbol));
+
   const getValue = (q: QuoteData | undefined, key: SortKey) => {
     if (!q) return null;
     if (key === 'changePercent') return q.changePercent ?? null;
     if (key === 'mtdChangePercent') return q.mtdChangePercent ?? null;
     if (key === 'ytdChangePercent') return q.ytdChangePercent ?? null;
     if (key === 'fiveYearCagrPercent') return q.fiveYearCagrPercent ?? null;
+    if (key === 'avgYearly') return avgYearlyMap[q.symbol] ?? null;
     return q.fiveYearChangePercent ?? null;
   };
 
@@ -265,6 +270,11 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                     {q.fiveYearCagrPercent != null && (
                       <p className={clsx('text-[10px] mt-0.5', colorForPercent(q.fiveYearCagrPercent))}>
                         5Y CAGR: {formatCagr(q.fiveYearCagrPercent, q.fiveYearFull)}
+                      </p>
+                    )}
+                    {avgYearlyMap[q.symbol] != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(avgYearlyMap[q.symbol]!))}>
+                        Avg Yr: {formatPercent(avgYearlyMap[q.symbol]!, 1)}
                       </p>
                     )}
                     <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />

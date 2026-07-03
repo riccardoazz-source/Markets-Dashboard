@@ -30,6 +30,7 @@ import { Search, X, BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
+import { useAvgYearly } from '@/lib/useAvgYearly';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
 
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
@@ -187,7 +188,7 @@ function detectReportingFreq(eps: EarningsPoint[]): string {
 
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
-type StockSortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
+type StockSortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
 const WATCHLIST_SORT_OPTIONS: { value: StockSortKey; label: string }[] = [
   { value: 'changePercent',         label: 'Day' },
@@ -195,6 +196,7 @@ const WATCHLIST_SORT_OPTIONS: { value: StockSortKey; label: string }[] = [
   { value: 'ytdChangePercent',      label: 'YTD' },
   { value: 'fiveYearChangePercent', label: '5Y' },
   { value: 'fiveYearCagrPercent',   label: 'CAGR' },
+  { value: 'avgYearly',             label: 'Avg Yr' },
 ];
 
 interface SearchHit { symbol: string; name: string; exchange: string; type: string }
@@ -839,6 +841,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
     return syms;
   }, [gistData, watchlistCategory]);
 
+  const avgYearlyMap = useAvgYearly(watchlistSymbols);
+
   // Watchlist sorted by the active sort key (Day / MTD / YTD); symbols whose
   // quote hasn't loaded yet sink to the bottom.
   const sortedWatchlistSymbols = useMemo(() => {
@@ -849,6 +853,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       if (watchlistSort === 'mtdChangePercent') return q.mtdChangePercent ?? null;
       if (watchlistSort === 'ytdChangePercent') return q.ytdChangePercent ?? null;
       if (watchlistSort === 'fiveYearCagrPercent') return q.fiveYearCagrPercent ?? null;
+      if (watchlistSort === 'avgYearly') return avgYearlyMap[sym] ?? null;
       return q.fiveYearChangePercent ?? null;
     };
     return [...watchlistSymbols].sort((a, b) => {
@@ -1025,6 +1030,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                         {ytd != null && <p className={clsx('text-[10px] mt-0.5', ytd >= 0 ? 'text-emerald-400' : 'text-red-400')}>YTD: {ytd >= 0 ? '+' : ''}{ytd.toFixed(1)}%</p>}
                         {fiveYear != null && <p className={clsx('text-[10px] mt-0.5', fiveYear >= 0 ? 'text-emerald-400' : 'text-red-400')}>5Y: {fiveYear >= 0 ? '+' : ''}{fiveYear.toFixed(1)}%</p>}
                         {cagr != null && <p className={clsx('text-[10px] mt-0.5', cagr >= 0 ? 'text-emerald-400' : 'text-red-400')}>5Y CAGR: {cagr >= 0 ? '+' : ''}{cagr.toFixed(1)}%{cagrFull ? '' : '*'}</p>}
+                        {avgYearlyMap[sym] != null && <p className={clsx('text-[10px] mt-0.5', avgYearlyMap[sym]! >= 0 ? 'text-emerald-400' : 'text-red-400')}>Avg Yr: {avgYearlyMap[sym]! >= 0 ? '+' : ''}{avgYearlyMap[sym]!.toFixed(1)}%</p>}
                         <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />
                         <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                       </>

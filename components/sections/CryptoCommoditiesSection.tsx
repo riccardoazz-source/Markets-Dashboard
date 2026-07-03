@@ -16,8 +16,10 @@ import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react'
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
+import { useAvgYearly } from '@/lib/useAvgYearly';
 
-type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
+type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
+const coinYahooSym = (c: { id: string; symbol: string }) => CRYPTO_YAHOO_SYMBOLS[c.id] ?? `${c.symbol}-USD`;
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'change24hPercent',     label: 'Day' },
@@ -25,6 +27,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ytdChangePercent',     label: 'YTD' },
   { value: 'fiveYearChangePercent',label: '5Y' },
   { value: 'fiveYearCagrPercent',  label: 'CAGR' },
+  { value: 'avgYearly',            label: 'Avg Yr' },
 ];
 
 // Category filter tabs — derived from the crypto config so they always match.
@@ -178,9 +181,10 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
   const catFiltered = selectedCat === 'All'
     ? safeData
     : safeData.filter(c => CRYPTO_CATEGORY_BY_ID.get(c.id) === selectedCat);
+  const avgYearlyMap = useAvgYearly(CRYPTO_IDS.map(coinYahooSym));
   const sorted = [...catFiltered].sort((a, b) => {
-    const av = a[sortBy] ?? -Infinity;
-    const bv = b[sortBy] ?? -Infinity;
+    const av = (sortBy === 'avgYearly' ? avgYearlyMap[coinYahooSym(a)] : (a as unknown as Record<string, number | null>)[sortBy]) ?? -Infinity;
+    const bv = (sortBy === 'avgYearly' ? avgYearlyMap[coinYahooSym(b)] : (b as unknown as Record<string, number | null>)[sortBy]) ?? -Infinity;
     return (bv as number) - (av as number);
   });
 
@@ -275,6 +279,11 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 {coin.fiveYearCagrPercent != null && (
                   <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.fiveYearCagrPercent))}>
                     5Y CAGR: {formatCagr(coin.fiveYearCagrPercent, coin.fiveYearFull)}
+                  </p>
+                )}
+                {avgYearlyMap[coinYahooSym(coin)] != null && (
+                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(avgYearlyMap[coinYahooSym(coin)]!))}>
+                    Avg Yr: {formatPercent(avgYearlyMap[coinYahooSym(coin)]!, 1)}
                   </p>
                 )}
                 <Ma200dLine price={coin.price} sma200d={coin.sma200d} />

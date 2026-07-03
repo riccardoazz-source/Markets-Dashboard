@@ -16,8 +16,9 @@ import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react'
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
+import { useAvgYearly } from '@/lib/useAvgYearly';
 
-type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent';
+type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'changePercent',         label: 'Day' },
@@ -25,6 +26,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'ytdChangePercent',      label: 'YTD' },
   { value: 'fiveYearChangePercent', label: '5Y' },
   { value: 'fiveYearCagrPercent',   label: 'CAGR' },
+  { value: 'avgYearly',             label: 'Avg Yr' },
 ];
 
 const COMMODITY_CATEGORIES = ['All', ...Array.from(new Set(COMMODITIES.map(c => c.category)))];
@@ -91,12 +93,15 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
 
   useEffect(() => { setActiveTools(DEFAULT_TOOLS); setDataMsg(null); }, [selected]);
 
+  const avgYearlyMap = useAvgYearly(COMMODITIES.map(c => c.symbol));
+
   const getValue = (q: QuoteData | undefined, key: SortKey): number | null => {
     if (!q) return null;
     if (key === 'changePercent') return q.changePercent ?? null;
     if (key === 'mtdChangePercent') return q.mtdChangePercent ?? null;
     if (key === 'ytdChangePercent') return q.ytdChangePercent ?? null;
     if (key === 'fiveYearCagrPercent') return q.fiveYearCagrPercent ?? null;
+    if (key === 'avgYearly') return avgYearlyMap[q.symbol] ?? null;
     return q.fiveYearChangePercent ?? null;
   };
 
@@ -209,6 +214,11 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                     {q.fiveYearCagrPercent != null && (
                       <p className={clsx('text-[10px] mt-0.5', colorForPercent(q.fiveYearCagrPercent))}>
                         5Y CAGR: {formatCagr(q.fiveYearCagrPercent, q.fiveYearFull)}
+                      </p>
+                    )}
+                    {avgYearlyMap[q.symbol] != null && (
+                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(avgYearlyMap[q.symbol]!))}>
+                        Avg Yr: {formatPercent(avgYearlyMap[q.symbol]!, 1)}
                       </p>
                     )}
                     <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />
