@@ -1102,6 +1102,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 isCustom={!!customRange}
                 onCustomRange={(from, to) => setCustomRange({ from, to })}
               />
+              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
             </div>
           </div>
 

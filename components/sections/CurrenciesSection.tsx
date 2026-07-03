@@ -11,7 +11,7 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { LoadingSpinner, LoadingGrid } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
-import { ArrowRight, RefreshCw, BarChart2 } from 'lucide-react';
+import { ArrowRight, RefreshCw, BarChart2, X } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
@@ -86,7 +86,8 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       const data = await res.json() as CurrencyRate[];
       setRates(data);
       setLastUpdate(new Date());
-      if (!selected && data.length > 0) setSelected({ from: data[0].from, to: data[0].to });
+      // No auto-select: the detail is now a pop-up, so opening it unprompted on tab
+      // entry is wrong — wait for the user to click a pair.
     } catch (e) {
       console.error(e);
     } finally {
@@ -290,6 +291,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                 price={selectedRate?.rate ?? undefined}
                 dayPct={selectedRate?.change1d ?? undefined}
               />
+              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
             </div>
             <TimeframeSelector
               value={timeframe}

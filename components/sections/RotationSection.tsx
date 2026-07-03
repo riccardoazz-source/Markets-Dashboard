@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import clsx from 'clsx';
 import { Star } from 'lucide-react';
-import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS, assetNavTarget } from '@/lib/config';
+import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData, QuadrantPoint } from '@/lib/gist';
 import { scoreRotation, selectPicks, ScoredItem, MODEL_WEIGHTS, PRE_BREAKOUT_SLOTS, PRE_BREAKOUT_POS52W_MIN, PRE_BREAKOUT_R1M_FLOOR } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
+import { AssetQuickView } from '@/components/ui/AssetQuickView';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
 import { SentimentPanel, SentimentSnapshot } from '@/components/sections/SentimentPanel';
 
@@ -237,7 +238,10 @@ Pre-breakout sleeve (M7) — ${PRE_BREAKOUT_SLOTS} reserved "coiled spring" slot
 }
 
 
-export function RotationSection({ onNavigate }: { onNavigate?: (section: string, symbol: string) => void }) {
+export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (section: string, symbol: string) => void; onCompare?: (symbol: string) => void }) {
+  // Clicking an asset (list row or quadrant dot) opens it right here as a pop-up,
+  // instead of navigating away to its section tab.
+  const [quickView, setQuickView] = useState<{ symbol: string; name: string; group: string } | null>(null);
   const [items, setItems] = useState<RotationItem[]>([]);
   const [rollingLoading, setRollingLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -813,7 +817,7 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
                   return (
                     <tr
                       key={item.symbol}
-                      onClick={() => { const t = assetNavTarget(item.group as string, item.symbol); onNavigate?.(t.section, t.jumpTo); }}
+                      onClick={() => setQuickView({ symbol: item.symbol, name: item.name ?? item.symbol, group: item.group as string })}
                       className={clsx(
                         'cursor-pointer transition-colors hover:bg-border/30',
                         isSelected && 'bg-accent/10'
@@ -951,16 +955,23 @@ export function RotationSection({ onNavigate }: { onNavigate?: (section: string,
         <QuadrantChart
           assets={quadrantAssets}
           loading={rollingLoading}
-          onAssetClick={a => {
-            const t = assetNavTarget(a.group, a.symbol);
-            onNavigate?.(t.section, t.jumpTo);
-          }}
+          onAssetClick={a => setQuickView({ symbol: a.symbol, name: a.name, group: a.group })}
         />
       </div>
 
       {/* Backtest — time machine. Includes the active stock lists so the model
           is tested on exactly the universe shown above. */}
       <BacktestPanel stockSymbols={stockListSymbols} onNavigate={onNavigate} />
+
+      {quickView && (
+        <AssetQuickView
+          symbol={quickView.symbol}
+          name={quickView.name}
+          group={quickView.group}
+          onClose={() => setQuickView(null)}
+          onCompare={onCompare}
+        />
+      )}
     </div>
   );
 }
