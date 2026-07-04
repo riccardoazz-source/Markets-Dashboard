@@ -425,11 +425,10 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     .slice(0, 8);
 
   // For ALL timeframes: trim every asset to the same common start date.
-  // commonStart = latest first-date after clipping each series to the
-  // selected timeframe window. This ensures:
-  //   1. No asset shows data before the selected timeframe start
-  //   2. All assets start at the same date (shortest-available series wins)
-  //   3. rawData + totalReturnData are trimmed so correlation uses the same range
+  // Each series is trimmed to the selected timeframe window [tfStart, tfEnd] and
+  // re-normalised to 0% at its OWN first point in that window. No asset shows data
+  // before the timeframe start, and a recently-listed asset no longer drags a
+  // long-history asset down to its short window (it just starts later on the chart).
   const displayAssets = useMemo(() => {
     if (!assets.length) return assets;
     try {
@@ -443,19 +442,14 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         ...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', 'MONTHLY_MARKERS', 'YEARLY_MARKERS',
         ...Object.keys(EVENT_INDICATOR_CATEGORY),
       ]);
-      const firstDates = assets
-        .filter(a => !EVENT_OVERLAY.has(a.symbol))
-        .map(a => {
-          const raw = a.rawData ?? a.data;
-          const rawFirst = raw.find(d => d.date >= tfStart)?.date ?? tfStart;
-          const tr = a.totalReturnData;
-          if (!tr || tr.length === 0) return rawFirst;
-          const trFirst = tr.find(d => d.date >= tfStart)?.date ?? tfStart;
-          return rawFirst > trFirst ? rawFirst : trFirst;
-        });
-      const commonStart = firstDates.length > 0
-        ? firstDates.reduce((a, b) => (a > b ? a : b))
-        : tfStart;
+      // Each asset spans the full timeframe window from its OWN first available point
+      // (re-normalised to 0% there below), instead of clipping EVERY series to the
+      // shortest asset's start. The old behaviour collapsed a 1Y chart to a newcomer's
+      // ~2 months whenever a long-history asset was compared with a recently-listed one
+      // (the REX crypto ETF dragging "Crypto & Digital Payments" down to 2 months).
+      // Two full-history assets still both start at tfStart, so nothing regresses; only
+      // a short-history asset now shows from its listing instead of clipping the rest.
+      const commonStart = tfStart;
 
       return assets.map(a => {
         const raw = a.rawData ?? a.data;
