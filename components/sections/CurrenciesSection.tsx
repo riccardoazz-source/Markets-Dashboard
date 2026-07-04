@@ -259,8 +259,8 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       {selected && (
         <DetailModal onClose={() => setSelected(null)}>
         <div className="rounded-xl border border-border bg-bg-card p-5 space-y-4">
-          <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap min-w-0">
               <h3 className="text-lg font-bold text-white flex items-center gap-1.5">
                 <Flag code={selected.from} size={16} />
                 {selected.from}
