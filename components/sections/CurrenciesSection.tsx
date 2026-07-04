@@ -291,15 +291,17 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                 price={selectedRate?.rate ?? undefined}
                 dayPct={selectedRate?.change1d ?? undefined}
               />
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <TimeframeSelector
+                value={timeframe}
+                onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+                options={TF_OPTIONS}
+                isCustom={!!customRange}
+                onCustomRange={(from, to) => setCustomRange({ from, to })}
+              />
               <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
             </div>
-            <TimeframeSelector
-              value={timeframe}
-              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
-              options={TF_OPTIONS}
-              isCustom={!!customRange}
-              onCustomRange={(from, to) => setCustomRange({ from, to })}
-            />
           </div>
 
           {dataMsg && (
