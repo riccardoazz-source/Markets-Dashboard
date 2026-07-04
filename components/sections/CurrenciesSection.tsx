@@ -259,7 +259,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       {selected && (
         <DetailModal onClose={() => setSelected(null)}>
         <div className="rounded-xl border border-border bg-bg-card p-5 space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-lg font-bold text-white flex items-center gap-1.5">
                 <Flag code={selected.from} size={16} />
@@ -273,6 +273,8 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                   {selectedRate.rate.toFixed(dec)}
                 </span>
               )}
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
               {onCompare && (
                 <button
                   onClick={() => onCompare(`${selected.from}${selected.to}=X`)}
@@ -291,17 +293,18 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                 price={selectedRate?.rate ?? undefined}
                 dayPct={selectedRate?.change1d ?? undefined}
               />
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <TimeframeSelector
-                value={timeframe}
-                onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
-                options={TF_OPTIONS}
-                isCustom={!!customRange}
-                onCustomRange={(from, to) => setCustomRange({ from, to })}
-              />
               <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
             </div>
+          </div>
+
+          <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+            <TimeframeSelector
+              value={timeframe}
+              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+              options={TF_OPTIONS}
+              isCustom={!!customRange}
+              onCustomRange={(from, to) => setCustomRange({ from, to })}
+            />
           </div>
 
           {dataMsg && (

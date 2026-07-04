@@ -70,12 +70,14 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
           </div>
         </div>
 
-        <TimeframeSelector
-          value={timeframe}
-          onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
-          isCustom={!!customRange}
-          onCustomRange={(from, to) => setCustomRange({ from, to })}
-        />
+        <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+          <TimeframeSelector
+            value={timeframe}
+            onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+            isCustom={!!customRange}
+            onCustomRange={(from, to) => setCustomRange({ from, to })}
+          />
+        </div>
 
         {q && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
