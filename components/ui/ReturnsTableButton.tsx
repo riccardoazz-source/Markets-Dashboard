@@ -197,23 +197,23 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
               {loading && <div className="flex items-center justify-center h-40 gap-2 text-xs text-gray-500"><LoadingSpinner size={22} /> Loading full history…</div>}
               {error && !loading && <p className="text-[12px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ {error}</p>}
               {!loading && !error && matrix && (
-                <table className="border-separate border-spacing-0.5 text-[11px] tabular-nums">
+                <table className="border-separate border-spacing-0 text-[11px] tabular-nums">
                   <thead>
                     <tr>
-                      <th className="sticky left-0 z-10 bg-[#12172a] px-2 py-1 text-left text-gray-400 font-semibold">Time</th>
+                      <th className="sticky left-0 top-0 z-30 bg-[#12172a] px-2 py-1.5 text-left text-gray-400 font-semibold border-r border-b border-white/10 min-w-[64px]">Time</th>
                       {matrix.cols.map(c => (
-                        <th key={c} className="px-2 py-1 text-center text-gray-400 font-semibold whitespace-nowrap min-w-[58px]">{c}</th>
+                        <th key={c} className="sticky top-0 z-20 bg-[#12172a] px-2 py-1.5 text-center text-gray-400 font-semibold whitespace-nowrap min-w-[62px] border-b border-white/10">{c}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {matrix.rows.map(r => (
                       <tr key={r}>
-                        <td className="sticky left-0 z-10 bg-[#12172a] px-2 py-1 text-left text-gray-300 font-semibold whitespace-nowrap">{r}</td>
+                        <td className="sticky left-0 z-10 bg-[#12172a] px-2 py-1.5 text-left text-gray-300 font-semibold whitespace-nowrap border-r border-white/10">{r}</td>
                         {matrix.cols.map((_, c) => {
                           const v = matrix.grid.get(r)?.get(c);
                           return (
-                            <td key={c} className="px-2 py-1 text-center text-gray-100 rounded whitespace-nowrap" style={{ backgroundColor: cellBg(v) }}>
+                            <td key={c} className="px-2 py-1.5 text-center text-gray-100 whitespace-nowrap" style={{ backgroundColor: cellBg(v) }}>
                               {fmt(v)}
                             </td>
                           );
@@ -222,15 +222,15 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
                     ))}
                     {/* Average / Median footer */}
                     <tr>
-                      <td className="sticky left-0 z-10 bg-[#0d1120] px-2 py-1 text-left text-gray-400 font-bold whitespace-nowrap">Average</td>
+                      <td className="sticky left-0 z-10 bg-[#0d1120] px-2 py-1.5 text-left text-gray-400 font-bold whitespace-nowrap border-r border-t border-white/10">Average</td>
                       {matrix.avg.map((v, c) => (
-                        <td key={c} className="px-2 py-1 text-center font-semibold whitespace-nowrap" style={{ backgroundColor: '#0d1120', color: v == null ? '#6b7280' : v >= 0 ? '#4ade80' : '#f87171' }}>{fmt(v)}</td>
+                        <td key={c} className="px-2 py-1.5 text-center font-semibold whitespace-nowrap border-t border-white/10" style={{ backgroundColor: '#0d1120', color: v == null ? '#6b7280' : v >= 0 ? '#4ade80' : '#f87171' }}>{fmt(v)}</td>
                       ))}
                     </tr>
                     <tr>
-                      <td className="sticky left-0 z-10 bg-[#0d1120] px-2 py-1 text-left text-gray-400 font-bold whitespace-nowrap">Median</td>
+                      <td className="sticky left-0 z-10 bg-[#0d1120] px-2 py-1.5 text-left text-gray-400 font-bold whitespace-nowrap border-r border-white/10">Median</td>
                       {matrix.median.map((v, c) => (
-                        <td key={c} className="px-2 py-1 text-center font-semibold whitespace-nowrap" style={{ backgroundColor: '#0d1120', color: v == null ? '#6b7280' : v >= 0 ? '#4ade80' : '#f87171' }}>{fmt(v)}</td>
+                        <td key={c} className="px-2 py-1.5 text-center font-semibold whitespace-nowrap" style={{ backgroundColor: '#0d1120', color: v == null ? '#6b7280' : v >= 0 ? '#4ade80' : '#f87171' }}>{fmt(v)}</td>
                       ))}
                     </tr>
                   </tbody>
