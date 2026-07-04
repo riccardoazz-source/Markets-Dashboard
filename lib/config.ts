@@ -358,7 +358,7 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/TOTBKCR' } },
   // WALCL is reported in millions on FRED; the computed handler divides by 1000 → billions.
-  { id: 'WALCL',    name: 'Fed Balance Sheet',       category: 'Money',       unit: 'B$',
+  { id: 'WALCL',    name: 'Fed Balance Sheet (WALCL)', category: 'Money',      unit: 'B$',
     source: { type: 'computed', label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/WALCL' } },
   // Bank credit quality — quarterly FRED series
