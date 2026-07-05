@@ -236,9 +236,11 @@ export function PriceChart({
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
-  // Full daily history — so long MAs (SMA 50/200/200W, EMA 100) and the trend line can be
-  // computed on the WHOLE series and drawn even when the selected window is short.
-  const wantsFullMA = !!(toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w || toolsOverlay?.ema100);
+  // Full daily history — so every moving average and the trend line can be computed on the
+  // WHOLE series and drawn even when the selected window is short (a MA is a fixed number
+  // today, independent of the view period).
+  const wantsFullMA = !!(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
+    toolsOverlay?.sma200w || toolsOverlay?.ema20 || toolsOverlay?.ema100);
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
   const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend);
 
@@ -309,8 +311,11 @@ export function PriceChart({
   const fullSMA = (period: number) => projectToVisible(fullDates, computeSMA(fullCloses, period), visDates);
   const fullEMA = (period: number) => projectToVisible(fullDates, computeEMA(fullCloses, period), visDates);
 
-  // Moving-average / band / level series
-  const sma20Vals   = toolsOverlay?.sma20   && P.sma20.ok   ? computeSMA(closes, P.sma20.period)  : null;
+  // Moving-average / band / level series — all computed on the full history (projected onto the
+  // visible bars) when it's loaded, with a graceful fallback to the visible window otherwise.
+  const sma20Vals   = toolsOverlay?.sma20
+    ? (useFull && PFull.sma20.ok    ? fullSMA(PFull.sma20.period)   : (P.sma20.ok   ? computeSMA(closes, P.sma20.period)   : null))
+    : null;
   const sma50Vals   = toolsOverlay?.sma50
     ? (useFull && PFull.sma50.ok   ? fullSMA(PFull.sma50.period)   : (P.sma50.ok   ? computeSMA(closes, P.sma50.period)   : null))
     : null;
@@ -320,7 +325,9 @@ export function PriceChart({
   const sma200wVals = toolsOverlay?.sma200w
     ? (useFull && PFull.sma200w.ok ? fullSMA(PFull.sma200w.period) : (P.sma200w.ok ? computeSMA(closes, P.sma200w.period) : null))
     : null;
-  const ema20Vals   = toolsOverlay?.ema20   && P.ema20.ok   ? computeEMA(closes, P.ema20.period)  : null;
+  const ema20Vals   = toolsOverlay?.ema20
+    ? (useFull && PFull.ema20.ok    ? fullEMA(PFull.ema20.period)   : (P.ema20.ok   ? computeEMA(closes, P.ema20.period)   : null))
+    : null;
   const ema100Vals  = toolsOverlay?.ema100
     ? (useFull && PFull.ema100.ok  ? fullEMA(PFull.ema100.period)  : (P.ema100.ok  ? computeEMA(closes, P.ema100.period)  : null))
     : null;
@@ -329,19 +336,23 @@ export function PriceChart({
 
   // Trend line (OLS linear regression of close on bar index). Fit on the full history and
   // evaluated at each visible bar's index, or fit on the visible window only — per trendFull.
+  // Coloured green when rising (slope ≥ 0), red when falling.
   let trendVals: (number | null)[] | null = null;
+  let trendUp = true;
   if (toolsOverlay?.trend) {
     if (toolsOverlay.trendFull && useFull) {
       const fit = computeTrendLine(fullCloses);
       if (fit) {
         const idx = fullIndexForVisible(fullDates, visDates);
         trendVals = data.map((_, i) => fit.intercept + fit.slope * idx[i]);
+        trendUp = fit.slope >= 0;
       }
     } else {
       const fit = computeTrendLine(data.map(d => d.close));
-      if (fit) trendVals = data.map((_, i) => fit.intercept + fit.slope * i);
+      if (fit) { trendVals = data.map((_, i) => fit.intercept + fit.slope * i); trendUp = fit.slope >= 0; }
     }
   }
+  const trendColor = trendUp ? '#10b981' : '#ef4444';
 
   // vs SPY benchmark line — rebased to the asset's first price.
   const spyLine = spyActive && spyData.length > 0
@@ -462,8 +473,8 @@ export function PriceChart({
         spyLine || trendVals) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
           {trendVals && (
-            <span className="flex items-center gap-1 text-[10px] text-emerald-300">
-              <span className="inline-block w-5 border-t-2 border-emerald-300" />
+            <span className="flex items-center gap-1 text-[10px]" style={{ color: trendColor }}>
+              <span className="inline-block w-5 border-t-2" style={{ borderColor: trendColor }} />
               Trend ({toolsOverlay?.trendFull ? 'full history' : 'visible'})
             </span>
           )}
@@ -653,9 +664,9 @@ export function PriceChart({
             <Line type="monotone" dataKey="spy" stroke="#cbd5e1" strokeWidth={1.5}
               strokeDasharray="5 3" dot={false} activeDot={false} connectNulls name="spy" />
           )}
-          {/* Trend line (linear regression) */}
+          {/* Trend line (linear regression) — green if rising, red if falling */}
           {trendVals && (
-            <Line type="linear" dataKey="trend" stroke="#34d399" strokeWidth={2}
+            <Line type="linear" dataKey="trend" stroke={trendColor} strokeWidth={2}
               dot={false} activeDot={false} connectNulls name="trend" />
           )}
 

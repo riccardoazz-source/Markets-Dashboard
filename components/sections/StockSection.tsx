@@ -249,8 +249,10 @@ function DualChart({
   onSetRange?: (from: string, to: string) => void;
 }) {
   const { handlers, range, area, clear } = useChartDragSelect();
-  // Full daily history so long MAs + the full-history trend line render on short windows.
-  const wantsFullMA = !!(toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w);
+  // Full daily history so every moving average + the full-history trend line render on short
+  // windows (a MA is a fixed number today, independent of the view period).
+  const wantsFullMA = !!(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
+    toolsOverlay?.sma200w || toolsOverlay?.ema20);
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
   const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend);
   if (!prices.length) return null;
@@ -353,7 +355,9 @@ function DualChart({
   };
 
   // Moving-average / band / level overlays (all on the price axis)
-  const sma20Vals   = toolsOverlay?.sma20   && P.sma20.ok   ? computeSMA(toolCloses, P.sma20.period)   : null;
+  const sma20Vals   = toolsOverlay?.sma20
+    ? (useFull && PFull.sma20.ok    ? projectFull(computeSMA(fullCloses, PFull.sma20.period))   : (P.sma20.ok   ? computeSMA(toolCloses, P.sma20.period)   : null))
+    : null;
   const sma50Vals   = toolsOverlay?.sma50
     ? (useFull && PFull.sma50.ok   ? projectFull(computeSMA(fullCloses, PFull.sma50.period))   : (P.sma50.ok   ? computeSMA(toolCloses, P.sma50.period)   : null))
     : null;
@@ -363,17 +367,21 @@ function DualChart({
   const sma200wVals = toolsOverlay?.sma200w
     ? (useFull && PFull.sma200w.ok ? projectFull(computeSMA(fullCloses, PFull.sma200w.period)) : (P.sma200w.ok ? computeSMA(toolCloses, P.sma200w.period) : null))
     : null;
-  const ema20Vals  = toolsOverlay?.ema20  && P.ema20.ok ? computeEMA(toolCloses, P.ema20.period) : null;
+  const ema20Vals  = toolsOverlay?.ema20
+    ? (useFull && PFull.ema20.ok    ? projectFull(computeEMA(fullCloses, PFull.ema20.period))   : (P.ema20.ok   ? computeEMA(toolCloses, P.ema20.period)   : null))
+    : null;
   const bands      = toolsOverlay?.bollinger && P.boll.ok ? computeBollingerBands(toolCloses, P.boll.period, 2) : null;
   const fibLevels  = toolsOverlay?.fib ? computeFibLevels(toolCloses) : null;
 
   // Trend line (OLS linear regression) — on full history evaluated at each visible bar, or on
   // the visible window only, per trendFull. Keyed by date so it merges into chartData below.
   const trendByDate = new Map<string, number>();
+  let trendUp = true;
   if (toolsOverlay?.trend) {
     if (toolsOverlay.trendFull && useFull) {
       const fit = computeTrendLine(fullCloses);
       if (fit) {
+        trendUp = fit.slope >= 0;
         let j = 0;
         for (let i = 0; i < visDates.length; i++) {
           while (j < fullDates.length && fullDates[j] < visDates[i]) j++;
@@ -383,10 +391,11 @@ function DualChart({
       }
     } else {
       const fit = computeTrendLine(prices.map(p => p.close));
-      if (fit) prices.forEach((p, i) => trendByDate.set(p.date, fit.intercept + fit.slope * i));
+      if (fit) { trendUp = fit.slope >= 0; prices.forEach((p, i) => trendByDate.set(p.date, fit.intercept + fit.slope * i)); }
     }
   }
   const showTrend = trendByDate.size > 0;
+  const trendColor = trendUp ? '#10b981' : '#ef4444';
   const overlayByDate = new Map<string, {
     sma20: number | null; sma50: number | null; sma200: number | null; sma200w: number | null;
     ema20: number | null; bbRange: [number, number] | null;
@@ -489,8 +498,8 @@ function DualChart({
         toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy || showTrend) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
           {showTrend && (
-            <span className="flex items-center gap-1 text-[10px] text-emerald-300">
-              <span className="inline-block w-5 border-t-2 border-emerald-300" />
+            <span className="flex items-center gap-1 text-[10px]" style={{ color: trendColor }}>
+              <span className="inline-block w-5 border-t-2" style={{ borderColor: trendColor }} />
               Trend ({toolsOverlay?.trendFull ? 'full history' : 'visible'})
             </span>
           )}
@@ -659,7 +668,7 @@ function DualChart({
             strokeWidth={1.5} strokeDasharray="5 3" dot={false} activeDot={false} connectNulls name="spy" />
         )}
         {showTrend && (
-          <Line yAxisId="price" type="linear" dataKey="trend" stroke="#34d399"
+          <Line yAxisId="price" type="linear" dataKey="trend" stroke={trendColor}
             strokeWidth={2} dot={false} activeDot={false} connectNulls name="trend" />
         )}
         {area && (

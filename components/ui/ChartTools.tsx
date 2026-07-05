@@ -42,11 +42,13 @@ export const DEFAULT_TOOLS: ActiveTools = {
   trend: false, trendFull: true,
 };
 
-// Tools whose maths benefit from the FULL price history (long MAs that can't be computed
-// inside a short window, and the full-history trend line). When any of these is active
-// the chart/tools fetch MAX history and compute on it, projecting onto the visible bars.
+// Tools whose maths use the FULL price history so the value/line is the same at every view
+// period and can be drawn even on a short window. ALL moving averages qualify (a moving
+// average is a fixed number today, independent of the selected period), plus the full-history
+// trend. When any is active the chart fetches MAX history and computes on it, projecting onto
+// the visible bars.
 export function needsFullHistory(t: ActiveTools): boolean {
-  return t.sma200 || t.sma200w || t.sma50 || t.ema100 || (t.trend && t.trendFull);
+  return t.sma20 || t.sma50 || t.sma200 || t.sma200w || t.ema20 || t.ema100 || (t.trend && t.trendFull);
 }
 
 interface Props {
@@ -106,10 +108,11 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
   );
   const n = closes.length;
 
-  // Full history (for long MAs on short windows): the current MA VALUE at the last bar
-  // is identical whether computed on the full series or the visible one — but a short
-  // window can't compute it at all. So the long MAs use the full history's closes.
-  const fullHist = useFullHistory(symbol, needsFullHistory(activeTools));
+  // Full history so EVERY moving average can be enabled and computed regardless of the view
+  // period (a MA is a fixed number today, independent of the window). Fetched as soon as the
+  // Tools panel is opened — so the chips reflect the full dataset and stay enable-able even on
+  // a 1-day view — and whenever a full-history tool is already active.
+  const fullHist = useFullHistory(symbol, open || needsFullHistory(activeTools));
   const longCloses = useMemo(
     () => (fullHist ? fullHist.map(d => d.close).filter((c): c is number => typeof c === 'number' && isFinite(c)) : closes),
     [fullHist, closes],
@@ -143,8 +146,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     const macdOk     = P.macdSlow.ok && n >= (P.macdSlow.period + P.macdSig.period);
     const macdOut    = macdOk ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period) : null;
     return {
-      sma20:   P.sma20.ok && n >= P.sma20.period   ? last(computeSMA(closes, P.sma20.period))   : null,
-      ema20:   P.ema20.ok && n >= P.ema20.period   ? last(computeEMA(closes, P.ema20.period))   : null,
+      sma20:   PL.sma20.ok && nL >= PL.sma20.period   ? last(computeSMA(longCloses, PL.sma20.period))   : null,
+      ema20:   PL.ema20.ok && nL >= PL.ema20.period   ? last(computeEMA(longCloses, PL.ema20.period))   : null,
       ema100:  PL.ema100.ok && nL >= PL.ema100.period  ? last(computeEMA(longCloses, PL.ema100.period))  : null,
       sma50:   sma50val,
       sma200:  sma200val,
@@ -206,8 +209,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                 <ToolChip active={activeTools.stdDev}  onToggle={() => toggle('stdDev')}  label="Std Dev"  color="sky"    />
                 <ToolChip active={activeTools.minMax}  onToggle={() => toggle('minMax')}  label="Min/Max"  color="violet" />
                 <Divider />
-                <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={!P.sma20.ok   || n < P.sma20.period}   />
-                <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={!P.ema20.ok   || n < P.ema20.period}   />
+                <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={!PL.sma20.ok   || nL < PL.sma20.period}   />
+                <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={!PL.ema20.ok   || nL < PL.ema20.period}   />
                 <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={!PL.ema100.ok  || nL < PL.ema100.period}  />
                 <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={!PL.sma50.ok   || nL < PL.sma50.period}   />
                 <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={!PL.sma200.ok  || nL < PL.sma200.period}  />
