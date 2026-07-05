@@ -1,5 +1,5 @@
 import { ChartPoint } from './stooq';
-import { computeSMA, avgCalendarDaysPerBar, computeIndicatorPeriods } from './indicators';
+import { computeSma200wLatest } from './indicators';
 
 export interface YahooMeta {
   price: number;
@@ -56,13 +56,12 @@ function computeSma200d(closes: (number | null)[]): number | null {
   return last200.reduce((a, b) => a + b, 0) / 200;
 }
 
-// Latest 200-week SMA. The period (1400 calendar days = 200 weeks) is scaled to
-// the data's real granularity via computeIndicatorPeriods, so equities (1.4
-// cal-days/bar) use ~1000 bars while crypto (1.0) uses ~1400. Returns null when
-// there isn't enough history (e.g. assets younger than ~4 years).
+// Latest 200-week SMA — mean of the last 200 WEEKLY closes (TradingView methodology),
+// via computeSma200wLatest which resamples the daily series to weekly closes first.
+// Returns null when there isn't enough history (assets younger than ~200 weeks).
 function computeSma200w(timestamps: number[], closes: (number | null)[]): number | null {
   const dates: string[] = [];
-  const vals: number[] = [];
+  const vals: (number | null)[] = [];
   for (let i = 0; i < closes.length; i++) {
     const c = closes[i];
     if (c != null && c > 0 && timestamps[i] != null) {
@@ -70,12 +69,7 @@ function computeSma200w(timestamps: number[], closes: (number | null)[]): number
       vals.push(c);
     }
   }
-  if (vals.length < 3) return null;
-  const P = computeIndicatorPeriods(avgCalendarDaysPerBar(dates));
-  if (!P.sma200w.ok || vals.length < P.sma200w.period) return null;
-  const sma = computeSMA(vals, P.sma200w.period);
-  for (let i = sma.length - 1; i >= 0; i--) if (sma[i] != null) return sma[i];
-  return null;
+  return computeSma200wLatest(dates, vals);
 }
 
 // YTD reference: first valid close on/after Jan 1 of the current year.

@@ -14,7 +14,7 @@ import { useFullHistory } from '@/lib/useFullHistory';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeTrendLine, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeTrendLine, computeSma200wDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 
 interface ToolsOverlay {
@@ -323,7 +323,9 @@ export function PriceChart({
     ? (useFull && PFull.sma200.ok  ? fullSMA(PFull.sma200.period)  : (P.sma200.ok  ? computeSMA(closes, P.sma200.period)  : null))
     : null;
   const sma200wVals = toolsOverlay?.sma200w
-    ? (useFull && PFull.sma200w.ok ? fullSMA(PFull.sma200w.period) : (P.sma200w.ok ? computeSMA(closes, P.sma200w.period) : null))
+    ? (useFull
+        ? projectToVisible(fullDates, computeSma200wDaily(fullDates, fullCloses), visDates)
+        : computeSma200wDaily(data.map(d => d.date), data.map(d => d.close)))
     : null;
   const ema20Vals   = toolsOverlay?.ema20
     ? (useFull && PFull.ema20.ok    ? fullEMA(PFull.ema20.period)   : (P.ema20.ok   ? computeEMA(closes, P.ema20.period)   : null))

@@ -79,6 +79,59 @@ export function computeIndicatorPeriods(avgDPB: number) {
   };
 }
 
+/**
+ * Resample a daily series (dates ascending) to weekly closes — the last valid close of each
+ * calendar week (Mon–Sun). Nulls/non-finite closes are skipped. Used for the 200-week SMA so it
+ * matches how TradingView computes it on the weekly timeframe (mean of the 200 weekly closes),
+ * instead of averaging every daily bar over the same span.
+ */
+export function resampleWeekly(dates: string[], closes: (number | null)[]): { dates: string[]; closes: number[] } {
+  const outD: string[] = [];
+  const outC: number[] = [];
+  const mondayKey = (iso: string): string => {
+    const d = new Date(iso + 'T00:00:00Z');
+    const dow = (d.getUTCDay() + 6) % 7; // days since Monday
+    d.setUTCDate(d.getUTCDate() - dow);
+    return d.toISOString().slice(0, 10);
+  };
+  let curKey = '';
+  for (let i = 0; i < dates.length; i++) {
+    const c = closes[i];
+    if (c == null || !isFinite(c)) continue;
+    const k = mondayKey(dates[i]);
+    if (k === curKey) { outD[outD.length - 1] = dates[i]; outC[outC.length - 1] = c; }
+    else { curKey = k; outD.push(dates[i]); outC.push(c); }
+  }
+  return { dates: outD, closes: outC };
+}
+
+/**
+ * 200-week SMA the TradingView way: resample to weekly closes, take SMA(200) of them, and hold
+ * each weekly value forward onto the daily dates until the next week closes. Returns an array
+ * aligned 1:1 with `dates` (null until 200 weekly closes exist). `dates`/`closes` are the raw
+ * (possibly null-containing) daily series and must be index-aligned.
+ */
+export function computeSma200wDaily(dates: string[], closes: (number | null)[]): (number | null)[] {
+  const out: (number | null)[] = new Array(dates.length).fill(null);
+  const w = resampleWeekly(dates, closes);
+  if (w.closes.length < 200) return out;
+  const wsma = computeSMA(w.closes, 200); // aligned to w.dates
+  let j = 0;
+  let lastVal: number | null = null;
+  for (let i = 0; i < dates.length; i++) {
+    while (j < w.dates.length && w.dates[j] <= dates[i]) { if (wsma[j] != null) lastVal = wsma[j]; j++; }
+    out[i] = lastVal;
+  }
+  return out;
+}
+
+/** Latest 200-week SMA value (TradingView-style weekly closes), or null if <200 weeks. */
+export function computeSma200wLatest(dates: string[], closes: (number | null)[]): number | null {
+  const series = computeSma200wDaily(dates, closes);
+  for (let i = series.length - 1; i >= 0; i--) if (series[i] != null) return series[i];
+  return null;
+}
+
 /** Sliding-window Simple Moving Average — O(n). */
 export function computeSMA(closes: number[], period: number): (number | null)[] {
   const result: (number | null)[] = [];

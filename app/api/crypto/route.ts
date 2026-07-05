@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
-import { computeSMA, avgCalendarDaysPerBar, computeIndicatorPeriods } from '@/lib/indicators';
+import { computeSma200wLatest } from '@/lib/indicators';
 
 interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
@@ -216,11 +216,11 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
     const fiveYearsAgo = Math.floor((Date.now() - 5 * 365 * 86_400_000) / 1000);
     const fiveYTs = findFirstValidTs(fiveYearsAgo);
 
-    // 200-week SMA (crypto trades 7d/wk → ~1.0 cal-days/bar → ~1400 bars).
+    // 200-week SMA — mean of the last 200 WEEKLY closes (TradingView methodology).
     let sma200w: number | null = null;
     {
       const dates: string[] = [];
-      const vals: number[] = [];
+      const vals: (number | null)[] = [];
       for (let i = 0; i < ts.length; i++) {
         const c = closes[i];
         if (typeof c === 'number' && isFinite(c) && c > 0) {
@@ -228,15 +228,7 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
           vals.push(c);
         }
       }
-      if (vals.length >= 3) {
-        const P = computeIndicatorPeriods(avgCalendarDaysPerBar(dates));
-        if (P.sma200w.ok && vals.length >= P.sma200w.period) {
-          const smaArr = computeSMA(vals, P.sma200w.period);
-          for (let i = smaArr.length - 1; i >= 0; i--) {
-            if (smaArr[i] != null) { sma200w = smaArr[i]; break; }
-          }
-        }
-      }
+      sma200w = computeSma200wLatest(dates, vals);
     }
 
     // 200-day SMA: last 200 valid closes (crypto trades daily, no scaling needed).

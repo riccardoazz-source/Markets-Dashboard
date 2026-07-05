@@ -18,7 +18,7 @@ import { useGistData } from '@/lib/gist';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
-  computeBollingerBands, computeFibLevels, computeTrendLine,
+  computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
 import {
@@ -365,7 +365,9 @@ function DualChart({
     ? (useFull && PFull.sma200.ok  ? projectFull(computeSMA(fullCloses, PFull.sma200.period))  : (P.sma200.ok  ? computeSMA(toolCloses, P.sma200.period)  : null))
     : null;
   const sma200wVals = toolsOverlay?.sma200w
-    ? (useFull && PFull.sma200w.ok ? projectFull(computeSMA(fullCloses, PFull.sma200w.period)) : (P.sma200w.ok ? computeSMA(toolCloses, P.sma200w.period) : null))
+    ? (useFull
+        ? projectFull(computeSma200wDaily(fullDates, fullCloses))
+        : computeSma200wDaily(prices.map(p => p.date), prices.map(p => p.close)))
     : null;
   const ema20Vals  = toolsOverlay?.ema20
     ? (useFull && PFull.ema20.ok    ? projectFull(computeEMA(fullCloses, PFull.ema20.period))   : (P.ema20.ok   ? computeEMA(toolCloses, P.ema20.period)   : null))

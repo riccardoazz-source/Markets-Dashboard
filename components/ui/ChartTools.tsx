@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wLatest, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
 
@@ -139,7 +139,10 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     if (closes.length === 0) return null;
     const sma50arr   = PL.sma50.ok && nL >= PL.sma50.period   ? computeSMA(longCloses, PL.sma50.period)   : null;
     const sma200arr  = PL.sma200.ok && nL >= PL.sma200.period  ? computeSMA(longCloses, PL.sma200.period)  : null;
-    const sma200warr = PL.sma200w.ok && nL >= PL.sma200w.period ? computeSMA(longCloses, PL.sma200w.period) : null;
+    // 200-week SMA uses the TradingView weekly-close method, on the raw (aligned) daily series.
+    const sma200wVal = fullHist
+      ? computeSma200wLatest(fullHist.map(d => d.date), fullHist.map(d => d.close))
+      : computeSma200wLatest(data.map(d => d.date), data.map(d => d.close));
     const sma50val   = sma50arr  ? last(sma50arr)  : null;
     const sma200val  = sma200arr ? last(sma200arr) : null;
     const bbands     = P.boll.ok && n >= P.boll.period ? computeBollingerBands(closes, P.boll.period, 2) : null;
@@ -151,7 +154,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
       ema100:  PL.ema100.ok && nL >= PL.ema100.period  ? last(computeEMA(longCloses, PL.ema100.period))  : null,
       sma50:   sma50val,
       sma200:  sma200val,
-      sma200w: sma200warr ? last(sma200warr) : null,
+      sma200w: sma200wVal,
       cross:   sma50val != null && sma200val != null
                  ? (sma50val > sma200val ? 'golden' : 'death') as 'golden' | 'death'
                  : null,
@@ -166,7 +169,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
       momentumWeekly:  n >= P.momWeek.period  ? last(computeMomentum(closes, P.momWeek.period))  : null,
       momentumMonthly: n >= P.momMonth.period ? last(computeMomentum(closes, P.momMonth.period)) : null,
     };
-  }, [closes, longCloses, n, nL, P, PL]);
+  }, [closes, longCloses, n, nL, P, PL, fullHist, data]);
 
   const toggle = (key: keyof ActiveTools) =>
     onChange({ ...activeTools, [key]: !activeTools[key] });
