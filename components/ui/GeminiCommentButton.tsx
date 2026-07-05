@@ -15,6 +15,8 @@ interface SingleContext {
   r3m?: number | null;
   r6m?: number | null;
   r1y?: number | null;
+  timeframe?: string;   // the period the user is viewing
+  tools?: string[];     // active chart tools/indicators with their latest values
 }
 
 interface CompareContext {

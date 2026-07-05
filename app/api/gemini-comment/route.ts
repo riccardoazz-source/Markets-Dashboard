@@ -16,6 +16,8 @@ interface SingleAssetRequest {
   r3m?: number | null;
   r6m?: number | null;
   r1y?: number | null;
+  timeframe?: string;
+  tools?: string[];
   messages?: Turn[];
 }
 
@@ -85,7 +87,7 @@ export async function POST(req: Request) {
       'For your FIRST reply: give a 4-5 sentence comparative analysis — which asset leads and why, what the correlations mean for diversification, and one risk or opportunity. ' +
       'For LATER replies: answer the user\'s specific follow-up about these assets.';
   } else {
-    const { name, symbol, assetClass, price, dayPct, r1m, r3m, r6m, r1y } = body as SingleAssetRequest;
+    const { name, symbol, assetClass, price, dayPct, r1m, r3m, r6m, r1y, timeframe, tools } = body as SingleAssetRequest;
     const dataBlock = [
       price != null ? `Price: ${price.toLocaleString()}` : null,
       `Day: ${p(dayPct)}`,
@@ -94,6 +96,7 @@ export async function POST(req: Request) {
       r6m != null ? `6M: ${p(r6m)}` : null,
       r1y != null ? `1Y: ${p(r1y)}` : null,
     ].filter(Boolean).join(' · ');
+    const toolsBlock = tools && tools.length ? tools.join('\n') : 'none active';
 
     systemInstruction =
       `You are a market analyst in an ongoing chat with a trader. You are discussing ONLY ${name} (${symbol}), asset class ${assetClass}. ` +
@@ -101,8 +104,11 @@ export async function POST(req: Request) {
       `ALWAYS use web search when current news, catalysts or facts about ${name} would help. Cite specific numbers. ` +
       'Keep every reply concise (max ~130 words), plain prose, no markdown.\n\n' +
       `ASSET: ${name} (${symbol}) · Class: ${assetClass}\n` +
-      `PERFORMANCE: ${dataBlock}\n\n` +
+      `CHART VIEW: the trader is looking at the ${timeframe ?? 'recent'} timeframe.\n` +
+      `PERFORMANCE: ${dataBlock}\n` +
+      `ACTIVE CHART TOOLS (indicators the trader currently has on the chart, with latest values):\n${toolsBlock}\n\n` +
       `For your FIRST reply: give a 3-4 sentence commentary — the key catalyst driving recent action (from web search), the current trend from the data, and one risk or opportunity. ` +
+      'When the trader has indicators active, weave the most relevant one into your read (e.g. price vs SMA 200, RSI regime, MACD, trend line). ' +
       'For LATER replies: answer the user\'s specific follow-up about this asset.';
   }
 

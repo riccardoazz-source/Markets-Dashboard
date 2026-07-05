@@ -17,6 +17,7 @@ import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
+import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
@@ -375,6 +376,8 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                 assetClass="Sectors"
                 price={selectedSector?.price}
                 dayPct={selectedSector?.changePercent}
+                timeframe={timeframe}
+                tools={historical.length > 0 ? summarizeTools(activeTools, historical) : undefined}
               />
               <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300">
                 <X size={16} />

@@ -29,6 +29,7 @@ import { format, parseISO } from 'date-fns';
 import clsx from 'clsx';
 import { Search, X, BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
+import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
@@ -1176,6 +1177,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 name={selected.name}
                 symbol={selected.symbol}
                 assetClass="Stocks"
+                timeframe={timeframe}
+                tools={prices.length > 0 ? summarizeTools(activeTools, prices) : undefined}
               />
               <TimeframeSelector
                 value={timeframe}

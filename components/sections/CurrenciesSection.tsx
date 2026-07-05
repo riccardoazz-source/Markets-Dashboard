@@ -13,6 +13,7 @@ import { LoadingSpinner, LoadingGrid } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { ArrowRight, RefreshCw, BarChart2, X } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
+import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 
@@ -292,6 +293,8 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                 assetClass="Currency"
                 price={selectedRate?.rate ?? undefined}
                 dayPct={selectedRate?.change1d ?? undefined}
+                timeframe={timeframe}
+                tools={historical.length > 0 ? summarizeTools(activeTools, historical) : undefined}
               />
               <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
             </div>
