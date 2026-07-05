@@ -122,12 +122,21 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
   const stats = useMemo(() => computeStats(closes, avgDPB), [closes, avgDPB]);
   const P = useMemo(() => computeIndicatorPeriods(avgDPB), [avgDPB]);
 
+  // Long MAs are computed on the FULL history, so their periods MUST be scaled to the full
+  // history's own granularity — NOT the visible window's. Otherwise a short view (few bars →
+  // a different avg-days-per-bar estimate) would rescale the period and the SMA/EMA value would
+  // change with the selected period, which is wrong: a moving average is a fixed number today.
+  const PL = useMemo(
+    () => (fullHist ? computeIndicatorPeriods(avgCalendarDaysPerBar(fullHist.map(d => d.date))) : P),
+    [fullHist, P],
+  );
+
   // Pre-compute all indicator current values once per data change
   const iv = useMemo(() => {
     if (closes.length === 0) return null;
-    const sma50arr   = P.sma50.ok && nL >= P.sma50.period   ? computeSMA(longCloses, P.sma50.period)   : null;
-    const sma200arr  = P.sma200.ok && nL >= P.sma200.period  ? computeSMA(longCloses, P.sma200.period)  : null;
-    const sma200warr = P.sma200w.ok && nL >= P.sma200w.period ? computeSMA(longCloses, P.sma200w.period) : null;
+    const sma50arr   = PL.sma50.ok && nL >= PL.sma50.period   ? computeSMA(longCloses, PL.sma50.period)   : null;
+    const sma200arr  = PL.sma200.ok && nL >= PL.sma200.period  ? computeSMA(longCloses, PL.sma200.period)  : null;
+    const sma200warr = PL.sma200w.ok && nL >= PL.sma200w.period ? computeSMA(longCloses, PL.sma200w.period) : null;
     const sma50val   = sma50arr  ? last(sma50arr)  : null;
     const sma200val  = sma200arr ? last(sma200arr) : null;
     const bbands     = P.boll.ok && n >= P.boll.period ? computeBollingerBands(closes, P.boll.period, 2) : null;
@@ -136,7 +145,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     return {
       sma20:   P.sma20.ok && n >= P.sma20.period   ? last(computeSMA(closes, P.sma20.period))   : null,
       ema20:   P.ema20.ok && n >= P.ema20.period   ? last(computeEMA(closes, P.ema20.period))   : null,
-      ema100:  P.ema100.ok && nL >= P.ema100.period  ? last(computeEMA(longCloses, P.ema100.period))  : null,
+      ema100:  PL.ema100.ok && nL >= PL.ema100.period  ? last(computeEMA(longCloses, PL.ema100.period))  : null,
       sma50:   sma50val,
       sma200:  sma200val,
       sma200w: sma200warr ? last(sma200warr) : null,
@@ -154,12 +163,15 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
       momentumWeekly:  n >= P.momWeek.period  ? last(computeMomentum(closes, P.momWeek.period))  : null,
       momentumMonthly: n >= P.momMonth.period ? last(computeMomentum(closes, P.momMonth.period)) : null,
     };
-  }, [closes, longCloses, n, nL, P]);
+  }, [closes, longCloses, n, nL, P, PL]);
 
   const toggle = (key: keyof ActiveTools) =>
     onChange({ ...activeTools, [key]: !activeTools[key] });
 
-  const activeCount = Object.values(activeTools).filter(Boolean).length;
+  // trendFull is a modifier of the Trend tool (full vs visible fit), not a tool of its own —
+  // exclude it so the badge doesn't count a tool that isn't active.
+  const activeCount = (Object.keys(activeTools) as (keyof ActiveTools)[])
+    .filter(k => k !== 'trendFull' && activeTools[k]).length;
   const showResults = activeCount > 0 && stats != null && iv != null;
 
   return (
@@ -196,10 +208,10 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                 <Divider />
                 <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={!P.sma20.ok   || n < P.sma20.period}   />
                 <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={!P.ema20.ok   || n < P.ema20.period}   />
-                <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={!P.ema100.ok  || nL < P.ema100.period}  />
-                <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={!P.sma50.ok   || nL < P.sma50.period}   />
-                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={!P.sma200.ok  || nL < P.sma200.period}  />
-                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={!P.sma200w.ok || nL < P.sma200w.period} title={!P.sma200w.ok || nL < P.sma200w.period ? 'Needs ~4y of data (not enough price history for this asset)' : undefined} />
+                <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={!PL.ema100.ok  || nL < PL.ema100.period}  />
+                <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={!PL.sma50.ok   || nL < PL.sma50.period}   />
+                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={!PL.sma200.ok  || nL < PL.sma200.period}  />
+                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={!PL.sma200w.ok || nL < PL.sma200w.period} title={!PL.sma200w.ok || nL < PL.sma200w.period ? 'Needs ~4y of data (not enough price history for this asset)' : undefined} />
                 <Divider />
                 <ToolChip active={activeTools.trend}  onToggle={() => toggle('trend')}  label="Trend" color="green" disabled={n < 2} />
                 {activeTools.trend && (
