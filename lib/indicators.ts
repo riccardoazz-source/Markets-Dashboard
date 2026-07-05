@@ -39,36 +39,41 @@ export function barsForCalDays(calendarDays: number, avgDPB: number): number {
 }
 
 /**
- * Scaled periods (in bars) for all standard chart indicators, adapted to the
- * data's granularity. Each indicator is defined by a real-world calendar span:
+ * Periods (in bars) for all standard chart indicators.
  *
- *   "SMA 20"  = 20 trading days × 1.4 cal/trading = 28 cal days
- *   "SMA 200W"= 200 weeks × 7                     = 1400 cal days
- *   "RSI 14"  = 14 trading days × 1.4             = 20 cal days
- *   …
+ * The bar-count indicators use their CONVENTIONAL period in bars — exactly like
+ * TradingView, where "SMA 200" is 200 candles regardless of the instrument. These
+ * are computed on the data's native daily bars, so "SMA 200" = 200 daily bars for
+ * every asset (200 sessions for equities, 200 days for crypto). The previous
+ * "N trading days × 1.4 calendar ÷ avgDPB" scaling only round-tripped to 200 for
+ * equities (avgDPB ≈ 1.4); for crypto (avgDPB ≈ 1.0, trades 7 d/wk) it inflated
+ * every period (e.g. SMA 200 → 280 bars), which is why crypto MAs disagreed with
+ * TradingView. Literal bar counts fix that and leave equities unchanged.
  *
- * A chip is considered feasible (not disabled) only if its computed period
- * is ≥ its minBars. Returns both the period to pass to computeXXX and a
- * boolean `ok` that drives the disabled prop.
+ * Only SMA 200W (defined in calendar WEEKS, not in the data's own bars) and the
+ * momentum look-backs (calendar days) still scale by the data's granularity.
+ *
+ * `ok` guards feasibility; the real "enough history" check (n ≥ period) is done at
+ * the call sites.
  */
 export function computeIndicatorPeriods(avgDPB: number) {
-  // p(calendarDays, minBars) → { period, ok: period >= minBars && period >= 2 }
-  const p = (calDays: number, minBars: number) => {
+  const lit = (period: number, minBars: number) => ({ period, ok: period >= Math.max(minBars, 2) });
+  const cal = (calDays: number, minBars: number) => {
     const period = barsForCalDays(calDays, avgDPB);
     return { period, ok: period >= Math.max(minBars, 2) };
   };
   return {
-    sma20:    p(28,   3),    // 20 trading days
-    sma50:    p(70,   3),    // 50 trading days
-    sma200:   p(280,  3),    // 200 trading days
-    sma200w:  p(1400, 3),    // 200 calendar weeks
-    ema20:    p(28,   3),    // 20 trading days
-    ema100:   p(140,  3),    // 100 trading days
-    boll:     p(28,   10),   // 20 trading days; min 10 for meaningful variance
-    rsi:      p(20,   10),   // 14 trading days
-    macdFast: p(17,   3),    // 12 trading days
-    macdSlow: p(36,   5),    // 26 trading days
-    macdSig:  p(13,   3),    // 9 trading days
+    sma20:    lit(20,   3),
+    sma50:    lit(50,   3),
+    sma200:   lit(200,  3),
+    sma200w:  cal(1400, 3),   // 200 calendar weeks → bars for this data's cadence
+    ema20:    lit(20,   3),
+    ema100:   lit(100,  3),
+    boll:     lit(20,   10),  // 20-period Bollinger; min 10 for meaningful variance
+    rsi:      lit(14,   10),
+    macdFast: lit(12,   3),
+    macdSlow: lit(26,   5),
+    macdSig:  lit(9,    3),
     momWeek:  { period: Math.max(1, Math.round(7  / avgDPB)), ok: true },
     momMonth: { period: Math.max(1, Math.round(30 / avgDPB)), ok: true },
   };
