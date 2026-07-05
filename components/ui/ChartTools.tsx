@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeSma200wLatest, computeRsiWeeklyDaily, computeMacdWeeklyDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wLatest, computeRsiResampledDaily, computeMacdResampledDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
 
@@ -24,9 +24,11 @@ export interface ActiveTools {
   bollinger: boolean;
   fib: boolean;
   rsi: boolean;
-  rsiWeekly: boolean;  // true = RSI on weekly closes; false = daily
+  rsiWeekly: boolean;   // RSI timeframe: weekly / monthly / (neither = daily) — mutually exclusive
+  rsiMonthly: boolean;
   macd: boolean;
-  macdWeekly: boolean; // true = MACD on weekly closes; false = daily
+  macdWeekly: boolean;  // MACD timeframe: weekly / monthly / (neither = daily) — mutually exclusive
+  macdMonthly: boolean;
   momentumDaily: boolean;
   momentumWeekly: boolean;
   momentumMonthly: boolean;
@@ -38,7 +40,9 @@ export interface ActiveTools {
 export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
   sma20: false, sma50: false, sma200: false, sma200w: false, ema20: false, ema100: false,
-  bollinger: false, fib: false, rsi: false, rsiWeekly: false, macd: false, macdWeekly: false,
+  bollinger: false, fib: false,
+  rsi: false, rsiWeekly: false, rsiMonthly: false,
+  macd: false, macdWeekly: false, macdMonthly: false,
   momentumDaily: false, momentumWeekly: false, momentumMonthly: false,
   spyRatio: false,
   trend: false, trendFull: true,
@@ -51,7 +55,9 @@ export const DEFAULT_TOOLS: ActiveTools = {
 // the visible bars.
 export function needsFullHistory(t: ActiveTools): boolean {
   return t.sma20 || t.sma50 || t.sma200 || t.sma200w || t.ema20 || t.ema100 ||
-    (t.trend && t.trendFull) || (t.rsi && t.rsiWeekly) || (t.macd && t.macdWeekly);
+    (t.trend && t.trendFull) ||
+    (t.rsi && (t.rsiWeekly || t.rsiMonthly)) ||
+    (t.macd && (t.macdWeekly || t.macdMonthly));
 }
 
 interface Props {
@@ -149,10 +155,12 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     const sma50val   = sma50arr  ? last(sma50arr)  : null;
     const sma200val  = sma200arr ? last(sma200arr) : null;
     const bbands     = P.boll.ok && n >= P.boll.period ? computeBollingerBands(closes, P.boll.period, 2) : null;
-    const macdOut    = activeTools.macdWeekly
-      ? (fullHist ? computeMacdWeeklyDaily(fullHist.map(d => d.date), fullHist.map(d => d.close)) : null)
+    const macdGrain  = activeTools.macdMonthly ? 'monthly' : activeTools.macdWeekly ? 'weekly' : null;
+    const macdOut    = macdGrain
+      ? (fullHist ? computeMacdResampledDaily(fullHist.map(d => d.date), fullHist.map(d => d.close), macdGrain) : null)
       : (P.macdSlow.ok && n >= (P.macdSlow.period + P.macdSig.period)
           ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period) : null);
+    const rsiGrainV  = activeTools.rsiMonthly ? 'monthly' : activeTools.rsiWeekly ? 'weekly' : null;
     return {
       sma20:   PL.sma20.ok && nL >= PL.sma20.period   ? last(computeSMA(longCloses, PL.sma20.period))   : null,
       ema20:   PL.ema20.ok && nL >= PL.ema20.period   ? last(computeEMA(longCloses, PL.ema20.period))   : null,
@@ -165,8 +173,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                  : null,
       bbUpper: bbands ? last(bbands.upper) : null,
       bbLower: bbands ? last(bbands.lower) : null,
-      rsi:    activeTools.rsiWeekly
-                ? (fullHist ? last(computeRsiWeeklyDaily(fullHist.map(d => d.date), fullHist.map(d => d.close), 14)) : null)
+      rsi:    rsiGrainV
+                ? (fullHist ? last(computeRsiResampledDaily(fullHist.map(d => d.date), fullHist.map(d => d.close), rsiGrainV, 14)) : null)
                 : (P.rsi.ok && n >= P.rsi.period ? last(computeRSI(closes, P.rsi.period)) : null),
       macd:   macdOut ? last(macdOut.macd)   : null,
       signal: macdOut ? last(macdOut.signal) : null,
@@ -176,14 +184,15 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
       momentumWeekly:  n >= P.momWeek.period  ? last(computeMomentum(closes, P.momWeek.period))  : null,
       momentumMonthly: n >= P.momMonth.period ? last(computeMomentum(closes, P.momMonth.period)) : null,
     };
-  }, [closes, longCloses, n, nL, P, PL, fullHist, data, activeTools.rsiWeekly, activeTools.macdWeekly]);
+  }, [closes, longCloses, n, nL, P, PL, fullHist, data,
+      activeTools.rsiWeekly, activeTools.rsiMonthly, activeTools.macdWeekly, activeTools.macdMonthly]);
 
   const toggle = (key: keyof ActiveTools) =>
     onChange({ ...activeTools, [key]: !activeTools[key] });
 
   // trendFull / rsiWeekly / macdWeekly are modifiers of the Trend / RSI / MACD tools, not tools
   // of their own — exclude them so the badge doesn't count a tool that isn't active.
-  const MODIFIER_KEYS: (keyof ActiveTools)[] = ['trendFull', 'rsiWeekly', 'macdWeekly'];
+  const MODIFIER_KEYS: (keyof ActiveTools)[] = ['trendFull', 'rsiWeekly', 'rsiMonthly', 'macdWeekly', 'macdMonthly'];
   const activeCount = (Object.keys(activeTools) as (keyof ActiveTools)[])
     .filter(k => !MODIFIER_KEYS.includes(k) && activeTools[k]).length;
   const showResults = activeCount > 0 && stats != null && iv != null;
@@ -196,6 +205,14 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
   const setMom = (p: 'daily' | 'weekly' | 'monthly' | null) =>
     onChange({ ...activeTools, momentumDaily: p === 'daily', momentumWeekly: p === 'weekly', momentumMonthly: p === 'monthly' });
   const nextMom = () => setMom(momPeriod === 'daily' ? 'weekly' : momPeriod === 'weekly' ? 'monthly' : 'daily');
+
+  // RSI / MACD share a daily→weekly→monthly selector (weekly & monthly flags are mutually exclusive).
+  type Grain3 = 'daily' | 'weekly' | 'monthly';
+  const nextGrain = (g: Grain3): Grain3 => (g === 'daily' ? 'weekly' : g === 'weekly' ? 'monthly' : 'daily');
+  const rsiGrain: Grain3 = activeTools.rsiMonthly ? 'monthly' : activeTools.rsiWeekly ? 'weekly' : 'daily';
+  const cycleRsi = () => { const g = nextGrain(rsiGrain); onChange({ ...activeTools, rsiWeekly: g === 'weekly', rsiMonthly: g === 'monthly' }); };
+  const macdGrain: Grain3 = activeTools.macdMonthly ? 'monthly' : activeTools.macdWeekly ? 'weekly' : 'daily';
+  const cycleMacd = () => { const g = nextGrain(macdGrain); onChange({ ...activeTools, macdWeekly: g === 'weekly', macdMonthly: g === 'monthly' }); };
 
   return (
     <div className="border border-border rounded-xl overflow-hidden">
@@ -253,21 +270,21 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                 <ToolChip active={activeTools.rsi}  onToggle={() => toggle('rsi')}  label="RSI 14" color="indigo" disabled={n < 2} />
                 {activeTools.rsi && (
                   <button
-                    onClick={() => onChange({ ...activeTools, rsiWeekly: !activeTools.rsiWeekly })}
-                    className="text-[10px] px-2 py-0.5 rounded-md border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 transition-colors"
-                    title="Compute RSI 14 on weekly closes or on daily closes"
+                    onClick={cycleRsi}
+                    className="text-[10px] px-2 py-0.5 rounded-md border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 transition-colors capitalize"
+                    title="Compute RSI 14 on daily / weekly / monthly closes"
                   >
-                    {activeTools.rsiWeekly ? 'weekly' : 'daily'}
+                    {rsiGrain}
                   </button>
                 )}
                 <ToolChip active={activeTools.macd} onToggle={() => toggle('macd')} label="MACD"   color="green"  disabled={n < 2} />
                 {activeTools.macd && (
                   <button
-                    onClick={() => onChange({ ...activeTools, macdWeekly: !activeTools.macdWeekly })}
-                    className="text-[10px] px-2 py-0.5 rounded-md border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors"
-                    title="Compute MACD on weekly closes or on daily closes"
+                    onClick={cycleMacd}
+                    className="text-[10px] px-2 py-0.5 rounded-md border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors capitalize"
+                    title="Compute MACD on daily / weekly / monthly closes"
                   >
-                    {activeTools.macdWeekly ? 'weekly' : 'daily'}
+                    {macdGrain}
                   </button>
                 )}
                 <Divider />
@@ -358,7 +375,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
 
                   {activeTools.rsi && iv.rsi != null && (
                     <Res
-                      label={`RSI 14 ${activeTools.rsiWeekly ? 'W' : 'D'}${iv.rsi > 70 ? ' · Overbought' : iv.rsi < 30 ? ' · Oversold' : ''}`}
+                      label={`RSI 14 ${rsiGrain === 'monthly' ? 'M' : rsiGrain === 'weekly' ? 'W' : 'D'}${iv.rsi > 70 ? ' · Overbought' : iv.rsi < 30 ? ' · Oversold' : ''}`}
                       value={iv.rsi.toFixed(1)}
                       color={iv.rsi > 70 ? 'text-red-400' : iv.rsi < 30 ? 'text-emerald-400' : 'text-indigo-400'}
                     />
@@ -366,7 +383,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
 
                   {activeTools.macd && iv.macd != null && iv.signal != null && iv.hist != null && (
                     <>
-                      <Res label={`MACD ${activeTools.macdWeekly ? 'W' : 'D'}`} value={iv.macd.toFixed(decimals)} color="text-emerald-400" />
+                      <Res label={`MACD ${macdGrain === 'monthly' ? 'M' : macdGrain === 'weekly' ? 'W' : 'D'}`} value={iv.macd.toFixed(decimals)} color="text-emerald-400" />
                       <Res label="Signal" value={iv.signal.toFixed(decimals)} color="text-emerald-400" />
                       <Res
                         label="Histogram"

@@ -6,7 +6,7 @@ import { CHART_COLORS } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeSma200wDaily, computeRsiWeeklyDaily, computeMacdWeeklyDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wDaily, computeRsiResampledDaily, computeMacdResampledDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import {
@@ -63,24 +63,26 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
     bbMid:  bands ? (bands.middle[i] ?? null) : null,
   })), [prices, sma20Vals, sma50Vals, sma200Vals, sma200wVals, ema20Vals, ema100Vals, bands]);
 
+  const rsiGrain = activeTools.rsiMonthly ? 'monthly' : activeTools.rsiWeekly ? 'weekly' : null;
   const rsiVals = useMemo(
     () => !activeTools.rsi ? null
-      : activeTools.rsiWeekly
-        ? computeRsiWeeklyDaily(prices.map(p => p.date), prices.map(p => p.close), 14)
+      : rsiGrain
+        ? computeRsiResampledDaily(prices.map(p => p.date), prices.map(p => p.close), rsiGrain, 14)
         : (P.rsi.ok ? computeRSI(closes, P.rsi.period) : null),
-    [closes, prices, activeTools.rsi, activeTools.rsiWeekly, P],
+    [closes, prices, activeTools.rsi, rsiGrain, P],
   );
   const rsiData = useMemo(
     () => rsiVals ? prices.map((p, i) => ({ date: p.date, rsi: rsiVals[i] })) : [],
     [prices, rsiVals],
   );
 
+  const macdGrain = activeTools.macdMonthly ? 'monthly' : activeTools.macdWeekly ? 'weekly' : null;
   const macdResult = useMemo(
     () => !activeTools.macd ? null
-      : activeTools.macdWeekly
-        ? computeMacdWeeklyDaily(prices.map(p => p.date), prices.map(p => p.close))
+      : macdGrain
+        ? computeMacdResampledDaily(prices.map(p => p.date), prices.map(p => p.close), macdGrain)
         : (P.macdSlow.ok ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period) : null),
-    [closes, prices, activeTools.macd, activeTools.macdWeekly, P],
+    [closes, prices, activeTools.macd, macdGrain, P],
   );
   const macdData = useMemo(() => macdResult
     ? prices.map((p, i) => ({ date: p.date, macd: macdResult.macd[i], signal: macdResult.signal[i], hist: macdResult.hist[i] }))
@@ -208,7 +210,7 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
       {/* RSI sub-chart */}
       {activeTools.rsi && rsiData.filter(d => d.rsi != null).length > 0 && (
         <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-          <p className="text-[10px] text-indigo-400 font-semibold mb-1">RSI 14 {activeTools.rsiWeekly ? 'Weekly' : 'Daily'}</p>
+          <p className="text-[10px] text-indigo-400 font-semibold mb-1 capitalize">RSI 14 {rsiGrain ?? 'daily'}</p>
           <ResponsiveContainer width="100%" height={80}>
             <LineChart data={rsiData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -231,7 +233,7 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
       {/* MACD sub-chart */}
       {activeTools.macd && macdData.filter(d => d.hist != null).length > 0 && (
         <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-          <p className="text-[10px] text-blue-400 font-semibold mb-1">MACD (12, 26, 9) {activeTools.macdWeekly ? 'Weekly' : 'Daily'}</p>
+          <p className="text-[10px] text-blue-400 font-semibold mb-1 capitalize">MACD (12, 26, 9) {macdGrain ?? 'daily'}</p>
           <ResponsiveContainer width="100%" height={80}>
             <ComposedChart data={macdData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />

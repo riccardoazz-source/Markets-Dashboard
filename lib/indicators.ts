@@ -79,30 +79,42 @@ export function computeIndicatorPeriods(avgDPB: number) {
   };
 }
 
-/**
- * Resample a daily series (dates ascending) to weekly closes — the last valid close of each
- * calendar week (Mon–Sun). Nulls/non-finite closes are skipped. Used for the 200-week SMA so it
- * matches how TradingView computes it on the weekly timeframe (mean of the 200 weekly closes),
- * instead of averaging every daily bar over the same span.
- */
-export function resampleWeekly(dates: string[], closes: (number | null)[]): { dates: string[]; closes: number[] } {
+// Bucket a daily series by a key function, keeping the last valid close of each bucket.
+function resampleBy(
+  dates: string[], closes: (number | null)[], keyOf: (iso: string) => string,
+): { dates: string[]; closes: number[] } {
   const outD: string[] = [];
   const outC: number[] = [];
-  const mondayKey = (iso: string): string => {
-    const d = new Date(iso + 'T00:00:00Z');
-    const dow = (d.getUTCDay() + 6) % 7; // days since Monday
-    d.setUTCDate(d.getUTCDate() - dow);
-    return d.toISOString().slice(0, 10);
-  };
   let curKey = '';
   for (let i = 0; i < dates.length; i++) {
     const c = closes[i];
     if (c == null || !isFinite(c)) continue;
-    const k = mondayKey(dates[i]);
+    const k = keyOf(dates[i]);
     if (k === curKey) { outD[outD.length - 1] = dates[i]; outC[outC.length - 1] = c; }
     else { curKey = k; outD.push(dates[i]); outC.push(c); }
   }
   return { dates: outD, closes: outC };
+}
+
+const mondayKey = (iso: string): string => {
+  const d = new Date(iso + 'T00:00:00Z');
+  const dow = (d.getUTCDay() + 6) % 7; // days since Monday
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * Resample a daily series (dates ascending) to weekly closes — the last valid close of each
+ * calendar week (Mon–Sun). Used for the 200-week SMA and weekly RSI/MACD so they match how
+ * TradingView computes them on the weekly timeframe (from weekly closes).
+ */
+export function resampleWeekly(dates: string[], closes: (number | null)[]): { dates: string[]; closes: number[] } {
+  return resampleBy(dates, closes, mondayKey);
+}
+
+/** Resample a daily series to monthly closes — the last valid close of each calendar month. */
+export function resampleMonthly(dates: string[], closes: (number | null)[]): { dates: string[]; closes: number[] } {
+  return resampleBy(dates, closes, iso => iso.slice(0, 7)); // YYYY-MM
 }
 
 /**
@@ -132,23 +144,36 @@ export function computeSma200wLatest(dates: string[], closes: (number | null)[])
   return null;
 }
 
-/**
- * RSI(period) computed on WEEKLY closes (last close of each week), then held forward onto each
- * daily date. Returns an array aligned 1:1 with `dates`, so a weekly RSI can be shown on a daily
- * chart — matching TradingView's weekly-timeframe RSI. `dates`/`closes` are the raw daily series.
- */
-export function computeRsiWeeklyDaily(dates: string[], closes: (number | null)[], period = 14): (number | null)[] {
+export type Grain = 'weekly' | 'monthly';
+
+const resampleGrain = (grain: Grain, dates: string[], closes: (number | null)[]) =>
+  grain === 'monthly' ? resampleMonthly(dates, closes) : resampleWeekly(dates, closes);
+
+// Hold a value-per-bucket series (aligned to bucketDates) forward onto each daily date.
+function projectBucketsToDaily(
+  dates: string[], bucketDates: string[], bucketVals: (number | null)[],
+): (number | null)[] {
   const out: (number | null)[] = new Array(dates.length).fill(null);
-  const w = resampleWeekly(dates, closes);
-  if (w.closes.length <= period) return out;
-  const wr = computeRSI(w.closes, period); // aligned to w.dates
   let j = 0;
   let lastVal: number | null = null;
   for (let i = 0; i < dates.length; i++) {
-    while (j < w.dates.length && w.dates[j] <= dates[i]) { if (wr[j] != null) lastVal = wr[j]; j++; }
+    while (j < bucketDates.length && bucketDates[j] <= dates[i]) { if (bucketVals[j] != null) lastVal = bucketVals[j]; j++; }
     out[i] = lastVal;
   }
   return out;
+}
+
+/**
+ * RSI(period) computed on WEEKLY or MONTHLY closes, then held forward onto each daily date.
+ * Returns an array aligned 1:1 with `dates`, so a higher-timeframe RSI can be drawn on a daily
+ * chart — matching TradingView's weekly/monthly RSI. `dates`/`closes` are the raw daily series.
+ */
+export function computeRsiResampledDaily(
+  dates: string[], closes: (number | null)[], grain: Grain, period = 14,
+): (number | null)[] {
+  const w = resampleGrain(grain, dates, closes);
+  if (w.closes.length <= period) return new Array(dates.length).fill(null);
+  return projectBucketsToDaily(dates, w.dates, computeRSI(w.closes, period));
 }
 
 /** Sliding-window Simple Moving Average — O(n). */
@@ -291,29 +316,22 @@ export function computeTrendLine(closes: (number | null)[]): { slope: number; in
 }
 
 /**
- * MACD(fast/slow/signal) computed on WEEKLY closes, each of the three series held forward onto
- * the daily dates. Returns arrays aligned 1:1 with `dates`, so a weekly MACD can be shown on a
- * daily chart — matching TradingView's weekly-timeframe MACD. `dates`/`closes` are the raw daily
- * series.
+ * MACD(fast/slow/signal) computed on WEEKLY or MONTHLY closes, each series held forward onto the
+ * daily dates. Returns arrays aligned 1:1 with `dates`, so a higher-timeframe MACD can be drawn
+ * on a daily chart — matching TradingView's weekly/monthly MACD. `dates`/`closes` are raw daily.
  */
-export function computeMacdWeeklyDaily(
-  dates: string[], closes: (number | null)[], fast = 12, slow = 26, signal = 9,
+export function computeMacdResampledDaily(
+  dates: string[], closes: (number | null)[], grain: Grain, fast = 12, slow = 26, signal = 9,
 ): { macd: (number | null)[]; signal: (number | null)[]; hist: (number | null)[] } {
   const empty = () => new Array(dates.length).fill(null) as (number | null)[];
-  const w = resampleWeekly(dates, closes);
+  const w = resampleGrain(grain, dates, closes);
   if (w.closes.length <= slow + signal) return { macd: empty(), signal: empty(), hist: empty() };
   const m = computeMACD(w.closes, fast, slow, signal); // aligned to w.dates
-  const project = (arr: (number | null)[]): (number | null)[] => {
-    const out = new Array(dates.length).fill(null) as (number | null)[];
-    let j = 0;
-    let lastVal: number | null = null;
-    for (let i = 0; i < dates.length; i++) {
-      while (j < w.dates.length && w.dates[j] <= dates[i]) { if (arr[j] != null) lastVal = arr[j]; j++; }
-      out[i] = lastVal;
-    }
-    return out;
+  return {
+    macd:   projectBucketsToDaily(dates, w.dates, m.macd),
+    signal: projectBucketsToDaily(dates, w.dates, m.signal),
+    hist:   projectBucketsToDaily(dates, w.dates, m.hist),
   };
-  return { macd: project(m.macd), signal: project(m.signal), hist: project(m.hist) };
 }
 
 /** MACD (default 12/26/9 trading days, auto-scaled via barsForCalDays). Returns three arrays of length = closes.length. */

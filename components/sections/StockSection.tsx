@@ -18,7 +18,7 @@ import { useGistData } from '@/lib/gist';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
-  computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily, computeRsiWeeklyDaily, computeMacdWeeklyDaily,
+  computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily, computeRsiResampledDaily, computeMacdResampledDaily,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
 import {
@@ -800,10 +800,12 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
-  // Full daily history for a weekly RSI / MACD on the stock's oscillator sub-charts.
+  // Full daily history for a weekly/monthly RSI / MACD on the stock's oscillator sub-charts.
+  const rsiGrain = activeTools.rsiMonthly ? 'monthly' : activeTools.rsiWeekly ? 'weekly' : null;
+  const macdGrain = activeTools.macdMonthly ? 'monthly' : activeTools.macdWeekly ? 'weekly' : null;
   const oscFullHist = useFullHistory(
     selected?.symbol,
-    !!((activeTools.rsi && activeTools.rsiWeekly) || (activeTools.macd && activeTools.macdWeekly)),
+    !!((activeTools.rsi && rsiGrain) || (activeTools.macd && macdGrain)),
   );
   const [dataMsg, setDataMsg] = useState<string | null>(null);
   const [spyPrices, setSpyPrices] = useState<HistoricalPoint[]>([]);
@@ -1360,11 +1362,11 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           {/* RSI / MACD oscillator sub-charts for stocks */}
           {!loading && prices.length > 0 && activeTools.rsi && (() => {
             let rsiData: { date: string; rsi: number | null }[];
-            if (activeTools.rsiWeekly) {
-              // Weekly RSI on the full daily history, held forward (at-or-before) onto each visible day.
+            if (rsiGrain) {
+              // Weekly/monthly RSI on the full daily history, held forward onto each visible day.
               const full = oscFullHist && oscFullHist.length > 2 ? oscFullHist : prices;
               const fullDates = full.map(p => p.date);
-              const fSeries = computeRsiWeeklyDaily(fullDates, full.map(p => p.close), 14);
+              const fSeries = computeRsiResampledDaily(fullDates, full.map(p => p.close), rsiGrain, 14);
               let j = 0;
               let lastVal: number | null = null;
               rsiData = prices.map(p => {
@@ -1380,7 +1382,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
             return (
               <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-                <p className="text-[10px] text-indigo-400 font-semibold mb-1">RSI 14 {activeTools.rsiWeekly ? 'Weekly' : 'Daily'}</p>
+                <p className="text-[10px] text-indigo-400 font-semibold mb-1 capitalize">RSI 14 {rsiGrain ?? 'daily'}</p>
                 <ResponsiveContainer width="100%" height={80}>
                   <LineChart data={rsiData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -1402,10 +1404,10 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
           {!loading && prices.length > 0 && activeTools.macd && (() => {
             let macdData: { date: string; macd: number | null; signal: number | null; hist: number | null }[];
-            if (activeTools.macdWeekly) {
+            if (macdGrain) {
               const full = oscFullHist && oscFullHist.length > 2 ? oscFullHist : prices;
               const fullDates = full.map(p => p.date);
-              const w = computeMacdWeeklyDaily(fullDates, full.map(p => p.close));
+              const w = computeMacdResampledDaily(fullDates, full.map(p => p.close), macdGrain);
               let j = 0;
               let lm: number | null = null, ls: number | null = null, lh: number | null = null;
               macdData = prices.map(p => {
@@ -1429,7 +1431,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">MACD: not enough data</div>;
             return (
               <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-                <p className="text-[10px] text-blue-400 font-semibold mb-1">MACD (12, 26, 9) {activeTools.macdWeekly ? 'Weekly' : 'Daily'}</p>
+                <p className="text-[10px] text-blue-400 font-semibold mb-1 capitalize">MACD (12, 26, 9) {macdGrain ?? 'daily'}</p>
                 <ResponsiveContainer width="100%" height={80}>
                   <ComposedChart data={macdData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />

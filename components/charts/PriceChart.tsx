@@ -14,7 +14,7 @@ import { useFullHistory } from '@/lib/useFullHistory';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeTrendLine, computeSma200wDaily, computeRsiWeeklyDaily, computeMacdWeeklyDaily,
+  computeTrendLine, computeSma200wDaily, computeRsiResampledDaily, computeMacdResampledDaily,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 
@@ -31,8 +31,10 @@ interface ToolsOverlay {
   fib?: boolean;
   rsi?: boolean;
   rsiWeekly?: boolean;
+  rsiMonthly?: boolean;
   macd?: boolean;
   macdWeekly?: boolean;
+  macdMonthly?: boolean;
   momentumDaily?: boolean;
   momentumWeekly?: boolean;
   momentumMonthly?: boolean;
@@ -112,7 +114,7 @@ function fullIndexForVisible(fullDates: string[], visDates: string[]): number[] 
 
 // ── Oscillator sub-charts ────────────────────────────────────────────────────
 
-function RSISubChart({ data, weekly }: { data: { date: string; rsi: number | null }[]; weekly?: boolean }) {
+function RSISubChart({ data, grain }: { data: { date: string; rsi: number | null }[]; grain?: string }) {
   const valid = data.filter(d => d.rsi != null);
   if (valid.length === 0) {
     return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
@@ -120,7 +122,7 @@ function RSISubChart({ data, weekly }: { data: { date: string; rsi: number | nul
   return (
     <div className="mt-2">
       <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] text-indigo-400 font-semibold">RSI 14 {weekly ? 'Weekly' : 'Daily'}</span>
+        <span className="text-[10px] text-indigo-400 font-semibold capitalize">RSI 14 {grain ?? 'daily'}</span>
         <span className="text-[9px] text-gray-600">
           <span className="text-red-400">▬</span> Overbought (70) &nbsp;
           <span className="text-emerald-400">▬</span> Oversold (30)
@@ -147,9 +149,9 @@ function RSISubChart({ data, weekly }: { data: { date: string; rsi: number | nul
   );
 }
 
-function MACDSubChart({ data, weekly }: {
+function MACDSubChart({ data, grain }: {
   data: { date: string; macd: number | null; signal: number | null; hist: number | null }[];
-  weekly?: boolean;
+  grain?: string;
 }) {
   const valid = data.filter(d => d.hist != null);
   if (valid.length === 0) {
@@ -158,7 +160,7 @@ function MACDSubChart({ data, weekly }: {
   return (
     <div className="mt-2">
       <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] text-blue-400 font-semibold">MACD (12, 26, 9) {weekly ? 'Weekly' : 'Daily'}</span>
+        <span className="text-[10px] text-blue-400 font-semibold capitalize">MACD (12, 26, 9) {grain ?? 'daily'}</span>
         <span className="text-[9px] text-gray-600">
           <span className="text-blue-400">▬</span> MACD &nbsp;
           <span className="text-orange-400">╌</span> Signal &nbsp;
@@ -246,8 +248,10 @@ export function PriceChart({
   const wantsFullMA = !!(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
     toolsOverlay?.sma200w || toolsOverlay?.ema20 || toolsOverlay?.ema100);
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
-  const wantsFullRsi = !!(toolsOverlay?.rsi && toolsOverlay?.rsiWeekly);
-  const wantsFullMacd = !!(toolsOverlay?.macd && toolsOverlay?.macdWeekly);
+  const rsiGrain = toolsOverlay?.rsiMonthly ? 'monthly' : toolsOverlay?.rsiWeekly ? 'weekly' : null;
+  const macdGrain = toolsOverlay?.macdMonthly ? 'monthly' : toolsOverlay?.macdWeekly ? 'weekly' : null;
+  const wantsFullRsi = !!(toolsOverlay?.rsi && rsiGrain);
+  const wantsFullMacd = !!(toolsOverlay?.macd && macdGrain);
   const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend || wantsFullRsi || wantsFullMacd);
 
   // vs SPY benchmark overlay — fetched here so the tool works in every section
@@ -412,19 +416,19 @@ export function PriceChart({
       }))
     : data;
 
-  // RSI data for sub-chart — weekly (on weekly closes from full history, projected) or daily.
+  // RSI data for sub-chart — daily, or weekly/monthly (on resampled closes from full history).
   const rsiVals = toolsOverlay?.rsi
-    ? (toolsOverlay.rsiWeekly
-        ? (useFull ? projectToVisible(fullDates, computeRsiWeeklyDaily(fullDates, fullCloses, 14), visDates) : null)
+    ? (rsiGrain
+        ? (useFull ? projectToVisible(fullDates, computeRsiResampledDaily(fullDates, fullCloses, rsiGrain, 14), visDates) : null)
         : (P.rsi.ok ? computeRSI(closes, P.rsi.period) : null))
     : null;
   const rsiData = rsiVals ? data.map((d, i) => ({ date: d.date, rsi: rsiVals[i] })) : null;
 
-  // MACD data for sub-chart — weekly (on weekly closes from full history, projected) or daily.
+  // MACD data for sub-chart — daily, or weekly/monthly (on resampled closes from full history).
   const macdResult = toolsOverlay?.macd
-    ? (toolsOverlay.macdWeekly
+    ? (macdGrain
         ? (useFull ? (() => {
-            const w = computeMacdWeeklyDaily(fullDates, fullCloses);
+            const w = computeMacdResampledDaily(fullDates, fullCloses, macdGrain);
             return {
               macd:   projectToVisible(fullDates, w.macd, visDates),
               signal: projectToVisible(fullDates, w.signal, visDates),
@@ -754,8 +758,8 @@ export function PriceChart({
       </ResponsiveContainer>
 
       {/* Oscillator sub-charts */}
-      {rsiData && <RSISubChart data={rsiData} weekly={!!toolsOverlay?.rsiWeekly} />}
-      {macdData && <MACDSubChart data={macdData} weekly={!!toolsOverlay?.macdWeekly} />}
+      {rsiData && <RSISubChart data={rsiData} grain={rsiGrain ?? 'daily'} />}
+      {macdData && <MACDSubChart data={macdData} grain={macdGrain ?? 'daily'} />}
       {momDailyData   && <MomentumSubChart data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
       {momWeeklyData  && <MomentumSubChart data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}
       {momMonthlyData && <MomentumSubChart data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
