@@ -10,10 +10,11 @@ import { HistoricalPoint } from '@/lib/types';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { spyBenchmarkSeries } from '@/lib/utils';
+import { useFullHistory } from '@/lib/useFullHistory';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeTrendLine, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 
 interface ToolsOverlay {
@@ -34,10 +35,15 @@ interface ToolsOverlay {
   momentumMonthly?: boolean;
   spyRatio?: boolean;
   sma200w?: boolean;
+  trend?: boolean;
+  /** true = fit the trend on full history (shown over the visible window); false = visible period only. */
+  trendFull?: boolean;
 }
 
 interface Props {
   data: HistoricalPoint[];
+  /** Symbol used to fetch full daily history (for long MAs + full-history trend on short views). */
+  symbol?: string;
   color?: string;
   showAverage?: boolean;
   averageValue?: number;
@@ -68,6 +74,37 @@ function formatDate(dateStr: string, data: HistoricalPoint[]) {
 
 function fmtDate(d: string) {
   try { return format(parseISO(d), 'MMM d, yyyy'); } catch { return d; }
+}
+
+// Project a full-history indicator series (dates asc) onto the visible bars: for each
+// visible date take the most recent full-history value at-or-before it. O(n+m).
+function projectToVisible(
+  fullDates: string[], fullVals: (number | null)[], visDates: string[],
+): (number | null)[] {
+  const out: (number | null)[] = new Array(visDates.length).fill(null);
+  let j = 0;
+  let lastVal: number | null = null;
+  for (let i = 0; i < visDates.length; i++) {
+    const vd = visDates[i];
+    while (j < fullDates.length && fullDates[j] <= vd) {
+      if (fullVals[j] != null) lastVal = fullVals[j];
+      j++;
+    }
+    out[i] = lastVal;
+  }
+  return out;
+}
+
+// Index (into the full history) closest at-or-after each visible date — used to evaluate a
+// full-history trend line at the right x for every visible bar.
+function fullIndexForVisible(fullDates: string[], visDates: string[]): number[] {
+  const out = new Array(visDates.length).fill(0);
+  let j = 0;
+  for (let i = 0; i < visDates.length; i++) {
+    while (j < fullDates.length && fullDates[j] < visDates[i]) j++;
+    out[i] = Math.min(j, Math.max(fullDates.length - 1, 0));
+  }
+  return out;
 }
 
 // ── Oscillator sub-charts ────────────────────────────────────────────────────
@@ -193,11 +230,17 @@ function MomentumSubChart({
 // ── Main PriceChart ──────────────────────────────────────────────────────────
 
 export function PriceChart({
-  data, color = '#6366f1', showAverage = false, averageValue,
+  data, symbol, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
   enableDragSelect = true, toolsOverlay, onSetRange,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
+
+  // Full daily history — so long MAs (SMA 50/200/200W, EMA 100) and the trend line can be
+  // computed on the WHOLE series and drawn even when the selected window is short.
+  const wantsFullMA = !!(toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w || toolsOverlay?.ema100);
+  const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
+  const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend);
 
   // vs SPY benchmark overlay — fetched here so the tool works in every section
   // that renders a PriceChart without each one wiring up its own SPY fetch.
@@ -250,18 +293,55 @@ export function PriceChart({
     : null;
   const toolStdDev = toolVariance != null ? Math.sqrt(toolVariance) : null;
 
-  // Scale all indicator periods to the data's real-world time granularity
+  // Scale all indicator periods to the visible data's real-world time granularity
   const P = computeIndicatorPeriods(avgCalendarDaysPerBar(data.map(d => d.date)));
 
+  // Full-history context: closes/dates/periods for the WHOLE series (daily). Long MAs and the
+  // full-history trend are computed here, then projected onto the visible bars.
+  const visDates = data.map(d => d.date);
+  const useFull = !!fullHist && fullHist.length > 2;
+  const fullDates = useFull ? fullHist!.map(d => d.date) : [];
+  const fullCloses = useFull ? fullHist!.map(d => d.close) : [];
+  const PFull = useFull ? computeIndicatorPeriods(avgCalendarDaysPerBar(fullDates)) : P;
+
+  // Long MA on full history (drawn on short windows too) with graceful fallback to the visible
+  // window when full history hasn't loaded yet.
+  const fullSMA = (period: number) => projectToVisible(fullDates, computeSMA(fullCloses, period), visDates);
+  const fullEMA = (period: number) => projectToVisible(fullDates, computeEMA(fullCloses, period), visDates);
+
   // Moving-average / band / level series
-  const sma20Vals   = toolsOverlay?.sma20   && P.sma20.ok   ? computeSMA(closes, P.sma20.period)              : null;
-  const sma50Vals   = toolsOverlay?.sma50   && P.sma50.ok   ? computeSMA(closes, P.sma50.period)              : null;
-  const sma200Vals  = toolsOverlay?.sma200  && P.sma200.ok  ? computeSMA(closes, P.sma200.period)             : null;
-  const sma200wVals = toolsOverlay?.sma200w && P.sma200w.ok ? computeSMA(closes, P.sma200w.period)            : null;
-  const ema20Vals   = toolsOverlay?.ema20   && P.ema20.ok   ? computeEMA(closes, P.ema20.period)              : null;
-  const ema100Vals  = toolsOverlay?.ema100  && P.ema100.ok  ? computeEMA(closes, P.ema100.period)             : null;
+  const sma20Vals   = toolsOverlay?.sma20   && P.sma20.ok   ? computeSMA(closes, P.sma20.period)  : null;
+  const sma50Vals   = toolsOverlay?.sma50
+    ? (useFull && PFull.sma50.ok   ? fullSMA(PFull.sma50.period)   : (P.sma50.ok   ? computeSMA(closes, P.sma50.period)   : null))
+    : null;
+  const sma200Vals  = toolsOverlay?.sma200
+    ? (useFull && PFull.sma200.ok  ? fullSMA(PFull.sma200.period)  : (P.sma200.ok  ? computeSMA(closes, P.sma200.period)  : null))
+    : null;
+  const sma200wVals = toolsOverlay?.sma200w
+    ? (useFull && PFull.sma200w.ok ? fullSMA(PFull.sma200w.period) : (P.sma200w.ok ? computeSMA(closes, P.sma200w.period) : null))
+    : null;
+  const ema20Vals   = toolsOverlay?.ema20   && P.ema20.ok   ? computeEMA(closes, P.ema20.period)  : null;
+  const ema100Vals  = toolsOverlay?.ema100
+    ? (useFull && PFull.ema100.ok  ? fullEMA(PFull.ema100.period)  : (P.ema100.ok  ? computeEMA(closes, P.ema100.period)  : null))
+    : null;
   const bands       = toolsOverlay?.bollinger && P.boll.ok  ? computeBollingerBands(closes, P.boll.period, 2) : null;
   const fibLevels   = toolsOverlay?.fib ? computeFibLevels(closes) : null;
+
+  // Trend line (OLS linear regression of close on bar index). Fit on the full history and
+  // evaluated at each visible bar's index, or fit on the visible window only — per trendFull.
+  let trendVals: (number | null)[] | null = null;
+  if (toolsOverlay?.trend) {
+    if (toolsOverlay.trendFull && useFull) {
+      const fit = computeTrendLine(fullCloses);
+      if (fit) {
+        const idx = fullIndexForVisible(fullDates, visDates);
+        trendVals = data.map((_, i) => fit.intercept + fit.slope * idx[i]);
+      }
+    } else {
+      const fit = computeTrendLine(data.map(d => d.close));
+      if (fit) trendVals = data.map((_, i) => fit.intercept + fit.slope * i);
+    }
+  }
 
   // vs SPY benchmark line — rebased to the asset's first price.
   const spyLine = spyActive && spyData.length > 0
@@ -282,13 +362,20 @@ export function PriceChart({
       if (v < domMin) domMin = v;
     }
   }
+  if (trendVals) {
+    for (const v of trendVals) {
+      if (v == null) continue;
+      if (v > domMax) domMax = v;
+      if (v < domMin) domMin = v;
+    }
+  }
   const dataRange = domMax - domMin;
   const pad = Math.max(dataRange * 0.08, Math.abs(domMax) * 0.02, 0.001);
   const yMin = domMin >= 0 ? Math.max(0, domMin - pad) : domMin - pad;
   const yMax = domMax + pad;
 
-  // Extend data with overlay columns (SMA/EMA lines + Bollinger band range + SPY)
-  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema20Vals || ema100Vals || bands || spyLine;
+  // Extend data with overlay columns (SMA/EMA lines + Bollinger band range + SPY + trend)
+  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema20Vals || ema100Vals || bands || spyLine || trendVals;
   const chartData = hasSeriesOverlay
     ? data.map((d, i) => ({
         ...d,
@@ -299,6 +386,7 @@ export function PriceChart({
         ema20:   ema20Vals?.[i]   ?? null,
         ema100:  ema100Vals?.[i]  ?? null,
         spy:    spyLine?.[i]     ?? null,
+        trend:  trendVals?.[i]   ?? null,
         bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
           ? [bands.lower[i] as number, bands.upper[i] as number]
           : null,
@@ -371,8 +459,14 @@ export function PriceChart({
       {/* Overlay legend when active */}
       {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w ||
         toolsOverlay?.ema20 || toolsOverlay?.ema100 || toolsOverlay?.bollinger || toolsOverlay?.fib ||
-        spyLine) && (
+        spyLine || trendVals) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
+          {trendVals && (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-300">
+              <span className="inline-block w-5 border-t-2 border-emerald-300" />
+              Trend ({toolsOverlay?.trendFull ? 'full history' : 'visible'})
+            </span>
+          )}
           {spyLine && (
             <span className="flex items-center gap-1 text-[10px] text-slate-300">
               <span className="inline-block w-5 border-t-2 border-dashed border-slate-300" />
@@ -477,6 +571,7 @@ export function PriceChart({
               if (name === 'ema20')  return [value != null ? value.toFixed(decimals) : '—', 'EMA 20'];
               if (name === 'ema100') return [value != null ? value.toFixed(decimals) : '—', 'EMA 100'];
               if (name === 'spy')    return [value != null ? value.toFixed(decimals) : '—', 'vs SPY (benchmark)'];
+              if (name === 'trend')  return [value != null ? value.toFixed(decimals) : '—', 'Trend'];
               if (name === 'bbRange') {
                 const r = value as unknown as [number, number] | null;
                 return [r ? `${r[0].toFixed(decimals)} – ${r[1].toFixed(decimals)}` : '—', 'Bollinger'];
@@ -557,6 +652,11 @@ export function PriceChart({
           {spyLine && (
             <Line type="monotone" dataKey="spy" stroke="#cbd5e1" strokeWidth={1.5}
               strokeDasharray="5 3" dot={false} activeDot={false} connectNulls name="spy" />
+          )}
+          {/* Trend line (linear regression) */}
+          {trendVals && (
+            <Line type="linear" dataKey="trend" stroke="#34d399" strokeWidth={2}
+              dot={false} activeDot={false} connectNulls name="trend" />
           )}
 
           {/* Level overlays */}

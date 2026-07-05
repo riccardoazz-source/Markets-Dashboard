@@ -370,7 +370,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           ) : divChartData && !anyToolActive ? (
             <DualLineDragChart data={divChartData} onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           ) : (
-            <PriceChart data={historical} color="auto" height={200} toolsOverlay={activeTools}
+            <PriceChart data={historical} symbol={selected ?? undefined} color="auto" height={200} toolsOverlay={activeTools}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
 
@@ -389,7 +389,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             </p>
           )}
           {!divChartData && historical.length > 0 && (
-            <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} />
+            <ChartTools data={historical} symbol={selected ?? undefined} activeTools={activeTools} onChange={setActiveTools} />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} />}
           {selected && <ChartNotes chartId={selected} />}

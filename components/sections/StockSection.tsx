@@ -18,8 +18,9 @@ import { useGistData } from '@/lib/gist';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
-  computeBollingerBands, computeFibLevels,
+  computeBollingerBands, computeFibLevels, computeTrendLine,
 } from '@/lib/indicators';
+import { useFullHistory } from '@/lib/useFullHistory';
 import {
   ResponsiveContainer, LineChart, Line, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, BarChart, Bar, ComposedChart, Cell, ReferenceArea, ReferenceLine,
@@ -230,12 +231,15 @@ interface DualChartToolsOverlay {
   fib?: boolean;
   spyRatio?: boolean;
   sma200w?: boolean;
+  trend?: boolean;
+  trendFull?: boolean;
 }
 
 function DualChart({
-  prices, totalReturn, currency, eps, financials, toolsOverlay, spyPrices, onSetRange,
+  prices, symbol, totalReturn, currency, eps, financials, toolsOverlay, spyPrices, onSetRange,
 }: {
   prices: HistoricalPoint[];
+  symbol?: string;
   totalReturn: HistoricalPoint[];
   currency: string;
   eps?: EarningsPoint[];
@@ -245,6 +249,10 @@ function DualChart({
   onSetRange?: (from: string, to: string) => void;
 }) {
   const { handlers, range, area, clear } = useChartDragSelect();
+  // Full daily history so long MAs + the full-history trend line render on short windows.
+  const wantsFullMA = !!(toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w);
+  const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
+  const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend);
   if (!prices.length) return null;
   const hasDivs = totalReturn !== prices && totalReturn.length > 0 &&
     Math.abs((totalReturn[totalReturn.length - 1]?.close ?? 0) - (prices[prices.length - 1]?.close ?? 0)) > 0.0001;
@@ -327,14 +335,58 @@ function DualChart({
   const toolCloses = prices.map(p => p.close).filter((c): c is number => typeof c === 'number' && isFinite(c));
   const P = computeIndicatorPeriods(avgCalendarDaysPerBar(prices.map(p => p.date)));
 
+  // Full-history context: long MAs and the full-history trend are computed on the WHOLE daily
+  // series, then projected (at-or-before each visible date) so they render on short windows too.
+  const visDates = prices.map(p => p.date);
+  const useFull = !!fullHist && fullHist.length > 2;
+  const fullDates = useFull ? fullHist!.map(d => d.date) : [];
+  const fullCloses = useFull ? fullHist!.map(d => d.close) : [];
+  const PFull = useFull ? computeIndicatorPeriods(avgCalendarDaysPerBar(fullDates)) : P;
+  const projectFull = (vals: (number | null)[]): (number | null)[] => {
+    const out: (number | null)[] = new Array(visDates.length).fill(null);
+    let j = 0; let lastVal: number | null = null;
+    for (let i = 0; i < visDates.length; i++) {
+      while (j < fullDates.length && fullDates[j] <= visDates[i]) { if (vals[j] != null) lastVal = vals[j]; j++; }
+      out[i] = lastVal;
+    }
+    return out;
+  };
+
   // Moving-average / band / level overlays (all on the price axis)
   const sma20Vals   = toolsOverlay?.sma20   && P.sma20.ok   ? computeSMA(toolCloses, P.sma20.period)   : null;
-  const sma50Vals   = toolsOverlay?.sma50   && P.sma50.ok   ? computeSMA(toolCloses, P.sma50.period)   : null;
-  const sma200Vals  = toolsOverlay?.sma200  && P.sma200.ok  ? computeSMA(toolCloses, P.sma200.period)  : null;
-  const sma200wVals = toolsOverlay?.sma200w && P.sma200w.ok ? computeSMA(toolCloses, P.sma200w.period) : null;
+  const sma50Vals   = toolsOverlay?.sma50
+    ? (useFull && PFull.sma50.ok   ? projectFull(computeSMA(fullCloses, PFull.sma50.period))   : (P.sma50.ok   ? computeSMA(toolCloses, P.sma50.period)   : null))
+    : null;
+  const sma200Vals  = toolsOverlay?.sma200
+    ? (useFull && PFull.sma200.ok  ? projectFull(computeSMA(fullCloses, PFull.sma200.period))  : (P.sma200.ok  ? computeSMA(toolCloses, P.sma200.period)  : null))
+    : null;
+  const sma200wVals = toolsOverlay?.sma200w
+    ? (useFull && PFull.sma200w.ok ? projectFull(computeSMA(fullCloses, PFull.sma200w.period)) : (P.sma200w.ok ? computeSMA(toolCloses, P.sma200w.period) : null))
+    : null;
   const ema20Vals  = toolsOverlay?.ema20  && P.ema20.ok ? computeEMA(toolCloses, P.ema20.period) : null;
   const bands      = toolsOverlay?.bollinger && P.boll.ok ? computeBollingerBands(toolCloses, P.boll.period, 2) : null;
   const fibLevels  = toolsOverlay?.fib ? computeFibLevels(toolCloses) : null;
+
+  // Trend line (OLS linear regression) — on full history evaluated at each visible bar, or on
+  // the visible window only, per trendFull. Keyed by date so it merges into chartData below.
+  const trendByDate = new Map<string, number>();
+  if (toolsOverlay?.trend) {
+    if (toolsOverlay.trendFull && useFull) {
+      const fit = computeTrendLine(fullCloses);
+      if (fit) {
+        let j = 0;
+        for (let i = 0; i < visDates.length; i++) {
+          while (j < fullDates.length && fullDates[j] < visDates[i]) j++;
+          const idx = Math.min(j, Math.max(fullDates.length - 1, 0));
+          trendByDate.set(visDates[i], fit.intercept + fit.slope * idx);
+        }
+      }
+    } else {
+      const fit = computeTrendLine(prices.map(p => p.close));
+      if (fit) prices.forEach((p, i) => trendByDate.set(p.date, fit.intercept + fit.slope * i));
+    }
+  }
+  const showTrend = trendByDate.size > 0;
   const overlayByDate = new Map<string, {
     sma20: number | null; sma50: number | null; sma200: number | null; sma200w: number | null;
     ema20: number | null; bbRange: [number, number] | null;
@@ -382,6 +434,7 @@ function DualChart({
     ema20:  overlayByDate.get(date)?.ema20  ?? null,
     bbRange: overlayByDate.get(date)?.bbRange ?? null,
     spy: showSpy ? (spyByDate.get(date) ?? null) : null,
+    trend: showTrend ? (trendByDate.get(date) ?? null) : null,
   }));
 
   const decimals = 2;
@@ -433,8 +486,14 @@ function DualChart({
         </div>
       )}
       {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w ||
-        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy) && (
+        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy || showTrend) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
+          {showTrend && (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-300">
+              <span className="inline-block w-5 border-t-2 border-emerald-300" />
+              Trend ({toolsOverlay?.trendFull ? 'full history' : 'visible'})
+            </span>
+          )}
           {showSpy && (
             <span className="flex items-center gap-1 text-[10px] text-slate-300">
               <span className="inline-block w-5 border-t-2 border-dashed border-slate-300" />vs SPY (benchmark)
@@ -529,6 +588,7 @@ function DualChart({
             if (name === 'sma200w') return [value != null ? formatPrice(value, currency) : '—', 'SMA 200W'];
             if (name === 'ema20')  return [value != null ? formatPrice(value, currency) : '—', 'EMA 20'];
             if (name === 'spy')    return [value != null ? formatPrice(value, currency) : '—', 'vs SPY (benchmark)'];
+            if (name === 'trend')  return [value != null ? formatPrice(value, currency) : '—', 'Trend'];
             if (name === 'bbRange') {
               const r = value as unknown as [number, number] | null;
               return [r ? `${formatPrice(r[0], currency)} – ${formatPrice(r[1], currency)}` : '—', 'Bollinger'];
@@ -597,6 +657,10 @@ function DualChart({
         {showSpy && (
           <Line yAxisId="price" type="monotone" dataKey="spy" stroke="#cbd5e1"
             strokeWidth={1.5} strokeDasharray="5 3" dot={false} activeDot={false} connectNulls name="spy" />
+        )}
+        {showTrend && (
+          <Line yAxisId="price" type="linear" dataKey="trend" stroke="#34d399"
+            strokeWidth={2} dot={false} activeDot={false} connectNulls name="trend" />
         )}
         {area && (
           <ReferenceArea
@@ -1262,6 +1326,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           ) : prices.length > 0 ? (
             <DualChart
               prices={prices}
+              symbol={selected?.symbol}
               totalReturn={totalReturn}
               currency={currency}
               eps={overlay === 'eps' ? earnings?.quarterly : undefined}
@@ -1341,7 +1406,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           })()}
 
           {!loading && prices.length > 0 && (
-            <ChartTools data={prices} activeTools={activeTools} onChange={setActiveTools} />
+            <ChartTools data={prices} symbol={selected?.symbol} activeTools={activeTools} onChange={setActiveTools} />
           )}
           {!loading && prices.length > 0 && (
             <ChartDataTable data={prices} unit={currency} />

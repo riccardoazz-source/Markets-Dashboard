@@ -368,6 +368,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
           ) : (
             <PriceChart
               data={historical}
+              symbol={`${selected.from}${selected.to}=X`}
               color="#6366f1"
               height={240}
               isCurrency={true}
@@ -378,6 +379,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
           {historical.length > 0 && (
             <ChartTools
               data={historical}
+              symbol={`${selected.from}${selected.to}=X`}
               activeTools={activeTools}
               onChange={setActiveTools}
               decimals={dec}

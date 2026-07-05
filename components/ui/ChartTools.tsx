@@ -9,6 +9,7 @@ import {
   computeBollingerBands, computeFibLevels, computeMomentum,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
+import { useFullHistory } from '@/lib/useFullHistory';
 
 export interface ActiveTools {
   avg: boolean;
@@ -28,6 +29,8 @@ export interface ActiveTools {
   momentumWeekly: boolean;
   momentumMonthly: boolean;
   spyRatio: boolean;
+  trend: boolean;      // linear-regression trend line
+  trendFull: boolean;  // true = fit on FULL history (shown over the visible window); false = fit on the visible period only
 }
 
 export const DEFAULT_TOOLS: ActiveTools = {
@@ -36,13 +39,22 @@ export const DEFAULT_TOOLS: ActiveTools = {
   bollinger: false, fib: false, rsi: false, macd: false,
   momentumDaily: false, momentumWeekly: false, momentumMonthly: false,
   spyRatio: false,
+  trend: false, trendFull: true,
 };
+
+// Tools whose maths benefit from the FULL price history (long MAs that can't be computed
+// inside a short window, and the full-history trend line). When any of these is active
+// the chart/tools fetch MAX history and compute on it, projecting onto the visible bars.
+export function needsFullHistory(t: ActiveTools): boolean {
+  return t.sma200 || t.sma200w || t.sma50 || t.ema100 || (t.trend && t.trendFull);
+}
 
 interface Props {
   data: HistoricalPoint[];
   activeTools: ActiveTools;
   onChange: (tools: ActiveTools) => void;
   decimals?: number;
+  symbol?: string; // when provided, long MAs / full trend compute on this symbol's full history
 }
 
 function computeStats(closes: number[], avgDPB: number) {
@@ -84,7 +96,7 @@ const last = <T,>(arr: (T | null)[]): T | null => {
   return null;
 };
 
-export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props) {
+export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }: Props) {
   const [open, setOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
 
@@ -93,6 +105,16 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
     [data],
   );
   const n = closes.length;
+
+  // Full history (for long MAs on short windows): the current MA VALUE at the last bar
+  // is identical whether computed on the full series or the visible one — but a short
+  // window can't compute it at all. So the long MAs use the full history's closes.
+  const fullHist = useFullHistory(symbol, needsFullHistory(activeTools));
+  const longCloses = useMemo(
+    () => (fullHist ? fullHist.map(d => d.close).filter((c): c is number => typeof c === 'number' && isFinite(c)) : closes),
+    [fullHist, closes],
+  );
+  const nL = longCloses.length;
 
   // Scale all indicator periods to the data's real-world time granularity.
   // Equity: ~1.4 cal days/bar. Crypto: ~1.0 (trades 7d/wk). Monthly FRED: ~30.
@@ -103,9 +125,9 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
   // Pre-compute all indicator current values once per data change
   const iv = useMemo(() => {
     if (closes.length === 0) return null;
-    const sma50arr   = P.sma50.ok && n >= P.sma50.period   ? computeSMA(closes, P.sma50.period)   : null;
-    const sma200arr  = P.sma200.ok && n >= P.sma200.period  ? computeSMA(closes, P.sma200.period)  : null;
-    const sma200warr = P.sma200w.ok && n >= P.sma200w.period ? computeSMA(closes, P.sma200w.period) : null;
+    const sma50arr   = P.sma50.ok && nL >= P.sma50.period   ? computeSMA(longCloses, P.sma50.period)   : null;
+    const sma200arr  = P.sma200.ok && nL >= P.sma200.period  ? computeSMA(longCloses, P.sma200.period)  : null;
+    const sma200warr = P.sma200w.ok && nL >= P.sma200w.period ? computeSMA(longCloses, P.sma200w.period) : null;
     const sma50val   = sma50arr  ? last(sma50arr)  : null;
     const sma200val  = sma200arr ? last(sma200arr) : null;
     const bbands     = P.boll.ok && n >= P.boll.period ? computeBollingerBands(closes, P.boll.period, 2) : null;
@@ -114,7 +136,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
     return {
       sma20:   P.sma20.ok && n >= P.sma20.period   ? last(computeSMA(closes, P.sma20.period))   : null,
       ema20:   P.ema20.ok && n >= P.ema20.period   ? last(computeEMA(closes, P.ema20.period))   : null,
-      ema100:  P.ema100.ok && n >= P.ema100.period  ? last(computeEMA(closes, P.ema100.period))  : null,
+      ema100:  P.ema100.ok && nL >= P.ema100.period  ? last(computeEMA(longCloses, P.ema100.period))  : null,
       sma50:   sma50val,
       sma200:  sma200val,
       sma200w: sma200warr ? last(sma200warr) : null,
@@ -132,7 +154,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
       momentumWeekly:  n >= P.momWeek.period  ? last(computeMomentum(closes, P.momWeek.period))  : null,
       momentumMonthly: n >= P.momMonth.period ? last(computeMomentum(closes, P.momMonth.period)) : null,
     };
-  }, [closes, n, P]);
+  }, [closes, longCloses, n, nL, P]);
 
   const toggle = (key: keyof ActiveTools) =>
     onChange({ ...activeTools, [key]: !activeTools[key] });
@@ -174,10 +196,21 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2 }: Props)
                 <Divider />
                 <ToolChip active={activeTools.sma20}   onToggle={() => toggle('sma20')}   label="SMA 20"   color="cyan"   disabled={!P.sma20.ok   || n < P.sma20.period}   />
                 <ToolChip active={activeTools.ema20}   onToggle={() => toggle('ema20')}   label="EMA 20"   color="rose"   disabled={!P.ema20.ok   || n < P.ema20.period}   />
-                <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={!P.ema100.ok  || n < P.ema100.period}  />
-                <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={!P.sma50.ok   || n < P.sma50.period}   />
-                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={!P.sma200.ok  || n < P.sma200.period}  />
-                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={!P.sma200w.ok || n < P.sma200w.period} title={!P.sma200w.ok || n < P.sma200w.period ? 'Needs ~4y of data — switch to a longer timeframe (5Y / MAX)' : undefined} />
+                <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={!P.ema100.ok  || nL < P.ema100.period}  />
+                <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={!P.sma50.ok   || nL < P.sma50.period}   />
+                <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={!P.sma200.ok  || nL < P.sma200.period}  />
+                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={!P.sma200w.ok || nL < P.sma200w.period} title={!P.sma200w.ok || nL < P.sma200w.period ? 'Needs ~4y of data (not enough price history for this asset)' : undefined} />
+                <Divider />
+                <ToolChip active={activeTools.trend}  onToggle={() => toggle('trend')}  label="Trend" color="green" disabled={n < 2} />
+                {activeTools.trend && (
+                  <button
+                    onClick={() => onChange({ ...activeTools, trendFull: !activeTools.trendFull })}
+                    className="text-[10px] px-2 py-0.5 rounded-md border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                    title="Fit the trend line on the full price history, or only on the visible period"
+                  >
+                    {activeTools.trendFull ? 'full history' : 'visible period'}
+                  </button>
+                )}
                 <Divider />
                 <ToolChip active={activeTools.bollinger} onToggle={() => toggle('bollinger')} label="Bollinger" color="teal"   disabled={!P.boll.ok || n < P.boll.period} />
                 <ToolChip active={activeTools.fib}       onToggle={() => toggle('fib')}       label="Fibonacci" color="yellow" disabled={n < 2} />

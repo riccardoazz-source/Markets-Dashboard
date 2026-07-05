@@ -192,6 +192,27 @@ export function computeMomentum(closes: number[], period: number): (number | nul
   });
 }
 
+/**
+ * Ordinary-least-squares trend line: fits y = intercept + slope·x with x = bar index.
+ * Returns the coefficients (evaluate at any index to get the fitted price), or null when
+ * there are fewer than 2 valid points. Used by the Trend tool — fit on the visible data
+ * OR on the full history, then evaluate at the visible bars' indices.
+ */
+export function computeTrendLine(closes: (number | null)[]): { slope: number; intercept: number } | null {
+  let n = 0, sx = 0, sy = 0, sxy = 0, sxx = 0;
+  for (let i = 0; i < closes.length; i++) {
+    const y = closes[i];
+    if (y == null || !isFinite(y)) continue;
+    n++; sx += i; sy += y; sxy += i * y; sxx += i * i;
+  }
+  if (n < 2) return null;
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return null;
+  const slope = (n * sxy - sx * sy) / denom;
+  const intercept = (sy - slope * sx) / n;
+  return { slope, intercept };
+}
+
 /** MACD (default 12/26/9 trading days, auto-scaled via barsForCalDays). Returns three arrays of length = closes.length. */
 export function computeMACD(
   closes: number[],
