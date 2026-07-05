@@ -188,6 +188,15 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     .filter(k => !MODIFIER_KEYS.includes(k) && activeTools[k]).length;
   const showResults = activeCount > 0 && stats != null && iv != null;
 
+  // Momentum is a single chip with a Daily/Weekly/Monthly selector — the three flags stay
+  // mutually exclusive under the hood.
+  const momActive = activeTools.momentumDaily || activeTools.momentumWeekly || activeTools.momentumMonthly;
+  const momPeriod: 'daily' | 'weekly' | 'monthly' =
+    activeTools.momentumWeekly ? 'weekly' : activeTools.momentumMonthly ? 'monthly' : 'daily';
+  const setMom = (p: 'daily' | 'weekly' | 'monthly' | null) =>
+    onChange({ ...activeTools, momentumDaily: p === 'daily', momentumWeekly: p === 'weekly', momentumMonthly: p === 'monthly' });
+  const nextMom = () => setMom(momPeriod === 'daily' ? 'weekly' : momPeriod === 'weekly' ? 'monthly' : 'daily');
+
   return (
     <div className="border border-border rounded-xl overflow-hidden">
       <button
@@ -262,9 +271,16 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                   </button>
                 )}
                 <Divider />
-                <ToolChip active={activeTools.momentumDaily}   onToggle={() => toggle('momentumDaily')}   label="Mom. Daily"   color="sky" disabled={n < 2} />
-                <ToolChip active={activeTools.momentumWeekly}  onToggle={() => toggle('momentumWeekly')}  label="Mom. Weekly"  color="sky" disabled={n < P.momWeek.period}  />
-                <ToolChip active={activeTools.momentumMonthly} onToggle={() => toggle('momentumMonthly')} label="Mom. Monthly" color="sky" disabled={n < P.momMonth.period} />
+                <ToolChip active={momActive} onToggle={() => setMom(momActive ? null : 'daily')} label="Momentum" color="sky" disabled={n < 2} />
+                {momActive && (
+                  <button
+                    onClick={nextMom}
+                    className="text-[10px] px-2 py-0.5 rounded-md border border-sky-500/40 text-sky-300 hover:bg-sky-500/10 transition-colors capitalize"
+                    title="Choose the momentum look-back: daily / weekly / monthly"
+                  >
+                    {momPeriod}
+                  </button>
+                )}
               </div>
 
               {/* ── Results strip — visible when any tool is active ──────── */}
