@@ -6,7 +6,7 @@ import { CHART_COLORS } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import {
@@ -43,7 +43,7 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
   const sma20Vals   = activeTools.sma20    && P.sma20.ok   ? computeSMA(closes, P.sma20.period)               : null;
   const sma50Vals   = activeTools.sma50    && P.sma50.ok   ? computeSMA(closes, P.sma50.period)               : null;
   const sma200Vals  = activeTools.sma200   && P.sma200.ok  ? computeSMA(closes, P.sma200.period)              : null;
-  const sma200wVals = activeTools.sma200w  && P.sma200w.ok ? computeSMA(closes, P.sma200w.period)             : null;
+  const sma200wVals = activeTools.sma200w  ? computeSma200wDaily(prices.map(p => p.date), prices.map(p => p.close)) : null;
   const ema20Vals   = activeTools.ema20    && P.ema20.ok   ? computeEMA(closes, P.ema20.period)               : null;
   const ema100Vals  = activeTools.ema100   && P.ema100.ok  ? computeEMA(closes, P.ema100.period)              : null;
   const bands       = activeTools.bollinger && P.boll.ok   ? computeBollingerBands(closes, P.boll.period, 2)  : null;
