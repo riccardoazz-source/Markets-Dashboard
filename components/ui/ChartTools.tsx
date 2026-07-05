@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeSma200wLatest, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wLatest, computeRsiWeeklyDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
 
@@ -24,6 +24,7 @@ export interface ActiveTools {
   bollinger: boolean;
   fib: boolean;
   rsi: boolean;
+  rsiWeekly: boolean;  // true = RSI on weekly closes; false = daily
   macd: boolean;
   momentumDaily: boolean;
   momentumWeekly: boolean;
@@ -36,7 +37,7 @@ export interface ActiveTools {
 export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
   sma20: false, sma50: false, sma200: false, sma200w: false, ema20: false, ema100: false,
-  bollinger: false, fib: false, rsi: false, macd: false,
+  bollinger: false, fib: false, rsi: false, rsiWeekly: false, macd: false,
   momentumDaily: false, momentumWeekly: false, momentumMonthly: false,
   spyRatio: false,
   trend: false, trendFull: true,
@@ -48,7 +49,8 @@ export const DEFAULT_TOOLS: ActiveTools = {
 // trend. When any is active the chart fetches MAX history and computes on it, projecting onto
 // the visible bars.
 export function needsFullHistory(t: ActiveTools): boolean {
-  return t.sma20 || t.sma50 || t.sma200 || t.sma200w || t.ema20 || t.ema100 || (t.trend && t.trendFull);
+  return t.sma20 || t.sma50 || t.sma200 || t.sma200w || t.ema20 || t.ema100 ||
+    (t.trend && t.trendFull) || (t.rsi && t.rsiWeekly);
 }
 
 interface Props {
@@ -160,7 +162,9 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                  : null,
       bbUpper: bbands ? last(bbands.upper) : null,
       bbLower: bbands ? last(bbands.lower) : null,
-      rsi:    P.rsi.ok && n >= P.rsi.period ? last(computeRSI(closes, P.rsi.period)) : null,
+      rsi:    activeTools.rsiWeekly
+                ? (fullHist ? last(computeRsiWeeklyDaily(fullHist.map(d => d.date), fullHist.map(d => d.close), 14)) : null)
+                : (P.rsi.ok && n >= P.rsi.period ? last(computeRSI(closes, P.rsi.period)) : null),
       macd:   macdOut ? last(macdOut.macd)   : null,
       signal: macdOut ? last(macdOut.signal) : null,
       hist:   macdOut ? last(macdOut.hist)   : null,
@@ -169,15 +173,15 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
       momentumWeekly:  n >= P.momWeek.period  ? last(computeMomentum(closes, P.momWeek.period))  : null,
       momentumMonthly: n >= P.momMonth.period ? last(computeMomentum(closes, P.momMonth.period)) : null,
     };
-  }, [closes, longCloses, n, nL, P, PL, fullHist, data]);
+  }, [closes, longCloses, n, nL, P, PL, fullHist, data, activeTools.rsiWeekly]);
 
   const toggle = (key: keyof ActiveTools) =>
     onChange({ ...activeTools, [key]: !activeTools[key] });
 
-  // trendFull is a modifier of the Trend tool (full vs visible fit), not a tool of its own —
-  // exclude it so the badge doesn't count a tool that isn't active.
+  // trendFull / rsiWeekly are modifiers of the Trend / RSI tools, not tools of their own —
+  // exclude them so the badge doesn't count a tool that isn't active.
   const activeCount = (Object.keys(activeTools) as (keyof ActiveTools)[])
-    .filter(k => k !== 'trendFull' && activeTools[k]).length;
+    .filter(k => k !== 'trendFull' && k !== 'rsiWeekly' && activeTools[k]).length;
   const showResults = activeCount > 0 && stats != null && iv != null;
 
   return (
@@ -233,7 +237,16 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                 <ToolChip active={activeTools.bollinger} onToggle={() => toggle('bollinger')} label="Bollinger" color="teal"   disabled={!P.boll.ok || n < P.boll.period} />
                 <ToolChip active={activeTools.fib}       onToggle={() => toggle('fib')}       label="Fibonacci" color="yellow" disabled={n < 2} />
                 <Divider />
-                <ToolChip active={activeTools.rsi}  onToggle={() => toggle('rsi')}  label="RSI 14" color="indigo" disabled={!P.rsi.ok || n < P.rsi.period} />
+                <ToolChip active={activeTools.rsi}  onToggle={() => toggle('rsi')}  label="RSI 14" color="indigo" disabled={n < 2} />
+                {activeTools.rsi && (
+                  <button
+                    onClick={() => onChange({ ...activeTools, rsiWeekly: !activeTools.rsiWeekly })}
+                    className="text-[10px] px-2 py-0.5 rounded-md border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 transition-colors"
+                    title="Compute RSI 14 on weekly closes or on daily closes"
+                  >
+                    {activeTools.rsiWeekly ? 'weekly' : 'daily'}
+                  </button>
+                )}
                 <ToolChip active={activeTools.macd} onToggle={() => toggle('macd')} label="MACD"   color="green"  disabled={!P.macdSlow.ok || n < (P.macdSlow.period + P.macdSig.period)} />
                 <Divider />
                 <ToolChip active={activeTools.momentumDaily}   onToggle={() => toggle('momentumDaily')}   label="Mom. Daily"   color="sky" disabled={n < 2} />
@@ -316,7 +329,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
 
                   {activeTools.rsi && iv.rsi != null && (
                     <Res
-                      label={iv.rsi > 70 ? 'RSI · Overbought' : iv.rsi < 30 ? 'RSI · Oversold' : 'RSI 14'}
+                      label={`RSI 14 ${activeTools.rsiWeekly ? 'W' : 'D'}${iv.rsi > 70 ? ' · Overbought' : iv.rsi < 30 ? ' · Oversold' : ''}`}
                       value={iv.rsi.toFixed(1)}
                       color={iv.rsi > 70 ? 'text-red-400' : iv.rsi < 30 ? 'text-emerald-400' : 'text-indigo-400'}
                     />

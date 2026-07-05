@@ -6,7 +6,7 @@ import { CHART_COLORS } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeSma200wDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wDaily, computeRsiWeeklyDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import {
@@ -64,8 +64,11 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
   })), [prices, sma20Vals, sma50Vals, sma200Vals, sma200wVals, ema20Vals, ema100Vals, bands]);
 
   const rsiVals = useMemo(
-    () => activeTools.rsi && P.rsi.ok ? computeRSI(closes, P.rsi.period) : null,
-    [closes, activeTools.rsi, P],
+    () => !activeTools.rsi ? null
+      : activeTools.rsiWeekly
+        ? computeRsiWeeklyDaily(prices.map(p => p.date), prices.map(p => p.close), 14)
+        : (P.rsi.ok ? computeRSI(closes, P.rsi.period) : null),
+    [closes, prices, activeTools.rsi, activeTools.rsiWeekly, P],
   );
   const rsiData = useMemo(
     () => rsiVals ? prices.map((p, i) => ({ date: p.date, rsi: rsiVals[i] })) : [],
@@ -204,7 +207,7 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
       {/* RSI sub-chart */}
       {activeTools.rsi && rsiData.filter(d => d.rsi != null).length > 0 && (
         <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-          <p className="text-[10px] text-indigo-400 font-semibold mb-1">RSI 14</p>
+          <p className="text-[10px] text-indigo-400 font-semibold mb-1">RSI 14 {activeTools.rsiWeekly ? 'Weekly' : 'Daily'}</p>
           <ResponsiveContainer width="100%" height={80}>
             <LineChart data={rsiData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />

@@ -18,7 +18,7 @@ import { useGistData } from '@/lib/gist';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
-  computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily,
+  computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily, computeRsiWeeklyDaily,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
 import {
@@ -800,6 +800,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  // Full daily history for a weekly RSI on the stock's oscillator sub-chart.
+  const rsiFullHist = useFullHistory(selected?.symbol, !!(activeTools.rsi && activeTools.rsiWeekly));
   const [dataMsg, setDataMsg] = useState<string | null>(null);
   const [spyPrices, setSpyPrices] = useState<HistoricalPoint[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1354,14 +1356,28 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
           {/* RSI / MACD oscillator sub-charts for stocks */}
           {!loading && prices.length > 0 && activeTools.rsi && (() => {
-            const stockCloses = prices.map(p => p.close).filter((c): c is number => isFinite(c));
-            const rsiVals = computeRSI(stockCloses);
-            const rsiData = prices.map((p, i) => ({ date: p.date, rsi: rsiVals[i] }));
+            let rsiData: { date: string; rsi: number | null }[];
+            if (activeTools.rsiWeekly) {
+              // Weekly RSI on the full daily history, held forward (at-or-before) onto each visible day.
+              const full = rsiFullHist && rsiFullHist.length > 2 ? rsiFullHist : prices;
+              const fullDates = full.map(p => p.date);
+              const fSeries = computeRsiWeeklyDaily(fullDates, full.map(p => p.close), 14);
+              let j = 0;
+              let lastVal: number | null = null;
+              rsiData = prices.map(p => {
+                while (j < fullDates.length && fullDates[j] <= p.date) { if (fSeries[j] != null) lastVal = fSeries[j]; j++; }
+                return { date: p.date, rsi: lastVal };
+              });
+            } else {
+              const stockCloses = prices.map(p => p.close).filter((c): c is number => isFinite(c));
+              const rsiVals = computeRSI(stockCloses);
+              rsiData = prices.map((p, i) => ({ date: p.date, rsi: rsiVals[i] }));
+            }
             const valid = rsiData.filter(d => d.rsi != null);
             if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
             return (
               <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-                <p className="text-[10px] text-indigo-400 font-semibold mb-1">RSI 14</p>
+                <p className="text-[10px] text-indigo-400 font-semibold mb-1">RSI 14 {activeTools.rsiWeekly ? 'Weekly' : 'Daily'}</p>
                 <ResponsiveContainer width="100%" height={80}>
                   <LineChart data={rsiData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />

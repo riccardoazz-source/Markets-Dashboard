@@ -14,7 +14,7 @@ import { useFullHistory } from '@/lib/useFullHistory';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeTrendLine, computeSma200wDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeTrendLine, computeSma200wDaily, computeRsiWeeklyDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 
 interface ToolsOverlay {
@@ -29,6 +29,7 @@ interface ToolsOverlay {
   bollinger?: boolean;
   fib?: boolean;
   rsi?: boolean;
+  rsiWeekly?: boolean;
   macd?: boolean;
   momentumDaily?: boolean;
   momentumWeekly?: boolean;
@@ -109,7 +110,7 @@ function fullIndexForVisible(fullDates: string[], visDates: string[]): number[] 
 
 // ── Oscillator sub-charts ────────────────────────────────────────────────────
 
-function RSISubChart({ data }: { data: { date: string; rsi: number | null }[] }) {
+function RSISubChart({ data, weekly }: { data: { date: string; rsi: number | null }[]; weekly?: boolean }) {
   const valid = data.filter(d => d.rsi != null);
   if (valid.length === 0) {
     return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
@@ -117,7 +118,7 @@ function RSISubChart({ data }: { data: { date: string; rsi: number | null }[] })
   return (
     <div className="mt-2">
       <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] text-indigo-400 font-semibold">RSI 14</span>
+        <span className="text-[10px] text-indigo-400 font-semibold">RSI 14 {weekly ? 'Weekly' : 'Daily'}</span>
         <span className="text-[9px] text-gray-600">
           <span className="text-red-400">▬</span> Overbought (70) &nbsp;
           <span className="text-emerald-400">▬</span> Oversold (30)
@@ -242,7 +243,8 @@ export function PriceChart({
   const wantsFullMA = !!(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
     toolsOverlay?.sma200w || toolsOverlay?.ema20 || toolsOverlay?.ema100);
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
-  const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend);
+  const wantsFullRsi = !!(toolsOverlay?.rsi && toolsOverlay?.rsiWeekly);
+  const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend || wantsFullRsi);
 
   // vs SPY benchmark overlay — fetched here so the tool works in every section
   // that renders a PriceChart without each one wiring up its own SPY fetch.
@@ -406,8 +408,12 @@ export function PriceChart({
       }))
     : data;
 
-  // RSI data for sub-chart
-  const rsiVals = toolsOverlay?.rsi && P.rsi.ok ? computeRSI(closes, P.rsi.period) : null;
+  // RSI data for sub-chart — weekly (on weekly closes from full history, projected) or daily.
+  const rsiVals = toolsOverlay?.rsi
+    ? (toolsOverlay.rsiWeekly
+        ? (useFull ? projectToVisible(fullDates, computeRsiWeeklyDaily(fullDates, fullCloses, 14), visDates) : null)
+        : (P.rsi.ok ? computeRSI(closes, P.rsi.period) : null))
+    : null;
   const rsiData = rsiVals ? data.map((d, i) => ({ date: d.date, rsi: rsiVals[i] })) : null;
 
   // MACD data for sub-chart
@@ -735,7 +741,7 @@ export function PriceChart({
       </ResponsiveContainer>
 
       {/* Oscillator sub-charts */}
-      {rsiData && <RSISubChart data={rsiData} />}
+      {rsiData && <RSISubChart data={rsiData} weekly={!!toolsOverlay?.rsiWeekly} />}
       {macdData && <MACDSubChart data={macdData} />}
       {momDailyData   && <MomentumSubChart data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
       {momWeeklyData  && <MomentumSubChart data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}

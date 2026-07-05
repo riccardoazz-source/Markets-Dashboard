@@ -132,6 +132,25 @@ export function computeSma200wLatest(dates: string[], closes: (number | null)[])
   return null;
 }
 
+/**
+ * RSI(period) computed on WEEKLY closes (last close of each week), then held forward onto each
+ * daily date. Returns an array aligned 1:1 with `dates`, so a weekly RSI can be shown on a daily
+ * chart — matching TradingView's weekly-timeframe RSI. `dates`/`closes` are the raw daily series.
+ */
+export function computeRsiWeeklyDaily(dates: string[], closes: (number | null)[], period = 14): (number | null)[] {
+  const out: (number | null)[] = new Array(dates.length).fill(null);
+  const w = resampleWeekly(dates, closes);
+  if (w.closes.length <= period) return out;
+  const wr = computeRSI(w.closes, period); // aligned to w.dates
+  let j = 0;
+  let lastVal: number | null = null;
+  for (let i = 0; i < dates.length; i++) {
+    while (j < w.dates.length && w.dates[j] <= dates[i]) { if (wr[j] != null) lastVal = wr[j]; j++; }
+    out[i] = lastVal;
+  }
+  return out;
+}
+
 /** Sliding-window Simple Moving Average — O(n). */
 export function computeSMA(closes: number[], period: number): (number | null)[] {
   const result: (number | null)[] = [];
