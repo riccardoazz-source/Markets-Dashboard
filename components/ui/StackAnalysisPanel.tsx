@@ -6,7 +6,7 @@ import { CHART_COLORS } from '@/lib/utils';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeSma200wDaily, computeRsiWeeklyDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wDaily, computeRsiWeeklyDaily, computeMacdWeeklyDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import {
@@ -76,10 +76,11 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
   );
 
   const macdResult = useMemo(
-    () => activeTools.macd && P.macdSlow.ok
-      ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period)
-      : null,
-    [closes, activeTools.macd, P],
+    () => !activeTools.macd ? null
+      : activeTools.macdWeekly
+        ? computeMacdWeeklyDaily(prices.map(p => p.date), prices.map(p => p.close))
+        : (P.macdSlow.ok ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period) : null),
+    [closes, prices, activeTools.macd, activeTools.macdWeekly, P],
   );
   const macdData = useMemo(() => macdResult
     ? prices.map((p, i) => ({ date: p.date, macd: macdResult.macd[i], signal: macdResult.signal[i], hist: macdResult.hist[i] }))
@@ -230,7 +231,7 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
       {/* MACD sub-chart */}
       {activeTools.macd && macdData.filter(d => d.hist != null).length > 0 && (
         <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-          <p className="text-[10px] text-blue-400 font-semibold mb-1">MACD (12, 26, 9)</p>
+          <p className="text-[10px] text-blue-400 font-semibold mb-1">MACD (12, 26, 9) {activeTools.macdWeekly ? 'Weekly' : 'Daily'}</p>
           <ResponsiveContainer width="100%" height={80}>
             <ComposedChart data={macdData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />

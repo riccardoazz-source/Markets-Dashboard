@@ -290,6 +290,32 @@ export function computeTrendLine(closes: (number | null)[]): { slope: number; in
   return { slope, intercept };
 }
 
+/**
+ * MACD(fast/slow/signal) computed on WEEKLY closes, each of the three series held forward onto
+ * the daily dates. Returns arrays aligned 1:1 with `dates`, so a weekly MACD can be shown on a
+ * daily chart — matching TradingView's weekly-timeframe MACD. `dates`/`closes` are the raw daily
+ * series.
+ */
+export function computeMacdWeeklyDaily(
+  dates: string[], closes: (number | null)[], fast = 12, slow = 26, signal = 9,
+): { macd: (number | null)[]; signal: (number | null)[]; hist: (number | null)[] } {
+  const empty = () => new Array(dates.length).fill(null) as (number | null)[];
+  const w = resampleWeekly(dates, closes);
+  if (w.closes.length <= slow + signal) return { macd: empty(), signal: empty(), hist: empty() };
+  const m = computeMACD(w.closes, fast, slow, signal); // aligned to w.dates
+  const project = (arr: (number | null)[]): (number | null)[] => {
+    const out = new Array(dates.length).fill(null) as (number | null)[];
+    let j = 0;
+    let lastVal: number | null = null;
+    for (let i = 0; i < dates.length; i++) {
+      while (j < w.dates.length && w.dates[j] <= dates[i]) { if (arr[j] != null) lastVal = arr[j]; j++; }
+      out[i] = lastVal;
+    }
+    return out;
+  };
+  return { macd: project(m.macd), signal: project(m.signal), hist: project(m.hist) };
+}
+
 /** MACD (default 12/26/9 trading days, auto-scaled via barsForCalDays). Returns three arrays of length = closes.length. */
 export function computeMACD(
   closes: number[],

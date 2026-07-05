@@ -14,7 +14,8 @@ import { useFullHistory } from '@/lib/useFullHistory';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeTrendLine, computeSma200wDaily, computeRsiWeeklyDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeTrendLine, computeSma200wDaily, computeRsiWeeklyDaily, computeMacdWeeklyDaily,
+  avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 
 interface ToolsOverlay {
@@ -31,6 +32,7 @@ interface ToolsOverlay {
   rsi?: boolean;
   rsiWeekly?: boolean;
   macd?: boolean;
+  macdWeekly?: boolean;
   momentumDaily?: boolean;
   momentumWeekly?: boolean;
   momentumMonthly?: boolean;
@@ -145,8 +147,9 @@ function RSISubChart({ data, weekly }: { data: { date: string; rsi: number | nul
   );
 }
 
-function MACDSubChart({ data }: {
+function MACDSubChart({ data, weekly }: {
   data: { date: string; macd: number | null; signal: number | null; hist: number | null }[];
+  weekly?: boolean;
 }) {
   const valid = data.filter(d => d.hist != null);
   if (valid.length === 0) {
@@ -155,7 +158,7 @@ function MACDSubChart({ data }: {
   return (
     <div className="mt-2">
       <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] text-blue-400 font-semibold">MACD (12, 26, 9)</span>
+        <span className="text-[10px] text-blue-400 font-semibold">MACD (12, 26, 9) {weekly ? 'Weekly' : 'Daily'}</span>
         <span className="text-[9px] text-gray-600">
           <span className="text-blue-400">▬</span> MACD &nbsp;
           <span className="text-orange-400">╌</span> Signal &nbsp;
@@ -244,7 +247,8 @@ export function PriceChart({
     toolsOverlay?.sma200w || toolsOverlay?.ema20 || toolsOverlay?.ema100);
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
   const wantsFullRsi = !!(toolsOverlay?.rsi && toolsOverlay?.rsiWeekly);
-  const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend || wantsFullRsi);
+  const wantsFullMacd = !!(toolsOverlay?.macd && toolsOverlay?.macdWeekly);
+  const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend || wantsFullRsi || wantsFullMacd);
 
   // vs SPY benchmark overlay — fetched here so the tool works in every section
   // that renders a PriceChart without each one wiring up its own SPY fetch.
@@ -416,9 +420,18 @@ export function PriceChart({
     : null;
   const rsiData = rsiVals ? data.map((d, i) => ({ date: d.date, rsi: rsiVals[i] })) : null;
 
-  // MACD data for sub-chart
-  const macdResult = toolsOverlay?.macd && P.macdSlow.ok
-    ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period)
+  // MACD data for sub-chart — weekly (on weekly closes from full history, projected) or daily.
+  const macdResult = toolsOverlay?.macd
+    ? (toolsOverlay.macdWeekly
+        ? (useFull ? (() => {
+            const w = computeMacdWeeklyDaily(fullDates, fullCloses);
+            return {
+              macd:   projectToVisible(fullDates, w.macd, visDates),
+              signal: projectToVisible(fullDates, w.signal, visDates),
+              hist:   projectToVisible(fullDates, w.hist, visDates),
+            };
+          })() : null)
+        : (P.macdSlow.ok ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period) : null))
     : null;
   const macdData = macdResult
     ? data.map((d, i) => ({
@@ -742,7 +755,7 @@ export function PriceChart({
 
       {/* Oscillator sub-charts */}
       {rsiData && <RSISubChart data={rsiData} weekly={!!toolsOverlay?.rsiWeekly} />}
-      {macdData && <MACDSubChart data={macdData} />}
+      {macdData && <MACDSubChart data={macdData} weekly={!!toolsOverlay?.macdWeekly} />}
       {momDailyData   && <MomentumSubChart data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
       {momWeeklyData  && <MomentumSubChart data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}
       {momMonthlyData && <MomentumSubChart data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
