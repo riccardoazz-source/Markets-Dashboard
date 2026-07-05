@@ -386,7 +386,17 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
             />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} unit={`${selected?.from}/${selected?.to}`} />}
-          {selected && <ChartNotes chartId={`${selected.from}/${selected.to}`} />}
+          {selected && (
+            <ChartNotes
+              chartId={`${selected.from}/${selected.to}`}
+              captureView={() => ({ tools: { ...activeTools } as Record<string, boolean>, timeframe, customRange })}
+              onRestoreView={v => {
+                if (v.tools) setActiveTools({ ...DEFAULT_TOOLS, ...(v.tools as Partial<ActiveTools>) });
+                if (v.timeframe) setTimeframe(v.timeframe as Timeframe);
+                setCustomRange(v.customRange ?? null);
+              }}
+            />
+          )}
         </div>
         </DetailModal>
       )}

@@ -1,16 +1,20 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useGistData, NoteEntry, todayStr, makeId } from '@/lib/gist';
-import { StickyNote, Plus, Edit2, Trash2, Check, X } from 'lucide-react';
+import { useGistData, NoteEntry, NoteView, todayStr, makeId } from '@/lib/gist';
+import { StickyNote, Plus, Edit2, Trash2, Check, X, RotateCcw } from 'lucide-react';
 import clsx from 'clsx';
 
 interface Props {
   chartId: string;
   defaultCategory?: string;
+  /** Capture the current chart view (tools, timeframe, …) to store with a new note. */
+  captureView?: () => NoteView | undefined;
+  /** Re-apply a saved view when the user clicks "restore" on a note. */
+  onRestoreView?: (view: NoteView) => void;
 }
 
-export function ChartNotes({ chartId, defaultCategory }: Props) {
+export function ChartNotes({ chartId, defaultCategory, captureView, onRestoreView }: Props) {
   const { data, update } = useGistData();
   const [open, setOpen] = useState(false);
   const [newText, setNewText] = useState('');
@@ -39,7 +43,8 @@ export function ChartNotes({ chartId, defaultCategory }: Props) {
     const category = newCategory.trim();
     // A note needs either some text or a category — at least one.
     if (!text && !category) return;
-    const entry: NoteEntry = { id: makeId(), text, date: todayStr(), category: category || undefined };
+    const view = captureView?.();
+    const entry: NoteEntry = { id: makeId(), text, date: todayStr(), category: category || undefined, view };
     await update({ notes: { [chartId]: [...notes, entry] } });
     setNewText('');
     setNewCategory(defaultCategory ?? '');
@@ -131,12 +136,21 @@ export function ChartNotes({ chartId, defaultCategory }: Props) {
                     {note.text && (
                       <p className="text-xs text-gray-200 leading-relaxed whitespace-pre-wrap break-words">{note.text}</p>
                     )}
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <p className="text-[10px] text-gray-600">{note.date}</p>
                       {note.category && (
                         <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-accent/15 text-accent/80">
                           {note.category}
                         </span>
+                      )}
+                      {note.view && onRestoreView && (
+                        <button
+                          onClick={() => onRestoreView(note.view!)}
+                          title="Restore the chart view saved with this note (tools, timeframe)"
+                          className="flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full border border-accent/40 text-accent hover:bg-accent/10 transition-colors"
+                        >
+                          <RotateCcw size={9} /> Restore view
+                        </button>
                       )}
                     </div>
                   </div>

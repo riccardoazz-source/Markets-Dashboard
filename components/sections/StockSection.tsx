@@ -1459,7 +1459,18 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           {!loading && prices.length > 0 && (
             <ChartDataTable data={prices} unit={currency} />
           )}
-          {selected && <ChartNotes chartId={`stock:${selected.symbol}`} defaultCategory="Watchlist" />}
+          {selected && (
+            <ChartNotes
+              chartId={`stock:${selected.symbol}`}
+              defaultCategory="Watchlist"
+              captureView={() => ({ tools: { ...activeTools } as Record<string, boolean>, timeframe, customRange })}
+              onRestoreView={v => {
+                if (v.tools) setActiveTools({ ...DEFAULT_TOOLS, ...(v.tools as Partial<ActiveTools>) });
+                if (v.timeframe) setTimeframe(v.timeframe as Timeframe);
+                setCustomRange(v.customRange ?? null);
+              }}
+            />
+          )}
 
           {/* Dividends chart (bar) */}
           {!loading && dividends.length > 0 && (

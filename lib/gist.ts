@@ -1,10 +1,20 @@
 import { useState, useEffect } from 'react';
 
+// Snapshot of the chart view captured when a note is created, so clicking "restore"
+// returns to exactly the same setup (active tools + toggles, timeframe, custom range).
+export interface NoteView {
+  tools?: Record<string, boolean>;              // ActiveTools snapshot (chips + weekly/full modifiers)
+  timeframe?: string;                           // e.g. '1D','1Y','MAX'
+  customRange?: { from: string; to: string } | null;
+  symbols?: string[];                           // Compare: the set of compared symbols
+}
+
 export interface NoteEntry {
   id: string;
   text: string;
   date: string; // YYYY-MM-DD
   category?: string;
+  view?: NoteView; // optional saved chart state
 }
 
 export interface AnalysisEntry {

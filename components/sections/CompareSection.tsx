@@ -998,6 +998,13 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         <ChartNotes
           chartId={`compare:${[...selectedSymbols].sort().join(',')}`}
           defaultCategory="Compare"
+          captureView={() => ({ tools: { ...stackTools } as Record<string, boolean>, timeframe, customRange, symbols: selectedSymbols })}
+          onRestoreView={v => {
+            if (v.tools) setStackTools({ ...DEFAULT_TOOLS, ...(v.tools as Partial<ActiveTools>) });
+            if (v.timeframe) setTimeframe(v.timeframe as Timeframe);
+            setCustomRange(v.customRange ?? null);
+            if (v.symbols && v.symbols.length > 0) setSelectedSymbols(v.symbols.slice(0, 8));
+          }}
         />
       )}
     </div>

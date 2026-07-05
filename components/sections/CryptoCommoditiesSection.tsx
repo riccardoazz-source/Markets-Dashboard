@@ -375,7 +375,17 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
             <ChartTools data={historical} symbol={coinYahooSym(selectedCrypto)} activeTools={activeTools} onChange={setActiveTools} />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} />}
-          {selected && <ChartNotes chartId={`crypto:${selected}`} />}
+          {selected && (
+            <ChartNotes
+              chartId={`crypto:${selected}`}
+              captureView={() => ({ tools: { ...activeTools } as Record<string, boolean>, timeframe, customRange })}
+              onRestoreView={v => {
+                if (v.tools) setActiveTools({ ...DEFAULT_TOOLS, ...(v.tools as Partial<ActiveTools>) });
+                if (v.timeframe) setTimeframe(v.timeframe as Timeframe);
+                setCustomRange(v.customRange ?? null);
+              }}
+            />
+          )}
         </div>
         </DetailModal>
       )}

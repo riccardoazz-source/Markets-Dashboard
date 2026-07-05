@@ -649,7 +649,17 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           {historical.length > 0 && selected !== 'BTC_HALVING' && !selIsRec && !selIsFOMC && !selIsFedChairs && !selIsGridMarker && !selIsEvents && (
             <ChartDataTable data={historical} unit={selectedIndicator?.unit} />
           )}
-          {selected && <ChartNotes chartId={selected} />}
+          {selected && (
+            <ChartNotes
+              chartId={selected}
+              captureView={() => ({ tools: { ...activeTools } as Record<string, boolean>, timeframe, customRange })}
+              onRestoreView={v => {
+                if (v.tools) setActiveTools({ ...DEFAULT_TOOLS, ...(v.tools as Partial<ActiveTools>) });
+                if (v.timeframe) setTimeframe(v.timeframe as Timeframe);
+                setCustomRange(v.customRange ?? null);
+              }}
+            />
+          )}
 
           <p className="text-[10px] text-gray-700">
             Data: Federal Reserve (FRED), BLS, NY Fed, ECB, DBnomics · Not financial advice

@@ -433,7 +433,17 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             <ChartTools data={historical} symbol={selected ?? undefined} activeTools={activeTools} onChange={setActiveTools} />
           )}
           {historical.length > 0 && <ChartDataTable data={historical} />}
-          {selected && <ChartNotes chartId={selected} />}
+          {selected && (
+            <ChartNotes
+              chartId={selected}
+              captureView={() => ({ tools: { ...activeTools } as Record<string, boolean>, timeframe, customRange })}
+              onRestoreView={v => {
+                if (v.tools) setActiveTools({ ...DEFAULT_TOOLS, ...(v.tools as Partial<ActiveTools>) });
+                if (v.timeframe) setTimeframe(v.timeframe as Timeframe);
+                setCustomRange(v.customRange ?? null);
+              }}
+            />
+          )}
         </div>
         </DetailModal>
       )}
