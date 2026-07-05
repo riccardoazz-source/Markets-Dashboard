@@ -824,7 +824,10 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                       )}
                     >
                       <td className="px-3 py-2 text-[11px] text-gray-600 tabular-nums">{idx + 1}</td>
-                      <td className="px-3 py-2">
+                      {/* max-w-0 w-full makes this column absorb the leftover width and truncate
+                          the name, so the fixed metric columns always fit the viewport (no
+                          horizontal overflow / clipping on mobile). */}
+                      <td className="px-3 py-2 max-w-0 w-full">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span
                             onClick={(e) => { e.stopPropagation(); toggleSymbol(item.symbol); }}
