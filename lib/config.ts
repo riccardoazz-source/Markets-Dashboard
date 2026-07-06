@@ -332,6 +332,10 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'WEI',      name: 'Weekly Economic Index',  category: 'Growth',      unit: '%',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/WEI' } },
+  // MFPPBS: Private Business Sector — Total Factor Productivity (index, annual, BLS).
+  { id: 'MFPPBS',   name: 'Total Factor Productivity', category: 'Growth',   unit: 'idx',
+    source: { type: 'fred',    label: 'FRED / BLS',
+              url: 'https://fred.stlouisfed.org/series/MFPPBS' } },
   // Employment
   { id: 'UNRATE',   name: 'US Unemployment',        category: 'Employment',  unit: '%',
     source: { type: 'bls',     label: 'BLS',
@@ -342,6 +346,12 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'JTSJOL',   name: 'Job Openings (JOLTS)',   category: 'Employment',  unit: 'K',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/JTSJOL' } },
+  { id: 'CIVPART',  name: 'Labor Force Participation', category: 'Employment', unit: '%',
+    source: { type: 'fred',    label: 'FRED / BLS',
+              url: 'https://fred.stlouisfed.org/series/CIVPART' } },
+  { id: 'LES1252881600Q', name: 'Median Real Weekly Earnings', category: 'Employment', unit: '$',
+    source: { type: 'fred',    label: 'FRED / BLS',
+              url: 'https://fred.stlouisfed.org/series/LES1252881600Q' } },
   // Real Estate
   { id: 'HOUST',    name: 'Housing Starts',         category: 'Real Estate', unit: 'K',
     source: { type: 'fred',    label: 'FRED',
@@ -357,6 +367,10 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'TOTBKCR',  name: 'Bank Credit (All Comm.)', category: 'Money',      unit: 'B$',
     source: { type: 'fred',    label: 'FRED',
               url: 'https://fred.stlouisfed.org/series/TOTBKCR' } },
+  // TOTALSLAR: Percent Change of Total Consumer Credit (annual rate, monthly, Fed G.19).
+  { id: 'TOTALSLAR', name: 'Consumer Credit (% chg)', category: 'Money',     unit: '%',
+    source: { type: 'fred',    label: 'FRED / Federal Reserve',
+              url: 'https://fred.stlouisfed.org/series/TOTALSLAR' } },
   // WALCL is reported in millions on FRED; the computed handler divides by 1000 → billions.
   { id: 'WALCL',    name: 'Fed Balance Sheet (WALCL)', category: 'Money',      unit: 'B$',
     source: { type: 'computed', label: 'FRED',
