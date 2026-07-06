@@ -1161,7 +1161,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 )}
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">
               {onCompare && (
                 <button
                   onClick={() => onCompare(selected.symbol)}
@@ -1180,15 +1180,19 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 timeframe={timeframe}
                 tools={prices.length > 0 ? summarizeTools(activeTools, prices) : undefined}
               />
-              <TimeframeSelector
-                value={timeframe}
-                onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
-                options={TF_OPTIONS}
-                isCustom={!!customRange}
-                onCustomRange={(from, to) => setCustomRange({ from, to })}
-              />
               <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
             </div>
+          </div>
+
+          {/* Timeframe on its own row (it is wide) so the ✕ always stays in the top-right corner. */}
+          <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+            <TimeframeSelector
+              value={timeframe}
+              onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+              options={TF_OPTIONS}
+              isCustom={!!customRange}
+              onCustomRange={(from, to) => setCustomRange({ from, to })}
+            />
           </div>
 
           {dataMsg && (
