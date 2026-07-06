@@ -58,6 +58,9 @@ interface Props {
   interpolationType?: 'monotone' | 'stepAfter';
   enableDragSelect?: boolean;
   toolsOverlay?: ToolsOverlay;
+  /** Dividend-reinvested total-return series (aligned by date to `data`). Drawn as a dashed
+   *  line above the price so the cumulative (dividends-included) path is always visible. */
+  totalReturnData?: HistoricalPoint[];
   /** Called when the user clicks "Set as period" on the drag-select banner. */
   onSetRange?: (from: string, to: string) => void;
 }
@@ -238,7 +241,7 @@ function MomentumSubChart({
 export function PriceChart({
   data, symbol, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
-  enableDragSelect = true, toolsOverlay, onSetRange,
+  enableDragSelect = true, toolsOverlay, totalReturnData, onSetRange,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
@@ -297,6 +300,12 @@ export function PriceChart({
   const hasNegative = closes.some(v => v < 0);
   const hasPositive = closes.some(v => v > 0);
   const needsZeroLine = hasNegative && hasPositive;
+
+  // Dividend-reinvested total-return line (dashed), aligned by date to the price series.
+  const trByDate = totalReturnData && totalReturnData.length
+    ? new Map(totalReturnData.map(d => [d.date, d.close]))
+    : null;
+  const trLine = trByDate ? data.map(d => trByDate.get(d.date) ?? null) : null;
 
   // Tool overlay computations (level overlays on main chart)
   const toolAvg = closes.length > 0 ? closes.reduce((s, v) => s + v, 0) / closes.length : null;
@@ -392,13 +401,16 @@ export function PriceChart({
       if (v < domMin) domMin = v;
     }
   }
+  if (trLine) {
+    for (const v of trLine) { if (v != null && v > domMax) domMax = v; }
+  }
   const dataRange = domMax - domMin;
   const pad = Math.max(dataRange * 0.08, Math.abs(domMax) * 0.02, 0.001);
   const yMin = domMin >= 0 ? Math.max(0, domMin - pad) : domMin - pad;
   const yMax = domMax + pad;
 
-  // Extend data with overlay columns (SMA/EMA lines + Bollinger band range + SPY + trend)
-  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema20Vals || ema100Vals || bands || spyLine || trendVals;
+  // Extend data with overlay columns (SMA/EMA lines + Bollinger band range + SPY + trend + TR)
+  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema20Vals || ema100Vals || bands || spyLine || trendVals || trLine;
   const chartData = hasSeriesOverlay
     ? data.map((d, i) => ({
         ...d,
@@ -410,6 +422,7 @@ export function PriceChart({
         ema100:  ema100Vals?.[i]  ?? null,
         spy:    spyLine?.[i]     ?? null,
         trend:  trendVals?.[i]   ?? null,
+        tr:     trLine?.[i]      ?? null,
         bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
           ? [bands.lower[i] as number, bands.upper[i] as number]
           : null,
@@ -495,8 +508,14 @@ export function PriceChart({
       {/* Overlay legend when active */}
       {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w ||
         toolsOverlay?.ema20 || toolsOverlay?.ema100 || toolsOverlay?.bollinger || toolsOverlay?.fib ||
-        spyLine || trendVals) && (
+        spyLine || trendVals || trLine) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
+          {trLine && (
+            <span className="flex items-center gap-1 text-[10px] text-teal-300">
+              <span className="inline-block w-5 border-t-2 border-dashed border-teal-300" />
+              Total Return (div. reinvested)
+            </span>
+          )}
           {trendVals && (
             <span className="flex items-center gap-1 text-[10px]" style={{ color: trendColor }}>
               <span className="inline-block w-5 border-t-2" style={{ borderColor: trendColor }} />
@@ -608,6 +627,7 @@ export function PriceChart({
               if (name === 'ema100') return [value != null ? value.toFixed(decimals) : '—', 'EMA 100'];
               if (name === 'spy')    return [value != null ? value.toFixed(decimals) : '—', 'vs SPY (benchmark)'];
               if (name === 'trend')  return [value != null ? value.toFixed(decimals) : '—', 'Trend'];
+              if (name === 'tr')     return [value != null ? value.toFixed(decimals) : '—', 'Total Return (div. reinvested)'];
               if (name === 'bbRange') {
                 const r = value as unknown as [number, number] | null;
                 return [r ? `${r[0].toFixed(decimals)} – ${r[1].toFixed(decimals)}` : '—', 'Bollinger'];
@@ -693,6 +713,11 @@ export function PriceChart({
           {trendVals && (
             <Line type="linear" dataKey="trend" stroke={trendColor} strokeWidth={2}
               dot={false} activeDot={false} connectNulls name="trend" />
+          )}
+          {/* Total-return (dividends reinvested) — dashed line above the price */}
+          {trLine && (
+            <Line type={interpolationType} dataKey="tr" stroke="#2dd4bf" strokeWidth={1.5}
+              strokeDasharray="5 3" dot={false} activeDot={false} connectNulls name="tr" />
           )}
 
           {/* Level overlays */}

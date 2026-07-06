@@ -214,6 +214,13 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     }));
   }, [historical, divData]);
 
+  // Total-return series (dividends reinvested) — passed to PriceChart so the cumulative line
+  // is drawn even when a tool is active (the dual-line chart only renders with no tool active).
+  const trSeries = useMemo(
+    () => (divData?.dividends.length && historical.length ? buildTotalReturnSeries(historical, divData.dividends) : undefined),
+    [historical, divData],
+  );
+
   const irr = useMemo(() => {
     if (!divData?.dividends.length || !historical.length) return null;
     return computeAssetIRR(historical, divData.dividends);
@@ -420,6 +427,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             <DualLineDragChart data={divChartData} onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           ) : (
             <PriceChart data={historical} symbol={selected ?? undefined} color="auto" height={200} toolsOverlay={activeTools}
+              totalReturnData={trSeries}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
 

@@ -134,6 +134,10 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   const [assets, setAssets] = useState<CompareAsset[]>([]);
   const [loading, setLoading] = useState(false);
   const [normalized, setNormalized] = useState(true);
+  // Align every asset to a common start (the shortest-history asset's start) for an
+  // apples-to-apples comparison. Turn OFF to let each asset span its own full history
+  // from the timeframe start (shows more data + each asset's full dividend history).
+  const [alignStart, setAlignStart] = useState(true);
   // Linear scale by default. Log is an opt-in toggle for when one asset has
   // returns many times larger than the others (e.g. an index vs a macro series).
   const [logScale, setLogScale] = useState(false);
@@ -447,11 +451,13 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         }
         return null;
       };
-      const commonStart = assets
-        .filter(a => !EVENT_OVERLAY.has(a.symbol))
-        .map(firstInWindow)
-        .filter((d): d is string => d != null)
-        .reduce((m, d) => (d > m ? d : m), tfStart);
+      const commonStart = alignStart
+        ? assets
+            .filter(a => !EVENT_OVERLAY.has(a.symbol))
+            .map(firstInWindow)
+            .filter((d): d is string => d != null)
+            .reduce((m, d) => (d > m ? d : m), tfStart)
+        : tfStart; // each asset spans its own history from the timeframe start
 
       return assets.map(a => {
         const raw = a.rawData ?? a.data;
@@ -515,7 +521,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       console.error('[CompareSection] displayAssets error:', e);
       return assets;
     }
-  }, [assets, timeframe, customRange, normalized]);
+  }, [assets, timeframe, customRange, normalized, alignStart]);
 
   // Synthetic spread series, derived from the aligned display assets.
   const spreadAssets = useMemo(
@@ -709,6 +715,12 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               className={clsx('px-3 py-1 text-xs font-medium rounded-full transition-all border',
                 normalized ? 'border-accent text-accent bg-accent/10' : 'border-border text-gray-400 hover:text-gray-200')}>
               {normalized ? '% Change' : 'Absolute price'}
+            </button>
+            <button onClick={() => setAlignStart(s => !s)}
+              title="Aligned: every asset starts from the same date (the shortest-history one) for a fair comparison. Full history: each asset spans its own data from the timeframe start — more data and each asset's full dividend history."
+              className={clsx('px-3 py-1 text-xs font-medium rounded-full transition-all border',
+                alignStart ? 'border-accent text-accent bg-accent/10' : 'border-border text-gray-400 hover:text-gray-200')}>
+              {alignStart ? 'Aligned start' : 'Full history'}
             </button>
             {!normalized && (
               <button onClick={() => setLogScale(s => !s)}
