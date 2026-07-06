@@ -1290,7 +1290,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
           {/* Stats */}
           {data?.meta && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
               <Stat label="Price" value={formatPrice(data.meta.price, currency)} />
               {cagrPrice && (
                 <Stat label={`Return (${timeframe})`} value={formatPercent(cagrPrice.return)} color={colorForPercent(cagrPrice.return)} />
@@ -1334,8 +1334,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               ) : finList.length > 0 ? (
                 <Stat label="Revenue CAGR" value="N/A" color="text-gray-600" />
               ) : null}
-              {data.meta.high52w != null && <Stat label="52W High" value={formatPrice(data.meta.high52w, currency)} />}
-              {data.meta.low52w != null && <Stat label="52W Low" value={formatPrice(data.meta.low52w, currency)} />}
+              {data.meta.high52w != null && data.meta.high52w > 0 && <Stat label="52W High" value={formatPrice(data.meta.high52w, currency)} />}
+              {data.meta.low52w != null && data.meta.low52w > 0 && <Stat label="52W Low" value={formatPrice(data.meta.low52w, currency)} />}
               {dividends.length > 0 && (
                 <Stat label="Dividends (period)" value={`${dividends.length} (${formatPrice(totalDivs, currency)})`} />
               )}
@@ -1537,9 +1537,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="bg-bg-input rounded-lg px-3 py-2">
-      <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
-      <p className={clsx('text-sm font-bold tabular-nums', color ?? 'text-gray-100')}>{value}</p>
+    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
+      <p className={clsx('text-[13px] font-bold tabular-nums truncate', color ?? 'text-gray-100')}>{value}</p>
     </div>
   );
 }

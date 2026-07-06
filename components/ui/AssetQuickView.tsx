@@ -105,9 +105,9 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="bg-bg-input rounded-lg px-3 py-2">
-      <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
-      <p className={`text-sm font-bold ${color ?? 'text-gray-200'}`}>{value}</p>
+    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
+      <p className={`text-[13px] font-bold tabular-nums truncate ${color ?? 'text-gray-200'}`}>{value}</p>
     </div>
   );
 }

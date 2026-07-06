@@ -290,7 +290,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
             </p>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
             <Stat label="Price" value={formatPrice(selectedQuote.price)} />
             <Stat label="Day Change" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
             {selectedQuote.mtdChangePercent != null && (
@@ -305,8 +305,8 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                 <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
               </>
             )}
-            {selectedQuote.high52w != null && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
-            {selectedQuote.low52w != null && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
+            {selectedQuote.high52w != null && selectedQuote.high52w > 0 && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
+            {selectedQuote.low52w != null && selectedQuote.low52w > 0 && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
           </div>
 
           {histLoading ? (
@@ -339,9 +339,9 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="bg-bg-input rounded-lg px-3 py-2">
-      <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
-      <p className={clsx('text-sm font-bold', color ?? 'text-gray-100')}>{value}</p>
+    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
+      <p className={clsx('text-[13px] font-bold tabular-nums truncate', color ?? 'text-gray-100')}>{value}</p>
     </div>
   );
 }

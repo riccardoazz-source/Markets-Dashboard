@@ -316,32 +316,32 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
             </p>
           )}
 
-          <div className="flex gap-4 flex-wrap">
+          <div className="flex gap-2 flex-wrap">
             {selectedRate?.change1d != null && (
-              <div className="bg-bg-input rounded-lg px-3 py-2.5">
-                <p className="text-[10px] text-gray-500 mb-0.5">Daily Change</p>
+              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+                <p className="text-[9px] text-gray-500 mb-0.5">Daily Change</p>
                 <p className={clsx('text-sm font-bold', pctClass(selectedRate.change1d))}>
                   {pctText(selectedRate.change1d)}
                 </p>
               </div>
             )}
             {selectedRate?.ytd != null && (
-              <div className="bg-bg-input rounded-lg px-3 py-2.5">
-                <p className="text-[10px] text-gray-500 mb-0.5">YTD</p>
+              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+                <p className="text-[9px] text-gray-500 mb-0.5">YTD</p>
                 <p className={clsx('text-sm font-bold', pctClass(selectedRate.ytd))}>
                   {pctText(selectedRate.ytd)}
                 </p>
               </div>
             )}
             {average != null && (
-              <div className="bg-bg-input rounded-lg px-3 py-2.5">
-                <p className="text-[10px] text-gray-500 mb-0.5">Period Average</p>
+              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+                <p className="text-[9px] text-gray-500 mb-0.5">Period Average</p>
                 <p className="text-sm font-bold text-gold">{average.toFixed(dec)}</p>
               </div>
             )}
             {average != null && selectedRate?.rate != null && (
-              <div className="bg-bg-input rounded-lg px-3 py-2.5">
-                <p className="text-[10px] text-gray-500 mb-0.5">vs Average</p>
+              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+                <p className="text-[9px] text-gray-500 mb-0.5">vs Average</p>
                 <p className={clsx(
                   'text-sm font-bold',
                   selectedRate.rate > average ? 'text-up-text' : 'text-down-text'
@@ -352,8 +352,8 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
               </div>
             )}
             {historical.length > 0 && (
-              <div className="bg-bg-input rounded-lg px-3 py-2.5">
-                <p className="text-[10px] text-gray-500 mb-0.5">Period Change</p>
+              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+                <p className="text-[9px] text-gray-500 mb-0.5">Period Change</p>
                 <p className={clsx(
                   'text-sm font-bold',
                   historical[historical.length - 1].close >= historical[0].close ? 'text-up-text' : 'text-down-text'

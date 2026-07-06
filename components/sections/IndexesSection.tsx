@@ -346,7 +346,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             </p>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
             <Stat label="Price" value={selectedQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2 })} />
             <Stat label="Day Change" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
             {selectedQuote.ytdChangePercent != null && (
@@ -362,8 +362,8 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               /* computeAssetIRR returns a decimal (0.085 = 8.5%) — multiply by 100 for display */
               <Stat label={`IRR (${timeframe})`} value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />
             )}
-            {selectedQuote.high52w != null && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
-            {selectedQuote.low52w != null && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
+            {selectedQuote.high52w != null && selectedQuote.high52w > 0 && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
+            {selectedQuote.low52w != null && selectedQuote.low52w > 0 && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}
             {selectedQuote.trailingPE != null && <Stat label="P/E" value={selectedQuote.trailingPE.toFixed(1)} />}
             {selectedQuote.forwardPE != null && <Stat label="Fwd P/E" value={selectedQuote.forwardPE.toFixed(1)} />}
           </div>
@@ -415,9 +415,9 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="bg-bg-input rounded-lg px-3 py-2">
-      <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
-      <p className={clsx('text-sm font-bold', color ?? 'text-gray-100')}>{value}</p>
+    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
+      <p className={clsx('text-[13px] font-bold tabular-nums truncate', color ?? 'text-gray-100')}>{value}</p>
     </div>
   );
 }

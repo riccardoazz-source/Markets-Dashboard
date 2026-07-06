@@ -399,7 +399,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             </p>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
             {selectedSector.price != null && <Stat label="Price" value={formatPrice(selectedSector.price)} />}
             {selectedSector.changePercent != null && <Stat label="Day" value={formatPercent(selectedSector.changePercent)} color={colorForPercent(selectedSector.changePercent)} />}
             {selectedSector.ytdReturn != null && <Stat label="YTD" value={formatPercent(selectedSector.ytdReturn)} color={colorForPercent(selectedSector.ytdReturn)} />}
@@ -411,8 +411,8 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               /* computeAssetIRR returns a decimal (0.085 = 8.5%) — multiply by 100 for display */
               <Stat label={`IRR (${timeframe})`} value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />
             )}
-            {selectedSector.high52w != null && <Stat label="52W High" value={formatPrice(selectedSector.high52w)} />}
-            {selectedSector.low52w != null && <Stat label="52W Low" value={formatPrice(selectedSector.low52w)} />}
+            {selectedSector.high52w != null && selectedSector.high52w > 0 && <Stat label="52W High" value={formatPrice(selectedSector.high52w)} />}
+            {selectedSector.low52w != null && selectedSector.low52w > 0 && <Stat label="52W Low" value={formatPrice(selectedSector.low52w)} />}
           </div>
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
@@ -456,9 +456,9 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="bg-bg-input rounded-lg px-3 py-2">
-      <p className="text-[10px] text-gray-500 mb-0.5">{label}</p>
-      <p className={clsx('text-sm font-bold', color ?? 'text-gray-100')}>{value}</p>
+    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
+      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
+      <p className={clsx('text-[13px] font-bold tabular-nums truncate', color ?? 'text-gray-100')}>{value}</p>
     </div>
   );
 }
