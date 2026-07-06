@@ -165,7 +165,7 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
       {open && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)}>
           <div
-            className="w-full max-w-[1150px] max-h-[88vh] flex flex-col rounded-xl border border-emerald-500/25 bg-[#12172a] shadow-2xl overflow-hidden"
+            className="w-full max-w-[1400px] max-h-[88vh] flex flex-col rounded-xl border border-emerald-500/25 bg-[#12172a] shadow-2xl overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}

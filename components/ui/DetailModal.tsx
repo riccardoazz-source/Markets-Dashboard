@@ -25,7 +25,9 @@ export function DetailModal({ onClose, children }: { onClose: () => void; childr
       {/* min-h-full + items-center: short panels are vertically centred, tall panels
           grow and the overlay scrolls (standard robust modal pattern). */}
       <div className="flex min-h-full items-start sm:items-center justify-center p-2 sm:p-6">
-        <div className="w-full max-w-3xl" onClick={e => e.stopPropagation()}>
+        {/* Cap at 6xl (~1152px): on desktop the viewport fills up to that; on mobile the
+            viewport is smaller than the cap so the panel still fills the screen. */}
+        <div className="w-full max-w-6xl" onClick={e => e.stopPropagation()}>
           {children}
         </div>
       </div>
