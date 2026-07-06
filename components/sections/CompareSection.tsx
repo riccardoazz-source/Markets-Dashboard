@@ -181,7 +181,6 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
 
     try {
       let data: HistoricalPoint[] = [];
-      let adjData: HistoricalPoint[] = [];
       let dividends: { date: string; amount: number }[] = [];
 
       if (config?.type === 'crypto') {
@@ -252,11 +251,6 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           const json = await res.json() as StockApiResp;
           if (Array.isArray(json.prices) && json.prices.length) {
             data = json.prices;
-            // adjPrices are split + dividend adjusted — use as total-return series.
-            // Fall back to manual reinvestment only when adjPrices are not returned.
-            if (Array.isArray(json.adjPrices) && json.adjPrices.length) {
-              adjData = json.adjPrices;
-            }
             dividends = Array.isArray(json.dividends) ? json.dividends : [];
             // Cache name from meta if available
             if (!nameCacheRef[symbol] && json.meta) {
@@ -276,15 +270,13 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         if (!data.length) return null;
       }
 
-      // Total-return series only when the asset actually pays dividends.
-      // Raw indexes (^GSPC, ^NDX…) and macro series have no distributions, so
-      // their TR line would just duplicate the price line — skip it entirely.
-      // When dividends exist, prefer adjPrices (Yahoo adjclose handles splits +
-      // dividends), falling back to manual reinvestment.
+      // Total-return series only when the asset actually pays dividends. Built by reinvesting
+      // the actual dividend cash flows into the (split-adjusted) price series — NOT Yahoo's
+      // adjClose, which for some ETFs (e.g. MAGS) is returned unadjusted so it would silently
+      // hide the dividends. This keeps the TR line, the IRR and the dividend bars all consistent
+      // with the same dividend list. Raw indexes/macro have no distributions → no TR line.
       const totalReturnData: HistoricalPoint[] | undefined =
-        dividends.length > 0
-          ? (adjData.length > 0 ? adjData : buildTotalReturnSeries(data, dividends))
-          : undefined;
+        dividends.length > 0 ? buildTotalReturnSeries(data, dividends) : undefined;
 
       const cagr = calculateCAGR(data, tf);
       const cagrTR = totalReturnData ? calculateCAGR(totalReturnData, tf) : undefined;
@@ -499,7 +491,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         const cagrTR = trFiltered && trFiltered.length > 1
           ? calculateCAGR(trFiltered, timeframe)
           : null;
-        const irrTrim = divsFiltered.length > 0
+        // IRR from the ACTUAL dividend cash flows over the aligned window (dividend-paying
+        // assets only). computeAssetIRR handles an empty in-window dividend list = the price
+        // IRR, so a dividend payer with no distribution inside the window shows its price return
+        // rather than falling back to a stale full-history value.
+        const irrTrim = a.totalReturnData
           ? computeAssetIRR(rawFiltered, divsFiltered)
           : null;
 
@@ -943,10 +939,10 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                         <p className={clsx('text-sm font-semibold', colorForPercent(a.cagr))}>{formatPercent(a.cagr)}</p>
                       </div>
                     )}
-                    {a.cagrWithDiv != null && (
+                    {a.totalReturnData && a.irr != null && (
                       <div className="mt-1">
                         <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
-                        <p className={clsx('text-sm font-semibold', colorForPercent(a.cagrWithDiv))}>{formatPercent(a.cagrWithDiv)}</p>
+                        <p className={clsx('text-sm font-semibold', colorForPercent(a.irr))}>{formatPercent(a.irr)}</p>
                       </div>
                     )}
                   </>

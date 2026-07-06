@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { INDEXES } from '@/lib/config';
 import { QuoteData, HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
-import { formatPrice, formatPercent, formatCagr, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, type DividendEvent } from '@/lib/utils';
+import { formatPrice, formatPercent, formatCagr, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, buildTotalReturnSeries, type DividendEvent } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -114,20 +114,19 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
       .catch(() => {});
   }, [selected, timeframe, customRange, quotes]);
 
-  // Dual-line chart data: price vs total return, normalized to 0% at period start
+  // Dual-line chart data: price vs total return, normalized to 0% at period start.
+  // Total return is built by reinvesting the ACTUAL dividend cash flows into the (split-adjusted)
+  // price series, so the line always shows when dividends exist and matches the IRR + bars.
   const divChartData = useMemo(() => {
-    if (!historical.length || !divData?.adjPrices.length) return null;
-    const adjMap = new Map<string, number>(divData.adjPrices.map(p => [p.date, p.close]));
+    if (!historical.length || !divData?.dividends.length) return null;
+    const tr = buildTotalReturnSeries(historical, divData.dividends);
     const priceBase = historical[0].close;
-    const adjBase = divData.adjPrices[0].close;
-    return historical.map(p => {
-      const adj = adjMap.get(p.date);
-      return {
-        date: p.date,
-        price: ((p.close - priceBase) / priceBase) * 100,
-        totalReturn: adj != null ? ((adj - adjBase) / adjBase) * 100 : undefined,
-      };
-    });
+    const trBase = tr[0]?.close ?? 0;
+    return historical.map((p, i) => ({
+      date: p.date,
+      price: ((p.close - priceBase) / priceBase) * 100,
+      totalReturn: trBase ? ((tr[i].close - trBase) / trBase) * 100 : undefined,
+    }));
   }, [historical, divData]);
 
   const irr = useMemo(() => {
