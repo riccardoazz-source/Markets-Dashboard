@@ -16,6 +16,15 @@ type Gran = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
 const GRANS: Gran[] = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Weekday of a Daily cell: row is "YYYY-MM", col is (day-of-month − 1). Returns e.g. "Wed".
+function weekdayFor(row: string, col: number): string {
+  const [y, m] = row.split('-').map(Number);
+  if (!y || !m) return '';
+  const d = new Date(Date.UTC(y, m - 1, col + 1));
+  return isNaN(d.getTime()) ? '' : WEEKDAYS[d.getUTCDay()];
+}
 
 function dayOfYear(d: Date): number {
   const start = Date.UTC(d.getUTCFullYear(), 0, 1);
@@ -214,6 +223,9 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
                           const v = matrix.grid.get(r)?.get(c);
                           return (
                             <td key={c} className="px-2 py-1.5 text-center text-gray-100 whitespace-nowrap" style={{ backgroundColor: cellBg(v) }}>
+                              {gran === 'Daily' && v != null && (
+                                <span className="block text-[8px] font-normal text-gray-400/80 leading-none mb-0.5">{weekdayFor(r, c)}</span>
+                              )}
                               {fmt(v)}
                             </td>
                           );
