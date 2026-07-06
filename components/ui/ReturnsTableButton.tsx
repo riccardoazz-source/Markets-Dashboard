@@ -16,15 +16,8 @@ type Gran = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
 const GRANS: Gran[] = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-// Weekday of a Daily cell: row is "YYYY-MM", col is (day-of-month − 1). Returns e.g. "Wed".
-function weekdayFor(row: string, col: number): string {
-  const [y, m] = row.split('-').map(Number);
-  if (!y || !m) return '';
-  const d = new Date(Date.UTC(y, m - 1, col + 1));
-  return isNaN(d.getTime()) ? '' : WEEKDAYS[d.getUTCDay()];
-}
+// Monday-first weekday columns for the Daily (day-of-week) view.
+const WEEKDAYS_MON = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function dayOfYear(d: Date): number {
   const start = Date.UTC(d.getUTCFullYear(), 0, 1);
@@ -51,7 +44,7 @@ function colLabels(gran: Gran): string[] {
     case 'Quarterly': return ['Q1', 'Q2', 'Q3', 'Q4'];
     case 'Monthly':   return MONTHS;
     case 'Weekly':    return Array.from({ length: 53 }, (_, i) => `W${i + 1}`);
-    case 'Daily':     return Array.from({ length: 31 }, (_, i) => `${i + 1}`);
+    case 'Daily':     return WEEKDAYS_MON; // handled in buildMatrix; kept for completeness
   }
 }
 
@@ -72,6 +65,44 @@ function buildMatrix(points: HistoricalPoint[], gran: Gran): Matrix {
     .map(p => ({ t: new Date(p.date + 'T00:00:00Z'), c: p.close }))
     .filter(p => isFinite(p.c) && p.c > 0 && !isNaN(p.t.getTime()))
     .sort((a, b) => a.t.getTime() - b.t.getTime());
+
+  // Daily = day-of-week view: columns are Monday…Sunday, rows are months. Each cell is the
+  // AVERAGE of that weekday's daily returns within the month (a month has ~4 of each weekday).
+  // The daily return is realized ON its bar's weekday (Mon close / prev-trading-day close − 1).
+  if (gran === 'Daily') {
+    const cols = WEEKDAYS_MON;
+    const cell = new Map<string, Map<number, { s: number; n: number }>>();
+    const allByCol: number[][] = Array.from({ length: 7 }, () => []);
+    for (let i = 1; i < pts.length; i++) {
+      const ret = (pts[i].c / pts[i - 1].c - 1) * 100;
+      if (!isFinite(ret)) continue;
+      const d = pts[i].t;
+      const row = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      const col = (d.getUTCDay() + 6) % 7;              // Mon=0 … Sun=6
+      if (!cell.has(row)) cell.set(row, new Map());
+      const e = cell.get(row)!.get(col) ?? { s: 0, n: 0 };
+      e.s += ret; e.n++; cell.get(row)!.set(col, e);
+      allByCol[col].push(ret);
+    }
+    const grid = new Map<string, Map<number, number>>();
+    for (const [row, rm] of cell) {
+      const g = new Map<number, number>();
+      for (const [col, e] of rm) g.set(col, e.s / e.n);
+      grid.set(row, g);
+    }
+    const rows = [...grid.keys()].sort().reverse();
+    const avg: (number | null)[] = [];
+    const median: (number | null)[] = [];
+    for (let c = 0; c < 7; c++) {
+      const vals = allByCol[c];
+      if (!vals.length) { avg.push(null); median.push(null); continue; }
+      avg.push(vals.reduce((s, v) => s + v, 0) / vals.length);
+      const sorted = [...vals].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      median.push(sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2);
+    }
+    return { rows, cols, grid, avg, median };
+  }
 
   // Last close per period, preserving chronological order of first appearance.
   const periods = new Map<string, { row: string; col: number; c: number; order: number }>();
@@ -181,7 +212,9 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
             <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-white/5 bg-emerald-900/10 shrink-0">
               <div className="min-w-0">
                 <div className="text-sm font-bold text-white truncate">{name} <span className="text-emerald-300 font-semibold">— {gran} Returns (%)</span></div>
-                <div className="text-[10px] text-gray-500">{symbol} · period-over-period, full history · green = gain, red = loss</div>
+                <div className="text-[10px] text-gray-500">
+                  {symbol} · {gran === 'Daily' ? 'avg daily return by weekday, per month' : 'period-over-period'}, full history · green = gain, red = loss
+                </div>
               </div>
               <button onClick={() => setOpen(false)} className="p-1 text-gray-500 hover:text-gray-200 shrink-0" aria-label="Close"><X size={16} /></button>
             </div>
@@ -223,9 +256,6 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
                           const v = matrix.grid.get(r)?.get(c);
                           return (
                             <td key={c} className="px-2 py-1.5 text-center text-gray-100 whitespace-nowrap" style={{ backgroundColor: cellBg(v) }}>
-                              {gran === 'Daily' && v != null && (
-                                <span className="block text-[8px] font-normal text-gray-400/80 leading-none mb-0.5">{weekdayFor(r, c)}</span>
-                              )}
                               {fmt(v)}
                             </td>
                           );
