@@ -416,7 +416,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             </>}
             {irr != null && (
               /* computeAssetIRR returns a decimal (0.085 = 8.5%) — multiply by 100 for display */
-              <Stat label={`IRR (${timeframe})`} value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />
+              <Stat label={`IRR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />
             )}
             {selectedSector.high52w != null && selectedSector.high52w > 0 && <Stat label="52W High" value={formatPrice(selectedSector.high52w)} />}
             {selectedSector.low52w != null && selectedSector.low52w > 0 && <Stat label="52W Low" value={formatPrice(selectedSector.low52w)} />}

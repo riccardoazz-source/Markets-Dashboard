@@ -1297,13 +1297,13 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
               <Stat label="Price" value={formatPrice(data.meta.price, currency)} />
               {cagrPrice && (
-                <Stat label={`Return (${timeframe})`} value={formatPercent(cagrPrice.return)} color={colorForPercent(cagrPrice.return)} />
+                <Stat label={`Return (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrPrice.return)} color={colorForPercent(cagrPrice.return)} />
               )}
               {cagrPrice && (
-                <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrPrice.cagr)} color={colorForPercent(cagrPrice.cagr)} />
+                <Stat label={`CAGR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrPrice.cagr)} color={colorForPercent(cagrPrice.cagr)} />
               )}
               {cagrTR && dividends.length > 0 && (
-                <Stat label={`IRR (${timeframe})`} value={formatPercent(cagrTR.cagr)} color={colorForPercent(cagrTR.cagr)} />
+                <Stat label={`IRR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrTR.cagr)} color={colorForPercent(cagrTR.cagr)} />
               )}
               {nrIRR != null && (
                 <Stat label="IRR (cash flow)" value={formatPercent(nrIRR * 100)} color={colorForPercent(nrIRR * 100)} />

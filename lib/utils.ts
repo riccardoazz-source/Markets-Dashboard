@@ -70,13 +70,16 @@ export function calculateCAGR(
   data: HistoricalPoint[],
   timeframe: Timeframe
 ): CAGRData | null {
+  // Return/CAGR are ALWAYS computed over the span of the data passed in (first → last point).
+  // Callers fetch/trim the data to the analysis window themselves — including CUSTOM date
+  // ranges — so `timeframe` is only a label here. The old behaviour re-filtered the data to
+  // `getTimeframeStart(timeframe)` (measured from TODAY), which silently discarded the front
+  // of any custom range in the past (e.g. Jan–Jun of a full-2025 window while the selector
+  // was on 1Y) and returned the trailing-window return instead of the selected period's.
   if (!data || data.length < 2) return null;
-  const startDate = getTimeframeStart(timeframe);
-  const filtered = data.filter(d => d.date >= startDate);
-  if (filtered.length < 2) return null;
 
-  const start = filtered[0];
-  const end = filtered[filtered.length - 1];
+  const start = data[0];
+  const end = data[data.length - 1];
   const startPrice = start.close;
   const endPrice = end.close;
 

@@ -585,7 +585,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 />
               )}
               {cagrData && (
-                <Stat label={`Change (${timeframe})`} value={formatPercent(cagrData.return)} color={cagrData.return >= 0 ? 'text-up-text' : 'text-down-text'} />
+                <Stat label={`Change (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.return)} color={cagrData.return >= 0 ? 'text-up-text' : 'text-down-text'} />
               )}
             </div>
           )}

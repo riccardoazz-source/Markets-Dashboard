@@ -301,8 +301,8 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
             )}
             {cagrData && (
               <>
-                <Stat label={`Return (${timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
-                <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
+                <Stat label={`Return (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
+                <Stat label={`CAGR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
               </>
             )}
             {selectedQuote.high52w != null && selectedQuote.high52w > 0 && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}

@@ -360,13 +360,13 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             )}
             {cagrData && (
               <>
-                <Stat label={`Return (${timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
-                <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
+                <Stat label={`Return (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
+                <Stat label={`CAGR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
               </>
             )}
             {irr != null && (
               /* computeAssetIRR returns a decimal (0.085 = 8.5%) — multiply by 100 for display */
-              <Stat label={`IRR (${timeframe})`} value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />
+              <Stat label={`IRR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />
             )}
             {selectedQuote.high52w != null && selectedQuote.high52w > 0 && <Stat label="52W High" value={formatPrice(selectedQuote.high52w)} />}
             {selectedQuote.low52w != null && selectedQuote.low52w > 0 && <Stat label="52W Low" value={formatPrice(selectedQuote.low52w)} />}

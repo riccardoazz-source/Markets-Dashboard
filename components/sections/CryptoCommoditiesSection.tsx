@@ -360,8 +360,8 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
             )}
             {cagrData && (
               <>
-                <Stat label={`Return (${timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
-                <Stat label={`CAGR (${timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
+                <Stat label={`Return (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
+                <Stat label={`CAGR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
               </>
             )}
             <Stat label="Market Cap" value={formatMarketCap(selectedCrypto.marketCap)} />
