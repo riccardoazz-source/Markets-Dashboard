@@ -457,7 +457,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       })
     : null;
 
-  const rightMargin = hasRight2Axis ? 140 : hasRightAxis ? 68 : percentMode ? 16 : 24;
+  // Reserve just enough right-edge space for the right-hand axes (~38px each) — not the old
+  // 140/68px, which burned a lot of lateral space (worse on mobile) in absolute-price compare.
+  const rightMargin = hasRight2Axis ? 82 : hasRightAxis ? 42 : percentMode ? 12 : 16;
 
   return (
     <div className="relative select-none">
@@ -607,8 +609,8 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           <YAxis
             yAxisId="left"
             {...(percentMode ? { domain: ['auto', 'auto'] } : leftAxisProps)}
-            tick={{ fill: '#6b7280', fontSize: 11 }}
-            axisLine={false} tickLine={false} width={percentMode ? 52 : 60}
+            tick={{ fill: '#6b7280', fontSize: 10 }}
+            axisLine={false} tickLine={false} width={percentMode ? 44 : 38}
             tickFormatter={percentMode ? pctTickFmt : tickFmt}
           />
           {hasRightAxis && rightAxisProps && (
@@ -616,8 +618,8 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               yAxisId="right"
               orientation="right"
               {...rightAxisProps}
-              tick={{ fill: '#6b7280', fontSize: 11 }}
-              axisLine={false} tickLine={false} width={65}
+              tick={{ fill: '#6b7280', fontSize: 10 }}
+              axisLine={false} tickLine={false} width={38}
               tickFormatter={tickFmt}
             />
           )}
@@ -626,8 +628,8 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               yAxisId="right2"
               orientation="right"
               {...right2AxisProps}
-              tick={{ fill: '#6b7280', fontSize: 11 }}
-              axisLine={false} tickLine={false} width={65}
+              tick={{ fill: '#6b7280', fontSize: 10 }}
+              axisLine={false} tickLine={false} width={38}
               tickFormatter={tickFmt}
             />
           )}
