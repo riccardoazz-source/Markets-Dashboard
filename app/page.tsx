@@ -89,7 +89,7 @@ export default function Home() {
         {section === 'commodities' && <CommoditiesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'sectors'     && <SectorsSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'macro'       && <MacroSection jumpTo={jumpTarget} onCompare={handleCompare} />}
-        {section === 'macroworld'  && MACRO_WORLD_ENABLED && <MacroWorldSection />}
+        {section === 'macroworld'  && MACRO_WORLD_ENABLED && <MacroWorldSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'stock'       && <StockSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'compare'     && <CompareSection jumpTo={jumpTarget} />}
         {section === 'rotation'    && <RotationSection onNavigate={(s, id) => { setSection(s as Section); setJumpTarget(id); }} onCompare={handleCompare} />}

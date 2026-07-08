@@ -18,6 +18,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { StackAnalysisPanel, DEFAULT_TOOLS } from '@/components/ui/StackAnalysisPanel';
 import type { ActiveTools } from '@/components/ui/ChartTools';
+import { IMF_INDICATOR_BY_CODE } from '@/lib/imfConfig';
 
 class ChartErrorBoundary extends Component<
   { children: ReactNode },
@@ -187,7 +188,23 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       let data: HistoricalPoint[] = [];
       let dividends: { date: string; amount: number }[] = [];
 
-      if (config?.type === 'crypto') {
+      if (symbol.startsWith('WB:')) {
+        // Macro World — "WB:<ISO3>:<indicatorCode>" (e.g. WB:USA:NY.GDP.MKTP.KD.ZG).
+        // Fetch the whole country payload and pull out the one annual indicator series;
+        // displayAssets trims it to the timeframe/custom-range window like any other asset.
+        const [, ctry, code] = symbol.split(':');
+        const res = await fetch(`/api/worldbank?mode=country&country=${encodeURIComponent(ctry)}`);
+        if (!res.ok) return null;
+        const json = await res.json();
+        const ind = json?.indicators?.[code];
+        if (!ind || !Array.isArray(ind.series) || !ind.series.length) return null;
+        data = ind.series as HistoricalPoint[];
+        // Cache a readable name so the chip/legend don't show the raw "WB:…" symbol.
+        if (!nameCacheRef[symbol]) {
+          const indName = IMF_INDICATOR_BY_CODE.get(code)?.name ?? code;
+          nameCacheRef[symbol] = `${ctry} · ${indName}`;
+        }
+      } else if (config?.type === 'crypto') {
         // For custom date ranges, compute days from the range span; otherwise use the timeframe map.
         let days: number;
         if (dateRange) {
@@ -295,7 +312,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       return {
         symbol,
         name: nameCacheRef[symbol] ?? displayName,
-        type: config?.type ?? 'stock',
+        type: symbol.startsWith('WB:') ? 'index' : (config?.type ?? 'stock'),
         color,
         data: displayData,
         rawData: data,

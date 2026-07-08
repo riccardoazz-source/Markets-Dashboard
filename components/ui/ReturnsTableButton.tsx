@@ -121,9 +121,16 @@ function cellBg(v: number | null | undefined): string {
 }
 const fmt = (v: number | null | undefined) => (v == null ? '' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
 
-export function ReturnsTableButton({ name, symbol }: { name: string; symbol: string }) {
+export function ReturnsTableButton({ name, symbol, externalData, defaultGran = 'Monthly' }: {
+  name: string;
+  symbol: string;
+  /** When provided, use this series directly instead of fetching /api/historical
+   *  (e.g. Macro World feeds its already-loaded annual World Bank series). */
+  externalData?: HistoricalPoint[];
+  defaultGran?: Gran;
+}) {
   const [open, setOpen] = useState(false);
-  const [gran, setGran] = useState<Gran>('Monthly');
+  const [gran, setGran] = useState<Gran>(defaultGran);
   const [data, setData] = useState<HistoricalPoint[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,8 +144,14 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
 
   // Fetch (or reuse cached) full history whenever the modal is open for the CURRENT
   // symbol. Keyed on [open, symbol] so switching assets always refetches.
+  // When externalData is supplied the caller owns the series → skip the fetch entirely.
   useEffect(() => {
     if (!open) return;
+    if (externalData) {
+      if (externalData.length) { setData(externalData); setError(null); }
+      else { setData([]); setError('No data available for this indicator.'); }
+      return;
+    }
     const cached = cache.current.get(symbol);
     if (cached) { setData(cached); setError(null); return; }
     let cancelled = false;
@@ -153,7 +166,7 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
       .catch(() => { if (!cancelled) setError('Network error — could not load price history.'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [open, symbol]);
+  }, [open, symbol, externalData]);
 
   // Close on Escape.
   useEffect(() => {

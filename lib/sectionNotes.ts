@@ -1,14 +1,17 @@
 import {
   INDEXES, COMMODITIES, SECTORS, MACRO_INDICATORS, CURRENCY_PAIRS, CRYPTO_IDS,
 } from '@/lib/config';
+// Macro World (removable feature) — see lib/imfConfig.ts. If that feature is
+// removed, drop the 'macroworld' entries below too.
+import { IMF_INDICATOR_BY_CODE } from '@/lib/imfConfig';
 
 /** Sections that support per-asset chart notes. */
 export type NotesSection =
   | 'indexes' | 'currencies' | 'crypto'
-  | 'commodities' | 'sectors' | 'macro' | 'stock' | 'compare';
+  | 'commodities' | 'sectors' | 'macro' | 'macroworld' | 'stock' | 'compare';
 
 export const NOTE_SECTIONS: NotesSection[] = [
-  'indexes', 'currencies', 'crypto', 'commodities', 'sectors', 'macro', 'stock', 'compare',
+  'indexes', 'currencies', 'crypto', 'commodities', 'sectors', 'macro', 'macroworld', 'stock', 'compare',
 ];
 
 export function isNotesSection(s: string): s is NotesSection {
@@ -37,6 +40,13 @@ export function resolveNoteName(section: NotesSection, chartId: string): string 
       return SECTORS.find(s => s.symbol === chartId)?.name ?? null;
     case 'macro':
       return MACRO_INDICATORS.find(m => m.id === chartId)?.name ?? null;
+    case 'macroworld': {
+      // chartId = "imf:<ISO3>:<indicatorCode>"
+      const m = /^imf:([A-Z]{3}):(.+)$/.exec(chartId);
+      if (!m) return null;
+      const indName = IMF_INDICATOR_BY_CODE.get(m[2])?.name ?? m[2];
+      return `${m[1]} · ${indName}`;
+    }
     case 'stock': {
       if (!chartId.startsWith('stock:')) return null;
       return chartId.slice('stock:'.length);

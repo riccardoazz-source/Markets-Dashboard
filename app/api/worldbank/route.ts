@@ -18,8 +18,9 @@ const BASE = 'https://api.worldbank.org/v2';
 const TTL = 24 * 60 * 60 * 1000;
 
 interface Cached<T> { data: T; ts: number }
+interface Place { code: string; name: string; aggregate: boolean }
 const seriesCache = new Map<string, Cached<{ date: string; close: number }[]>>();
-let countriesCache: Cached<{ code: string; name: string }[]> | null = null;
+let countriesCache: Cached<Place[]> | null = null;
 
 async function wb(path: string): Promise<unknown | null> {
   const ctrl = new AbortController();
@@ -35,15 +36,16 @@ async function wb(path: string): Promise<unknown | null> {
   } catch { return null; } finally { clearTimeout(timer); }
 }
 
-async function countryList(): Promise<{ code: string; name: string }[]> {
+async function countryList(): Promise<Place[]> {
   if (countriesCache && Date.now() - countriesCache.ts < TTL) return countriesCache.data;
   const json = await wb('/country') as [unknown, Array<{ id: string; name: string; region?: { id?: string; value?: string } }>] | null;
   const rows = Array.isArray(json) ? json[1] : null;
   if (!Array.isArray(rows)) return [];
   const list = rows
-    // Drop aggregates (World Bank marks them region.id === 'NA' / value 'Aggregates').
-    .filter(c => c.region?.id !== 'NA' && c.region?.value !== 'Aggregates' && /^[A-Z]{3}$/.test(c.id))
-    .map(c => ({ code: c.id, name: c.name }))
+    .filter(c => /^[A-Z]{3}$/.test(c.id))
+    // Keep both real countries AND aggregates (EU, Euro area, World, regions, income groups),
+    // flagged so the UI can group them separately.
+    .map(c => ({ code: c.id, name: c.name, aggregate: c.region?.value === 'Aggregates' || c.region?.id === 'NA' }))
     .sort((a, b) => a.name.localeCompare(b.name));
   if (list.length) countriesCache = { data: list, ts: Date.now() };
   return list;
