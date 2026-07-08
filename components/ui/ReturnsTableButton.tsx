@@ -54,6 +54,20 @@ interface Matrix {
   median: (number | null)[];            // per-column median
 }
 
+// Human-readable label for one (row, col) cell — used by the best/worst records list.
+function periodLabel(gran: Gran, row: string, col: number): string {
+  switch (gran) {
+    case 'Yearly':    return row;
+    case 'Quarterly': return `Q${col + 1} ${row}`;
+    case 'Monthly':   return `${MONTHS[col] ?? ''} ${row}`;
+    case 'Weekly':    return `W${col + 1} ${row}`;
+    case 'Daily': {   // row is "YYYY-MM", col is day-of-month − 1
+      const [y, m] = row.split('-');
+      return `${col + 1} ${MONTHS[Number(m) - 1] ?? ''} ${y}`;
+    }
+  }
+}
+
 // Period returns from period-END closes: last close of each period, in chronological
 // order, then consecutive % changes. A month's return = monthEnd/prevMonthEnd − 1
 // (so January is measured against the prior December — cross-year, exactly like the
@@ -151,6 +165,18 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
 
   const matrix = useMemo(() => (data && data.length ? buildMatrix(data, gran) : null), [data, gran]);
 
+  // Best/worst records: the 3 biggest gains and 3 biggest losses across every cell in this view.
+  const records = useMemo(() => {
+    if (!matrix) return null;
+    const all: { label: string; v: number }[] = [];
+    for (const [row, m] of matrix.grid) {
+      for (const [col, v] of m) if (isFinite(v)) all.push({ label: periodLabel(gran, row, col), v });
+    }
+    if (all.length === 0) return null;
+    const sorted = [...all].sort((a, b) => b.v - a.v);
+    return { best: sorted.slice(0, 3), worst: sorted.slice(-3).reverse() };
+  }, [matrix, gran]);
+
   return (
     <>
       <button
@@ -236,6 +262,31 @@ export function ReturnsTableButton({ name, symbol }: { name: string; symbol: str
                   </tbody>
                 </table>
               )}
+
+              {/* Records — the 3 biggest gains and 3 biggest losses across the whole history */}
+              {!loading && !error && records && (
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-2.5">
+                    <p className="text-[10px] uppercase tracking-widest text-emerald-400/80 mb-1.5">▲ Top 3 gains ({gran.toLowerCase()})</p>
+                    {records.best.map((r, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 py-0.5 text-[11px]">
+                        <span className="text-gray-400 truncate">{r.label}</span>
+                        <span className="text-emerald-400 font-bold tabular-nums shrink-0">{fmt(r.v)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-lg border border-red-500/20 bg-red-500/[0.04] p-2.5">
+                    <p className="text-[10px] uppercase tracking-widest text-red-400/80 mb-1.5">▼ Top 3 losses ({gran.toLowerCase()})</p>
+                    {records.worst.map((r, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 py-0.5 text-[11px]">
+                        <span className="text-gray-400 truncate">{r.label}</span>
+                        <span className="text-red-400 font-bold tabular-nums shrink-0">{fmt(r.v)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {!loading && !error && matrix && matrix.rows.length === 0 && (
                 <p className="text-[12px] text-gray-500 px-1 py-2">Not enough history to compute {gran.toLowerCase()} returns.</p>
               )}

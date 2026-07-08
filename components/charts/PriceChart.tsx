@@ -306,6 +306,9 @@ export function PriceChart({
     ? new Map(totalReturnData.map(d => [d.date, d.close]))
     : null;
   const trLine = trByDate ? data.map(d => trByDate.get(d.date) ?? null) : null;
+  // Colour the total-return line by the asset's direction over the window (like the Stock chart):
+  // a lighter green when up, lighter red when down — not a fixed teal.
+  const trColor = last >= first ? '#34d399' : '#f87171';
 
   // Tool overlay computations (level overlays on main chart)
   const toolAvg = closes.length > 0 ? closes.reduce((s, v) => s + v, 0) / closes.length : null;
@@ -511,8 +514,8 @@ export function PriceChart({
         spyLine || trendVals || trLine) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
           {trLine && (
-            <span className="flex items-center gap-1 text-[10px] text-teal-300">
-              <span className="inline-block w-5 border-t-2 border-dashed border-teal-300" />
+            <span className="flex items-center gap-1 text-[10px]" style={{ color: trColor }}>
+              <span className="inline-block w-5 border-t-2 border-dashed" style={{ borderColor: trColor }} />
               Total Return (div. reinvested)
             </span>
           )}
@@ -714,9 +717,9 @@ export function PriceChart({
             <Line type="linear" dataKey="trend" stroke={trendColor} strokeWidth={2}
               dot={false} activeDot={false} connectNulls name="trend" />
           )}
-          {/* Total-return (dividends reinvested) — dashed line above the price */}
+          {/* Total-return (dividends reinvested) — dashed line above the price, coloured by direction */}
           {trLine && (
-            <Line type={interpolationType} dataKey="tr" stroke="#2dd4bf" strokeWidth={1.5}
+            <Line type={interpolationType} dataKey="tr" stroke={trColor} strokeWidth={1.5}
               strokeDasharray="5 3" dot={false} activeDot={false} connectNulls name="tr" />
           )}
 
