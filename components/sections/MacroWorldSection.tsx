@@ -16,24 +16,7 @@ import { X, RefreshCw, Globe } from 'lucide-react';
 import clsx from 'clsx';
 
 interface IndicatorData { series: HistoricalPoint[]; latest: number | null; latestYear: string | null }
-interface CountryData { code: string; name: string; indicators: Record<string, IndicatorData> }
-
-// IMF DataMapper is fetched DIRECTLY from the browser (the user's IP), because the IMF blocks
-// datacenter IPs (Vercel) — a server route returns 403. Tries the API directly first, then falls
-// back to a public CORS relay if the browser blocks the cross-origin request.
-const IMF_BASE = 'https://www.imf.org/external/datamapper/api/v1';
-async function imfFetch(path: string): Promise<unknown | null> {
-  const direct = `${IMF_BASE}${path}`;
-  try {
-    const r = await fetch(direct);
-    if (r.ok) return await r.json();
-  } catch { /* fall through to proxy */ }
-  try {
-    const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(direct)}`);
-    if (r.ok) return await r.json();
-  } catch { /* give up */ }
-  return null;
-}
+interface CountryData { code: string; indicators: Record<string, IndicatorData> }
 
 export function MacroWorldSection() {
   const [countries, setCountries] = useState<{ code: string; name: string }[]>([]);
@@ -44,42 +27,22 @@ export function MacroWorldSection() {
   const [selected, setSelected] = useState<string | null>(null);       // indicator code
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
 
-  // Country list (once) — direct from the IMF DataMapper.
+  // Country list (once).
   useEffect(() => {
-    imfFetch('/countries').then((j) => {
-      const map = (j as { countries?: Record<string, { label?: string }> })?.countries ?? {};
-      const list = Object.entries(map)
-        .filter(([code]) => /^[A-Z]{3}$/.test(code))         // real countries, drop aggregates
-        .map(([code, v]) => ({ code, name: v.label ?? code }))
-        .sort((a, b) => a.name.localeCompare(b.name));
-      if (list.length) setCountries(list);
-    });
+    fetch('/api/worldbank?mode=countries')
+      .then(r => r.json())
+      .then((j) => { if (Array.isArray(j)) setCountries(j); })
+      .catch(() => {});
   }, []);
 
   const fetchCountry = useCallback(async (code: string) => {
     setLoading(true); setError(null);
     try {
-      const results = await Promise.all(
-        IMF_INDICATORS.map(ind =>
-          imfFetch(`/${encodeURIComponent(ind.code)}/${encodeURIComponent(code)}`)
-            .then(j => (j as { values?: Record<string, Record<string, Record<string, number>>> })?.values?.[ind.code]?.[code] ?? null)
-        ),
-      );
-      const indicators: Record<string, IndicatorData> = {};
-      let any = false;
-      IMF_INDICATORS.forEach((ind, i) => {
-        const byYear = results[i] ?? {};
-        const series = Object.entries(byYear)
-          .filter(([y, v]) => /^\d{4}$/.test(y) && typeof v === 'number' && isFinite(v))
-          .map(([y, v]) => ({ date: `${y}-01-01`, close: v as number }))
-          .sort((a, b) => a.date.localeCompare(b.date));
-        if (series.length) any = true;
-        const last = series[series.length - 1];
-        indicators[ind.code] = { series, latest: last ? last.close : null, latestYear: last ? last.date.slice(0, 4) : null };
-      });
-      if (!any) { setError('Could not load IMF data (the IMF service may be temporarily unreachable).'); setData(null); }
-      else setData({ code, name: code, indicators });
-    } catch { setError('Network error — could not reach the IMF data service.'); }
+      const res = await fetch(`/api/worldbank?mode=country&country=${encodeURIComponent(code)}`);
+      const json = await res.json();
+      if (json?.error || !json?.indicators) { setError('Could not load data for this country. Try Refresh.'); setData(null); }
+      else setData(json as CountryData);
+    } catch { setError('Network error — could not reach the data service.'); }
     finally { setLoading(false); }
   }, []);
 
@@ -105,7 +68,7 @@ export function MacroWorldSection() {
             {countries.length === 0 && <option value="USA">United States</option>}
             {countries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
           </select>
-          <span className="text-[10px] text-gray-600">IMF · World Economic Outlook · annual</span>
+          <span className="text-[10px] text-gray-600">World Bank · annual</span>
         </div>
         <button onClick={() => fetchCountry(country)} className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-300">
           <RefreshCw size={11} /> Refresh
@@ -152,13 +115,13 @@ export function MacroWorldSection() {
               <div className="min-w-0">
                 <h3 className="text-base font-bold text-white truncate">{countryName} — {sel.name}</h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  <span className="font-mono">{sel.code}</span> · {sel.unit} · IMF WEO (annual, incl. forecasts)
+                  <span className="font-mono">{sel.code}</span> · {sel.unit} · World Bank · annual
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <GeminiCommentButton
                   key={`${country}:${sel.code}`}
-                  name={` — `}
+                  name={`${countryName} — ${sel.name}`}
                   symbol={`${country}:${sel.code}`}
                   assetClass="Macro (country)"
                   timeframe="annual"
@@ -171,7 +134,7 @@ export function MacroWorldSection() {
             {selSeries.length > 1 ? (
               <PriceChart data={selSeries} color="auto" height={220} toolsOverlay={activeTools} />
             ) : (
-              <div className="flex items-center justify-center h-40 text-gray-500 text-sm">No IMF series for this indicator.</div>
+              <div className="flex items-center justify-center h-40 text-gray-500 text-sm">No series for this indicator.</div>
             )}
 
             {selSeries.length > 0 && (
