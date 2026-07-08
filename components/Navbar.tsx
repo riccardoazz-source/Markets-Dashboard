@@ -1,10 +1,11 @@
 'use client';
 
-import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw } from 'lucide-react';
+import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe } from 'lucide-react';
 import { ForwardRefExoticComponent, RefAttributes } from 'react';
 import clsx from 'clsx';
+import { MACRO_WORLD_ENABLED } from '@/lib/imfConfig';
 
-export type Section = 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'stock' | 'compare' | 'rotation' | 'sources';
+export type Section = 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'macroworld' | 'stock' | 'compare' | 'rotation' | 'sources';
 
 type LucideIcon = ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>>;
 
@@ -15,6 +16,8 @@ const SECTIONS: { id: Section; label: string; short: string; Icon: LucideIcon }[
   { id: 'commodities', label: 'Commodities', short: 'Cmdty', Icon: Gem        },
   { id: 'sectors',     label: 'Sectors',     short: 'Sec',   Icon: Grid2X2    },
   { id: 'macro',       label: 'Macro',       short: 'Macro', Icon: Activity   },
+  // Macro World (IMF) — only shown when the feature flag is on.
+  ...(MACRO_WORLD_ENABLED ? [{ id: 'macroworld' as Section, label: 'Macro World', short: 'World', Icon: Globe }] : []),
   { id: 'stock',       label: 'Stocks',      short: 'Stocks',Icon: Briefcase  },
   { id: 'compare',     label: 'Compare',     short: 'vs.',   Icon: GitCompare },
   { id: 'rotation',    label: 'Rotation',    short: 'RRG',   Icon: RefreshCw  },

@@ -9,6 +9,8 @@ import { CommoditiesSection } from '@/components/sections/CommoditiesSection';
 import { SectorsSection } from '@/components/sections/SectorsSection';
 import { CompareSection } from '@/components/sections/CompareSection';
 import { MacroSection } from '@/components/sections/MacroSection';
+import { MacroWorldSection } from '@/components/sections/MacroWorldSection';
+import { MACRO_WORLD_ENABLED } from '@/lib/imfConfig';
 import { StockSection } from '@/components/sections/StockSection';
 import { SourcesSection } from '@/components/sections/SourcesSection';
 import { RotationSection } from '@/components/sections/RotationSection';
@@ -23,6 +25,7 @@ const SECTION_LABELS: Record<Section, string> = {
   commodities: 'Commodities',
   sectors:     'Sector Heat Rankings',
   macro:       'Macro Indicators',
+  macroworld:  'Macro World',
   stock:       'Stocks',
   compare:     'Asset Comparison',
   rotation:    'Capital Rotation',
@@ -36,6 +39,7 @@ const SECTION_DESCRIPTIONS: Record<Section, string> = {
   commodities: 'Live prices for metals, energy and agricultural commodities',
   sectors:     'US sector ETF performance ranked by return — click any sector for details',
   macro:       'Key macroeconomic indicators from the Federal Reserve (FRED)',
+  macroworld:  'Country macro data from the IMF World Economic Outlook — growth, inflation, debt, jobs & more',
   stock:       'Search any stock by ticker or ISIN — price, total return with dividends, CAGR & IRR',
   compare:     'Normalized performance, dividend-adjusted CAGR, IRR and correlation between any combination of assets',
   rotation:    'Relative Rotation Graph — see which asset classes are gaining or losing relative momentum vs a benchmark',
@@ -85,6 +89,7 @@ export default function Home() {
         {section === 'commodities' && <CommoditiesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'sectors'     && <SectorsSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'macro'       && <MacroSection jumpTo={jumpTarget} onCompare={handleCompare} />}
+        {section === 'macroworld'  && MACRO_WORLD_ENABLED && <MacroWorldSection />}
         {section === 'stock'       && <StockSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'compare'     && <CompareSection jumpTo={jumpTarget} />}
         {section === 'rotation'    && <RotationSection onNavigate={(s, id) => { setSection(s as Section); setJumpTarget(id); }} onCompare={handleCompare} />}
