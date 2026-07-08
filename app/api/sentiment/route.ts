@@ -23,7 +23,7 @@ interface Snapshot {
 
 const CLASS_FIELDS = ['indexes_note', 'crypto_note', 'commodities_note', 'sectors_note', 'stocks_note'];
 const FIELDS = [
-  'headline', 'regime_now', 'regime_next', 'macro_note', 'macro_backdrop',
+  'headline', 'drivers', 'regime_now', 'regime_next', 'macro_note', 'macro_backdrop',
   'outlook_note', 'rotation_note', 'risk_note', 'confidence', 'fear_greed',
   ...CLASS_FIELDS,
 ];
@@ -146,15 +146,17 @@ export async function POST(req: Request) {
     'You are a markets desk analyst writing a DAILY BRIEF from a live table you have been given. Style: Bloomberg terminal flash, not a research essay. ' +
     'READ THE FULL TABLE BELOW — it is exactly what the user sees on screen. Every field has a strict WORD LIMIT you must never exceed. ' +
     'Always name specific assets and exact numbers FROM THE TABLE. ' +
-    'You MUST do THREE web searches before writing:\n' +
-    '  1. Search for the catalyst behind today\'s biggest daily movers shown in the data below (the names with the largest day % move).\n' +
-    '  2. Search for today\'s key macro backdrop: Fed/ECB/BoJ stance, latest inflation print, and the most important geopolitical development.\n' +
-    '  3. Search for "CNN Fear and Greed Index today" and read the CURRENT numeric value (0-100) and its label (Extreme Fear / Fear / Neutral / Greed / Extreme Greed).\n' +
-    'Both searches feed different fields — macro_note covers the daily moves, macro_backdrop covers rates/inflation/geopolitics. Be punchy and specific, never vague. ' +
+    'You MUST do FOUR web searches before writing, and lead with what is ACTUALLY happening in the world today:\n' +
+    '  1. Search for "what is moving markets today" / today\'s TOP breaking market-moving news and events RIGHT NOW — geopolitics (wars, sanctions, diplomacy), central-bank actions, economic-data surprises, major political/policy headlines, big corporate news. Identify the 1-3 real events driving the tape today and, for each, WHY it moves markets (the mechanism: e.g. "Iran deal collapse → oil spikes → risk-off"). This is the most important search.\n' +
+    '  2. Search for the catalyst behind today\'s biggest daily movers shown in the data below (the names with the largest day % move).\n' +
+    '  3. Search for today\'s key macro backdrop: Fed/ECB/BoJ stance, latest inflation print.\n' +
+    '  4. Search for "CNN Fear and Greed Index today" and read the CURRENT numeric value (0-100) and its label (Extreme Fear / Fear / Neutral / Greed / Extreme Greed).\n' +
+    'The searches feed different fields — drivers = the real news/events moving markets today, macro_note covers the specific table movers, macro_backdrop covers rates/inflation. Be punchy and specific, always name the actual event, date and source. Never be vague. ' +
     'Distinguish the regime RIGHT NOW from the next ~month. ' +
     'Use one of these exact labels: Risk-On, Risk-Off, Stagflation Risk, Soft Landing, Transition, Reflation, Goldilocks.\n\n' +
     'Output ONLY these key: value lines — one per line, no preamble, no markdown, no bullet characters:\n' +
     'headline: <MAX 12 WORDS. The single biggest move today + the reason.>\n' +
+    'drivers: <MAX 55 WORDS. From search #1: the 1-3 REAL news/events actually moving markets TODAY, each as event → market effect with a number, e.g. "Trump says Iran MoU collapsing → Brent +4%, S&P −1.8%; ...". Name the concrete event and today\'s date. This is the most important line — it must explain WHY the tape is moving today, not just describe prices.>\n' +
     'regime_now: <one label>\n' +
     'regime_next: <one label>\n' +
     'macro_note: <MAX 35 WORDS. The 2 biggest daily movers with catalysts from search #1. Numbers required.>\n' +
@@ -183,7 +185,7 @@ export async function POST(req: Request) {
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
         tools: [{ google_search: {} }],
         generationConfig: {
-          maxOutputTokens: 1200,
+          maxOutputTokens: 1500,
           temperature: 0.2,
           thinkingConfig: { thinkingBudget: 0 },
         },

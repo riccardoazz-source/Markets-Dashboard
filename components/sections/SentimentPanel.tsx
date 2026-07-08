@@ -23,6 +23,7 @@ export interface SentimentSnapshot {
 
 interface SentimentData {
   headline?: string;
+  drivers?: string; // the real news/events moving markets today (event → effect)
   regime_now?: string;
   regime_next?: string;
   macro_note?: string;
@@ -95,6 +96,13 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
     <div className="space-y-3">
       {d.headline && (
         <p className={clsx('font-semibold text-gray-100 leading-snug', compact ? 'text-xs' : 'text-sm')}>{d.headline}</p>
+      )}
+
+      {d.drivers && (
+        <div className="rounded-lg border border-accent/30 bg-accent/[0.06] p-2.5">
+          <p className="text-[9px] uppercase tracking-widest text-accent/70 mb-1">⚡ Why markets are moving today</p>
+          <p className={clsx('text-gray-200 leading-relaxed', compact ? 'text-[11px]' : 'text-xs')}>{d.drivers}</p>
+        </div>
       )}
 
       <div className={clsx('grid gap-2', d.fear_greed_score ? 'grid-cols-3' : 'grid-cols-2')}>
@@ -276,7 +284,7 @@ export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun 
         <div>
           <h3 className="text-sm font-semibold text-gray-200">🧭 Market Sentiment</h3>
           <p className="text-[11px] text-gray-500 max-w-xl">
-            Reads the live leaderboard on this page (all asset classes) + searches today&apos;s macro headlines for a regime call — now and the next month. Saved by date.
+            Searches today&apos;s real market-moving news + reads the live leaderboard for a regime call — what&apos;s happening now, why, and the next month. Saved by date.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
