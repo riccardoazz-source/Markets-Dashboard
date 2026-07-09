@@ -9,13 +9,13 @@ export const maxDuration = 25;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Macro World "extra" metrics that the World Bank indicator API does not carry:
-//   • 10Y government bond yield          — FRED  IRLTLT01{cc}M156N (OECD, monthly)
+//   • Central bank policy rate           — BIS  CBPOL_M (monthly, ~38 central banks)
 //   • Real GDP growth forecast (next yr) — IMF WEO  NGDP_RPCH   (has forecast years)
 //   • General govt gross debt, % of GDP  — IMF WEO  GGXWDG_NGDP (broad coverage)
 // All via DBnomics REST JSON. Everything degrades to null on failure so the caller
 // simply shows "—" — it can never break the World Bank data.
 //
-//   GET /api/macroworld-extra?mode=summary → { ISO3: { yield10y, gdpFcst, debt } }
+//   GET /api/macroworld-extra?mode=summary → { ISO3: { policyRate, gdpFcst, debt } }
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DB = 'https://api.db.nomics.world/v22';
@@ -23,17 +23,18 @@ const TTL = 24 * 60 * 60 * 1000;
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 type Metric = { value: number; year: string } | null;
-type ExtraMap = Record<string, { yield10y: Metric; gdpFcst: Metric; debt: Metric }>;
+type ExtraMap = Record<string, { policyRate: Metric; gdpFcst: Metric; debt: Metric }>;
 interface Cached { data: ExtraMap; ts: number }
 let cache: Cached | null = null;
 
-// ISO3 → the 2-letter code FRED uses in IRLTLT01{cc}M156N (OECD long-term rates).
-// Only economies with an OECD long-term-rate series; the rest resolve to null.
-const YIELD_CC: Record<string, string> = {
-  USA: 'US', CAN: 'CA', MEX: 'MX', CHL: 'CL', COL: 'CO', DEU: 'DE', FRA: 'FR',
-  GBR: 'GB', ITA: 'IT', ESP: 'ES', NLD: 'NL', CHE: 'CH', SWE: 'SE', POL: 'PL',
-  JPN: 'JP', KOR: 'KR', ISR: 'IL', AUS: 'AU', NZL: 'NZ', TUR: 'TR', EMU: 'EZ',
-  RUS: 'RU', ZAF: 'ZA', IND: 'IN', IDN: 'ID',
+// ISO3 → the BIS REF_AREA code for the central bank policy rate. Euro-area members
+// all share the ECB rate (XM). Economies BIS doesn't cover resolve to null.
+const POLICY_CC: Record<string, string> = {
+  USA: 'US', EMU: 'XM', DEU: 'XM', FRA: 'XM', ITA: 'XM', ESP: 'XM', NLD: 'XM',
+  JPN: 'JP', GBR: 'GB', CHE: 'CH', SWE: 'SE', CAN: 'CA', AUS: 'AU', NZL: 'NZ',
+  POL: 'PL', RUS: 'RU', CHN: 'CN', IND: 'IN', IDN: 'ID', KOR: 'KR', MEX: 'MX',
+  BRA: 'BR', CHL: 'CL', COL: 'CO', PER: 'PE', ZAF: 'ZA', TUR: 'TR', SAU: 'SA',
+  THA: 'TH', ISR: 'IL',
 };
 
 interface DbDoc { period?: string[]; value?: (number | string | null)[]; dimensions?: Record<string, string> }
@@ -76,17 +77,32 @@ function valueAtYear(doc: DbDoc, year: number): Metric {
   return null;
 }
 
-async function fredYield(iso3: string): Promise<Metric> {
-  const cc = YIELD_CC[iso3];
-  if (!cc) return null;
-  const id = `IRLTLT01${cc}M156N`;
-  const enc = encodeURIComponent(id);
-  for (const url of [`${DB}/series/FRED/${enc}/${enc}?observations=1`, `${DB}/series/FRED/${enc}?observations=1`]) {
-    const j = await dbFetch(url);
-    const doc = j?.series?.docs?.[0];
-    if (doc?.period?.length) { const m = lastFinite(doc); if (m) return m; }
+// Central bank policy rates for every needed BIS area in one dimension query
+// (same approach that works for WEO). Returns ISO3 → latest policy rate.
+async function bisPolicyRates(): Promise<Record<string, Metric>> {
+  const ccList = Array.from(new Set(Object.values(POLICY_CC)));
+  const dims = encodeURIComponent(JSON.stringify({ REF_AREA: ccList }));
+  const byCc: Record<string, DbDoc> = {};
+  for (const ds of ['BIS/CBPOL_M', 'BIS/CBPOL']) {
+    const j = await dbFetch(`${DB}/series/${ds}?dimensions=${dims}&observations=1&limit=200`, 10_000);
+    const docs = j?.series?.docs;
+    if (Array.isArray(docs) && docs.length) {
+      for (const d of docs) { const ref = d.dimensions?.['REF_AREA']; if (ref && !byCc[ref]) byCc[ref] = d; }
+      if (Object.keys(byCc).length) break;
+    }
   }
-  return null;
+  // Per-series fallback if the dimension query returned nothing.
+  if (!Object.keys(byCc).length) {
+    await Promise.all(ccList.map(async cc => {
+      const code = encodeURIComponent(`M.${cc}`);
+      const j = await dbFetch(`${DB}/series/BIS/CBPOL_M/${code}?observations=1`, 6_000);
+      const doc = j?.series?.docs?.[0];
+      if (doc?.period?.length) byCc[cc] = doc;
+    }));
+  }
+  const out: Record<string, Metric> = {};
+  for (const [iso, cc] of Object.entries(POLICY_CC)) out[iso] = byCc[cc] ? lastFinite(byCc[cc]) : null;
+  return out;
 }
 
 // One IMF WEO subject for many countries in a single DBnomics dimension query.
@@ -112,12 +128,11 @@ async function buildExtra(): Promise<ExtraMap> {
   if (cache && Date.now() - cache.ts < TTL) return cache.data;
   const nowYear = parseInt(new Date().toISOString().slice(0, 4), 10);
 
-  const [growthDocs, debtDocs, yields] = await Promise.all([
+  const [growthDocs, debtDocs, policyMap] = await Promise.all([
     weoSubject('NGDP_RPCH'),
     weoSubject('GGXWDG_NGDP'),
-    Promise.all(IMF_SUMMARY_CODES.map(async c => [c, await fredYield(c)] as const)),
+    bisPolicyRates(),
   ]);
-  const yieldMap = Object.fromEntries(yields);
 
   const out: ExtraMap = {};
   for (const iso of IMF_SUMMARY_CODES) {
@@ -126,9 +141,9 @@ async function buildExtra(): Promise<ExtraMap> {
     const gdpFcst = g ? (valueAtYear(g, nowYear + 1) ?? valueAtYear(g, nowYear) ?? lastFinite(g)) : null;
     const d = debtDocs[iso];
     const debt = d ? (valueAtYear(d, nowYear) ?? lastFinite(d)) : null;
-    out[iso] = { yield10y: yieldMap[iso] ?? null, gdpFcst, debt };
+    out[iso] = { policyRate: policyMap[iso] ?? null, gdpFcst, debt };
   }
-  if (Object.values(out).some(v => v.yield10y || v.gdpFcst || v.debt)) cache = { data: out, ts: Date.now() };
+  if (Object.values(out).some(v => v.policyRate || v.gdpFcst || v.debt)) cache = { data: out, ts: Date.now() };
   return out;
 }
 

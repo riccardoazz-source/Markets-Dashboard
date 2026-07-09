@@ -30,7 +30,7 @@ interface IndicatorData { series: HistoricalPoint[]; latest: number | null; late
 interface CountryData { code: string; indicators: Record<string, IndicatorData> }
 type SummaryMap = Record<string, Record<string, { value: number; year: string }>>;
 type Metric = { value: number; year: string } | null;
-type ExtraMap = Record<string, { yield10y: Metric; gdpFcst: Metric; debt: Metric }>;
+type ExtraMap = Record<string, { policyRate: Metric; gdpFcst: Metric; debt: Metric }>;
 
 function changeStr(d: number, unit: ImfUnit): string {
   const s = d >= 0 ? '+' : '';
@@ -305,30 +305,41 @@ const SUMMARY_COL_LABELS: Record<string, string> = {
 interface BoardCol {
   key: string; src: 'wb' | 'extra'; label: string;
   unit: ImfUnit; higherBetter: boolean; scale: number; colored: boolean;
+  colorMode?: 'band'; // 'band' = healthy range (used for inflation)
   wbFallback?: string;
 }
-function wbCol(code: string): BoardCol {
+function wbCol(code: string, extra?: Partial<BoardCol>): BoardCol {
   const ind = IMF_INDICATOR_BY_CODE.get(code);
   const unit = (ind?.unit ?? '%') as ImfUnit;
   return {
     key: code, src: 'wb', label: SUMMARY_COL_LABELS[code] ?? ind?.name ?? code,
     unit, higherBetter: ind?.higherBetter ?? true, scale: ind?.scale ?? 1,
     colored: unit === '%' || unit === '% of GDP',
+    ...extra,
   };
 }
 // Column order of the snapshot: World Bank actuals interleaved with the DBnomics
-// extras (GDP forecast, 10Y govt yield, WEO debt with a World Bank fallback).
+// extras (GDP forecast, central bank policy rate, WEO debt with a WB fallback).
 const BOARD_COLUMNS: BoardCol[] = [
   wbCol('NY.GDP.MKTP.KD.ZG'),
   { key: 'gdpFcst', src: 'extra', label: 'GDP fcst', unit: '%', higherBetter: true, scale: 1, colored: true },
   wbCol('NY.GDP.MKTP.CD'),
   wbCol('NY.GDP.PCAP.CD'),
-  wbCol('FP.CPI.TOTL.ZG'),
+  wbCol('FP.CPI.TOTL.ZG', { colorMode: 'band' }), // inflation: healthy ~0-3%, not "lower = greener"
   wbCol('SL.UEM.TOTL.ZS'),
-  { key: 'yield10y', src: 'extra', label: '10Y Yield', unit: '%', higherBetter: false, scale: 1, colored: true },
+  // Central bank policy rate — left neutral (no "high/low is good" judgement).
+  { key: 'policyRate', src: 'extra', label: 'Policy Rate', unit: '%', higherBetter: false, scale: 1, colored: false },
   wbCol('BN.CAB.XOKA.GD.ZS'),
   { key: 'debt', src: 'extra', label: 'Debt/GDP', unit: '% of GDP', higherBetter: false, scale: 1, colored: true, wbFallback: 'GC.DOD.TOTL.GD.ZS' },
 ];
+
+// Inflation colour: healthy near the ~2% target (0-3% green), elevated 3-6% amber,
+// deflation (<0) or runaway (>6%) red. NOT a simple "lower is greener" scale.
+function inflationColor(v: number): string {
+  if (v < 0 || v > 6) return 'text-down-text';
+  if (v > 3) return 'text-amber-400';
+  return 'text-up-text';
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Macro-area summary board. Headline economies (China & Japan distinct) and key
@@ -348,7 +359,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
   // falling back to the World Bank figure for the WEO debt column when WEO has no value.
   const metricFor = (c: BoardCol, code: string): { value: number; year: string } | null => {
     if (c.src === 'wb') return summary[code]?.[c.key] ?? null;
-    const m = extra?.[code]?.[c.key as 'yield10y' | 'gdpFcst' | 'debt'] ?? null;
+    const m = extra?.[code]?.[c.key as 'policyRate' | 'gdpFcst' | 'debt'] ?? null;
     if (m) return m;
     if (c.wbFallback) return summary[code]?.[c.wbFallback] ?? null;
     return null;
@@ -393,6 +404,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
                         const cell = metricFor(c, p.code);
                         const val = cell ? cell.value / c.scale : null;
                         const color = val == null ? 'text-gray-600'
+                          : c.colorMode === 'band' ? inflationColor(val)
                           : c.colored ? colorForPercent(c.higherBetter ? val : -val)
                           : 'text-gray-200';
                         return (
@@ -411,7 +423,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
         </table>
       </div>
       <p className="text-[10px] text-gray-600 leading-snug">
-        <strong>GDP fcst</strong> = IMF WEO next-year real-GDP forecast · <strong>10Y Yield</strong> = government 10-year bond yield (OECD via FRED) · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Ratio columns coloured by direction (growth/forecast/current-account green = higher; inflation/unemployment/yield/debt green = lower); $ figures stay neutral. Hover a cell for its year; “—” = the source has no recent figure.
+        <strong>GDP fcst</strong> = IMF WEO next-year real-GDP forecast · <strong>Policy Rate</strong> = central bank policy rate (BIS; euro members show the ECB rate) · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; policy rate &amp; $ figures neutral. Hover a cell for its year; “—” = no recent figure.
       </p>
     </div>
   );
