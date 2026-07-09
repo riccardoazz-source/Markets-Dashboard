@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { IMF_INDICATORS } from '@/lib/imfConfig';
+import { IMF_INDICATORS, IMF_SUMMARY_INDICATORS, IMF_SUMMARY_CODES } from '@/lib/imfConfig';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -12,6 +12,7 @@ export const maxDuration = 30;
 //
 //   GET /api/worldbank?mode=countries            → [{ code, name }]
 //   GET /api/worldbank?mode=country&country=USA   → { code, indicators: {CODE:{series,latest,latestYear}} }
+//   GET /api/worldbank?mode=summary               → { ISO3: { INDCODE: { value, year } } }
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BASE = 'https://api.worldbank.org/v2';
@@ -19,8 +20,10 @@ const TTL = 24 * 60 * 60 * 1000;
 
 interface Cached<T> { data: T; ts: number }
 interface Place { code: string; name: string; aggregate: boolean }
+type SummaryMap = Record<string, Record<string, { value: number; year: string }>>;
 const seriesCache = new Map<string, Cached<{ date: string; close: number }[]>>();
 let countriesCache: Cached<Place[]> | null = null;
+let summaryCache: Cached<SummaryMap> | null = null;
 
 async function wb(path: string): Promise<unknown | null> {
   const ctrl = new AbortController();
@@ -68,9 +71,37 @@ async function series(country: string, code: string, scale: number): Promise<{ d
   return out;
 }
 
+// Macro-area board: one multi-country WB call per summary indicator (much cheaper
+// than N×M single fetches), keeping each place's most recent non-null value.
+async function summary(): Promise<SummaryMap> {
+  if (summaryCache && Date.now() - summaryCache.ts < TTL) return summaryCache.data;
+  const codes = IMF_SUMMARY_CODES.join(';');
+  const out: SummaryMap = {};
+  await Promise.all(IMF_SUMMARY_INDICATORS.map(async indCode => {
+    const json = await wb(`/country/${codes}/indicator/${encodeURIComponent(indCode)}?mrv=12`) as
+      [unknown, Array<{ countryiso3code?: string; date: string; value: number | null }>] | null;
+    const rows = Array.isArray(json) ? json[1] : null;
+    if (!Array.isArray(rows)) return;
+    for (const r of rows) {
+      const iso = r.countryiso3code;
+      if (!iso || typeof r.value !== 'number' || !isFinite(r.value) || !/^\d{4}$/.test(r.date)) continue;
+      const cur = out[iso]?.[indCode];
+      if (!cur || r.date > cur.year) (out[iso] ??= {})[indCode] = { value: r.value, year: r.date };
+    }
+  }));
+  if (Object.keys(out).length) summaryCache = { data: out, ts: Date.now() };
+  return out;
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const mode = url.searchParams.get('mode');
+
+  if (mode === 'summary') {
+    const s = await summary();
+    if (!Object.keys(s).length) return NextResponse.json({ error: 'wb_unreachable' }, { status: 200 });
+    return NextResponse.json(s);
+  }
 
   if (mode === 'countries') {
     const list = await countryList();

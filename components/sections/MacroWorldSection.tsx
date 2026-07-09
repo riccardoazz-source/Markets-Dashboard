@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
@@ -12,7 +12,11 @@ import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { LoadingGrid } from '@/components/ui/LoadingSpinner';
-import { IMF_INDICATORS, IMF_INDICATOR_BY_CODE, fmtImf, type ImfUnit } from '@/lib/imfConfig';
+import {
+  IMF_INDICATORS, IMF_INDICATOR_BY_CODE, fmtImf, type ImfUnit,
+  isPrincipalAggregate, principalAggregateOrder,
+  IMF_SUMMARY_GROUPS, IMF_SUMMARY_INDICATORS,
+} from '@/lib/imfConfig';
 import { colorForPercent, formatPercent, calculateCAGR, getTimeframeStart, extendToToday } from '@/lib/utils';
 import { X, RefreshCw, Globe, BarChart2 } from 'lucide-react';
 import clsx from 'clsx';
@@ -24,6 +28,7 @@ const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y
 interface Place { code: string; name: string; aggregate: boolean }
 interface IndicatorData { series: HistoricalPoint[]; latest: number | null; latestYear: string | null }
 interface CountryData { code: string; indicators: Record<string, IndicatorData> }
+type SummaryMap = Record<string, Record<string, { value: number; year: string }>>;
 
 function changeStr(d: number, unit: ImfUnit): string {
   const s = d >= 0 ? '+' : '';
@@ -48,6 +53,8 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
 export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [countries, setCountries] = useState<Place[]>([]);
   const [country, setCountry] = useState('USA');
+  const [placeMode, setPlaceMode] = useState<'countries' | 'regions'>('countries');
+  const [summary, setSummary] = useState<SummaryMap | null>(null);
   const [data, setData] = useState<CountryData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +67,10 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
     fetch('/api/worldbank?mode=countries')
       .then(r => r.json())
       .then((j) => { if (Array.isArray(j)) setCountries(j); })
+      .catch(() => {});
+    fetch('/api/worldbank?mode=summary')
+      .then(r => r.json())
+      .then((j) => { if (j && !j.error) setSummary(j as SummaryMap); })
       .catch(() => {});
   }, []);
 
@@ -75,6 +86,12 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   }, []);
 
   useEffect(() => { fetchCountry(country); }, [country, fetchCountry]);
+  // Keep the Countries/Regions toggle in sync with the current place.
+  useEffect(() => {
+    const inList = countries.find(c => c.code === country);
+    const isAgg = inList ? inList.aggregate : isPrincipalAggregate(country);
+    setPlaceMode(isAgg ? 'regions' : 'countries');
+  }, [country, countries]);
   useEffect(() => { setActiveTools(DEFAULT_TOOLS); setTimeframe('MAX'); setCustomRange(null); }, [selected, country]);
 
   // Deep-link from the section notes: "imf:USA:NY.GDP.MKTP.KD.ZG".
@@ -101,30 +118,43 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   const prev = series[series.length - 2];
   const cagr = series.length > 1 ? calculateCAGR(series, timeframe) : null;
   const realCountries = countries.filter(c => !c.aggregate);
-  const aggregates = countries.filter(c => c.aggregate);
+  // Only the principal aggregates (drop the ~40 IDA/IBRD/demographic buckets), in curated order.
+  const aggregates = countries
+    .filter(c => c.aggregate && isPrincipalAggregate(c.code))
+    .sort((a, b) => principalAggregateOrder(a.code) - principalAggregateOrder(b.code));
+  const pickList = placeMode === 'regions' ? aggregates : realCountries;
 
   return (
     <div className="space-y-3">
-      {/* Country selector */}
+      {/* Country selector — Countries vs Regions & groups on separate toggles */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Globe size={14} className="text-gray-500" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <Globe size={14} className="text-gray-500 shrink-0" />
+          {/* Mode toggle */}
+          <div className="flex items-center rounded-lg border border-border overflow-hidden">
+            {(['countries', 'regions'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => setPlaceMode(m)}
+                className={clsx(
+                  'px-2.5 py-1.5 text-xs font-medium transition-colors',
+                  placeMode === m ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100',
+                )}
+              >
+                {m === 'countries' ? 'Countries' : 'Regions & groups'}
+              </button>
+            ))}
+          </div>
           <select
-            value={country}
-            onChange={e => { setSelected(null); setCountry(e.target.value); }}
+            value={pickList.some(c => c.code === country) ? country : ''}
+            onChange={e => { if (e.target.value) { setSelected(null); setCountry(e.target.value); } }}
             className="bg-bg-input border border-border rounded-lg px-2.5 py-1.5 text-sm text-gray-100 outline-none focus:border-accent max-w-[240px]"
           >
             {countries.length === 0 && <option value="USA">United States</option>}
-            {aggregates.length > 0 && (
-              <optgroup label="Regions & groups">
-                {aggregates.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-              </optgroup>
+            {!pickList.some(c => c.code === country) && (
+              <option value="" disabled>{placeMode === 'regions' ? 'Select a region…' : 'Select a country…'}</option>
             )}
-            {realCountries.length > 0 && (
-              <optgroup label="Countries">
-                {realCountries.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-              </optgroup>
-            )}
+            {pickList.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
           </select>
           <span className="text-[10px] text-gray-600">World Bank · annual</span>
         </div>
@@ -164,6 +194,9 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
           })}
         </div>
       )}
+
+      {/* Macro-area summary board — headline economies & aggregates side by side */}
+      <SummaryBoard summary={summary} activeCode={country} onPick={code => { setSelected(null); setCountry(code); }} />
 
       {/* Detail modal — same structure ("mascherina") as the Macro section */}
       {selected && sel && (
@@ -247,6 +280,94 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
           </div>
         </DetailModal>
       )}
+    </div>
+  );
+}
+
+// Compact per-indicator column labels for the summary board.
+const SUMMARY_COL_LABELS: Record<string, string> = {
+  'NY.GDP.MKTP.KD.ZG': 'GDP Growth',
+  'FP.CPI.TOTL.ZG': 'Inflation',
+  'SL.UEM.TOTL.ZS': 'Unemploy.',
+  'FR.INR.RINR': 'Real Rate',
+  'GC.DOD.TOTL.GD.ZS': 'Debt/GDP',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Macro-area summary board. Headline economies (China & Japan distinct) and key
+// aggregates (Euro area, World) grouped by region, compared across a few key
+// indicators. Latest available value per cell; click a row to open that place.
+// ─────────────────────────────────────────────────────────────────────────────
+function SummaryBoard({ summary, activeCode, onPick }: {
+  summary: SummaryMap | null;
+  activeCode: string;
+  onPick: (code: string) => void;
+}) {
+  if (!summary) return null;
+  const cols = IMF_SUMMARY_INDICATORS.map(code => ({
+    code,
+    label: SUMMARY_COL_LABELS[code] ?? IMF_INDICATOR_BY_CODE.get(code)?.name ?? code,
+    higherBetter: IMF_INDICATOR_BY_CODE.get(code)?.higherBetter ?? true,
+    unit: IMF_INDICATOR_BY_CODE.get(code)?.unit ?? '%',
+  }));
+
+  return (
+    <div className="rounded-xl border border-border bg-bg-card p-3 sm:p-4 space-y-2">
+      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+        <h3 className="text-sm font-semibold text-gray-100">Macro-area snapshot</h3>
+        <span className="text-[10px] text-gray-500">Latest available · World Bank · click a row to open</span>
+      </div>
+      <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+        <table className="w-full text-xs border-separate border-spacing-0 min-w-[560px]">
+          <thead>
+            <tr>
+              <th className="text-left font-semibold text-gray-400 px-2 py-1.5 sticky left-0 bg-bg-card z-10">Economy</th>
+              {cols.map(c => (
+                <th key={c.code} className="text-right font-semibold text-gray-400 px-2 py-1.5 whitespace-nowrap">{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {IMF_SUMMARY_GROUPS.map(group => (
+              <Fragment key={group.region}>
+                <tr>
+                  <td colSpan={cols.length + 1} className="px-2 pt-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600 font-semibold">
+                    {group.region}
+                  </td>
+                </tr>
+                {group.places.map(p => {
+                  const row = summary[p.code];
+                  const isActive = p.code === activeCode;
+                  return (
+                    <tr
+                      key={p.code}
+                      onClick={() => onPick(p.code)}
+                      className={clsx('cursor-pointer transition-colors', isActive ? 'bg-accent/10' : 'hover:bg-border/20')}
+                    >
+                      <td className={clsx('px-2 py-1.5 whitespace-nowrap sticky left-0 z-10', isActive ? 'bg-accent/10 text-accent font-semibold' : 'bg-bg-card text-gray-200')}>
+                        {p.name}
+                      </td>
+                      {cols.map(c => {
+                        const cell = row?.[c.code];
+                        const color = cell ? colorForPercent(c.higherBetter ? cell.value : -cell.value) : 'text-gray-600';
+                        return (
+                          <td key={c.code} title={cell ? `${cell.year}` : 'no data'}
+                            className={clsx('text-right px-2 py-1.5 tabular-nums whitespace-nowrap', color)}>
+                            {cell ? fmtImf(cell.value, c.unit as ImfUnit) : '—'}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-gray-600 leading-snug">
+        GDP Growth green = faster, Inflation / Unemployment / Real Rate / Debt green = lower. Values are the latest year each source has published (hover a cell for the year).
+      </p>
     </div>
   );
 }
