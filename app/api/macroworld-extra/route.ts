@@ -77,31 +77,30 @@ function valueAtYear(doc: DbDoc, year: number): Metric {
   return null;
 }
 
-// Central bank policy rates for every needed BIS area in one dimension query
-// (same approach that works for WEO). Returns ISO3 → latest policy rate.
+// Central bank policy rates from BIS dataset "cbpol" (92 series). We pull the whole
+// dataset in one call and read each series' own dimensions to find its area code,
+// rather than guessing series-code strings. Prefer a monthly series per area, else
+// take any frequency. Returns ISO3 → latest policy rate.
 async function bisPolicyRates(): Promise<Record<string, Metric>> {
-  const ccList = Array.from(new Set(Object.values(POLICY_CC)));
-  const dims = encodeURIComponent(JSON.stringify({ REF_AREA: ccList }));
-  const byCc: Record<string, DbDoc> = {};
-  for (const ds of ['BIS/CBPOL_M', 'BIS/CBPOL']) {
-    const j = await dbFetch(`${DB}/series/${ds}?dimensions=${dims}&observations=1&limit=200`, 10_000);
-    const docs = j?.series?.docs;
-    if (Array.isArray(docs) && docs.length) {
-      for (const d of docs) { const ref = d.dimensions?.['REF_AREA']; if (ref && !byCc[ref]) byCc[ref] = d; }
-      if (Object.keys(byCc).length) break;
-    }
-  }
-  // Per-series fallback if the dimension query returned nothing.
-  if (!Object.keys(byCc).length) {
-    await Promise.all(ccList.map(async cc => {
-      const code = encodeURIComponent(`M.${cc}`);
-      const j = await dbFetch(`${DB}/series/BIS/CBPOL_M/${code}?observations=1`, 6_000);
-      const doc = j?.series?.docs?.[0];
-      if (doc?.period?.length) byCc[cc] = doc;
-    }));
+  const targets = new Set(Object.values(POLICY_CC));
+  const j = await dbFetch(`${DB}/series/BIS/cbpol?observations=1&limit=300`, 14_000);
+  const docs = j?.series?.docs ?? [];
+  const byArea: Record<string, { monthly: Metric; any: Metric }> = {};
+  for (const d of docs) {
+    const vals = Object.values(d.dimensions ?? {}).map(v => String(v));
+    const area = vals.find(v => targets.has(v));
+    if (!area) continue;
+    const metric = lastFinite(d);
+    if (!metric) continue;
+    const slot = byArea[area] ?? (byArea[area] = { monthly: null, any: null });
+    if (vals.includes('M') && !slot.monthly) slot.monthly = metric;
+    if (!slot.any) slot.any = metric;
   }
   const out: Record<string, Metric> = {};
-  for (const [iso, cc] of Object.entries(POLICY_CC)) out[iso] = byCc[cc] ? lastFinite(byCc[cc]) : null;
+  for (const [iso, cc] of Object.entries(POLICY_CC)) {
+    const slot = byArea[cc];
+    out[iso] = slot ? (slot.monthly ?? slot.any) : null;
+  }
   return out;
 }
 
@@ -170,12 +169,8 @@ export async function GET(req: Request) {
   // Dumps raw (truncated) bodies so the real structure is visible, not my guesses.
   if (mode === 'debug') {
     const probeUrls = [
-      `${DB}/search?q=policy rate&limit=12`,
-      `${DB}/search?q=CBPOL&limit=12`,
-      `${DB}/BIS`,
-      `${DB}/providers/BIS`,
-      `${DB}/series/FRED/FEDFUNDS?observations=1`,
-      `${DB}/series/FRED/ECBDFR?observations=1`,
+      `${DB}/series/BIS/cbpol?observations=1&limit=5`,
+      `${DB}/datasets/BIS/cbpol`,
     ];
     const probes = await Promise.all(probeUrls.map(async u => {
       const r = await rawDb(u);
