@@ -30,7 +30,7 @@ interface IndicatorData { series: HistoricalPoint[]; latest: number | null; late
 interface CountryData { code: string; indicators: Record<string, IndicatorData> }
 type SummaryMap = Record<string, Record<string, { value: number; year: string }>>;
 type Metric = { value: number; year: string } | null;
-type ExtraMap = Record<string, { policyRate: Metric; gdpFcst: Metric; debt: Metric }>;
+type ExtraMap = Record<string, { policyRate: Metric; gdpFcstCurr: Metric; gdpFcstNext: Metric; debt: Metric }>;
 
 function changeStr(d: number, unit: ImfUnit): string {
   const s = d >= 0 ? '+' : '';
@@ -322,7 +322,9 @@ function wbCol(code: string, extra?: Partial<BoardCol>): BoardCol {
 // extras (GDP forecast, central bank policy rate, WEO debt with a WB fallback).
 const BOARD_COLUMNS: BoardCol[] = [
   wbCol('NY.GDP.MKTP.KD.ZG'),
-  { key: 'gdpFcst', src: 'extra', label: 'GDP fcst', unit: '%', higherBetter: true, scale: 1, colored: true },
+  // Two forecast horizons — labels filled in dynamically from the data's own years.
+  { key: 'gdpFcstCurr', src: 'extra', label: 'GDP fcst', unit: '%', higherBetter: true, scale: 1, colored: true },
+  { key: 'gdpFcstNext', src: 'extra', label: 'GDP fcst', unit: '%', higherBetter: true, scale: 1, colored: true },
   wbCol('NY.GDP.MKTP.CD'),
   wbCol('NY.GDP.PCAP.CD'),
   wbCol('FP.CPI.TOTL.ZG', { colorMode: 'band' }), // inflation: healthy ~0-3%, not "lower = greener"
@@ -353,13 +355,24 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
   onPick: (code: string) => void;
 }) {
   if (!summary) return null;
-  const cols = BOARD_COLUMNS;
+
+  // Forecast years vary over time (2026/2027 today, 2027/2028 next year), so the two
+  // forecast column headers are derived from whatever years the WEO data carries.
+  const fcYear = (key: 'gdpFcstCurr' | 'gdpFcstNext'): string => {
+    if (extra) for (const v of Object.values(extra)) { const m = v[key]; if (m) return m.year; }
+    return '';
+  };
+  const cols = BOARD_COLUMNS.map(c =>
+    c.key === 'gdpFcstCurr' ? { ...c, label: `GDP fcst ${fcYear('gdpFcstCurr') || 'now'}` }
+    : c.key === 'gdpFcstNext' ? { ...c, label: `GDP fcst ${fcYear('gdpFcstNext') || 'next'}` }
+    : c,
+  );
 
   // Resolve a cell's {value, year} for either a World Bank or an extra (DBnomics) column,
   // falling back to the World Bank figure for the WEO debt column when WEO has no value.
   const metricFor = (c: BoardCol, code: string): { value: number; year: string } | null => {
     if (c.src === 'wb') return summary[code]?.[c.key] ?? null;
-    const m = extra?.[code]?.[c.key as 'policyRate' | 'gdpFcst' | 'debt'] ?? null;
+    const m = extra?.[code]?.[c.key as 'policyRate' | 'gdpFcstCurr' | 'gdpFcstNext' | 'debt'] ?? null;
     if (m) return m;
     if (c.wbFallback) return summary[code]?.[c.wbFallback] ?? null;
     return null;
@@ -372,7 +385,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
         <span className="text-[10px] text-gray-500">Latest available · World Bank + IMF WEO + OECD · click a row to open</span>
       </div>
       <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-        <table className="w-full text-xs border-separate border-spacing-0 min-w-[900px]">
+        <table className="w-full text-xs border-separate border-spacing-0 min-w-[1000px]">
           <thead>
             <tr>
               <th className="text-left font-semibold text-gray-400 px-2 py-1.5 sticky left-0 bg-bg-card z-10">Economy</th>
@@ -423,7 +436,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
         </table>
       </div>
       <p className="text-[10px] text-gray-600 leading-snug">
-        <strong>GDP fcst</strong> = IMF WEO next-year real-GDP forecast · <strong>Policy Rate</strong> = central bank policy rate (BIS; euro members show the ECB rate) · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; policy rate &amp; $ figures neutral. Hover a cell for its year; “—” = no recent figure.
+        <strong>GDP fcst</strong> = IMF WEO real-GDP forecast (this year &amp; next, years shown in the headers) · <strong>Policy Rate</strong> = central bank policy rate · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; policy rate &amp; $ figures neutral. Hover a cell for its year; “—” = no recent figure.
       </p>
     </div>
   );

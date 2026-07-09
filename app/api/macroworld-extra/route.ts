@@ -23,7 +23,7 @@ const TTL = 24 * 60 * 60 * 1000;
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 type Metric = { value: number; year: string } | null;
-type ExtraMap = Record<string, { policyRate: Metric; gdpFcst: Metric; debt: Metric }>;
+type ExtraMap = Record<string, { policyRate: Metric; gdpFcstCurr: Metric; gdpFcstNext: Metric; debt: Metric }>;
 interface Cached { data: ExtraMap; ts: number }
 let cache: Cached | null = null;
 
@@ -137,13 +137,15 @@ async function buildExtra(): Promise<ExtraMap> {
   const out: ExtraMap = {};
   for (const iso of IMF_SUMMARY_CODES) {
     const g = growthDocs[iso];
-    // Forecast = next year's WEO value if present, else the current-year estimate.
-    const gdpFcst = g ? (valueAtYear(g, nowYear + 1) ?? valueAtYear(g, nowYear) ?? lastFinite(g)) : null;
+    // Two forecast horizons, each carrying its own year so the UI can label them
+    // dynamically (this year's estimate + next year's forecast).
+    const gdpFcstCurr = g ? valueAtYear(g, nowYear) : null;
+    const gdpFcstNext = g ? valueAtYear(g, nowYear + 1) : null;
     const d = debtDocs[iso];
     const debt = d ? (valueAtYear(d, nowYear) ?? lastFinite(d)) : null;
-    out[iso] = { policyRate: policyMap[iso] ?? null, gdpFcst, debt };
+    out[iso] = { policyRate: policyMap[iso] ?? null, gdpFcstCurr, gdpFcstNext, debt };
   }
-  if (Object.values(out).some(v => v.policyRate || v.gdpFcst || v.debt)) cache = { data: out, ts: Date.now() };
+  if (Object.values(out).some(v => v.policyRate || v.gdpFcstCurr || v.gdpFcstNext || v.debt)) cache = { data: out, ts: Date.now() };
   return out;
 }
 
@@ -164,36 +166,22 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const mode = url.searchParams.get('mode');
 
-  // Probe DBnomics to discover the correct BIS policy-rate dataset/series format.
+  // Probe DBnomics to discover the correct policy-rate provider/dataset/series.
+  // Dumps raw (truncated) bodies so the real structure is visible, not my guesses.
   if (mode === 'debug') {
     const probeUrls = [
-      `${DB}/datasets/BIS`,
-      `${DB}/series/BIS/CBPOL_M/M.US?observations=1`,
-      `${DB}/series/BIS/CBPOL_D/D.US?observations=1`,
-      `${DB}/series/BIS/WS_CBPOL_M/M.US?observations=1`,
-      `${DB}/series/BIS/CBPOL_M?dimensions=${encodeURIComponent(JSON.stringify({ REF_AREA: ['US'] }))}&observations=1&limit=3`,
-      `${DB}/search?q=central%20bank%20policy%20rate%20United%20States&limit=5`,
+      `${DB}/search?q=policy rate&limit=12`,
+      `${DB}/search?q=CBPOL&limit=12`,
+      `${DB}/BIS`,
+      `${DB}/providers/BIS`,
+      `${DB}/series/FRED/FEDFUNDS?observations=1`,
+      `${DB}/series/FRED/ECBDFR?observations=1`,
     ];
     const probes = await Promise.all(probeUrls.map(async u => {
       const r = await rawDb(u);
       if ('error' in r) return { url: u, error: r.error };
-      const j = r.json as Record<string, unknown> | null;
-      // Summarise without dumping megabytes: dataset codes, or series doc shape.
-      const datasets = (j?.datasets as { docs?: Array<{ code?: string; name?: string }> } | undefined)?.docs;
-      const seriesDocs = (j?.series as { docs?: Array<Record<string, unknown>> } | undefined)?.docs;
-      const results = (j?.results as { docs?: Array<Record<string, unknown>> } | undefined)?.docs;
-      return {
-        url: u,
-        status: r.status,
-        topKeys: j ? Object.keys(j) : null,
-        datasetCodes: Array.isArray(datasets) ? datasets.map(d => `${d.code} — ${d.name}`).slice(0, 60) : undefined,
-        seriesDoc0: Array.isArray(seriesDocs) && seriesDocs[0] ? {
-          series_code: seriesDocs[0].series_code, dimensions: seriesDocs[0].dimensions,
-          lastPeriods: (seriesDocs[0].period as unknown[] | undefined)?.slice(-3),
-          lastValues: (seriesDocs[0].value as unknown[] | undefined)?.slice(-3),
-        } : undefined,
-        searchHits: Array.isArray(results) ? results.map(d => `${d.provider_code}/${d.dataset_code}/${d.series_code}`).slice(0, 8) : undefined,
-      };
+      // Raw preview so I can read the real shape (dataset codes, series codes, message).
+      return { url: u, status: r.status, body: JSON.stringify(r.json).slice(0, 1400) };
     }));
     return NextResponse.json({ probes }, { headers: { 'Cache-Control': 'no-store' } });
   }
