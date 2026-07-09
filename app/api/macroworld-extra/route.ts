@@ -9,13 +9,13 @@ export const maxDuration = 25;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Macro World "extra" metrics that the World Bank indicator API does not carry:
-//   • Central bank policy rate           — BIS  CBPOL_M (monthly, ~38 central banks)
+//   • Central bank policy rate           — IMF IFS  FPOLM_PA (monthly, ISO-2 areas)
 //   • Real GDP growth forecast (next yr) — IMF WEO  NGDP_RPCH   (has forecast years)
 //   • General govt gross debt, % of GDP  — IMF WEO  GGXWDG_NGDP (broad coverage)
 // All via DBnomics REST JSON. Everything degrades to null on failure so the caller
 // simply shows "—" — it can never break the World Bank data.
 //
-//   GET /api/macroworld-extra?mode=summary → { ISO3: { policyRate, gdpFcst, debt } }
+//   GET /api/macroworld-extra?mode=summary → { ISO3: { policyRate, gdpFcst…, debt } }
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DB = 'https://api.db.nomics.world/v22';
@@ -27,14 +27,15 @@ type ExtraMap = Record<string, { policyRate: Metric; gdpFcstCurr: Metric; gdpFcs
 interface Cached { data: ExtraMap; ts: number }
 let cache: Cached | null = null;
 
-// ISO3 → the BIS REF_AREA code for the central bank policy rate. Euro-area members
-// all share the ECB rate (XM). Economies BIS doesn't cover resolve to null.
+// ISO3 → the IMF IFS REF_AREA (ISO-2) code for the policy rate (FPOLM_PA). Euro-area
+// members share the ECB rate → all map to "U2". Areas IFS doesn't cover → null.
 const POLICY_CC: Record<string, string> = {
-  USA: 'US', EMU: 'XM', DEU: 'XM', FRA: 'XM', ITA: 'XM', ESP: 'XM', NLD: 'XM',
+  USA: 'US', EMU: 'U2', DEU: 'U2', FRA: 'U2', ITA: 'U2', ESP: 'U2', NLD: 'U2',
   JPN: 'JP', GBR: 'GB', CHE: 'CH', SWE: 'SE', CAN: 'CA', AUS: 'AU', NZL: 'NZ',
   POL: 'PL', RUS: 'RU', CHN: 'CN', IND: 'IN', IDN: 'ID', KOR: 'KR', MEX: 'MX',
   BRA: 'BR', CHL: 'CL', COL: 'CO', PER: 'PE', ZAF: 'ZA', TUR: 'TR', SAU: 'SA',
-  THA: 'TH', ISR: 'IL',
+  THA: 'TH', ISR: 'IL', ARE: 'AE', SGP: 'SG', VNM: 'VN', NGA: 'NG', EGY: 'EG',
+  KEN: 'KE', MAR: 'MA',
 };
 
 interface DbDoc { period?: string[]; value?: (number | string | null)[]; dimensions?: Record<string, string> }
@@ -77,30 +78,18 @@ function valueAtYear(doc: DbDoc, year: number): Metric {
   return null;
 }
 
-// Central bank policy rates from BIS dataset "cbpol" (92 series). We pull the whole
-// dataset in one call and read each series' own dimensions to find its area code,
-// rather than guessing series-code strings. Prefer a monthly series per area, else
-// take any frequency. Returns ISO3 → latest policy rate.
-async function bisPolicyRates(): Promise<Record<string, Metric>> {
-  const targets = new Set(Object.values(POLICY_CC));
-  const j = await dbFetch(`${DB}/series/BIS/cbpol?observations=1&limit=300`, 14_000);
+// Central bank policy rates from IMF IFS (indicator FPOLM_PA, monthly). One
+// dimension query for all needed ISO-2 areas — same approach that works for WEO.
+// Returns ISO3 → latest policy rate.
+async function imfPolicyRates(): Promise<Record<string, Metric>> {
+  const areas = Array.from(new Set(Object.values(POLICY_CC)));
+  const dims = encodeURIComponent(JSON.stringify({ FREQ: ['M'], INDICATOR: ['FPOLM_PA'], REF_AREA: areas }));
+  const j = await dbFetch(`${DB}/series/IMF/IFS?dimensions=${dims}&observations=1&limit=300&metadata=false`, 14_000);
   const docs = j?.series?.docs ?? [];
-  const byArea: Record<string, { monthly: Metric; any: Metric }> = {};
-  for (const d of docs) {
-    const vals = Object.values(d.dimensions ?? {}).map(v => String(v));
-    const area = vals.find(v => targets.has(v));
-    if (!area) continue;
-    const metric = lastFinite(d);
-    if (!metric) continue;
-    const slot = byArea[area] ?? (byArea[area] = { monthly: null, any: null });
-    if (vals.includes('M') && !slot.monthly) slot.monthly = metric;
-    if (!slot.any) slot.any = metric;
-  }
+  const byArea: Record<string, DbDoc> = {};
+  for (const d of docs) { const ra = d.dimensions?.['REF_AREA']; if (ra && !byArea[ra]) byArea[ra] = d; }
   const out: Record<string, Metric> = {};
-  for (const [iso, cc] of Object.entries(POLICY_CC)) {
-    const slot = byArea[cc];
-    out[iso] = slot ? (slot.monthly ?? slot.any) : null;
-  }
+  for (const [iso, cc] of Object.entries(POLICY_CC)) out[iso] = byArea[cc] ? lastFinite(byArea[cc]) : null;
   return out;
 }
 
@@ -130,7 +119,7 @@ async function buildExtra(): Promise<ExtraMap> {
   const [growthDocs, debtDocs, policyMap] = await Promise.all([
     weoSubject('NGDP_RPCH'),
     weoSubject('GGXWDG_NGDP'),
-    bisPolicyRates(),
+    imfPolicyRates(),
   ]);
 
   const out: ExtraMap = {};
@@ -194,5 +183,5 @@ export async function GET(req: Request) {
 
   if (mode !== 'summary') return NextResponse.json({ error: 'bad_mode' }, { status: 400 });
   const data = await buildExtra();
-  return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=172800' } });
+  return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
 }
