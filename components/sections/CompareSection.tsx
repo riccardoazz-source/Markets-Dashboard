@@ -86,14 +86,25 @@ const SPREAD_COLORS = ['#f472b6', '#facc15', '#22d3ee', '#a3e635', '#fb923c', '#
 const isSpreadSymbol = (s: string) => s.startsWith(SPREAD_PREFIX);
 const spreadSymbol = (a: string, b: string) => `${SPREAD_PREFIX}${a}__${b}`;
 
-// Difference of two aligned series, keyed by date (intersection only).
+// Difference of two series (A − B), aligned on the UNION of their dates with
+// last-observation-carried-forward. Using the union (not the intersection) means
+// a spread works even when the two series live on different date grids — e.g. an
+// annual macro series (dated Jan-1) minus a daily index (no Jan-1 point). Each
+// side's most recent value is held until it next prints; a date is only emitted
+// once BOTH series have started, so the spread has no leading gap.
 function diffSeries(a: HistoricalPoint[], b: HistoricalPoint[]): HistoricalPoint[] {
-  const bMap = new Map(b.map(d => [d.date, d.close]));
+  if (!a.length || !b.length) return [];
+  const A = [...a].sort((p, q) => p.date.localeCompare(q.date));
+  const B = [...b].sort((p, q) => p.date.localeCompare(q.date));
+  const dates = Array.from(new Set([...A.map(d => d.date), ...B.map(d => d.date)])).sort();
+  let i = 0, j = 0;
+  let lastA: number | null = null, lastB: number | null = null;
   const out: HistoricalPoint[] = [];
-  for (const d of a) {
-    const bv = bMap.get(d.date);
-    if (bv == null || !isFinite(d.close) || !isFinite(bv)) continue;
-    out.push({ date: d.date, close: d.close - bv });
+  for (const date of dates) {
+    while (i < A.length && A[i].date <= date) { lastA = A[i].close; i++; }
+    while (j < B.length && B[j].date <= date) { lastB = B[j].close; j++; }
+    if (lastA == null || lastB == null) continue;
+    if (isFinite(lastA) && isFinite(lastB)) out.push({ date, close: lastA - lastB });
   }
   return out;
 }
