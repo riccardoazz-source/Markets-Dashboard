@@ -169,15 +169,25 @@ export async function GET(req: Request) {
   // Dumps raw (truncated) bodies so the real structure is visible, not my guesses.
   if (mode === 'debug') {
     const probeUrls = [
-      `${DB}/series/IMF/IFS?q=policy rate&limit=6&observations=1`,
-      `${DB}/series/IMF/IFS?q=central bank policy&limit=6&observations=1`,
-      `${DB}/series/IMF/IFS?dimensions=${encodeURIComponent(JSON.stringify({ INDICATOR: ['FPOLM_PA'] }))}&limit=4&observations=1`,
+      `${DB}/series/IMF/IFS?q=${encodeURIComponent('policy rate')}&limit=10&observations=1&metadata=false`,
+      `${DB}/series/IMF/IFS?q=${encodeURIComponent('central bank')}&limit=10&observations=1&metadata=false`,
+      `${DB}/series/IMF/IFS?dimensions=${encodeURIComponent(JSON.stringify({ FREQ: ['M'], INDICATOR: ['FPOLM_PA'] }))}&limit=6&observations=1&metadata=false`,
     ];
     const probes = await Promise.all(probeUrls.map(async u => {
       const r = await rawDb(u);
       if ('error' in r) return { url: u, error: r.error };
-      // Raw preview so I can read the real shape (dataset codes, series codes, message).
-      return { url: u, status: r.status, body: JSON.stringify(r.json).slice(0, 2200) };
+      const j = r.json as { series?: { docs?: Array<Record<string, unknown>>; num_found?: number }; message?: string } | null;
+      const docs = j?.series?.docs;
+      // Parse the SERIES (indicator code, dimensions, last obs) — the useful part.
+      const parsed = Array.isArray(docs) ? docs.slice(0, 10).map(d => {
+        const period = d.period as string[] | undefined;
+        const value = d.value as unknown[] | undefined;
+        return {
+          code: d.series_code, name: d.series_name, dims: d.dimensions,
+          last: period?.length ? [period[period.length - 1], value?.[value.length - 1]] : null,
+        };
+      }) : null;
+      return { url: u, status: r.status, numFound: j?.series?.num_found, message: j?.message, docs: parsed };
     }));
     return NextResponse.json({ probes }, { headers: { 'Cache-Control': 'no-store' } });
   }
