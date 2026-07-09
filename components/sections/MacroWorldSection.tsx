@@ -15,7 +15,7 @@ import { LoadingGrid } from '@/components/ui/LoadingSpinner';
 import {
   IMF_INDICATORS, IMF_INDICATOR_BY_CODE, fmtImf, type ImfUnit,
   isPrincipalAggregate, principalAggregateOrder,
-  IMF_SUMMARY_GROUPS, IMF_SUMMARY_INDICATORS,
+  IMF_SUMMARY_GROUPS,
 } from '@/lib/imfConfig';
 import { colorForPercent, formatPercent, calculateCAGR, getTimeframeStart, extendToToday } from '@/lib/utils';
 import { X, RefreshCw, Globe, BarChart2 } from 'lucide-react';
@@ -29,6 +29,8 @@ interface Place { code: string; name: string; aggregate: boolean }
 interface IndicatorData { series: HistoricalPoint[]; latest: number | null; latestYear: string | null }
 interface CountryData { code: string; indicators: Record<string, IndicatorData> }
 type SummaryMap = Record<string, Record<string, { value: number; year: string }>>;
+type Metric = { value: number; year: string } | null;
+type ExtraMap = Record<string, { yield10y: Metric; gdpFcst: Metric; debt: Metric }>;
 
 function changeStr(d: number, unit: ImfUnit): string {
   const s = d >= 0 ? '+' : '';
@@ -55,6 +57,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   const [country, setCountry] = useState('USA');
   const [placeMode, setPlaceMode] = useState<'countries' | 'regions'>('countries');
   const [summary, setSummary] = useState<SummaryMap | null>(null);
+  const [extra, setExtra] = useState<ExtraMap | null>(null);
   const [data, setData] = useState<CountryData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +74,10 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
     fetch('/api/worldbank?mode=summary')
       .then(r => r.json())
       .then((j) => { if (j && !j.error) setSummary(j as SummaryMap); })
+      .catch(() => {});
+    fetch('/api/macroworld-extra?mode=summary')
+      .then(r => r.json())
+      .then((j) => { if (j && !j.error) setExtra(j as ExtraMap); })
       .catch(() => {});
   }, []);
 
@@ -196,7 +203,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       )}
 
       {/* Macro-area summary board — headline economies & aggregates side by side */}
-      <SummaryBoard summary={summary} activeCode={country} onPick={code => { setSelected(null); setCountry(code); }} />
+      <SummaryBoard summary={summary} extra={extra} activeCode={country} onPick={code => { setSelected(null); setCountry(code); }} />
 
       {/* Detail modal — same structure ("mascherina") as the Macro section */}
       {selected && sel && (
@@ -291,49 +298,75 @@ const SUMMARY_COL_LABELS: Record<string, string> = {
   'NY.GDP.PCAP.CD': 'GDP/capita',
   'FP.CPI.TOTL.ZG': 'Inflation',
   'SL.UEM.TOTL.ZS': 'Unemploy.',
-  'FR.INR.RINR': 'Real Rate',
   'BN.CAB.XOKA.GD.ZS': 'Curr. Acct',
   'GC.DOD.TOTL.GD.ZS': 'Debt/GDP',
 };
+
+interface BoardCol {
+  key: string; src: 'wb' | 'extra'; label: string;
+  unit: ImfUnit; higherBetter: boolean; scale: number; colored: boolean;
+  wbFallback?: string;
+}
+function wbCol(code: string): BoardCol {
+  const ind = IMF_INDICATOR_BY_CODE.get(code);
+  const unit = (ind?.unit ?? '%') as ImfUnit;
+  return {
+    key: code, src: 'wb', label: SUMMARY_COL_LABELS[code] ?? ind?.name ?? code,
+    unit, higherBetter: ind?.higherBetter ?? true, scale: ind?.scale ?? 1,
+    colored: unit === '%' || unit === '% of GDP',
+  };
+}
+// Column order of the snapshot: World Bank actuals interleaved with the DBnomics
+// extras (GDP forecast, 10Y govt yield, WEO debt with a World Bank fallback).
+const BOARD_COLUMNS: BoardCol[] = [
+  wbCol('NY.GDP.MKTP.KD.ZG'),
+  { key: 'gdpFcst', src: 'extra', label: 'GDP fcst', unit: '%', higherBetter: true, scale: 1, colored: true },
+  wbCol('NY.GDP.MKTP.CD'),
+  wbCol('NY.GDP.PCAP.CD'),
+  wbCol('FP.CPI.TOTL.ZG'),
+  wbCol('SL.UEM.TOTL.ZS'),
+  { key: 'yield10y', src: 'extra', label: '10Y Yield', unit: '%', higherBetter: false, scale: 1, colored: true },
+  wbCol('BN.CAB.XOKA.GD.ZS'),
+  { key: 'debt', src: 'extra', label: 'Debt/GDP', unit: '% of GDP', higherBetter: false, scale: 1, colored: true, wbFallback: 'GC.DOD.TOTL.GD.ZS' },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Macro-area summary board. Headline economies (China & Japan distinct) and key
 // aggregates (Euro area, World) grouped by region, compared across a few key
 // indicators. Latest available value per cell; click a row to open that place.
 // ─────────────────────────────────────────────────────────────────────────────
-function SummaryBoard({ summary, activeCode, onPick }: {
+function SummaryBoard({ summary, extra, activeCode, onPick }: {
   summary: SummaryMap | null;
+  extra: ExtraMap | null;
   activeCode: string;
   onPick: (code: string) => void;
 }) {
   if (!summary) return null;
-  const cols = IMF_SUMMARY_INDICATORS.map(code => {
-    const ind = IMF_INDICATOR_BY_CODE.get(code);
-    const unit = ind?.unit ?? '%';
-    return {
-      code,
-      label: SUMMARY_COL_LABELS[code] ?? ind?.name ?? code,
-      higherBetter: ind?.higherBetter ?? true,
-      unit,
-      scale: ind?.scale ?? 1,
-      // Only ratio columns (%, % of GDP) get green/red — absolute $ figures stay neutral.
-      colored: unit === '%' || unit === '% of GDP',
-    };
-  });
+  const cols = BOARD_COLUMNS;
+
+  // Resolve a cell's {value, year} for either a World Bank or an extra (DBnomics) column,
+  // falling back to the World Bank figure for the WEO debt column when WEO has no value.
+  const metricFor = (c: BoardCol, code: string): { value: number; year: string } | null => {
+    if (c.src === 'wb') return summary[code]?.[c.key] ?? null;
+    const m = extra?.[code]?.[c.key as 'yield10y' | 'gdpFcst' | 'debt'] ?? null;
+    if (m) return m;
+    if (c.wbFallback) return summary[code]?.[c.wbFallback] ?? null;
+    return null;
+  };
 
   return (
     <div className="rounded-xl border border-border bg-bg-card p-3 sm:p-4 space-y-2">
       <div className="flex items-baseline justify-between gap-2 flex-wrap">
         <h3 className="text-sm font-semibold text-gray-100">Macro-area snapshot</h3>
-        <span className="text-[10px] text-gray-500">Latest available · World Bank · click a row to open</span>
+        <span className="text-[10px] text-gray-500">Latest available · World Bank + IMF WEO + OECD · click a row to open</span>
       </div>
       <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-        <table className="w-full text-xs border-separate border-spacing-0 min-w-[760px]">
+        <table className="w-full text-xs border-separate border-spacing-0 min-w-[900px]">
           <thead>
             <tr>
               <th className="text-left font-semibold text-gray-400 px-2 py-1.5 sticky left-0 bg-bg-card z-10">Economy</th>
               {cols.map(c => (
-                <th key={c.code} className="text-right font-semibold text-gray-400 px-2 py-1.5 whitespace-nowrap">{c.label}</th>
+                <th key={c.key} className="text-right font-semibold text-gray-400 px-2 py-1.5 whitespace-nowrap">{c.label}</th>
               ))}
             </tr>
           </thead>
@@ -346,7 +379,6 @@ function SummaryBoard({ summary, activeCode, onPick }: {
                   </td>
                 </tr>
                 {group.places.map(p => {
-                  const row = summary[p.code];
                   const isActive = p.code === activeCode;
                   return (
                     <tr
@@ -358,15 +390,15 @@ function SummaryBoard({ summary, activeCode, onPick }: {
                         {p.name}
                       </td>
                       {cols.map(c => {
-                        const cell = row?.[c.code];
+                        const cell = metricFor(c, p.code);
                         const val = cell ? cell.value / c.scale : null;
                         const color = val == null ? 'text-gray-600'
                           : c.colored ? colorForPercent(c.higherBetter ? val : -val)
                           : 'text-gray-200';
                         return (
-                          <td key={c.code} title={cell ? `${cell.year}` : 'no data'}
+                          <td key={c.key} title={cell ? `${cell.year}` : 'no data'}
                             className={clsx('text-right px-2 py-1.5 tabular-nums whitespace-nowrap', color)}>
-                            {val == null ? '—' : fmtImf(val, c.unit as ImfUnit)}
+                            {val == null ? '—' : fmtImf(val, c.unit)}
                           </td>
                         );
                       })}
@@ -379,7 +411,7 @@ function SummaryBoard({ summary, activeCode, onPick }: {
         </table>
       </div>
       <p className="text-[10px] text-gray-600 leading-snug">
-        Ratio columns are coloured (GDP Growth &amp; Current Account green = higher; Inflation, Unemployment, Real Rate, Debt green = lower); absolute $ figures stay neutral. Values are the latest year each source has published (hover a cell for the year). Some cells read “—” where the World Bank has no recent figure for that country.
+        <strong>GDP fcst</strong> = IMF WEO next-year real-GDP forecast · <strong>10Y Yield</strong> = government 10-year bond yield (OECD via FRED) · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Ratio columns coloured by direction (growth/forecast/current-account green = higher; inflation/unemployment/yield/debt green = lower); $ figures stay neutral. Hover a cell for its year; “—” = the source has no recent figure.
       </p>
     </div>
   );

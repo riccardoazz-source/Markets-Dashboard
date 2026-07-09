@@ -33,7 +33,6 @@ export const IMF_INDICATORS: ImfIndicator[] = [
   { code: 'NY.GDP.MKTP.CD',    name: 'GDP (nominal)',       unit: 'USD bn',   category: 'Growth',   higherBetter: true,  scale: 1e9 },
   { code: 'FP.CPI.TOTL.ZG',    name: 'Inflation (CPI)',     unit: '%',        category: 'Prices',   higherBetter: false },
   { code: 'SL.UEM.TOTL.ZS',    name: 'Unemployment Rate',   unit: '%',        category: 'Labor',    higherBetter: false },
-  { code: 'FR.INR.RINR',       name: 'Real Interest Rate',  unit: '%',        category: 'Rates',    higherBetter: false },
   { code: 'GC.DOD.TOTL.GD.ZS', name: 'Govt Debt',           unit: '% of GDP', category: 'Fiscal',   higherBetter: false },
   { code: 'GC.NLD.TOTL.GD.ZS', name: 'Fiscal Balance',      unit: '% of GDP', category: 'Fiscal',   higherBetter: true  },
   { code: 'BN.CAB.XOKA.GD.ZS', name: 'Current Account',     unit: '% of GDP', category: 'External', higherBetter: true  },
@@ -139,16 +138,17 @@ export const IMF_SUMMARY_GROUPS: SummaryGroup[] = [
     { code: 'WLD', name: 'World' }, { code: 'EUU', name: 'European Union' } ] },
 ];
 
-// The columns of the summary board (must be codes present in IMF_INDICATORS).
+// The World Bank columns of the summary board (must be codes present in
+// IMF_INDICATORS). Interest rate, GDP forecast and best-coverage debt come from
+// /api/macroworld-extra (FRED + IMF WEO via DBnomics), added by the board itself.
 export const IMF_SUMMARY_INDICATORS: string[] = [
   'NY.GDP.MKTP.KD.ZG', // Real GDP Growth
   'NY.GDP.MKTP.CD',    // GDP (nominal, USD)
   'NY.GDP.PCAP.CD',    // GDP per Capita
   'FP.CPI.TOTL.ZG',    // Inflation
   'SL.UEM.TOTL.ZS',    // Unemployment
-  'FR.INR.RINR',       // Real Interest Rate
   'BN.CAB.XOKA.GD.ZS', // Current Account
-  'GC.DOD.TOTL.GD.ZS', // Govt Debt
+  'GC.DOD.TOTL.GD.ZS', // Govt Debt (World Bank — fallback for the WEO column)
 ];
 
 // Every place code needed by the summary board (for the multi-country WB fetch).
