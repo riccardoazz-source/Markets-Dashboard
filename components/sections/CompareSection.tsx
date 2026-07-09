@@ -518,7 +518,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         // and hid intra-period jitter on daily series (NY Fed EFFR, T-yields).
         // The chart already uses type="stepAfter" for macro, which renders the
         // step look from the full data.
-        const displayRaw = a.type === 'macro' && !isOverlay
+        // Macro series and Macro World (World Bank, annual & lagging) carry their
+        // last known value forward to today so the line reaches "now" rather than
+        // stopping at the last published point. Stats/CAGR still use the un-extended
+        // rawFiltered, so returns are computed on real data only.
+        const displayRaw = (a.type === 'macro' || a.symbol.startsWith('WB:')) && !isOverlay
           ? extendToToday(displayFiltered)
           : displayFiltered;
         const displayData = normalized ? pctChangeFromStart(displayRaw) : displayRaw;
