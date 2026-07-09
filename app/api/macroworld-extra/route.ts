@@ -80,8 +80,11 @@ function valueAtYear(doc: DbDoc, year: number): Metric {
 
 // Central bank policy rates from IMF IFS (indicator FPOLM_PA, monthly). One
 // dimension query for all needed ISO-2 areas — same approach that works for WEO.
-// Returns ISO3 → latest policy rate.
+// IFS stops updating FPOLM_PA for advanced economies (euro area, UK…) that report
+// via the ECB/BoE, so a stale years-old value must be rejected (those areas are
+// instead filled from FRED below). Returns ISO3 → latest recent policy rate.
 async function imfPolicyRates(): Promise<Record<string, Metric>> {
+  const nowYear = parseInt(new Date().toISOString().slice(0, 4), 10);
   const areas = Array.from(new Set(Object.values(POLICY_CC)));
   const dims = encodeURIComponent(JSON.stringify({ FREQ: ['M'], INDICATOR: ['FPOLM_PA'], REF_AREA: areas }));
   const j = await dbFetch(`${DB}/series/IMF/IFS?dimensions=${dims}&observations=1&limit=300&metadata=false`, 14_000);
@@ -89,7 +92,46 @@ async function imfPolicyRates(): Promise<Record<string, Metric>> {
   const byArea: Record<string, DbDoc> = {};
   for (const d of docs) { const ra = d.dimensions?.['REF_AREA']; if (ra && !byArea[ra]) byArea[ra] = d; }
   const out: Record<string, Metric> = {};
-  for (const [iso, cc] of Object.entries(POLICY_CC)) out[iso] = byArea[cc] ? lastFinite(byArea[cc]) : null;
+  for (const [iso, cc] of Object.entries(POLICY_CC)) {
+    const m = byArea[cc] ? lastFinite(byArea[cc]) : null;
+    // Drop anything older than ~3 years — it's a discontinued series, not the current rate.
+    out[iso] = m && parseInt(m.year, 10) >= nowYear - 3 ? m : null;
+  }
+  return out;
+}
+
+// FRED API key (same one the Macro route uses; already in the repo). Direct FRED
+// works on Vercel — DBnomics no longer hosts FRED.
+const FRED_KEY = process.env.FRED_API_KEY || 'f3c277afe140cbee307e1b716840f5a9';
+
+// Latest non-null FRED observation.
+async function fredLatest(id: string): Promise<Metric> {
+  const u = `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${FRED_KEY}&file_type=json&sort_order=desc&limit=12`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 7_000);
+  try {
+    const r = await fetch(u, { signal: ctrl.signal, headers: { 'Accept': 'application/json' }, next: { revalidate: 86400 } });
+    if (!r.ok) return null;
+    const j = await r.json() as { observations?: Array<{ date: string; value: string }> };
+    for (const o of j.observations ?? []) { const v = parseFloat(o.value); if (isFinite(v)) return { value: v, year: o.date.slice(0, 4) }; }
+    return null;
+  } catch { return null; } finally { clearTimeout(t); }
+}
+
+// Advanced economies where IFS is stale → use the exact central-bank-rate series
+// the Macro section already uses, so Macro World matches Macro. Euro members share
+// the ECB deposit facility rate.
+const FRED_OVERRIDE: Record<string, string> = {
+  USA: 'DFEDTARU',            // Fed funds target (upper)
+  EMU: 'ECBDFR', DEU: 'ECBDFR', FRA: 'ECBDFR', ITA: 'ECBDFR', ESP: 'ECBDFR', NLD: 'ECBDFR', // ECB deposit rate
+  JPN: 'IRSTCI01JPM156N',     // BoJ immediate rate
+  GBR: 'IRSTCI01GBM156N',     // BoE immediate rate
+};
+async function fredPolicyOverrides(): Promise<Record<string, Metric>> {
+  const ids = Array.from(new Set(Object.values(FRED_OVERRIDE)));
+  const byId = Object.fromEntries(await Promise.all(ids.map(async id => [id, await fredLatest(id)] as const)));
+  const out: Record<string, Metric> = {};
+  for (const [iso, id] of Object.entries(FRED_OVERRIDE)) { const m = byId[id]; if (m) out[iso] = m; }
   return out;
 }
 
@@ -116,10 +158,11 @@ async function buildExtra(): Promise<ExtraMap> {
   if (cache && Date.now() - cache.ts < TTL) return cache.data;
   const nowYear = parseInt(new Date().toISOString().slice(0, 4), 10);
 
-  const [growthDocs, debtDocs, policyMap] = await Promise.all([
+  const [growthDocs, debtDocs, policyMap, fredMap] = await Promise.all([
     weoSubject('NGDP_RPCH'),
     weoSubject('GGXWDG_NGDP'),
     imfPolicyRates(),
+    fredPolicyOverrides(),
   ]);
 
   const out: ExtraMap = {};
@@ -131,7 +174,8 @@ async function buildExtra(): Promise<ExtraMap> {
     const gdpFcstNext = g ? valueAtYear(g, nowYear + 1) : null;
     const d = debtDocs[iso];
     const debt = d ? (valueAtYear(d, nowYear) ?? lastFinite(d)) : null;
-    out[iso] = { policyRate: policyMap[iso] ?? null, gdpFcstCurr, gdpFcstNext, debt };
+    // FRED override (advanced economies) wins over the IFS value when present.
+    out[iso] = { policyRate: fredMap[iso] ?? policyMap[iso] ?? null, gdpFcstCurr, gdpFcstNext, debt };
   }
   if (Object.values(out).some(v => v.policyRate || v.gdpFcstCurr || v.gdpFcstNext || v.debt)) cache = { data: out, ts: Date.now() };
   return out;
