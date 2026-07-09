@@ -147,9 +147,58 @@ async function buildExtra(): Promise<ExtraMap> {
   return out;
 }
 
+// Raw DBnomics fetch (any shape) — used only by the debug probe.
+async function rawDb(u: string): Promise<{ status: number; json: unknown } | { error: string }> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const r = await fetch(u, { headers: { 'User-Agent': UA, 'Accept': 'application/json' } });
+    const status = r.status;
+    let json: unknown = null;
+    try { json = await r.json(); } catch { json = null; }
+    return { status, json };
+  } catch (e) { return { error: (e as Error).message }; } finally { clearTimeout(t); }
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  if (url.searchParams.get('mode') !== 'summary') return NextResponse.json({ error: 'bad_mode' }, { status: 400 });
+  const mode = url.searchParams.get('mode');
+
+  // Probe DBnomics to discover the correct BIS policy-rate dataset/series format.
+  if (mode === 'debug') {
+    const probeUrls = [
+      `${DB}/datasets/BIS`,
+      `${DB}/series/BIS/CBPOL_M/M.US?observations=1`,
+      `${DB}/series/BIS/CBPOL_D/D.US?observations=1`,
+      `${DB}/series/BIS/WS_CBPOL_M/M.US?observations=1`,
+      `${DB}/series/BIS/CBPOL_M?dimensions=${encodeURIComponent(JSON.stringify({ REF_AREA: ['US'] }))}&observations=1&limit=3`,
+      `${DB}/search?q=central%20bank%20policy%20rate%20United%20States&limit=5`,
+    ];
+    const probes = await Promise.all(probeUrls.map(async u => {
+      const r = await rawDb(u);
+      if ('error' in r) return { url: u, error: r.error };
+      const j = r.json as Record<string, unknown> | null;
+      // Summarise without dumping megabytes: dataset codes, or series doc shape.
+      const datasets = (j?.datasets as { docs?: Array<{ code?: string; name?: string }> } | undefined)?.docs;
+      const seriesDocs = (j?.series as { docs?: Array<Record<string, unknown>> } | undefined)?.docs;
+      const results = (j?.results as { docs?: Array<Record<string, unknown>> } | undefined)?.docs;
+      return {
+        url: u,
+        status: r.status,
+        topKeys: j ? Object.keys(j) : null,
+        datasetCodes: Array.isArray(datasets) ? datasets.map(d => `${d.code} — ${d.name}`).slice(0, 60) : undefined,
+        seriesDoc0: Array.isArray(seriesDocs) && seriesDocs[0] ? {
+          series_code: seriesDocs[0].series_code, dimensions: seriesDocs[0].dimensions,
+          lastPeriods: (seriesDocs[0].period as unknown[] | undefined)?.slice(-3),
+          lastValues: (seriesDocs[0].value as unknown[] | undefined)?.slice(-3),
+        } : undefined,
+        searchHits: Array.isArray(results) ? results.map(d => `${d.provider_code}/${d.dataset_code}/${d.series_code}`).slice(0, 8) : undefined,
+      };
+    }));
+    return NextResponse.json({ probes }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
+  if (mode !== 'summary') return NextResponse.json({ error: 'bad_mode' }, { status: 400 });
   const data = await buildExtra();
   return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=172800' } });
 }
