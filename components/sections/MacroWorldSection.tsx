@@ -13,7 +13,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { LoadingGrid } from '@/components/ui/LoadingSpinner';
 import { IMF_INDICATORS, IMF_INDICATOR_BY_CODE, fmtImf, type ImfUnit } from '@/lib/imfConfig';
-import { colorForPercent, formatPercent, calculateCAGR, getTimeframeStart } from '@/lib/utils';
+import { colorForPercent, formatPercent, calculateCAGR, getTimeframeStart, extendToToday } from '@/lib/utils';
 import { X, RefreshCw, Globe, BarChart2 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -223,7 +223,10 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
             )}
 
             {series.length > 1 ? (
-              <PriceChart data={series} color="auto" height={220} toolsOverlay={activeTools}
+              // Carry the last published year forward to today (World Bank lags ~1-2y),
+              // so the line reaches "now" instead of stopping at the last data year —
+              // except on a custom range, where the end date must be respected exactly.
+              <PriceChart data={customRange ? series : extendToToday(series)} color="auto" height={220} toolsOverlay={activeTools}
                 onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
             ) : (
               <div className="flex items-center justify-center h-40 text-gray-500 text-sm">No series for this window.</div>
