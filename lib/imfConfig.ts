@@ -136,9 +136,12 @@ export const IMF_SUMMARY_GROUPS: SummaryGroup[] = [
 // The columns of the summary board (must be codes present in IMF_INDICATORS).
 export const IMF_SUMMARY_INDICATORS: string[] = [
   'NY.GDP.MKTP.KD.ZG', // Real GDP Growth
+  'NY.GDP.MKTP.CD',    // GDP (nominal, USD)
+  'NY.GDP.PCAP.CD',    // GDP per Capita
   'FP.CPI.TOTL.ZG',    // Inflation
   'SL.UEM.TOTL.ZS',    // Unemployment
   'FR.INR.RINR',       // Real Interest Rate
+  'BN.CAB.XOKA.GD.ZS', // Current Account
   'GC.DOD.TOTL.GD.ZS', // Govt Debt
 ];
 

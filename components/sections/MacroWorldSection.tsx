@@ -287,9 +287,12 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
 // Compact per-indicator column labels for the summary board.
 const SUMMARY_COL_LABELS: Record<string, string> = {
   'NY.GDP.MKTP.KD.ZG': 'GDP Growth',
+  'NY.GDP.MKTP.CD': 'GDP ($)',
+  'NY.GDP.PCAP.CD': 'GDP/capita',
   'FP.CPI.TOTL.ZG': 'Inflation',
   'SL.UEM.TOTL.ZS': 'Unemploy.',
   'FR.INR.RINR': 'Real Rate',
+  'BN.CAB.XOKA.GD.ZS': 'Curr. Acct',
   'GC.DOD.TOTL.GD.ZS': 'Debt/GDP',
 };
 
@@ -304,12 +307,19 @@ function SummaryBoard({ summary, activeCode, onPick }: {
   onPick: (code: string) => void;
 }) {
   if (!summary) return null;
-  const cols = IMF_SUMMARY_INDICATORS.map(code => ({
-    code,
-    label: SUMMARY_COL_LABELS[code] ?? IMF_INDICATOR_BY_CODE.get(code)?.name ?? code,
-    higherBetter: IMF_INDICATOR_BY_CODE.get(code)?.higherBetter ?? true,
-    unit: IMF_INDICATOR_BY_CODE.get(code)?.unit ?? '%',
-  }));
+  const cols = IMF_SUMMARY_INDICATORS.map(code => {
+    const ind = IMF_INDICATOR_BY_CODE.get(code);
+    const unit = ind?.unit ?? '%';
+    return {
+      code,
+      label: SUMMARY_COL_LABELS[code] ?? ind?.name ?? code,
+      higherBetter: ind?.higherBetter ?? true,
+      unit,
+      scale: ind?.scale ?? 1,
+      // Only ratio columns (%, % of GDP) get green/red — absolute $ figures stay neutral.
+      colored: unit === '%' || unit === '% of GDP',
+    };
+  });
 
   return (
     <div className="rounded-xl border border-border bg-bg-card p-3 sm:p-4 space-y-2">
@@ -318,7 +328,7 @@ function SummaryBoard({ summary, activeCode, onPick }: {
         <span className="text-[10px] text-gray-500">Latest available · World Bank · click a row to open</span>
       </div>
       <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-        <table className="w-full text-xs border-separate border-spacing-0 min-w-[560px]">
+        <table className="w-full text-xs border-separate border-spacing-0 min-w-[760px]">
           <thead>
             <tr>
               <th className="text-left font-semibold text-gray-400 px-2 py-1.5 sticky left-0 bg-bg-card z-10">Economy</th>
@@ -349,11 +359,14 @@ function SummaryBoard({ summary, activeCode, onPick }: {
                       </td>
                       {cols.map(c => {
                         const cell = row?.[c.code];
-                        const color = cell ? colorForPercent(c.higherBetter ? cell.value : -cell.value) : 'text-gray-600';
+                        const val = cell ? cell.value / c.scale : null;
+                        const color = val == null ? 'text-gray-600'
+                          : c.colored ? colorForPercent(c.higherBetter ? val : -val)
+                          : 'text-gray-200';
                         return (
                           <td key={c.code} title={cell ? `${cell.year}` : 'no data'}
                             className={clsx('text-right px-2 py-1.5 tabular-nums whitespace-nowrap', color)}>
-                            {cell ? fmtImf(cell.value, c.unit as ImfUnit) : '—'}
+                            {val == null ? '—' : fmtImf(val, c.unit as ImfUnit)}
                           </td>
                         );
                       })}
@@ -366,7 +379,7 @@ function SummaryBoard({ summary, activeCode, onPick }: {
         </table>
       </div>
       <p className="text-[10px] text-gray-600 leading-snug">
-        GDP Growth green = faster, Inflation / Unemployment / Real Rate / Debt green = lower. Values are the latest year each source has published (hover a cell for the year).
+        Ratio columns are coloured (GDP Growth &amp; Current Account green = higher; Inflation, Unemployment, Real Rate, Debt green = lower); absolute $ figures stay neutral. Values are the latest year each source has published (hover a cell for the year). Some cells read “—” where the World Bank has no recent figure for that country.
       </p>
     </div>
   );
