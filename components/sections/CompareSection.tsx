@@ -109,6 +109,20 @@ function diffSeries(a: HistoricalPoint[], b: HistoricalPoint[]): HistoricalPoint
   return out;
 }
 
+// Window a series to [start, end] but ALWAYS keep a line for lagging series:
+// if the series has no point at `start`, carry its last value before `start`
+// forward as a synthetic point at `start`. This is what lets an annual, 1-2y
+// lagging macro series (e.g. World Bank GDP growth, last point 2024) still draw
+// a flat line on a short window (1D, 3M) using its most recent known value,
+// instead of disappearing entirely.
+function withCarryIn(raw: HistoricalPoint[], start: string, end: string | null): HistoricalPoint[] {
+  const inside = raw.filter(d => d.date >= start && (!end || d.date <= end));
+  if (inside.length && inside[0].date === start) return inside;
+  let carry: HistoricalPoint | null = null;
+  for (const d of raw) { if (d.date < start) carry = d; else break; }
+  return carry ? [{ date: start, close: carry.close }, ...inside] : inside;
+}
+
 // Build the synthetic spread assets from the already-aligned display assets.
 function buildSpreadAssets(
   base: CompareAsset[],
@@ -498,14 +512,23 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       return assets.map(a => {
         const raw = a.rawData ?? a.data;
         const isOverlay = EVENT_OVERLAY.has(a.symbol);
+        // Macro series and Macro World (World Bank) are annual and lag by 1-2y, so on a
+        // short window their last real point can fall BEFORE the window start. Carry that
+        // last value forward into the window so the line always shows (flat) rather than
+        // vanishing — this is the "show the last available point" behaviour.
+        const laggingMacro = (a.type === 'macro' || a.symbol.startsWith('WB:')) && !isOverlay;
         // rawFiltered: full history for overlay assets (recession bands, FOMC lines)
         // so CompareChart can find all events even on short timeframes.
-        let rawFiltered = isOverlay ? raw : raw.filter(d => d.date >= commonStart);
-        if (tfEnd && !isOverlay) rawFiltered = rawFiltered.filter(d => d.date <= tfEnd);
+        let rawFiltered = isOverlay ? raw
+          : laggingMacro ? withCarryIn(raw, commonStart, tfEnd)
+          : raw.filter(d => d.date >= commonStart);
+        if (tfEnd && !isOverlay && !laggingMacro) rawFiltered = rawFiltered.filter(d => d.date <= tfEnd);
         // displayFiltered: always trimmed to the visible range so the Stack
         // panel and all display charts align with the main chart timeframe.
-        let displayFiltered = raw.filter(d => d.date >= commonStart);
-        if (tfEnd) displayFiltered = displayFiltered.filter(d => d.date <= tfEnd);
+        let displayFiltered = laggingMacro
+          ? withCarryIn(raw, commonStart, tfEnd)
+          : raw.filter(d => d.date >= commonStart);
+        if (tfEnd && !laggingMacro) displayFiltered = displayFiltered.filter(d => d.date <= tfEnd);
         let trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
         if (tfEnd && trFiltered) trFiltered = trFiltered.filter(d => d.date <= tfEnd);
         const divsFiltered = (a.dividends ?? []).filter(d =>
@@ -518,12 +541,10 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         // and hid intra-period jitter on daily series (NY Fed EFFR, T-yields).
         // The chart already uses type="stepAfter" for macro, which renders the
         // step look from the full data.
-        // Macro series and Macro World (World Bank, annual & lagging) carry their
-        // last known value forward to today so the line reaches "now" rather than
-        // stopping at the last published point. Stats/CAGR still use the un-extended
-        // rawFiltered, so returns are computed on real data only.
-        const displayRaw = (a.type === 'macro' || a.symbol.startsWith('WB:')) && !isOverlay
-          ? extendToToday(displayFiltered)
+        // Lagging macro/World Bank lines also reach "now": carry the last value to today
+        // (unless a custom end date is set, which must be respected exactly).
+        const displayRaw = laggingMacro
+          ? (tfEnd ? displayFiltered : extendToToday(displayFiltered))
           : displayFiltered;
         const displayData = normalized ? pctChangeFromStart(displayRaw) : displayRaw;
         const displayTrData = trFiltered
