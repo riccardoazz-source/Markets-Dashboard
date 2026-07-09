@@ -18,7 +18,14 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { StackAnalysisPanel, DEFAULT_TOOLS } from '@/components/ui/StackAnalysisPanel';
 import type { ActiveTools } from '@/components/ui/ChartTools';
-import { IMF_INDICATOR_BY_CODE } from '@/lib/imfConfig';
+import { IMF_INDICATOR_BY_CODE, MACRO_WORLD_ENABLED, imfCompareAssets, imfCompareClass } from '@/lib/imfConfig';
+
+// Comparable universe = the static config assets plus (when enabled) the curated
+// Macro World country×indicator series, so both can be searched/added in Compare.
+const COMPARABLE_ASSETS = [
+  ...ALL_COMPARABLE_ASSETS,
+  ...(MACRO_WORLD_ENABLED ? imfCompareAssets() : []),
+];
 
 class ChartErrorBoundary extends Component<
   { children: ReactNode },
@@ -181,7 +188,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   }, []);
 
   const fetchAsset = useCallback(async (symbol: string, color: string, tf: Timeframe, dateRange?: { from: string; to: string }): Promise<CompareAsset | null> => {
-    const config = ALL_COMPARABLE_ASSETS.find(a => a.symbol === symbol);
+    const config = COMPARABLE_ASSETS.find(a => a.symbol === symbol);
     const displayName = nameCacheRef[symbol] ?? config?.name ?? symbol;
 
     try {
@@ -384,7 +391,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     setSpreads(prev => prev.filter(s => !(s.a === a && s.b === b)));
 
   const symbolName = (s: string) =>
-    nameCacheRef[s] ?? ALL_COMPARABLE_ASSETS.find(x => x.symbol === s)?.name ?? s;
+    nameCacheRef[s] ?? COMPARABLE_ASSETS.find(x => x.symbol === s)?.name ?? s;
 
   const addSymbol = (symbol: string, name?: string) => {
     if (selectedSymbols.includes(symbol) || selectedSymbols.length >= 8) return;
@@ -421,18 +428,19 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     const stocksClass: CompareClass[] = subcats.length
       ? [{ key: 'Stocks', label: 'Stocks', subcats }]
       : [];
-    return [...COMPARE_ASSET_CLASSES, ...stocksClass];
+    const macroWorldClass: CompareClass[] = MACRO_WORLD_ENABLED ? [imfCompareClass()] : [];
+    return [...COMPARE_ASSET_CLASSES, ...stocksClass, ...macroWorldClass];
   }, [gistData]);
 
   // Local config search (exclude already selected)
-  const localHits = ALL_COMPARABLE_ASSETS.filter(a =>
+  const localHits = COMPARABLE_ASSETS.filter(a =>
     !selectedSymbols.includes(a.symbol) &&
     (a.name.toLowerCase().includes(search.toLowerCase()) ||
      a.symbol.toLowerCase().includes(search.toLowerCase()))
   ).slice(0, 8);
 
   // Remote hits that aren't already in local config or selected
-  const localSymbols = new Set(ALL_COMPARABLE_ASSETS.map(a => a.symbol));
+  const localSymbols = new Set(COMPARABLE_ASSETS.map(a => a.symbol));
   const extraRemoteHits = remoteHits
     .filter(h => !selectedSymbols.includes(h.symbol) && !localSymbols.has(h.symbol))
     .slice(0, 8);
@@ -780,7 +788,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       {/* Selected symbols chips + search */}
       <div className="flex flex-wrap gap-2 items-center">
         {selectedSymbols.map((s, i) => {
-          const conf = ALL_COMPARABLE_ASSETS.find(a => a.symbol === s);
+          const conf = COMPARABLE_ASSETS.find(a => a.symbol === s);
           return (
             <div key={s} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
               style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '33', border: `1px solid ${CHART_COLORS[i % CHART_COLORS.length]}66`, color: 'white' }}>

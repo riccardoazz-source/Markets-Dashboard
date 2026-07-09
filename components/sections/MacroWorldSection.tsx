@@ -17,8 +17,9 @@ import { colorForPercent, formatPercent, calculateCAGR, getTimeframeStart } from
 import { X, RefreshCw, Globe, BarChart2 } from 'lucide-react';
 import clsx from 'clsx';
 
-// Annual data → only the multi-year windows make sense.
-const TF_OPTIONS: Timeframe[] = ['3Y', '5Y', '10Y', 'MAX'];
+// Same timeframe scale used everywhere else in the app. Data is annual, so the
+// sub-year windows simply show few/no points — but the selector stays consistent.
+const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
 interface Place { code: string; name: string; aggregate: boolean }
 interface IndicatorData { series: HistoricalPoint[]; latest: number | null; latestYear: string | null }
@@ -168,7 +169,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       {selected && sel && (
         <DetailModal onClose={() => setSelected(null)}>
           <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
-            <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <h3 className="text-base font-bold text-white truncate">{countryName} — {sel.name}</h3>
                 <p className="text-xs text-gray-500 mt-0.5"><span className="font-mono">{sel.code}</span> · {sel.category} · Unit: {sel.unit} · World Bank</p>
@@ -230,7 +231,16 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
 
             {series.length > 0 && <ChartTools data={series} activeTools={activeTools} onChange={setActiveTools} />}
             {series.length > 0 && <ChartDataTable data={series} unit={sel.unit} />}
-            <ChartNotes chartId={`imf:${country}:${sel.code}`} defaultCategory="Macro World" />
+            <ChartNotes
+              chartId={`imf:${country}:${sel.code}`}
+              defaultCategory="Macro World"
+              captureView={() => ({ tools: { ...activeTools } as Record<string, boolean>, timeframe, customRange })}
+              onRestoreView={v => {
+                if (v.tools) setActiveTools({ ...DEFAULT_TOOLS, ...(v.tools as Partial<ActiveTools>) });
+                if (v.timeframe) setTimeframe(v.timeframe as Timeframe);
+                setCustomRange(v.customRange ?? null);
+              }}
+            />
           </div>
         </DetailModal>
       )}
