@@ -118,19 +118,25 @@ export const IMF_SUMMARY_GROUPS: SummaryGroup[] = [
   { region: 'North America', places: [
     { code: 'USA', name: 'United States' }, { code: 'CAN', name: 'Canada' }, { code: 'MEX', name: 'Mexico' } ] },
   { region: 'South America', places: [
-    { code: 'BRA', name: 'Brazil' }, { code: 'ARG', name: 'Argentina' } ] },
+    { code: 'BRA', name: 'Brazil' }, { code: 'ARG', name: 'Argentina' }, { code: 'CHL', name: 'Chile' },
+    { code: 'COL', name: 'Colombia' }, { code: 'PER', name: 'Peru' } ] },
   { region: 'Europe', places: [
     { code: 'EMU', name: 'Euro area' }, { code: 'DEU', name: 'Germany' }, { code: 'FRA', name: 'France' },
-    { code: 'GBR', name: 'United Kingdom' }, { code: 'ITA', name: 'Italy' } ] },
+    { code: 'GBR', name: 'United Kingdom' }, { code: 'ITA', name: 'Italy' }, { code: 'ESP', name: 'Spain' },
+    { code: 'NLD', name: 'Netherlands' }, { code: 'CHE', name: 'Switzerland' }, { code: 'SWE', name: 'Sweden' },
+    { code: 'POL', name: 'Poland' }, { code: 'RUS', name: 'Russia' } ] },
   { region: 'Asia', places: [
     { code: 'CHN', name: 'China' }, { code: 'JPN', name: 'Japan' }, { code: 'IND', name: 'India' },
-    { code: 'KOR', name: 'South Korea' } ] },
+    { code: 'KOR', name: 'South Korea' }, { code: 'IDN', name: 'Indonesia' }, { code: 'SAU', name: 'Saudi Arabia' },
+    { code: 'TUR', name: 'Turkey' }, { code: 'ISR', name: 'Israel' }, { code: 'ARE', name: 'UAE' },
+    { code: 'SGP', name: 'Singapore' }, { code: 'THA', name: 'Thailand' }, { code: 'VNM', name: 'Vietnam' } ] },
   { region: 'Africa', places: [
-    { code: 'ZAF', name: 'South Africa' }, { code: 'NGA', name: 'Nigeria' } ] },
+    { code: 'ZAF', name: 'South Africa' }, { code: 'NGA', name: 'Nigeria' }, { code: 'EGY', name: 'Egypt' },
+    { code: 'KEN', name: 'Kenya' }, { code: 'MAR', name: 'Morocco' } ] },
   { region: 'Oceania', places: [
-    { code: 'AUS', name: 'Australia' } ] },
-  { region: 'World', places: [
-    { code: 'WLD', name: 'World' } ] },
+    { code: 'AUS', name: 'Australia' }, { code: 'NZL', name: 'New Zealand' } ] },
+  { region: 'Aggregates', places: [
+    { code: 'WLD', name: 'World' }, { code: 'EUU', name: 'European Union' } ] },
 ];
 
 // The columns of the summary board (must be codes present in IMF_INDICATORS).

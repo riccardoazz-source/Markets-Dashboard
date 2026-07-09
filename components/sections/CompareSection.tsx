@@ -825,17 +825,23 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
             </div>
 
             {search.length > 0 && (localHits.length > 0 || extraRemoteHits.length > 0) && (
-              <div className="absolute top-full left-0 mt-1 w-64 bg-bg-card border border-border rounded-lg shadow-xl z-20 max-h-64 overflow-y-auto">
+              <div className="absolute top-full left-0 mt-1 w-80 max-w-[85vw] bg-bg-card border border-border rounded-lg shadow-xl z-20 max-h-64 overflow-y-auto">
                 {localHits.length > 0 && (
                   <>
                     <p className="px-3 pt-2 pb-1 text-[10px] text-gray-600 uppercase tracking-wider font-semibold">Preset</p>
-                    {localHits.map(a => (
-                      <button key={a.symbol} onClick={() => addSymbol(a.symbol, a.name)}
-                        className="w-full flex items-center justify-between px-3 py-1.5 text-xs hover:bg-bg-hover text-left">
-                        <span className="text-gray-100 truncate">{a.name}</span>
-                        <span className="text-gray-500 ml-2 shrink-0 font-mono text-[10px]">{a.symbol}</span>
-                      </button>
-                    ))}
+                    {localHits.map(a => {
+                      const isWB = a.symbol.startsWith('WB:');
+                      return (
+                        <button key={a.symbol} onClick={() => addSymbol(a.symbol, a.name)}
+                          className="w-full flex items-start justify-between gap-2 px-3 py-1.5 text-xs hover:bg-bg-hover text-left">
+                          {/* Full name, wraps instead of truncating, so the indicator stays readable */}
+                          <span className="text-gray-100 leading-tight min-w-0 flex-1">{a.name}</span>
+                          <span className={clsx('shrink-0 text-[10px] mt-0.5', isWB ? 'text-emerald-400/80' : 'text-gray-500 font-mono')}>
+                            {isWB ? 'Macro World' : a.symbol}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </>
                 )}
                 {extraRemoteHits.length > 0 && (
