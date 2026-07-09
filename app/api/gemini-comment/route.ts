@@ -122,7 +122,7 @@ export async function POST(req: Request) {
   const timer = setTimeout(() => ctrl.abort(), 55_000);
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
     const r = await fetch(url, {
       signal: ctrl.signal,
       method: 'POST',
