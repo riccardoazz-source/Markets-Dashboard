@@ -16,6 +16,7 @@ export const maxDuration = 30;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BASE = 'https://api.worldbank.org/v2';
+const DB = 'https://api.db.nomics.world/v22';
 const TTL = 24 * 60 * 60 * 1000;
 
 interface Cached<T> { data: T; ts: number }
@@ -100,6 +101,49 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return results;
 }
 
+// All indicators of ONE country in a SINGLE DBnomics call (World Bank / WDI mirror).
+// This avoids the 12-request direct-WB burst the browser fires per country, which WB
+// rate-limits. DBnomics is reliable from this deployment (it also serves WEO/IFS).
+interface DbDoc { period?: string[]; value?: (number | string | null)[]; dimensions?: Record<string, string> }
+const countryCache = new Map<string, Cached<Record<string, { date: string; close: number }[]>>>();
+
+async function dbnomicsCountry(country: string): Promise<Record<string, { date: string; close: number }[]>> {
+  const hit = countryCache.get(country);
+  if (hit && Date.now() - hit.ts < TTL) return hit.data;
+  const codes = IMF_INDICATORS.map(i => i.code);
+  const scaleByCode = new Map(IMF_INDICATORS.map(i => [i.code, i.scale ?? 1]));
+  const dims = encodeURIComponent(JSON.stringify({ indicator: codes, country: [country] }));
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 14_000);
+  let json: { series?: { docs?: DbDoc[] } } | null = null;
+  try {
+    const r = await fetch(`${DB}/series/WB/WDI?dimensions=${dims}&observations=1&limit=200&metadata=false`, {
+      signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
+    });
+    if (r.ok) json = await r.json();
+  } catch { /* fall through */ } finally { clearTimeout(timer); }
+  const docs = json?.series?.docs ?? [];
+  const out: Record<string, { date: string; close: number }[]> = {};
+  for (const d of docs) {
+    const ind = d.dimensions?.indicator;
+    if (!ind) continue;
+    const scale = scaleByCode.get(ind) ?? 1;
+    const periods = d.period ?? [];
+    const values = d.value ?? [];
+    const series: { date: string; close: number }[] = [];
+    for (let i = 0; i < periods.length; i++) {
+      const p = String(periods[i]);
+      const v = values[i];
+      const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(String(v));
+      if (/^\d{4}$/.test(p) && isFinite(num)) series.push({ date: `${p}-01-01`, close: num / scale });
+    }
+    series.sort((a, b) => a.date.localeCompare(b.date));
+    if (series.length) out[ind] = series;
+  }
+  if (Object.keys(out).length) countryCache.set(country, { data: out, ts: Date.now() });
+  return out;
+}
+
 // Macro-area board: one multi-country WB call per summary indicator (much cheaper
 // than N×M single fetches), keeping each place's most recent non-null value.
 async function summary(): Promise<SummaryMap> {
@@ -159,15 +203,22 @@ export async function GET(req: Request) {
     const country = (url.searchParams.get('country') || '').toUpperCase();
     if (!/^[A-Z]{3}$/.test(country)) return NextResponse.json({ error: 'bad_country' }, { status: 400 });
 
-    const all = await mapLimit(IMF_INDICATORS, 4, i => series(country, i.code, i.scale ?? 1));
+    // One DBnomics call for all indicators; fall back to direct World Bank per-series
+    // (rate-limit-gated) only if DBnomics returns nothing.
+    let byCode = await dbnomicsCountry(country);
+    if (!Object.keys(byCode).length) {
+      const all = await mapLimit(IMF_INDICATORS, 4, i => series(country, i.code, i.scale ?? 1));
+      byCode = {};
+      IMF_INDICATORS.forEach((ind, i) => { if (all[i].length) byCode[ind.code] = all[i]; });
+    }
     const indicators: Record<string, { series: { date: string; close: number }[]; latest: number | null; latestYear: string | null }> = {};
     let any = false;
-    IMF_INDICATORS.forEach((ind, i) => {
-      const s = all[i];
+    for (const ind of IMF_INDICATORS) {
+      const s = byCode[ind.code] ?? [];
       if (s.length) any = true;
       const last = s[s.length - 1];
       indicators[ind.code] = { series: s, latest: last ? last.close : null, latestYear: last ? last.date.slice(0, 4) : null };
-    });
+    }
     if (!any) return NextResponse.json({ error: 'wb_unreachable' }, { status: 200 });
     return NextResponse.json({ code: country, indicators });
   }
