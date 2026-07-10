@@ -10,7 +10,7 @@ import { GeminiCommentButton } from './GeminiCommentButton';
 import { ChartNotes } from './ChartNotes';
 import { LoadingSpinner } from './LoadingSpinner';
 import { HistoricalPoint, QuoteData, Timeframe } from '@/lib/types';
-import { formatPrice, formatPercent, colorForPercent } from '@/lib/utils';
+import { formatPrice, formatPercent, colorForPercent, calculateCAGR, buildTotalReturnSeries, computeAssetIRR } from '@/lib/utils';
 
 // Generic asset pop-up used where there is no full section panel (the Rotation list
 // and the Quadrant): clicking an asset opens its chart + key stats + the usual
@@ -22,6 +22,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
+  const [dividends, setDividends] = useState<{ date: string; amount: number }[]>([]);
   const [quote, setQuote] = useState<QuoteData | null>(null);
   const [histLoading, setHistLoading] = useState(false);
 
@@ -36,18 +37,33 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
 
   const fetchHist = useCallback(async (tf: Timeframe, override?: { from: string; to: string }) => {
     setHistLoading(true);
+    const params = override
+      ? `symbol=${encodeURIComponent(symbol)}&timeframe=${tf}&from=${override.from}&to=${override.to}`
+      : `symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`;
     try {
-      const url = override
-        ? `/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}&from=${override.from}&to=${override.to}`
-        : `/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=${tf}`;
-      const raw = await fetch(url).then(r => r.json());
-      setHistorical(Array.isArray(raw) ? raw : []);
-    } catch { setHistorical([]); } finally { setHistLoading(false); }
+      // Prefer /api/stock — it returns dividends (for the total-return line + IRR).
+      const res = await fetch(`/api/stock?${params}`);
+      const json = res.ok ? await res.json() : null;
+      if (json && Array.isArray(json.prices) && json.prices.length) {
+        setHistorical(json.prices);
+        setDividends(Array.isArray(json.dividends) ? json.dividends : []);
+      } else {
+        const raw = await fetch(`/api/historical?${params}`).then(r => r.json());
+        setHistorical(Array.isArray(raw) ? raw : []);
+        setDividends([]);
+      }
+    } catch { setHistorical([]); setDividends([]); } finally { setHistLoading(false); }
   }, [symbol]);
 
   useEffect(() => { fetchHist(timeframe, customRange ?? undefined); }, [timeframe, customRange, fetchHist]);
 
   const q = quote;
+  // Dividend-inclusive figures (only when the asset actually pays dividends).
+  const totalReturn = dividends.length > 0 ? buildTotalReturnSeries(historical, dividends) : undefined;
+  const cagr = historical.length > 1 ? calculateCAGR(historical, timeframe) : null;
+  const irr = dividends.length > 0 ? computeAssetIRR(historical, dividends) : null;
+  const tfLabel = customRange ? 'Custom' : timeframe;
+
   return (
     <DetailModal onClose={onClose}>
       <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
@@ -91,10 +107,28 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
           </div>
         )}
 
+        {/* Return / CAGR / IRR — computed over the selected window, dividend-aware. */}
+        {historical.length > 1 && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {cagr && <Stat label={`Return (${tfLabel})`} value={formatPercent(cagr.return)} color={colorForPercent(cagr.return)} />}
+            {cagr && <Stat label="CAGR" value={formatPercent(cagr.cagr)} color={colorForPercent(cagr.cagr)} />}
+            {irr != null && <Stat label="IRR (w/ div.)" value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />}
+            {dividends.length > 0 && <Stat label="Dividends (period)" value={`${dividends.length}`} />}
+          </div>
+        )}
+
+        {dividends.length > 0 && (
+          <div className="flex items-center gap-3 text-[10px] text-gray-500 px-1">
+            <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-emerald-400" /> Price</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-3 border-t border-dashed border-emerald-400" /> Total Return (reinvested div.)</span>
+          </div>
+        )}
+
         {histLoading ? (
           <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
         ) : (
           <PriceChart data={historical} color="auto" height={200}
+            totalReturnData={totalReturn}
             onSetRange={(from, to) => setCustomRange({ from, to })} />
         )}
         <ChartNotes chartId={symbol} />
