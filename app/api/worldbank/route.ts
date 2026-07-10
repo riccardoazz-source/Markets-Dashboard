@@ -25,18 +25,19 @@ const seriesCache = new Map<string, Cached<{ date: string; close: number }[]>>()
 let countriesCache: Cached<Place[]> | null = null;
 let summaryCache: Cached<SummaryMap> | null = null;
 
-async function wb(path: string): Promise<unknown | null> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12_000);
-  try {
-    const sep = path.includes('?') ? '&' : '?';
-    const r = await fetch(`${BASE}${path}${sep}format=json&per_page=20000`, {
-      signal: ctrl.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-    });
-    if (!r.ok) return null;
-    return await r.json();
-  } catch { return null; } finally { clearTimeout(timer); }
+async function wb(path: string, retries = 1): Promise<unknown | null> {
+  const sep = path.includes('?') ? '&' : '?';
+  const url = `${BASE}${path}${sep}format=json&per_page=20000`;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } });
+      if (r.ok) return await r.json();
+    } catch { /* retry */ } finally { clearTimeout(timer); }
+    if (attempt < retries) await new Promise(res => setTimeout(res, 350)); // brief backoff (WB rate-limits bursts)
+  }
+  return null;
 }
 
 async function countryList(): Promise<Place[]> {
@@ -67,8 +68,20 @@ async function series(country: string, code: string, scale: number): Promise<{ d
         .map(r => ({ date: `${r.date}-01-01`, close: (r.value as number) / scale }))
         .sort((a, b) => a.date.localeCompare(b.date))
     : [];
-  seriesCache.set(key, { data: out, ts: Date.now() });
+  // Cache ONLY a real WB data response ([meta, data]); never cache a failed/rate-limited
+  // fetch (json === null) — otherwise a transient failure would show "—" for 24h.
+  if (Array.isArray(json) && json.length >= 2) seriesCache.set(key, { data: out, ts: Date.now() });
   return out;
+}
+
+// Run async tasks with limited concurrency — World Bank rate-limits bursts, so we
+// fan the per-country indicator fetches out a few at a time instead of all at once.
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let i = 0;
+  const worker = async () => { while (i < items.length) { const idx = i++; results[idx] = await fn(items[idx]); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 // Macro-area board: one multi-country WB call per summary indicator (much cheaper
@@ -113,7 +126,7 @@ export async function GET(req: Request) {
     const country = (url.searchParams.get('country') || '').toUpperCase();
     if (!/^[A-Z]{3}$/.test(country)) return NextResponse.json({ error: 'bad_country' }, { status: 400 });
 
-    const all = await Promise.all(IMF_INDICATORS.map(i => series(country, i.code, i.scale ?? 1)));
+    const all = await mapLimit(IMF_INDICATORS, 4, i => series(country, i.code, i.scale ?? 1));
     const indicators: Record<string, { series: { date: string; close: number }[]; latest: number | null; latestYear: string | null }> = {};
     let any = false;
     IMF_INDICATORS.forEach((ind, i) => {
