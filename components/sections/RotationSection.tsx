@@ -760,20 +760,20 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
       ) : (
         <div className="rounded-xl border border-border bg-bg-card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[880px]">
               <thead>
                 <tr className="border-b border-border">
                   <th className="w-8 px-3 py-2 text-left text-[10px] font-medium text-gray-600">#</th>
                   <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-600">Asset</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden md:table-cell', sortBy === 'day' ? 'text-accent' : 'text-gray-600')}>Day</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === 'day' ? 'text-accent' : 'text-gray-600')}>Day</th>
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium', sortBy === '1m' ? 'text-accent' : 'text-gray-600')}>1M</th>
                   <th className={clsx('px-3 py-2 text-right text-[10px] font-medium', sortBy === '3m' ? 'text-accent' : 'text-gray-600')}>3M</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden sm:table-cell', sortBy === '6m' ? 'text-accent' : 'text-gray-600')}>6M</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden sm:table-cell', sortBy === '1y' ? 'text-accent' : 'text-gray-600')}>1Y</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden lg:table-cell', sortBy === '5y' ? 'text-accent' : 'text-gray-600')}>5Y</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden md:table-cell', sortBy === '52w' ? 'text-accent' : 'text-gray-600')} title="Position within the 52-week range: 0% = on the 52W low, 100% = on the 52W high">52W Range</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden xl:table-cell', sortBy === '200d' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-day MA (green=above, red=below)">vs 200D</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium hidden xl:table-cell', sortBy === '200w' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-week MA (green=above, red=below)">vs 200W</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '6m' ? 'text-accent' : 'text-gray-600')}>6M</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '1y' ? 'text-accent' : 'text-gray-600')}>1Y</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '5y' ? 'text-accent' : 'text-gray-600')}>5Y</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '52w' ? 'text-accent' : 'text-gray-600')} title="Position within the 52-week range: 0% = on the 52W low, 100% = on the 52W high">52W Range</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '200d' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-day MA (green=above, red=below)">vs 200D</th>
+                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '200w' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-week MA (green=above, red=below)">vs 200W</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -889,7 +889,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                           </button>
                         </div>
                       </td>
-                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden md:table-cell', sortBy === 'day' ? `font-bold ${pctColor(item.dayPct)}` : pctColor(item.dayPct))}>
+                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums table-cell', sortBy === 'day' ? `font-bold ${pctColor(item.dayPct)}` : pctColor(item.dayPct))}>
                         {fmtPct(item.dayPct)}
                       </td>
                       <td className={clsx('px-3 py-2 text-right text-xs tabular-nums', sortBy === '1m' ? `font-bold ${pctColor(item.r1m)}` : pctColor(item.r1m))}>
@@ -898,16 +898,16 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                       <td className={clsx('px-3 py-2 text-right text-xs tabular-nums', sortBy === '3m' ? `font-bold ${pctColor(item.r3m)}` : pctColor(item.r3m))}>
                         {rollingLoading ? <span className="text-gray-700">…</span> : fmtPct(item.r3m)}
                       </td>
-                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden sm:table-cell', sortBy === '6m' ? `font-bold ${pctColor(item.r6m)}` : pctColor(item.r6m))}>
+                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums table-cell', sortBy === '6m' ? `font-bold ${pctColor(item.r6m)}` : pctColor(item.r6m))}>
                         {rollingLoading ? <span className="text-gray-700">…</span> : fmtPct(item.r6m)}
                       </td>
-                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden sm:table-cell', sortBy === '1y' ? `font-bold ${pctColor(item.r1y)}` : pctColor(item.r1y))}>
+                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums table-cell', sortBy === '1y' ? `font-bold ${pctColor(item.r1y)}` : pctColor(item.r1y))}>
                         {rollingLoading ? <span className="text-gray-700">…</span> : fmtPct(item.r1y)}
                       </td>
-                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden lg:table-cell', sortBy === '5y' ? `font-bold ${pctColor(item.fiveYPct)}` : pctColor(item.fiveYPct))}>
+                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums table-cell', sortBy === '5y' ? `font-bold ${pctColor(item.fiveYPct)}` : pctColor(item.fiveYPct))}>
                         {fmtPct(item.fiveYPct)}
                       </td>
-                      <td className="px-3 py-2 hidden md:table-cell"
+                      <td className="px-3 py-2 table-cell"
                           title={item.high52w != null && item.low52w != null ? `52W range: ${item.low52w.toFixed(2)} – ${item.high52w.toFixed(2)}` : undefined}>
                         {rollingLoading ? (
                           <div className="text-right text-gray-700">…</div>
@@ -924,11 +924,11 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                           </div>
                         )}
                       </td>
-                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden xl:table-cell', sortBy === '200d' ? `font-bold ${pctColor(vs200d)}` : pctColor(vs200d))}
+                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums table-cell', sortBy === '200d' ? `font-bold ${pctColor(vs200d)}` : pctColor(vs200d))}
                           title={item.ma200 != null ? `200D MA: ${item.ma200.toFixed(2)}` : undefined}>
                         {rollingLoading ? <span className="text-gray-700">…</span> : fmtPct(vs200d)}
                       </td>
-                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums hidden xl:table-cell', sortBy === '200w' ? `font-bold ${pctColor(vs200w)}` : pctColor(vs200w))}
+                      <td className={clsx('px-3 py-2 text-right text-xs tabular-nums table-cell', sortBy === '200w' ? `font-bold ${pctColor(vs200w)}` : pctColor(vs200w))}
                           title={item.sma200w != null ? `200W MA: ${item.sma200w.toFixed(2)}` : undefined}>
                         {rollingLoading ? <span className="text-gray-700">…</span> : fmtPct(vs200w)}
                       </td>

@@ -194,9 +194,75 @@ async function rawDb(u: string): Promise<{ status: number; json: unknown } | { e
   } catch (e) { return { error: (e as Error).message }; } finally { clearTimeout(t); }
 }
 
+// DBnomics doc → {date, close} series (annual / monthly / daily periods normalised).
+function docToSeries(doc?: DbDoc): { date: string; close: number }[] {
+  if (!doc?.period) return [];
+  const out: { date: string; close: number }[] = [];
+  const vals = doc.value ?? [];
+  for (let i = 0; i < doc.period.length; i++) {
+    const p = doc.period[i];
+    const v = vals[i];
+    const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(String(v));
+    if (!isFinite(num)) continue;
+    let date: string | null = null;
+    if (/^\d{4}$/.test(p)) date = `${p}-01-01`;
+    else if (/^\d{4}-\d{2}$/.test(p)) date = `${p}-01`;
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(p)) date = p;
+    if (date) out.push({ date, close: num });
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return out;
+}
+
+// Full FRED series (asc) as {date, close} — for advanced-economy policy-rate history.
+async function fredSeries(id: string): Promise<{ date: string; close: number }[]> {
+  const u = `https://api.stlouisfed.org/fred/series/observations?series_id=${id}&api_key=${FRED_KEY}&file_type=json&sort_order=asc`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 9_000);
+  try {
+    const r = await fetch(u, { signal: ctrl.signal, headers: { 'Accept': 'application/json' }, next: { revalidate: 86400 } });
+    if (!r.ok) return [];
+    const j = await r.json() as { observations?: Array<{ date: string; value: string }> };
+    return (j.observations ?? []).map(o => ({ date: o.date, close: parseFloat(o.value) })).filter(p => isFinite(p.close));
+  } catch { return []; } finally { clearTimeout(t); }
+}
+
+// IFS FPOLM_PA monthly series for one area (emerging-market policy-rate history).
+async function ifsPolicySeries(cc: string): Promise<{ date: string; close: number }[]> {
+  const dims = encodeURIComponent(JSON.stringify({ FREQ: ['M'], INDICATOR: ['FPOLM_PA'], REF_AREA: [cc] }));
+  const j = await dbFetch(`${DB}/series/IMF/IFS?dimensions=${dims}&observations=1&limit=5&metadata=false`, 12_000);
+  return docToSeries(j?.series?.docs?.[0]);
+}
+
+// One WEO subject for one country (annual, includes forecast years).
+async function weoCountrySeries(iso3: string, subject: string): Promise<{ date: string; close: number }[]> {
+  const dims = encodeURIComponent(JSON.stringify({ 'weo-subject': [subject], 'weo-country': [iso3] }));
+  for (const ds of ['IMF/WEO:latest', 'IMF/WEO']) {
+    const j = await dbFetch(`${DB}/series/${ds}?dimensions=${dims}&observations=1&limit=5&metadata=false`, 12_000);
+    const s = docToSeries(j?.series?.docs?.[0]);
+    if (s.length) return s;
+  }
+  return [];
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const mode = url.searchParams.get('mode');
+
+  // Per-country series for the extra indicators (openable over time in the grid).
+  if (mode === 'country') {
+    const country = (url.searchParams.get('country') || '').toUpperCase();
+    if (!/^[A-Z]{3}$/.test(country)) return NextResponse.json({ error: 'bad_country' }, { status: 400 });
+    const cc = POLICY_CC[country];
+    const fredId = FRED_OVERRIDE[country];
+    const [policyRate, gdpForecast, debt] = await Promise.all([
+      fredId ? fredSeries(fredId) : (cc ? ifsPolicySeries(cc) : Promise.resolve([])),
+      weoCountrySeries(country, 'NGDP_RPCH'),
+      weoCountrySeries(country, 'GGXWDG_NGDP'),
+    ]);
+    return NextResponse.json({ policyRate, gdpForecast, debt },
+      { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
+  }
 
   // Probe DBnomics to discover the correct policy-rate provider/dataset/series.
   // Dumps raw (truncated) bodies so the real structure is visible, not my guesses.

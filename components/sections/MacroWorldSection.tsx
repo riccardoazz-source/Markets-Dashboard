@@ -13,7 +13,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { LoadingGrid } from '@/components/ui/LoadingSpinner';
 import {
-  IMF_INDICATORS, IMF_INDICATOR_BY_CODE, fmtImf, type ImfUnit,
+  IMF_INDICATORS, IMF_INDICATOR_BY_CODE, fmtImf, type ImfUnit, type ImfIndicator,
   isPrincipalAggregate, principalAggregateOrder,
   IMF_SUMMARY_GROUPS,
 } from '@/lib/imfConfig';
@@ -31,6 +31,16 @@ interface CountryData { code: string; indicators: Record<string, IndicatorData> 
 type SummaryMap = Record<string, Record<string, { value: number; year: string }>>;
 type Metric = { value: number; year: string } | null;
 type ExtraMap = Record<string, { policyRate: Metric; gdpFcstCurr: Metric; gdpFcstNext: Metric; debt: Metric }>;
+type CountryExtra = { policyRate: HistoricalPoint[]; gdpForecast: HistoricalPoint[]; debt: HistoricalPoint[] };
+
+// Extra per-country indicators (IMF IFS / WEO / FRED) shown as openable cards next
+// to the World Bank ones — each has a real time series so it opens a chart.
+const EXTRA_INDICATORS: (ImfIndicator & { seriesKey: keyof CountryExtra })[] = [
+  { code: 'x:policyRate',  name: 'Policy Rate',           unit: '%',        category: 'Rates',  higherBetter: false, seriesKey: 'policyRate' },
+  { code: 'x:gdpForecast', name: 'GDP Growth + Forecast', unit: '%',        category: 'Growth', higherBetter: true,  seriesKey: 'gdpForecast' },
+  { code: 'x:debt',        name: 'Govt Debt (IMF)',       unit: '% of GDP', category: 'Fiscal', higherBetter: false, seriesKey: 'debt' },
+];
+const EXTRA_BY_CODE = new Map(EXTRA_INDICATORS.map(e => [e.code, e]));
 
 function changeStr(d: number, unit: ImfUnit): string {
   const s = d >= 0 ? '+' : '';
@@ -59,6 +69,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   const [summary, setSummary] = useState<SummaryMap | null>(null);
   const [extra, setExtra] = useState<ExtraMap | null>(null);
   const [data, setData] = useState<CountryData | null>(null);
+  const [extraCountry, setExtraCountry] = useState<CountryExtra | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);       // indicator code
@@ -93,6 +104,14 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   }, []);
 
   useEffect(() => { fetchCountry(country); }, [country, fetchCountry]);
+  // Extra per-country series (policy rate, GDP forecast, IMF debt) — openable charts.
+  useEffect(() => {
+    setExtraCountry(null);
+    fetch(`/api/macroworld-extra?mode=country&country=${encodeURIComponent(country)}`)
+      .then(r => r.json())
+      .then((j) => { if (j && !j.error) setExtraCountry(j as CountryExtra); })
+      .catch(() => {});
+  }, [country]);
   // Keep the Countries/Regions toggle in sync with the current place.
   useEffect(() => {
     const inList = countries.find(c => c.code === country);
@@ -109,8 +128,12 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   }, [jumpTo]);
 
   const countryName = countries.find(c => c.code === country)?.name ?? country;
-  const sel = selected ? IMF_INDICATOR_BY_CODE.get(selected) : null;
-  const fullSeries = (selected ? data?.indicators[selected]?.series : null) ?? [];
+  // The selected indicator may be a World Bank one OR an extra (IMF/FRED) one.
+  const extraSel = selected ? EXTRA_BY_CODE.get(selected) : null;
+  const sel = extraSel ?? (selected ? IMF_INDICATOR_BY_CODE.get(selected) : null);
+  const fullSeries: HistoricalPoint[] = extraSel
+    ? (extraCountry?.[extraSel.seriesKey] ?? [])
+    : ((selected ? data?.indicators[selected]?.series : null) ?? []);
 
   // Slice the annual series to the chosen window (client-side — the full series is already loaded).
   const series = useMemo(() => {
@@ -199,6 +222,33 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
               </button>
             );
           })}
+
+          {/* Extra indicators (IMF policy rate, WEO forecast & debt) — openable time charts */}
+          {EXTRA_INDICATORS.map(e => {
+            const s = extraCountry?.[e.seriesKey] ?? [];
+            const last = s.length ? s[s.length - 1] : null;
+            const isPct = e.unit === '%' || e.unit === '% of GDP';
+            const neutral = e.code === 'x:policyRate';
+            const valColor = !neutral && isPct && last ? colorForPercent(e.higherBetter ? last.close : -last.close) : 'text-gray-100';
+            return (
+              <button
+                key={e.code}
+                onClick={() => s.length && setSelected(e.code)}
+                disabled={!s.length}
+                className={clsx(
+                  'text-left rounded-xl border bg-bg-card p-3 transition-all',
+                  s.length ? 'border-emerald-500/25 hover:border-accent/50 hover:bg-border/20 cursor-pointer' : 'border-border opacity-50 cursor-not-allowed',
+                )}
+              >
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <p className="text-xs font-semibold text-gray-200 truncate">{e.name}</p>
+                  <span className="shrink-0 text-[8px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400/80">{e.category}</span>
+                </div>
+                <p className={clsx('text-lg font-bold tabular-nums', valColor)}>{fmtImf(last?.close, e.unit)}</p>
+                <p className="text-[10px] text-gray-600">{last ? last.date.slice(0, 4) : (extraCountry ? 'n/a' : '…')} · {e.unit}</p>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -212,10 +262,14 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <h3 className="text-base font-bold text-white truncate">{countryName} — {sel.name}</h3>
-                <p className="text-xs text-gray-500 mt-0.5"><span className="font-mono">{sel.code}</span> · {sel.category} · Unit: {sel.unit} · World Bank</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {!extraSel && <><span className="font-mono">{sel.code}</span> · </>}
+                  {sel.category} · Unit: {sel.unit} · {extraSel ? (extraSel.code === 'x:policyRate' ? 'IMF IFS · FRED' : 'IMF WEO') : 'World Bank'}
+                </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                {onCompare && (
+                {/* Compare only applies to the World Bank series (extra IMF/FRED ones aren't comparable symbols) */}
+                {onCompare && !extraSel && (
                   <button
                     onClick={() => onCompare(`WB:${country}:${sel.code}`)}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"

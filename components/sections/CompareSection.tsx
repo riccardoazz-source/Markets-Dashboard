@@ -27,6 +27,18 @@ const COMPARABLE_ASSETS = [
   ...(MACRO_WORLD_ENABLED ? imfCompareAssets() : []),
 ];
 
+// Colour for each source tag shown next to a search result (which dashboard
+// section the asset comes from).
+const GROUP_TAG_COLOR: Record<string, string> = {
+  'Macro World': 'text-emerald-400/80',
+  Indexes: 'text-blue-400/80',
+  Crypto: 'text-orange-400/80',
+  Commodities: 'text-amber-400/80',
+  Sectors: 'text-violet-400/80',
+  Macro: 'text-cyan-400/80',
+  FX: 'text-teal-400/80',
+};
+
 class ChartErrorBoundary extends Component<
   { children: ReactNode },
   { hasError: boolean }
@@ -850,19 +862,17 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                 {localHits.length > 0 && (
                   <>
                     <p className="px-3 pt-2 pb-1 text-[10px] text-gray-600 uppercase tracking-wider font-semibold">Preset</p>
-                    {localHits.map(a => {
-                      const isWB = a.symbol.startsWith('WB:');
-                      return (
-                        <button key={a.symbol} onClick={() => addSymbol(a.symbol, a.name)}
-                          className="w-full flex items-start justify-between gap-2 px-3 py-1.5 text-xs hover:bg-bg-hover text-left">
-                          {/* Full name, wraps instead of truncating, so the indicator stays readable */}
-                          <span className="text-gray-100 leading-tight min-w-0 flex-1">{a.name}</span>
-                          <span className={clsx('shrink-0 text-[10px] mt-0.5', isWB ? 'text-emerald-400/80' : 'text-gray-500 font-mono')}>
-                            {isWB ? 'Macro World' : a.symbol}
-                          </span>
-                        </button>
-                      );
-                    })}
+                    {localHits.map(a => (
+                      <button key={a.symbol} onClick={() => addSymbol(a.symbol, a.name)}
+                        className="w-full flex items-start justify-between gap-2 px-3 py-1.5 text-xs hover:bg-bg-hover text-left">
+                        {/* Full name, wraps instead of truncating, so the indicator stays readable */}
+                        <span className="text-gray-100 leading-tight min-w-0 flex-1">{a.name}</span>
+                        {/* Source tag: which dashboard section the asset comes from */}
+                        <span className={clsx('shrink-0 text-[10px] mt-0.5 font-medium', GROUP_TAG_COLOR[a.group] ?? 'text-gray-500')}>
+                          {a.group}
+                        </span>
+                      </button>
+                    ))}
                   </>
                 )}
                 {extraRemoteHits.length > 0 && (
