@@ -25,17 +25,33 @@ const seriesCache = new Map<string, Cached<{ date: string; close: number }[]>>()
 let countriesCache: Cached<Place[]> | null = null;
 let summaryCache: Cached<SummaryMap> | null = null;
 
+// GLOBAL World Bank concurrency gate. On mount the page fires the country grid
+// (12), the summary board (8) and the country list at once — ~21 simultaneous WB
+// requests from one IP, which WB rate-limits. Cap ALL wb() calls route-wide to a
+// few in flight so the burst is serialised instead of rejected.
+const MAX_WB = 4;
+let wbActive = 0;
+const wbWaiters: Array<() => void> = [];
+async function wbSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (wbActive >= MAX_WB) await new Promise<void>(r => wbWaiters.push(r));
+  wbActive++;
+  try { return await fn(); } finally { wbActive--; wbWaiters.shift()?.(); }
+}
+
 async function wb(path: string, retries = 1): Promise<unknown | null> {
   const sep = path.includes('?') ? '&' : '?';
   const url = `${BASE}${path}${sep}format=json&per_page=20000`;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 12_000);
-    try {
-      const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } });
-      if (r.ok) return await r.json();
-    } catch { /* retry */ } finally { clearTimeout(timer); }
-    if (attempt < retries) await new Promise(res => setTimeout(res, 350)); // brief backoff (WB rate-limits bursts)
+    const result = await wbSlot(async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12_000);
+      try {
+        const r = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } });
+        return r.ok ? await r.json() : null;
+      } catch { return null; } finally { clearTimeout(timer); }
+    });
+    if (result != null) return result;
+    if (attempt < retries) await new Promise(res => setTimeout(res, 350)); // brief backoff
   }
   return null;
 }
