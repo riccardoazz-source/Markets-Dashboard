@@ -183,24 +183,24 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   const assetMaps = plottableAssets.map(a => ({
     prices: new Map(a.data.map(d => [d.date, d.close])),
     tr:     a.trData ? new Map(a.trData.map(d => [d.date, d.close])) : null,
-    // For spreads: the RAW value difference (A − B) at each date, so the tooltip can
-    // show the actual spread at a point, not just the from-start percentage-point gap.
-    raw:    a.isSpread && a.rawData ? new Map(a.rawData.map(d => [d.date, d.close])) : null,
   }));
-  const spreadSymbols = new Set(plottableAssets.filter(a => a.isSpread).map(a => a.symbol));
 
+  // Forward-fill each series across all dates: once a series has started, carry its
+  // last known value forward. This makes SPARSE series (annual macro / World Bank data
+  // like GDP) show a value at EVERY hovered date in the tooltip — so a spread reads
+  // transparently as "A% − B% = spread%" instead of hiding the B term on days B has no
+  // point. Leading dates (before a series starts) stay null.
+  const lastVal: (number | null)[] = plottableAssets.map(() => null);
+  const started: boolean[] = plottableAssets.map(() => false);
   const chartData = allDates.map(date => {
     const point: Record<string, unknown> = { date };
     plottableAssets.forEach((a, idx) => {
-      const v = assetMaps[idx].prices.get(date) ?? null;
-      point[a.symbol] = v != null && isFinite(v) ? v : null;
+      const v = assetMaps[idx].prices.get(date);
+      if (v != null && isFinite(v)) { lastVal[idx] = v; started[idx] = true; }
+      point[a.symbol] = started[idx] ? lastVal[idx] : null;
       if (assetMaps[idx].tr) {
         const tv = assetMaps[idx].tr!.get(date) ?? null;
         point[`${a.symbol}_tr`] = tv != null && isFinite(tv) ? tv : null;
-      }
-      if (assetMaps[idx].raw) {
-        const rv = assetMaps[idx].raw!.get(date) ?? null;
-        point[`${a.symbol}_raw`] = rv != null && isFinite(rv) ? rv : null;
       }
     });
     return point;
@@ -643,23 +643,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           )}
           <Tooltip
             contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
-            formatter={(value: number, name: string, entry: { payload?: Record<string, unknown> }) => {
+            formatter={(value: number, name: string) => {
               const item = legendItems.find(l => l.key === name);
               const label = item?.name ?? name;
-              // For a spread, also show the actual difference (A − B) at this point.
-              let rawSuffix = '';
-              if (spreadSymbols.has(name)) {
-                const rv = entry?.payload?.[`${name}_raw`];
-                if (typeof rv === 'number' && isFinite(rv)) {
-                  const n = Math.abs(rv) >= 1000 ? rv.toLocaleString('en-US', { maximumFractionDigits: 1 }) : rv.toFixed(2);
-                  rawSuffix = `  ·  Δ ${rv >= 0 ? '+' : ''}${n}`;
-                }
-              }
               if (percentMode) {
                 const v = value as number;
-                return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%${rawSuffix}`, label];
+                return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, label];
               }
-              return [`${value?.toFixed(2)}${rawSuffix}`, label];
+              return [`${value?.toFixed(2)}`, label];
             }}
             labelFormatter={label => {
               try { return format(parseISO(label as string), 'MMM d, yyyy'); }

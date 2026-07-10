@@ -1001,9 +1001,6 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                 </div>
                 {a.isSpread ? (() => {
                   const last = a.data.length ? a.data[a.data.length - 1].close : null;
-                  // Actual value difference A − B right now (raw units), shown alongside the % gap.
-                  const rawLast = a.rawData?.length ? a.rawData[a.rawData.length - 1].close : null;
-                  const fmtRaw = (v: number) => `${v >= 0 ? '+' : ''}${Math.abs(v) >= 1000 ? v.toLocaleString('en-US', { maximumFractionDigits: 1 }) : v.toFixed(2)}`;
                   return (
                     <div>
                       <p className="text-[10px] text-gray-500">Latest spread{normalized ? ' (pp)' : ''}</p>
@@ -1012,14 +1009,8 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                           : normalized ? formatPercent(last)
                           : `${last >= 0 ? '+' : ''}${last.toFixed(2)}`}
                       </p>
-                      {normalized && rawLast != null && (
-                        <div className="mt-1">
-                          <p className="text-[10px] text-gray-500">Difference now (A − B)</p>
-                          <p className={clsx('text-sm font-semibold', colorForPercent(rawLast))}>{fmtRaw(rawLast)}</p>
-                        </div>
-                      )}
                       {normalized && (
-                        <p className="mt-1 text-[10px] text-gray-600 leading-snug">% = outperformance since start · Δ = actual value gap now</p>
+                        <p className="mt-1 text-[10px] text-gray-600 leading-snug">A − B: how many percentage points A has out/under-performed B since the start</p>
                       )}
                     </div>
                   );
