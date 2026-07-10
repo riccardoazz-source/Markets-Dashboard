@@ -1093,12 +1093,26 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         <ChartNotes
           chartId={`compare:${[...selectedSymbols].sort().join(',')}`}
           defaultCategory="Compare"
-          captureView={() => ({ tools: { ...stackTools } as Record<string, boolean>, timeframe, customRange, symbols: selectedSymbols })}
+          captureView={() => ({
+            tools: { ...stackTools } as Record<string, boolean>,
+            timeframe, customRange, symbols: selectedSymbols,
+            // Full Compare setup so Restore brings back exactly what was saved.
+            spreads: spreads.map(s => ({ ...s })),
+            normalized, alignStart, logScale, showStack, stackAssetIdx,
+          })}
           onRestoreView={v => {
             if (v.tools) setStackTools({ ...DEFAULT_TOOLS, ...(v.tools as Partial<ActiveTools>) });
             if (v.timeframe) setTimeframe(v.timeframe as Timeframe);
             setCustomRange(v.customRange ?? null);
             if (v.symbols && v.symbols.length > 0) setSelectedSymbols(v.symbols.slice(0, 8));
+            if (typeof v.normalized === 'boolean') setNormalized(v.normalized);
+            if (typeof v.alignStart === 'boolean') setAlignStart(v.alignStart);
+            if (typeof v.logScale === 'boolean') setLogScale(v.logScale);
+            if (typeof v.showStack === 'boolean') setShowStack(v.showStack);
+            if (typeof v.stackAssetIdx === 'number') setStackAssetIdx(v.stackAssetIdx);
+            // Restore spreads last, once symbols are set (the cleanup effect keeps only
+            // spreads whose underlying symbols are selected).
+            if (Array.isArray(v.spreads)) setSpreads(v.spreads.map(s => ({ a: s.a, b: s.b })));
           }}
         />
       )}

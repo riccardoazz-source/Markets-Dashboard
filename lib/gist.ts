@@ -7,6 +7,13 @@ export interface NoteView {
   timeframe?: string;                           // e.g. '1D','1Y','MAX'
   customRange?: { from: string; to: string } | null;
   symbols?: string[];                           // Compare: the set of compared symbols
+  // Compare-only extra state, so "Restore view" brings back the FULL setup.
+  spreads?: { a: string; b: string }[];         // spread pairs (A − B)
+  normalized?: boolean;                         // % Change (true) vs Absolute price (false)
+  alignStart?: boolean;                         // Aligned start (true) vs Full history (false)
+  logScale?: boolean;                           // log scale (absolute mode)
+  showStack?: boolean;                          // technical-analysis stack panel open
+  stackAssetIdx?: number;                       // which asset the stack panel shows
 }
 
 export interface NoteEntry {
