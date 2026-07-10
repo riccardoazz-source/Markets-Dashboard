@@ -413,8 +413,8 @@ const BOARD_COLUMNS: BoardCol[] = [
   // Two forecast horizons — labels filled in dynamically from the data's own years.
   { key: 'gdpFcstCurr', src: 'extra', label: 'GDP fcst', unit: '%', higherBetter: true, scale: 1, colored: true },
   { key: 'gdpFcstNext', src: 'extra', label: 'GDP fcst', unit: '%', higherBetter: true, scale: 1, colored: true },
-  wbCol('NY.GDP.MKTP.CD'),
-  wbCol('NY.GDP.PCAP.CD'),
+  wbCol('NY.GDP.MKTP.KD'),
+  wbCol('NY.GDP.PCAP.KD'),
   wbCol('FP.CPI.TOTL.ZG', { colorMode: 'band' }), // inflation: healthy ~0-3%, not "lower = greener"
   wbCol('SL.UEM.TOTL.ZS'),
   // Central bank policy rate — left neutral (no "high/low is good" judgement).

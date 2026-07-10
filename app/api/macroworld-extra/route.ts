@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { IMF_SUMMARY_CODES, IMF_COUNTRY_INDEX } from '@/lib/imfConfig';
+import { fetchYahooChart } from '@/lib/yahoo';
 
 // Edge runtime + DBnomics: the exact same network path that already powers the
 // Macro section's DBnomics/FRED fetches in production (works on Vercel, unlike the
@@ -249,24 +250,12 @@ async function weoCountrySeries(iso3: string, subject: string): Promise<{ date: 
 let buffettSummaryCache: { data: Record<string, Metric>; ts: number } | null = null;
 
 async function yahooMonthly(symbol: string): Promise<{ date: string; close: number }[]> {
-  const u = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=max&interval=1mo`;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8_000);
+  // Reuse the app's crumb-authenticated Yahoo fetch (with Stooq fallback) — a bare
+  // chart request is rejected/rate-limited by Yahoo without a cookie+crumb session.
   try {
-    const r = await fetch(u, { signal: ctrl.signal, headers: { 'User-Agent': UA, 'Accept': 'application/json' }, next: { revalidate: 86400 } });
-    if (!r.ok) return [];
-    const j = await r.json() as { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ close?: (number | null)[] }> } }> } };
-    const res = j?.chart?.result?.[0];
-    const ts = res?.timestamp;
-    const closes = res?.indicators?.quote?.[0]?.close;
-    if (!Array.isArray(ts) || !Array.isArray(closes)) return [];
-    const out: { date: string; close: number }[] = [];
-    for (let i = 0; i < ts.length; i++) {
-      const c = closes[i];
-      if (typeof c === 'number' && isFinite(c)) out.push({ date: new Date(ts[i] * 1000).toISOString().slice(0, 10), close: c });
-    }
-    return out;
-  } catch { return []; } finally { clearTimeout(t); }
+    const pts = await fetchYahooChart(symbol, new Date('1990-01-01'), new Date(), '1mo');
+    return pts.filter(p => typeof p.close === 'number' && isFinite(p.close));
+  } catch { return []; }
 }
 
 async function wbRealGdp(iso3: string): Promise<{ date: string; close: number }[]> {
@@ -327,6 +316,20 @@ export async function GET(req: Request) {
   if (mode === 'buffett-summary') {
     const data = await buffettSummary();
     return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=172800' } });
+  }
+
+  // Diagnostics for one country's Buffett inputs (index vs real GDP).
+  if (mode === 'buffett-debug') {
+    const country = (url.searchParams.get('country') || 'USA').toUpperCase();
+    const idx = IMF_COUNTRY_INDEX[country] ?? null;
+    const [index, gdp] = await Promise.all([idx ? yahooMonthly(idx.symbol) : Promise.resolve([]), wbRealGdp(country)]);
+    const b = await buffettSeries(country);
+    return NextResponse.json({
+      country, index: idx,
+      indexPoints: index.length, indexSample: index.slice(-2),
+      gdpPoints: gdp.length, gdpSample: gdp.slice(-2),
+      buffettPoints: b?.series.length ?? 0, buffettLatest: b?.series.slice(-1)[0] ?? null,
+    }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
   // Per-country series for the extra indicators (openable over time in the grid).
