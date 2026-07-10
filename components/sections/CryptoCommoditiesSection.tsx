@@ -19,16 +19,19 @@ import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 
-type SortKey = 'change24hPercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
+type SortKey = 'change24hPercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 const coinYahooSym = (c: { id: string; symbol: string }) => CRYPTO_YAHOO_SYMBOLS[c.id] ?? `${c.symbol}-USD`;
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'change24hPercent',     label: 'Day' },
-  { value: 'mtdChangePercent',     label: 'MTD' },
-  { value: 'ytdChangePercent',     label: 'YTD' },
-  { value: 'fiveYearChangePercent',label: '5Y' },
-  { value: 'fiveYearCagrPercent',  label: 'CAGR' },
-  { value: 'avgYearly',            label: 'Avg Yr' },
+  { value: 'change24hPercent',        label: 'Day' },
+  { value: 'oneMonthChangePercent',   label: '1M' },
+  { value: 'threeMonthChangePercent', label: '3M' },
+  { value: 'sixMonthChangePercent',   label: '6M' },
+  { value: 'mtdChangePercent',        label: 'MTD' },
+  { value: 'ytdChangePercent',        label: 'YTD' },
+  { value: 'fiveYearChangePercent',   label: '5Y' },
+  { value: 'fiveYearCagrPercent',     label: 'CAGR' },
+  { value: 'avgYearly',               label: 'Avg Yr' },
 ];
 
 // Category filter tabs — derived from the crypto config so they always match.
@@ -262,31 +265,24 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                   {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                   {formatPercent(coin.change24hPercent)} <span className="text-[10px] font-medium opacity-70">day</span>
                 </div>
-                {coin.mtdChangePercent != null && (
-                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.mtdChangePercent))}>
-                    MTD: {formatPercent(coin.mtdChangePercent, 1)}
-                  </p>
-                )}
-                {coin.ytdChangePercent != null && (
-                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.ytdChangePercent))}>
-                    YTD: {formatPercent(coin.ytdChangePercent, 1)}
-                  </p>
-                )}
-                {coin.fiveYearChangePercent != null && (
-                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.fiveYearChangePercent))}>
-                    5Y: {formatPercent(coin.fiveYearChangePercent, 1)}
-                  </p>
-                )}
-                {coin.fiveYearCagrPercent != null && (
-                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(coin.fiveYearCagrPercent))}>
-                    5Y CAGR: {formatCagr(coin.fiveYearCagrPercent, coin.fiveYearFull)}
-                  </p>
-                )}
-                {avgYearlyMap[coinYahooSym(coin)] != null && (
-                  <p className={clsx('text-[10px] mt-0.5', colorForPercent(avgYearlyMap[coinYahooSym(coin)]!))}>
-                    Avg Yr: {formatPercent(avgYearlyMap[coinYahooSym(coin)]!, 1)}
-                  </p>
-                )}
+                <div className="grid grid-cols-2 gap-x-2 mt-1.5">
+                  {([
+                    { k: '1M', v: coin.oneMonthChangePercent },
+                    { k: '3M', v: coin.threeMonthChangePercent },
+                    { k: '6M', v: coin.sixMonthChangePercent },
+                    { k: 'MTD', v: coin.mtdChangePercent },
+                    { k: 'YTD', v: coin.ytdChangePercent },
+                    { k: '5Y', v: coin.fiveYearChangePercent },
+                    { k: 'CAGR', v: coin.fiveYearCagrPercent, cagr: true },
+                    { k: 'Avg Yr', v: avgYearlyMap[coinYahooSym(coin)] ?? null },
+                  ] as { k: string; v: number | null | undefined; cagr?: boolean }[])
+                    .filter(s => s.v != null)
+                    .map(s => (
+                      <p key={s.k} className={clsx('text-[9px] leading-[1.35] tabular-nums', colorForPercent(s.v as number))}>
+                        <span className="text-gray-500">{s.k}:</span> {s.cagr ? formatCagr(s.v as number, coin.fiveYearFull) : formatPercent(s.v as number, 1)}
+                      </p>
+                    ))}
+                </div>
                 <Ma200dLine price={coin.price} sma200d={coin.sma200d} />
                 <Sma200wLine price={coin.price} sma200w={coin.sma200w} />
               </button>

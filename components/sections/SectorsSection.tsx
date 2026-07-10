@@ -28,6 +28,9 @@ interface SectorLiveData {
   oneYearReturn: number | null;
   ytdReturn: number | null;
   mtdReturn: number | null;
+  oneMonthReturn?: number | null;
+  threeMonthReturn?: number | null;
+  sixMonthReturn?: number | null;
   fiveYearReturn: number | null;
   fiveYearCagr?: number | null;
   fiveYearFull?: boolean;
@@ -46,15 +49,18 @@ const INITIAL: SectorLiveData = {
   high52w: null, low52w: null, dividendYield: null, sma200w: null, sma200d: null, currency: null,
 };
 
-type SectorSortKey = 'changePercent' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn' | 'fiveYearCagr' | 'avgYearly';
+type SectorSortKey = 'changePercent' | 'oneMonthReturn' | 'threeMonthReturn' | 'sixMonthReturn' | 'mtdReturn' | 'ytdReturn' | 'fiveYearReturn' | 'fiveYearCagr' | 'avgYearly';
 
 const SORT_OPTIONS: { value: SectorSortKey; label: string }[] = [
-  { value: 'changePercent',  label: 'Day' },
-  { value: 'mtdReturn',      label: 'MTD' },
-  { value: 'ytdReturn',      label: 'YTD' },
-  { value: 'fiveYearReturn', label: '5Y' },
-  { value: 'fiveYearCagr',   label: 'CAGR' },
-  { value: 'avgYearly',      label: 'Avg Yr' },
+  { value: 'changePercent',    label: 'Day' },
+  { value: 'oneMonthReturn',   label: '1M' },
+  { value: 'threeMonthReturn', label: '3M' },
+  { value: 'sixMonthReturn',   label: '6M' },
+  { value: 'mtdReturn',        label: 'MTD' },
+  { value: 'ytdReturn',        label: 'YTD' },
+  { value: 'fiveYearReturn',   label: '5Y' },
+  { value: 'fiveYearCagr',     label: 'CAGR' },
+  { value: 'avgYearly',        label: 'Avg Yr' },
 ];
 
 // Distinct categories from the SECTORS config, plus an 'All' option.
@@ -311,31 +317,24 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                       : '—'
                     }
                   </div>
-                  {sector.mtdReturn != null && (
-                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.mtdReturn))}>
-                      MTD: {formatPercent(sector.mtdReturn, 1)}
-                    </p>
-                  )}
-                  {ytd != null && (
-                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(ytd))}>
-                      YTD: {formatPercent(ytd, 1)}
-                    </p>
-                  )}
-                  {sector.fiveYearReturn != null && (
-                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.fiveYearReturn))}>
-                      5Y: {formatPercent(sector.fiveYearReturn, 1)}
-                    </p>
-                  )}
-                  {sector.fiveYearCagr != null && (
-                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.fiveYearCagr))}>
-                      5Y CAGR: {formatCagr(sector.fiveYearCagr, sector.fiveYearFull)}
-                    </p>
-                  )}
-                  {sector.avgYearly != null && (
-                    <p className={clsx('text-[10px] mt-0.5', colorForPercent(sector.avgYearly))}>
-                      Avg Yr: {formatPercent(sector.avgYearly, 1)}
-                    </p>
-                  )}
+                  <div className="grid grid-cols-2 gap-x-2 mt-1.5">
+                    {([
+                      { k: '1M', v: sector.oneMonthReturn },
+                      { k: '3M', v: sector.threeMonthReturn },
+                      { k: '6M', v: sector.sixMonthReturn },
+                      { k: 'MTD', v: sector.mtdReturn },
+                      { k: 'YTD', v: ytd },
+                      { k: '5Y', v: sector.fiveYearReturn },
+                      { k: 'CAGR', v: sector.fiveYearCagr, cagr: true },
+                      { k: 'Avg Yr', v: sector.avgYearly ?? null },
+                    ] as { k: string; v: number | null | undefined; cagr?: boolean }[])
+                      .filter(s => s.v != null)
+                      .map(s => (
+                        <p key={s.k} className={clsx('text-[9px] leading-[1.35] tabular-nums', colorForPercent(s.v as number))}>
+                          <span className="text-gray-500">{s.k}:</span> {s.cagr ? formatCagr(s.v as number, sector.fiveYearFull) : formatPercent(s.v as number, 1)}
+                        </p>
+                      ))}
+                  </div>
                   <Ma200dLine price={sector.price} sma200d={sector.sma200d} currency={sector.currency} />
                   <Sma200wLine price={sector.price} sma200w={sector.sma200w} currency={sector.currency} />
                 </>

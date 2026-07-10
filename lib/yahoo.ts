@@ -29,6 +29,9 @@ export interface YahooQuote {
   fiftyTwoWeekChangePercent: number | null;
   ytdChangePercent: number | null;
   mtdChangePercent: number | null;
+  oneMonthChangePercent: number | null;
+  threeMonthChangePercent: number | null;
+  sixMonthChangePercent: number | null;
   fiveYearChangePercent: number | null;
   /** Annualized 5-year CAGR (%). Falls back to since-inception annualization for younger assets. */
   fiveYearCagrPercent: number | null;
@@ -106,6 +109,15 @@ function computeFiveYear(price: number, timestamps: number[], closes: (number | 
     if (c != null && c > 0 && timestamps[i] >= fiveYearsAgo) {
       return ((price - c) / c) * 100;
     }
+  }
+  return null;
+}
+// % change vs the first close on/after N months ago (trailing 1M/3M/6M return).
+function computeMonthsAgo(price: number, timestamps: number[], closes: (number | null)[], months: number): number | null {
+  const cutoff = Math.floor((Date.now() - months * 30.44 * 86_400_000) / 1000);
+  for (let i = 0; i < timestamps.length; i++) {
+    const c = closes[i];
+    if (c != null && c > 0 && timestamps[i] >= cutoff) return ((price - c) / c) * 100;
   }
   return null;
 }
@@ -485,6 +497,9 @@ async function fetchQuotesV7(symbols: string[]): Promise<YahooQuote[]> {
       ytdChangePercent:
         (it.ytdReturn as number) != null ? (it.ytdReturn as number) * 100 : null,
       mtdChangePercent: null,
+      oneMonthChangePercent: null,
+      threeMonthChangePercent: null,
+      sixMonthChangePercent: null,
       fiveYearChangePercent: null,
       fiveYearCagrPercent: null,
       fiveYearFull: false,
@@ -548,6 +563,9 @@ async function fetchQuoteV8(symbol: string): Promise<YahooQuote | null> {
     fiftyTwoWeekChangePercent: computeFiftyTwoWeek(price, timestamps, closes),
     ytdChangePercent: computeYtd(price, timestamps, closes),
     mtdChangePercent: computeMtd(price, timestamps, closes),
+    oneMonthChangePercent: computeMonthsAgo(price, timestamps, closes, 1),
+    threeMonthChangePercent: computeMonthsAgo(price, timestamps, closes, 3),
+    sixMonthChangePercent: computeMonthsAgo(price, timestamps, closes, 6),
     fiveYearChangePercent: computeFiveYear(price, timestamps, closes),
     fiveYearCagrPercent: fiveYrCagr.cagr,
     fiveYearFull: fiveYrCagr.full,
@@ -629,6 +647,9 @@ async function fetchQuoteNoAuth(symbol: string): Promise<YahooQuote | null> {
       fiftyTwoWeekChangePercent: computeFiftyTwoWeek(price, timestamps, closes),
       ytdChangePercent: computeYtd(price, timestamps, closes),
       mtdChangePercent: computeMtd(price, timestamps, closes),
+      oneMonthChangePercent: computeMonthsAgo(price, timestamps, closes, 1),
+      threeMonthChangePercent: computeMonthsAgo(price, timestamps, closes, 3),
+      sixMonthChangePercent: computeMonthsAgo(price, timestamps, closes, 6),
       fiveYearChangePercent: computeFiveYear(price, timestamps, closes),
       fiveYearCagrPercent: fiveYrCagr.cagr,
       fiveYearFull: fiveYrCagr.full,
@@ -700,6 +721,9 @@ async function fetchQuotesV7NoAuth(symbols: string[]): Promise<YahooQuote[]> {
             : null,
         ytdChangePercent: it.ytdReturn != null ? Number(it.ytdReturn) * 100 : null,
         mtdChangePercent: null,
+        oneMonthChangePercent: null,
+        threeMonthChangePercent: null,
+        sixMonthChangePercent: null,
         fiveYearChangePercent: null,
         fiveYearCagrPercent: null,
         fiveYearFull: false,
@@ -836,6 +860,9 @@ export async function fetchYahooQuotesPE(symbols: string[]): Promise<YahooQuote[
             fiftyTwoWeekChangePercent: null,
             ytdChangePercent: null,
             mtdChangePercent: null,
+            oneMonthChangePercent: null,
+            threeMonthChangePercent: null,
+            sixMonthChangePercent: null,
             fiveYearChangePercent: null,
             fiveYearCagrPercent: null,
             fiveYearFull: false,

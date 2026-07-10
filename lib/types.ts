@@ -14,6 +14,9 @@ export interface QuoteData {
   fiftyTwoWeekChangePercent?: number | null;
   ytdChangePercent?: number | null;
   mtdChangePercent?: number | null;
+  oneMonthChangePercent?: number | null;
+  threeMonthChangePercent?: number | null;
+  sixMonthChangePercent?: number | null;
   fiveYearChangePercent?: number | null;
   /** Annualized 5-year CAGR (%). Annualized over actual span when <5y of data. */
   fiveYearCagrPercent?: number | null;
@@ -57,6 +60,9 @@ export interface CryptoData {
   change7dPercent?: number;
   change1yPercent?: number | null;
   mtdChangePercent?: number | null;
+  oneMonthChangePercent?: number | null;
+  threeMonthChangePercent?: number | null;
+  sixMonthChangePercent?: number | null;
   ytdChangePercent?: number | null;
   fiveYearChangePercent?: number | null;
   /** Annualized 5-year CAGR (%). Annualized over actual span when <5y of data. */
@@ -79,8 +85,9 @@ export interface SectorData {
   price: number;
   changePercent: number;
   ytdReturn?: number;
-  oneMonthReturn?: number;
-  threeMonthReturn?: number;
+  oneMonthReturn?: number | null;
+  threeMonthReturn?: number | null;
+  sixMonthReturn?: number | null;
   oneYearReturn?: number;
   rank?: number;
 }

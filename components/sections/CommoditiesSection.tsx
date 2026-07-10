@@ -19,15 +19,18 @@ import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 
-type SortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
+type SortKey = 'changePercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'changePercent',         label: 'Day' },
-  { value: 'mtdChangePercent',      label: 'MTD' },
-  { value: 'ytdChangePercent',      label: 'YTD' },
-  { value: 'fiveYearChangePercent', label: '5Y' },
-  { value: 'fiveYearCagrPercent',   label: 'CAGR' },
-  { value: 'avgYearly',             label: 'Avg Yr' },
+  { value: 'changePercent',            label: 'Day' },
+  { value: 'oneMonthChangePercent',    label: '1M' },
+  { value: 'threeMonthChangePercent',  label: '3M' },
+  { value: 'sixMonthChangePercent',    label: '6M' },
+  { value: 'mtdChangePercent',         label: 'MTD' },
+  { value: 'ytdChangePercent',         label: 'YTD' },
+  { value: 'fiveYearChangePercent',    label: '5Y' },
+  { value: 'fiveYearCagrPercent',      label: 'CAGR' },
+  { value: 'avgYearly',                label: 'Avg Yr' },
 ];
 
 const COMMODITY_CATEGORIES = ['All', ...Array.from(new Set(COMMODITIES.map(c => c.category)))];
@@ -99,6 +102,9 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
   const getValue = (q: QuoteData | undefined, key: SortKey): number | null => {
     if (!q) return null;
     if (key === 'changePercent') return q.changePercent ?? null;
+    if (key === 'oneMonthChangePercent') return q.oneMonthChangePercent ?? null;
+    if (key === 'threeMonthChangePercent') return q.threeMonthChangePercent ?? null;
+    if (key === 'sixMonthChangePercent') return q.sixMonthChangePercent ?? null;
     if (key === 'mtdChangePercent') return q.mtdChangePercent ?? null;
     if (key === 'ytdChangePercent') return q.ytdChangePercent ?? null;
     if (key === 'fiveYearCagrPercent') return q.fiveYearCagrPercent ?? null;
@@ -197,31 +203,24 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                       {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                       {formatPercent(day)} <span className="text-[10px] font-medium opacity-70">day</span>
                     </div>
-                    {mtd != null && (
-                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(mtd))}>
-                        MTD: {formatPercent(mtd, 1)}
-                      </p>
-                    )}
-                    {ytd != null && (
-                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(ytd))}>
-                        YTD: {formatPercent(ytd, 1)}
-                      </p>
-                    )}
-                    {fiveYear != null && (
-                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(fiveYear))}>
-                        5Y: {formatPercent(fiveYear, 1)}
-                      </p>
-                    )}
-                    {q.fiveYearCagrPercent != null && (
-                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(q.fiveYearCagrPercent))}>
-                        5Y CAGR: {formatCagr(q.fiveYearCagrPercent, q.fiveYearFull)}
-                      </p>
-                    )}
-                    {avgYearlyMap[q.symbol] != null && (
-                      <p className={clsx('text-[10px] mt-0.5', colorForPercent(avgYearlyMap[q.symbol]!))}>
-                        Avg Yr: {formatPercent(avgYearlyMap[q.symbol]!, 1)}
-                      </p>
-                    )}
+                    <div className="grid grid-cols-2 gap-x-2 mt-1.5">
+                      {([
+                        { k: '1M', v: q.oneMonthChangePercent },
+                        { k: '3M', v: q.threeMonthChangePercent },
+                        { k: '6M', v: q.sixMonthChangePercent },
+                        { k: 'MTD', v: mtd },
+                        { k: 'YTD', v: ytd },
+                        { k: '5Y', v: fiveYear },
+                        { k: 'CAGR', v: q.fiveYearCagrPercent, cagr: true },
+                        { k: 'Avg Yr', v: avgYearlyMap[q.symbol] ?? null },
+                      ] as { k: string; v: number | null | undefined; cagr?: boolean }[])
+                        .filter(s => s.v != null)
+                        .map(s => (
+                          <p key={s.k} className={clsx('text-[9px] leading-[1.35] tabular-nums', colorForPercent(s.v as number))}>
+                            <span className="text-gray-500">{s.k}:</span> {s.cagr ? formatCagr(s.v as number, q.fiveYearFull) : formatPercent(s.v as number, 1)}
+                          </p>
+                        ))}
+                    </div>
                     <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />
                     <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                   </>

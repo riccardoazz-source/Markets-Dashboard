@@ -159,7 +159,7 @@ async function fetchFiveYearAnchors(ids: string[]): Promise<Map<string, number>>
 // Yahoo isn't rate-limited like CoinGecko's free tier, so it's the reliable source
 // when CoinGecko anchor fetches fail (which is most of the time on cold serverless
 // instances). One round-trip per coin instead of three.
-interface YahooAnchors { fiveY: number | null; fiveYTs: number | null; ytd: number | null; mtd: number | null; sma200w: number | null; sma200d: number | null }
+interface YahooAnchors { fiveY: number | null; fiveYTs: number | null; ytd: number | null; mtd: number | null; oneM: number | null; threeM: number | null; sixM: number | null; sma200w: number | null; sma200d: number | null }
 const yahooAnchorCache = new Map<string, { anchors: YahooAnchors; day: string }>();
 
 async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
@@ -168,7 +168,7 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
   if (cached && cached.day === today) return cached.anchors;
 
   const symbol = CRYPTO_YAHOO_SYMBOLS[coinId];
-  const empty: YahooAnchors = { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null, sma200d: null };
+  const empty: YahooAnchors = { fiveY: null, fiveYTs: null, ytd: null, mtd: null, oneM: null, threeM: null, sixM: null, sma200w: null, sma200d: null };
   if (!symbol) return empty;
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5y&interval=1d&includePrePost=false`;
@@ -242,11 +242,15 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
       }
     }
 
+    const monthsAgo = (m: number) => Math.floor((Date.now() - m * 30.44 * 86_400_000) / 1000);
     const anchors: YahooAnchors = {
       fiveY: findFirstValid(fiveYearsAgo),
       fiveYTs,
       ytd: findFirstValid(jan1),
       mtd: findFirstValid(monthStart),
+      oneM: findFirstValid(monthsAgo(1)),
+      threeM: findFirstValid(monthsAgo(3)),
+      sixM: findFirstValid(monthsAgo(6)),
       sma200w,
       sma200d,
     };
@@ -263,7 +267,7 @@ async function fetchYahooAnchorsAll(ids: string[]): Promise<Map<string, YahooAnc
   const map = new Map<string, YahooAnchors>();
   // Yahoo is fine with parallel — no rate limit at this volume (8 coins)
   const results = await Promise.all(
-    ids.map(id => fetchYahooCryptoAnchors(id).then(a => ({ id, a })).catch(() => ({ id, a: { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null, sma200d: null } as YahooAnchors })))
+    ids.map(id => fetchYahooCryptoAnchors(id).then(a => ({ id, a })).catch(() => ({ id, a: { fiveY: null, fiveYTs: null, ytd: null, mtd: null, oneM: null, threeM: null, sixM: null, sma200w: null, sma200d: null } as YahooAnchors })))
   );
   for (const { id, a } of results) map.set(id, a);
   return map;
@@ -316,7 +320,7 @@ export async function GET(req: NextRequest) {
         const sym = (coin.symbol as string)?.toUpperCase();
         const currentPrice = coin.current_price as number;
         const id = coin.id as string;
-        const ya = yahooAnchors.get(id) ?? { fiveY: null, fiveYTs: null, ytd: null, mtd: null, sma200w: null, sma200d: null };
+        const ya = yahooAnchors.get(id) ?? { fiveY: null, fiveYTs: null, ytd: null, mtd: null, oneM: null, threeM: null, sixM: null, sma200w: null, sma200d: null };
 
         // YTD: CoinGecko anchor first (precise Jan 1 UTC), Yahoo fallback (first
         // trading day ≥ Jan 1).
@@ -334,6 +338,12 @@ export async function GET(req: NextRequest) {
             : null;
         const mtd30d = coin.price_change_percentage_30d_in_currency as number | null | undefined;
         const mtdChangePercent = mtdFromAnchor ?? (typeof mtd30d === 'number' && isFinite(mtd30d) ? mtd30d : null);
+
+        // Trailing 1M / 3M / 6M from the Yahoo 5y anchors (1M falls back to CG's 30d).
+        const pctFrom = (anchor: number | null | undefined) => anchor != null && currentPrice > 0 ? ((currentPrice - anchor) / anchor) * 100 : null;
+        const oneMonthChangePercent = pctFrom(ya.oneM) ?? (typeof mtd30d === 'number' && isFinite(mtd30d) ? mtd30d : null);
+        const threeMonthChangePercent = pctFrom(ya.threeM);
+        const sixMonthChangePercent = pctFrom(ya.sixM);
 
         // 5Y: CoinGecko anchor → Yahoo anchor. Yahoo is the reliable primary
         // because CoinGecko's /history endpoint is rate-limited on cold starts.
@@ -370,6 +380,9 @@ export async function GET(req: NextRequest) {
           change7dPercent: coin.price_change_percentage_7d_in_currency,
           change1yPercent: coin.price_change_percentage_1y_in_currency ?? null,
           mtdChangePercent,
+          oneMonthChangePercent,
+          threeMonthChangePercent,
+          sixMonthChangePercent,
           ytdChangePercent,
           fiveYearChangePercent,
           fiveYearCagrPercent,
