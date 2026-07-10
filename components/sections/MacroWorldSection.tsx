@@ -73,6 +73,13 @@ function giniColor(v: number): string {
   return 'text-up-text';
 }
 
+// Govt debt / GDP: <100% green, 100–120% amber, >120% red.
+function debtColor(v: number): string {
+  if (v > 120) return 'text-down-text';
+  if (v >= 100) return 'text-amber-400';
+  return 'text-up-text';
+}
+
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
@@ -256,6 +263,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
             const isPct = e.unit === '%' || e.unit === '% of GDP';
             const neutral = e.code === 'x:policyRate';
             const valColor = e.code === 'x:buffett' && last ? buffettColor(last.close)
+              : e.code === 'x:debt' && last ? debtColor(last.close)
               : !neutral && isPct && last ? colorForPercent(e.higherBetter ? last.close : -last.close)
               : 'text-gray-100';
             return (
@@ -392,7 +400,7 @@ const SUMMARY_COL_LABELS: Record<string, string> = {
 interface BoardCol {
   key: string; src: 'wb' | 'extra' | 'buffett'; label: string;
   unit: ImfUnit; higherBetter: boolean; scale: number; colored: boolean;
-  colorMode?: 'band' | 'buffett' | 'gini'; // band=inflation, buffett=valuation, gini=inequality
+  colorMode?: 'band' | 'buffett' | 'gini' | 'debt'; // inflation / valuation / inequality / debt bands
   wbFallback?: string;
 }
 function wbCol(code: string, extra?: Partial<BoardCol>): BoardCol {
@@ -419,7 +427,7 @@ const BOARD_COLUMNS: BoardCol[] = [
   // Central bank policy rate — left neutral (no "high/low is good" judgement).
   { key: 'policyRate', src: 'extra', label: 'Interest Rate', unit: '%', higherBetter: false, scale: 1, colored: false },
   wbCol('BN.CAB.XOKA.GD.ZS'),
-  { key: 'debt', src: 'extra', label: 'Debt/GDP', unit: '% of GDP', higherBetter: false, scale: 1, colored: true, wbFallback: 'GC.DOD.TOTL.GD.ZS' },
+  { key: 'debt', src: 'extra', label: 'Debt/GDP', unit: '% of GDP', higherBetter: false, scale: 1, colored: true, colorMode: 'debt', wbFallback: 'GC.DOD.TOTL.GD.ZS' },
   { key: 'buffett', src: 'buffett', label: 'Buffett', unit: 'ratio', higherBetter: false, scale: 1, colored: true, colorMode: 'buffett' },
   wbCol('SI.POV.GINI', { colored: true, colorMode: 'gini' }),
 ];
@@ -444,6 +452,10 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
   activeCode: string;
   onPick: (code: string) => void;
 }) {
+  // Click a column header to sort largest→smallest, then smallest→largest, then off.
+  // (Declared before any early return so the Rules of Hooks are respected.)
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+
   if (!summary) return null;
 
   // Forecast years vary over time (2026/2027 today, 2027/2028 next year), so the two
@@ -469,8 +481,6 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
     return null;
   };
 
-  // Click a column header to sort largest→smallest, then smallest→largest, then off.
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const toggleSort = (key: string) => setSort(s =>
     s?.key !== key ? { key, dir: 'desc' } : s.dir === 'desc' ? { key, dir: 'asc' } : null);
 
@@ -499,6 +509,7 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
             : c.colorMode === 'band' ? inflationColor(val)
             : c.colorMode === 'buffett' ? buffettColor(val)
             : c.colorMode === 'gini' ? giniColor(val)
+            : c.colorMode === 'debt' ? debtColor(val)
             : c.colored ? colorForPercent(c.higherBetter ? val : -val)
             : 'text-gray-200';
           return (
