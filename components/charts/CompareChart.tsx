@@ -183,7 +183,11 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   const assetMaps = plottableAssets.map(a => ({
     prices: new Map(a.data.map(d => [d.date, d.close])),
     tr:     a.trData ? new Map(a.trData.map(d => [d.date, d.close])) : null,
+    // For spreads: the RAW value difference (A − B) at each date, so the tooltip can
+    // show the actual spread at a point, not just the from-start percentage-point gap.
+    raw:    a.isSpread && a.rawData ? new Map(a.rawData.map(d => [d.date, d.close])) : null,
   }));
+  const spreadSymbols = new Set(plottableAssets.filter(a => a.isSpread).map(a => a.symbol));
 
   const chartData = allDates.map(date => {
     const point: Record<string, unknown> = { date };
@@ -193,6 +197,10 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
       if (assetMaps[idx].tr) {
         const tv = assetMaps[idx].tr!.get(date) ?? null;
         point[`${a.symbol}_tr`] = tv != null && isFinite(tv) ? tv : null;
+      }
+      if (assetMaps[idx].raw) {
+        const rv = assetMaps[idx].raw!.get(date) ?? null;
+        point[`${a.symbol}_raw`] = rv != null && isFinite(rv) ? rv : null;
       }
     });
     return point;
@@ -635,14 +643,23 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
           )}
           <Tooltip
             contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 12 }}
-            formatter={(value: number, name: string) => {
+            formatter={(value: number, name: string, entry: { payload?: Record<string, unknown> }) => {
               const item = legendItems.find(l => l.key === name);
               const label = item?.name ?? name;
+              // For a spread, also show the actual difference (A − B) at this point.
+              let rawSuffix = '';
+              if (spreadSymbols.has(name)) {
+                const rv = entry?.payload?.[`${name}_raw`];
+                if (typeof rv === 'number' && isFinite(rv)) {
+                  const n = Math.abs(rv) >= 1000 ? rv.toLocaleString('en-US', { maximumFractionDigits: 1 }) : rv.toFixed(2);
+                  rawSuffix = `  ·  Δ ${rv >= 0 ? '+' : ''}${n}`;
+                }
+              }
               if (percentMode) {
                 const v = value as number;
-                return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%`, label];
+                return [`${v >= 0 ? '+' : ''}${v.toFixed(2)}%${rawSuffix}`, label];
               }
-              return [`${value?.toFixed(2)}`, label];
+              return [`${value?.toFixed(2)}${rawSuffix}`, label];
             }}
             labelFormatter={label => {
               try { return format(parseISO(label as string), 'MMM d, yyyy'); }
