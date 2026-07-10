@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { IMF_SUMMARY_CODES } from '@/lib/imfConfig';
+import { IMF_SUMMARY_CODES, IMF_COUNTRY_INDEX } from '@/lib/imfConfig';
 
 // Edge runtime + DBnomics: the exact same network path that already powers the
 // Macro section's DBnomics/FRED fetches in production (works on Vercel, unlike the
@@ -245,9 +245,89 @@ async function weoCountrySeries(iso3: string, subject: string): Promise<{ date: 
   return [];
 }
 
+// ── Buffett-style indicator: index level ÷ real GDP, indexed to its own history ──
+let buffettSummaryCache: { data: Record<string, Metric>; ts: number } | null = null;
+
+async function yahooMonthly(symbol: string): Promise<{ date: string; close: number }[]> {
+  const u = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=max&interval=1mo`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const r = await fetch(u, { signal: ctrl.signal, headers: { 'User-Agent': UA, 'Accept': 'application/json' }, next: { revalidate: 86400 } });
+    if (!r.ok) return [];
+    const j = await r.json() as { chart?: { result?: Array<{ timestamp?: number[]; indicators?: { quote?: Array<{ close?: (number | null)[] }> } }> } };
+    const res = j?.chart?.result?.[0];
+    const ts = res?.timestamp;
+    const closes = res?.indicators?.quote?.[0]?.close;
+    if (!Array.isArray(ts) || !Array.isArray(closes)) return [];
+    const out: { date: string; close: number }[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      const c = closes[i];
+      if (typeof c === 'number' && isFinite(c)) out.push({ date: new Date(ts[i] * 1000).toISOString().slice(0, 10), close: c });
+    }
+    return out;
+  } catch { return []; } finally { clearTimeout(t); }
+}
+
+async function wbRealGdp(iso3: string): Promise<{ date: string; close: number }[]> {
+  const u = `https://api.worldbank.org/v2/country/${encodeURIComponent(iso3)}/indicator/NY.GDP.MKTP.KD?format=json&per_page=300`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8_000);
+  try {
+    const r = await fetch(u, { signal: ctrl.signal, headers: { 'User-Agent': UA, 'Accept': 'application/json' } });
+    if (!r.ok) return [];
+    const j = await r.json() as [unknown, Array<{ date: string; value: number | null }>] | null;
+    const rows = Array.isArray(j) ? j[1] : null;
+    if (!Array.isArray(rows)) return [];
+    return rows
+      .filter(x => typeof x.value === 'number' && isFinite(x.value) && /^\d{4}$/.test(x.date))
+      .map(x => ({ date: `${x.date}-01-01`, close: x.value as number }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  } catch { return []; } finally { clearTimeout(t); }
+}
+
+// Index(t) / realGDP(t, carried forward), normalised so its own historical mean = 1.0
+// (1.0 = historical norm). Returns the series + which index was used.
+async function buffettSeries(iso3: string): Promise<{ series: { date: string; close: number }[]; indexName: string; indexSymbol: string } | null> {
+  const idx = IMF_COUNTRY_INDEX[iso3];
+  if (!idx) return null;
+  const [index, gdp] = await Promise.all([yahooMonthly(idx.symbol), wbRealGdp(iso3)]);
+  if (index.length < 12 || gdp.length < 2) return null;
+  let gi = 0; let lastGdp: number | null = null;
+  const ratios: { date: string; close: number }[] = [];
+  for (const p of index) {
+    while (gi < gdp.length && gdp[gi].date <= p.date) { lastGdp = gdp[gi].close; gi++; }
+    if (lastGdp == null || lastGdp <= 0) continue;
+    ratios.push({ date: p.date, close: p.close / lastGdp });
+  }
+  if (ratios.length < 12) return null;
+  const mean = ratios.reduce((s, r) => s + r.close, 0) / ratios.length;
+  if (!(mean > 0)) return null;
+  return { series: ratios.map(r => ({ date: r.date, close: r.close / mean })), indexName: idx.name, indexSymbol: idx.symbol };
+}
+
+async function buffettSummary(): Promise<Record<string, Metric>> {
+  if (buffettSummaryCache && Date.now() - buffettSummaryCache.ts < TTL) return buffettSummaryCache.data;
+  const codes = IMF_SUMMARY_CODES.filter(c => IMF_COUNTRY_INDEX[c]);
+  const out: Record<string, Metric> = {};
+  await Promise.all(codes.map(async iso => {
+    const b = await buffettSeries(iso);
+    if (b && b.series.length) { const last = b.series[b.series.length - 1]; out[iso] = { value: last.close, year: last.date.slice(0, 4) }; }
+  }));
+  if (Object.keys(out).length) buffettSummaryCache = { data: out, ts: Date.now() };
+  return out;
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const mode = url.searchParams.get('mode');
+
+  // Buffett-style valuation (index ÷ real GDP) latest value per country — its own
+  // endpoint so it can be fetched lazily without slowing the main summary.
+  if (mode === 'buffett-summary') {
+    const data = await buffettSummary();
+    return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=172800' } });
+  }
 
   // Per-country series for the extra indicators (openable over time in the grid).
   if (mode === 'country') {
@@ -255,13 +335,17 @@ export async function GET(req: Request) {
     if (!/^[A-Z]{3}$/.test(country)) return NextResponse.json({ error: 'bad_country' }, { status: 400 });
     const cc = POLICY_CC[country];
     const fredId = FRED_OVERRIDE[country];
-    const [policyRate, gdpForecast, debt] = await Promise.all([
+    const [policyRate, gdpForecast, debt, buffett] = await Promise.all([
       fredId ? fredSeries(fredId) : (cc ? ifsPolicySeries(cc) : Promise.resolve([])),
       weoCountrySeries(country, 'NGDP_RPCH'),
       weoCountrySeries(country, 'GGXWDG_NGDP'),
+      buffettSeries(country),
     ]);
-    return NextResponse.json({ policyRate, gdpForecast, debt },
-      { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
+    return NextResponse.json({
+      policyRate, gdpForecast, debt,
+      buffett: buffett?.series ?? [],
+      buffettIndex: buffett?.indexName ?? null,
+    }, { headers: { 'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400' } });
   }
 
   // Probe DBnomics to discover the correct policy-rate provider/dataset/series.

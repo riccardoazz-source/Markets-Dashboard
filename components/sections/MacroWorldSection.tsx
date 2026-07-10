@@ -31,14 +31,16 @@ interface CountryData { code: string; indicators: Record<string, IndicatorData> 
 type SummaryMap = Record<string, Record<string, { value: number; year: string }>>;
 type Metric = { value: number; year: string } | null;
 type ExtraMap = Record<string, { policyRate: Metric; gdpFcstCurr: Metric; gdpFcstNext: Metric; debt: Metric }>;
-type CountryExtra = { policyRate: HistoricalPoint[]; gdpForecast: HistoricalPoint[]; debt: HistoricalPoint[] };
+type CountryExtra = { policyRate: HistoricalPoint[]; gdpForecast: HistoricalPoint[]; debt: HistoricalPoint[]; buffett: HistoricalPoint[]; buffettIndex?: string | null };
 
-// Extra per-country indicators (IMF IFS / WEO / FRED) shown as openable cards next
-// to the World Bank ones — each has a real time series so it opens a chart.
-const EXTRA_INDICATORS: (ImfIndicator & { seriesKey: keyof CountryExtra })[] = [
-  { code: 'x:policyRate',  name: 'Policy Rate',           unit: '%',        category: 'Rates',  higherBetter: false, seriesKey: 'policyRate' },
-  { code: 'x:gdpForecast', name: 'Real GDP Growth + Forecast', unit: '%',   category: 'Growth', higherBetter: true,  seriesKey: 'gdpForecast' },
-  { code: 'x:debt',        name: 'Govt Debt (IMF)',       unit: '% of GDP', category: 'Fiscal', higherBetter: false, seriesKey: 'debt' },
+// Extra per-country indicators (IMF IFS / WEO / FRED / Buffett) shown as openable
+// cards next to the World Bank ones — each has a real time series so it opens a chart.
+const EXTRA_SERIES_KEYS = ['policyRate', 'gdpForecast', 'debt', 'buffett'] as const;
+const EXTRA_INDICATORS: (ImfIndicator & { seriesKey: typeof EXTRA_SERIES_KEYS[number] })[] = [
+  { code: 'x:policyRate',  name: 'Policy Rate',           unit: '%',        category: 'Rates',     higherBetter: false, seriesKey: 'policyRate' },
+  { code: 'x:gdpForecast', name: 'Real GDP Growth + Forecast', unit: '%',   category: 'Growth',    higherBetter: true,  seriesKey: 'gdpForecast' },
+  { code: 'x:debt',        name: 'Govt Debt (IMF)',       unit: '% of GDP', category: 'Fiscal',    higherBetter: false, seriesKey: 'debt' },
+  { code: 'x:buffett',     name: 'Buffett Indicator',     unit: 'ratio',    category: 'Valuation', higherBetter: false, seriesKey: 'buffett' },
 ];
 const EXTRA_BY_CODE = new Map(EXTRA_INDICATORS.map(e => [e.code, e]));
 
@@ -50,7 +52,25 @@ function changeStr(d: number, unit: ImfUnit): string {
     case 'USD':      return `${s}$${Math.round(d).toLocaleString('en-US')}`;
     case 'USD bn':   return `${s}$${d.toFixed(1)}B`;
     case 'M people': return `${s}${d.toFixed(2)}M`;
+    case 'ratio':    return `${s}${d.toFixed(2)}`;
+    case 'index':    return `${s}${d.toFixed(1)}`;
   }
+}
+
+// Buffett-indicator colour (value = index/GDP vs its historical average, 1.0 = norm):
+// cheap < 0.8 green, fair 0.8–1.2 neutral, 1.2–1.5 amber, > 1.5 red.
+function buffettColor(v: number): string {
+  if (v >= 1.5) return 'text-down-text';
+  if (v >= 1.2) return 'text-amber-400';
+  if (v < 0.8) return 'text-up-text';
+  return 'text-gray-200';
+}
+
+// Gini index (income inequality): lower = more equal. <35 green, 35–45 amber, ≥45 red.
+function giniColor(v: number): string {
+  if (v >= 45) return 'text-down-text';
+  if (v >= 35) return 'text-amber-400';
+  return 'text-up-text';
 }
 
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
@@ -68,6 +88,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   const [placeMode, setPlaceMode] = useState<'countries' | 'regions'>('countries');
   const [summary, setSummary] = useState<SummaryMap | null>(null);
   const [extra, setExtra] = useState<ExtraMap | null>(null);
+  const [buffettMap, setBuffettMap] = useState<Record<string, { value: number; year: string }> | null>(null);
   const [data, setData] = useState<CountryData | null>(null);
   const [extraCountry, setExtraCountry] = useState<CountryExtra | null>(null);
   const [loading, setLoading] = useState(false);
@@ -89,6 +110,11 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
     fetch('/api/macroworld-extra?mode=summary')
       .then(r => r.json())
       .then((j) => { if (j && !j.error) setExtra(j as ExtraMap); })
+      .catch(() => {});
+    // Buffett indicator (index ÷ real GDP) — separate/lazy so it never slows the board.
+    fetch('/api/macroworld-extra?mode=buffett-summary')
+      .then(r => r.json())
+      .then((j) => { if (j && !j.error) setBuffettMap(j as Record<string, { value: number; year: string }>); })
       .catch(() => {});
   }, []);
 
@@ -229,7 +255,9 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
             const last = s.length ? s[s.length - 1] : null;
             const isPct = e.unit === '%' || e.unit === '% of GDP';
             const neutral = e.code === 'x:policyRate';
-            const valColor = !neutral && isPct && last ? colorForPercent(e.higherBetter ? last.close : -last.close) : 'text-gray-100';
+            const valColor = e.code === 'x:buffett' && last ? buffettColor(last.close)
+              : !neutral && isPct && last ? colorForPercent(e.higherBetter ? last.close : -last.close)
+              : 'text-gray-100';
             return (
               <button
                 key={e.code}
@@ -253,7 +281,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       )}
 
       {/* Macro-area summary board — headline economies & aggregates side by side */}
-      <SummaryBoard summary={summary} extra={extra} activeCode={country} onPick={code => { setSelected(null); setCountry(code); }} />
+      <SummaryBoard summary={summary} extra={extra} buffett={buffettMap} activeCode={country} onPick={code => { setSelected(null); setCountry(code); }} />
 
       {/* Detail modal — same structure ("mascherina") as the Macro section */}
       {selected && sel && (
@@ -264,7 +292,12 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                 <h3 className="text-base font-bold text-white truncate">{countryName} — {sel.name}</h3>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {!extraSel && <><span className="font-mono">{sel.code}</span> · </>}
-                  {sel.category} · Unit: {sel.unit} · {extraSel ? (extraSel.code === 'x:policyRate' ? 'IMF IFS · FRED' : 'IMF WEO') : 'World Bank'}
+                  {sel.category} · Unit: {sel.unit} · {
+                    !extraSel ? 'World Bank'
+                    : extraSel.code === 'x:policyRate' ? 'IMF IFS · FRED'
+                    : extraSel.code === 'x:buffett' ? `${extraCountry?.buffettIndex ?? 'index'} ÷ real GDP · indexed to historical avg (1.0)`
+                    : 'IMF WEO'
+                  }
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -348,18 +381,19 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
 // Compact per-indicator column labels for the summary board.
 const SUMMARY_COL_LABELS: Record<string, string> = {
   'NY.GDP.MKTP.KD.ZG': 'Real GDP Gr.',
-  'NY.GDP.MKTP.CD': 'GDP nom. ($)',
-  'NY.GDP.PCAP.CD': 'GDP/cap. nom.',
+  'NY.GDP.MKTP.KD': 'GDP real ($)',
+  'NY.GDP.PCAP.KD': 'GDP/cap. real',
   'FP.CPI.TOTL.ZG': 'Inflation',
   'SL.UEM.TOTL.ZS': 'Unemploy.',
   'BN.CAB.XOKA.GD.ZS': 'Curr. Acct',
   'GC.DOD.TOTL.GD.ZS': 'Debt/GDP',
+  'SI.POV.GINI': 'Gini',
 };
 
 interface BoardCol {
-  key: string; src: 'wb' | 'extra'; label: string;
+  key: string; src: 'wb' | 'extra' | 'buffett'; label: string;
   unit: ImfUnit; higherBetter: boolean; scale: number; colored: boolean;
-  colorMode?: 'band'; // 'band' = healthy range (used for inflation)
+  colorMode?: 'band' | 'buffett' | 'gini'; // band=inflation, buffett=valuation, gini=inequality
   wbFallback?: string;
 }
 function wbCol(code: string, extra?: Partial<BoardCol>): BoardCol {
@@ -387,6 +421,8 @@ const BOARD_COLUMNS: BoardCol[] = [
   { key: 'policyRate', src: 'extra', label: 'Policy Rate', unit: '%', higherBetter: false, scale: 1, colored: false },
   wbCol('BN.CAB.XOKA.GD.ZS'),
   { key: 'debt', src: 'extra', label: 'Debt/GDP', unit: '% of GDP', higherBetter: false, scale: 1, colored: true, wbFallback: 'GC.DOD.TOTL.GD.ZS' },
+  { key: 'buffett', src: 'buffett', label: 'Buffett', unit: 'ratio', higherBetter: false, scale: 1, colored: true, colorMode: 'buffett' },
+  wbCol('SI.POV.GINI', { colored: true, colorMode: 'gini' }),
 ];
 
 // Inflation colour: healthy near the ~2% target (0-3% green), elevated 3-6% amber,
@@ -402,9 +438,10 @@ function inflationColor(v: number): string {
 // aggregates (Euro area, World) grouped by region, compared across a few key
 // indicators. Latest available value per cell; click a row to open that place.
 // ─────────────────────────────────────────────────────────────────────────────
-function SummaryBoard({ summary, extra, activeCode, onPick }: {
+function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
   summary: SummaryMap | null;
   extra: ExtraMap | null;
+  buffett: Record<string, { value: number; year: string }> | null;
   activeCode: string;
   onPick: (code: string) => void;
 }) {
@@ -417,8 +454,8 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
     return '';
   };
   const cols = BOARD_COLUMNS.map(c =>
-    c.key === 'gdpFcstCurr' ? { ...c, label: `GDP fcst ${fcYear('gdpFcstCurr') || 'now'}` }
-    : c.key === 'gdpFcstNext' ? { ...c, label: `GDP fcst ${fcYear('gdpFcstNext') || 'next'}` }
+    c.key === 'gdpFcstCurr' ? { ...c, label: `Real GDP fcst ${fcYear('gdpFcstCurr') || 'now'}` }
+    : c.key === 'gdpFcstNext' ? { ...c, label: `Real GDP fcst ${fcYear('gdpFcstNext') || 'next'}` }
     : c,
   );
 
@@ -426,6 +463,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
   // falling back to the World Bank figure for the WEO debt column when WEO has no value.
   const metricFor = (c: BoardCol, code: string): { value: number; year: string } | null => {
     if (c.src === 'wb') return summary[code]?.[c.key] ?? null;
+    if (c.src === 'buffett') return buffett?.[code] ?? null;
     const m = extra?.[code]?.[c.key as 'policyRate' | 'gdpFcstCurr' | 'gdpFcstNext' | 'debt'] ?? null;
     if (m) return m;
     if (c.wbFallback) return summary[code]?.[c.wbFallback] ?? null;
@@ -439,7 +477,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
         <span className="text-[10px] text-gray-500">Latest available · World Bank + IMF WEO + OECD · click a row to open</span>
       </div>
       <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-        <table className="w-full text-xs border-separate border-spacing-0 min-w-[1000px]">
+        <table className="w-full text-xs border-separate border-spacing-0 min-w-[1160px]">
           <thead>
             <tr>
               <th className="text-left font-semibold text-gray-400 px-2 py-1.5 sticky left-0 bg-bg-card z-10">Economy</th>
@@ -472,6 +510,8 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
                         const val = cell ? cell.value / c.scale : null;
                         const color = val == null ? 'text-gray-600'
                           : c.colorMode === 'band' ? inflationColor(val)
+                          : c.colorMode === 'buffett' ? buffettColor(val)
+                          : c.colorMode === 'gini' ? giniColor(val)
                           : c.colored ? colorForPercent(c.higherBetter ? val : -val)
                           : 'text-gray-200';
                         return (
@@ -490,7 +530,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
         </table>
       </div>
       <p className="text-[10px] text-gray-600 leading-snug">
-        <strong>GDP fcst</strong> = IMF WEO <strong>real GDP growth</strong> forecast, % (this year &amp; next, years in the headers) · <strong>Policy Rate</strong> = central bank policy rate · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; policy rate &amp; $ figures neutral. Hover a cell for its year; “—” = no recent figure.
+        <strong>GDP fcst</strong> = IMF WEO <strong>real GDP growth</strong> forecast, % (this year &amp; next, years in the headers) · <strong>Policy Rate</strong> = central bank policy rate · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; policy rate &amp; $ figures neutral. <strong>Buffett</strong> = country index ÷ real GDP, indexed to its own historical average (1.0 = norm): &lt;0.8 cheap (green), 0.8–1.2 fair, 1.2–1.5 rich (amber), &gt;1.5 strongly overvalued (red). <strong>Gini</strong> = income inequality (0–100): &lt;35 green, 35–45 amber, ≥45 red. Hover a cell for its year; “—” = no recent figure.
       </p>
     </div>
   );

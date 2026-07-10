@@ -14,7 +14,7 @@
 
 export const MACRO_WORLD_ENABLED = true;
 
-export type ImfUnit = '%' | 'USD' | 'USD bn' | '% of GDP' | 'M people';
+export type ImfUnit = '%' | 'USD' | 'USD bn' | '% of GDP' | 'M people' | 'ratio' | 'index';
 
 export interface ImfIndicator {
   code: string;    // World Bank indicator code
@@ -38,7 +38,8 @@ export const IMF_INDICATORS: ImfIndicator[] = [
   { code: 'GC.DOD.TOTL.GD.ZS', name: 'Govt Debt',           unit: '% of GDP', category: 'Fiscal',   higherBetter: false },
   { code: 'GC.NLD.TOTL.GD.ZS', name: 'Fiscal Balance',      unit: '% of GDP', category: 'Fiscal',   higherBetter: true  },
   { code: 'BN.CAB.XOKA.GD.ZS', name: 'Current Account',     unit: '% of GDP', category: 'External', higherBetter: true  },
-  { code: 'SP.POP.TOTL',       name: 'Population',           unit: 'M people', category: 'People',    higherBetter: true,  scale: 1e6 },
+  { code: 'SP.POP.TOTL',       name: 'Population',           unit: 'M people', category: 'People',     higherBetter: true,  scale: 1e6 },
+  { code: 'SI.POV.GINI',       name: 'Gini Index',          unit: 'index',    category: 'Inequality', higherBetter: false },
 ];
 
 export const IMF_INDICATOR_BY_CODE = new Map(IMF_INDICATORS.map(i => [i.code, i]));
@@ -145,17 +146,52 @@ export const IMF_SUMMARY_GROUPS: SummaryGroup[] = [
 // /api/macroworld-extra (FRED + IMF WEO via DBnomics), added by the board itself.
 export const IMF_SUMMARY_INDICATORS: string[] = [
   'NY.GDP.MKTP.KD.ZG', // Real GDP Growth
-  'NY.GDP.MKTP.CD',    // GDP (nominal, USD)
-  'NY.GDP.PCAP.CD',    // GDP per Capita
+  'NY.GDP.MKTP.KD',    // GDP (real, constant US$)
+  'NY.GDP.PCAP.KD',    // GDP per Capita (real)
   'FP.CPI.TOTL.ZG',    // Inflation
   'SL.UEM.TOTL.ZS',    // Unemployment
   'BN.CAB.XOKA.GD.ZS', // Current Account
   'GC.DOD.TOTL.GD.ZS', // Govt Debt (World Bank — fallback for the WEO column)
+  'SI.POV.GINI',       // Gini index (income inequality)
 ];
 
 // Every place code needed by the summary board (for the multi-country WB fetch).
 export const IMF_SUMMARY_CODES: string[] =
   IMF_SUMMARY_GROUPS.flatMap(g => g.places.map(p => p.code));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Buffett-style indicator per country = main stock index level ÷ real GDP over
+// time, indexed to its own historical average (1.0 = historical norm). ISO3 →
+// the country's headline index (Yahoo symbol + display name).
+// ─────────────────────────────────────────────────────────────────────────────
+export const IMF_COUNTRY_INDEX: Record<string, { symbol: string; name: string }> = {
+  USA: { symbol: '^GSPC',      name: 'S&P 500' },
+  CAN: { symbol: '^GSPTSE',    name: 'S&P/TSX' },
+  MEX: { symbol: '^MXX',       name: 'IPC Mexico' },
+  BRA: { symbol: '^BVSP',      name: 'Bovespa' },
+  ARG: { symbol: '^MERV',      name: 'Merval' },
+  CHL: { symbol: '^IPSA',      name: 'IPSA' },
+  DEU: { symbol: '^GDAXI',     name: 'DAX' },
+  FRA: { symbol: '^FCHI',      name: 'CAC 40' },
+  GBR: { symbol: '^FTSE',      name: 'FTSE 100' },
+  ITA: { symbol: 'FTSEMIB.MI', name: 'FTSE MIB' },
+  ESP: { symbol: '^IBEX',      name: 'IBEX 35' },
+  NLD: { symbol: '^AEX',       name: 'AEX' },
+  CHE: { symbol: '^SSMI',      name: 'SMI' },
+  SWE: { symbol: '^OMX',       name: 'OMX Stockholm 30' },
+  POL: { symbol: 'WIG20.WA',   name: 'WIG20' },
+  JPN: { symbol: '^N225',      name: 'Nikkei 225' },
+  CHN: { symbol: '000001.SS',  name: 'SSE Composite' },
+  IND: { symbol: '^BSESN',     name: 'BSE Sensex' },
+  KOR: { symbol: '^KS11',      name: 'KOSPI' },
+  IDN: { symbol: '^JKSE',      name: 'Jakarta Composite' },
+  TUR: { symbol: 'XU100.IS',   name: 'BIST 100' },
+  ISR: { symbol: '^TA125.TA',  name: 'TA-125' },
+  SGP: { symbol: '^STI',       name: 'Straits Times' },
+  ZAF: { symbol: '^J203.JO',   name: 'JSE Top 40' },
+  AUS: { symbol: '^AXJO',      name: 'ASX 200' },
+  NZL: { symbol: '^NZ50',      name: 'NZX 50' },
+};
 
 export interface ImfCompareAsset { symbol: string; name: string; category: string; type: 'index'; group: string }
 
@@ -197,5 +233,7 @@ export function fmtImf(v: number | null | undefined, unit: ImfUnit): string {
     case 'USD':      return v >= 1000 ? `$${Math.round(v).toLocaleString('en-US')}` : `$${v.toFixed(0)}`;
     case 'USD bn':   return v >= 1000 ? `$${(v / 1000).toFixed(2)}T` : `$${v.toFixed(1)}B`;
     case 'M people': return v >= 1 ? `${v.toFixed(1)}M` : `${(v * 1000).toFixed(0)}k`;
+    case 'ratio':    return `${v.toFixed(2)}×`;
+    case 'index':    return v.toFixed(1);
   }
 }
