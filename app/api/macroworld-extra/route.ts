@@ -260,12 +260,25 @@ async function yahooMonthly(symbol: string): Promise<{ date: string; close: numb
 
 // Index(t) / realGDP(t, carried forward), normalised so its own historical mean = 1.0
 // (1.0 = historical norm). Returns the series + which index was used.
+// IMF WEO doesn't use ISO3 for some aggregates (e.g. euro area) — try alternates.
+const WEO_GDP_ALT: Record<string, string[]> = {
+  EMU: ['U2', 'EA', 'EA19', 'EA20', '163', 'EMU', 'EUR'],
+};
+
+async function realGdpForBuffett(iso3: string): Promise<{ date: string; close: number }[]> {
+  let gdp = await weoCountrySeries(iso3, 'NGDP_R');
+  if (!gdp.length) {
+    for (const alt of WEO_GDP_ALT[iso3] ?? []) { gdp = await weoCountrySeries(alt, 'NGDP_R'); if (gdp.length) break; }
+  }
+  return gdp;
+}
+
 async function buffettSeries(iso3: string): Promise<{ series: { date: string; close: number }[]; indexName: string; indexSymbol: string } | null> {
   const idx = IMF_COUNTRY_INDEX[iso3];
   if (!idx) return null;
   // Real GDP from IMF WEO (NGDP_R, national currency) via DBnomics — works from the
   // edge runtime, unlike a direct World Bank call. Units cancel in the normalisation.
-  const [index, gdp] = await Promise.all([yahooMonthly(idx.symbol), weoCountrySeries(iso3, 'NGDP_R')]);
+  const [index, gdp] = await Promise.all([yahooMonthly(idx.symbol), realGdpForBuffett(iso3)]);
   if (index.length < 12 || gdp.length < 2) return null;
   let gi = 0; let lastGdp: number | null = null;
   const ratios: { date: string; close: number }[] = [];
@@ -307,12 +320,17 @@ export async function GET(req: Request) {
   if (mode === 'buffett-debug') {
     const country = (url.searchParams.get('country') || 'USA').toUpperCase();
     const idx = IMF_COUNTRY_INDEX[country] ?? null;
-    const [index, gdp] = await Promise.all([idx ? yahooMonthly(idx.symbol) : Promise.resolve([]), weoCountrySeries(country, 'NGDP_R')]);
+    const [index, gdp] = await Promise.all([idx ? yahooMonthly(idx.symbol) : Promise.resolve([]), realGdpForBuffett(country)]);
     const b = await buffettSeries(country);
+    // Which WEO code carries this area's real GDP (helps pin aggregates like the euro area).
+    const weoProbe = Object.fromEntries(await Promise.all(
+      [country, ...(WEO_GDP_ALT[country] ?? [])].map(async c => [c, (await weoCountrySeries(c, 'NGDP_R')).length] as const),
+    ));
     return NextResponse.json({
       country, index: idx,
       indexPoints: index.length, indexSample: index.slice(-2),
       gdpPoints: gdp.length, gdpSample: gdp.slice(-2),
+      weoProbe,
       buffettPoints: b?.series.length ?? 0, buffettLatest: b?.series.slice(-1)[0] ?? null,
     }, { headers: { 'Cache-Control': 'no-store' } });
   }

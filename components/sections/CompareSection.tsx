@@ -232,7 +232,20 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       let data: HistoricalPoint[] = [];
       let dividends: { date: string; amount: number }[] = [];
 
-      if (symbol.startsWith('WB:')) {
+      if (symbol.startsWith('WBX:')) {
+        // Macro World EXTRA series — "WBX:<ISO3>:<key>" (policyRate|gdpForecast|debt|buffett).
+        const [, ctry, key] = symbol.split(':');
+        const res = await fetch(`/api/macroworld-extra?mode=country&country=${encodeURIComponent(ctry)}`);
+        if (!res.ok) return null;
+        const json = await res.json();
+        const arr = json?.[key];
+        if (!Array.isArray(arr) || !arr.length) return null;
+        data = arr as HistoricalPoint[];
+        if (!nameCacheRef[symbol]) {
+          const labels: Record<string, string> = { policyRate: 'Interest Rate', gdpForecast: 'Real GDP Growth + Forecast', debt: 'Govt Debt (IMF)', buffett: 'Buffett Indicator' };
+          nameCacheRef[symbol] = `${ctry} · ${labels[key] ?? key}`;
+        }
+      } else if (symbol.startsWith('WB:')) {
         // Macro World — "WB:<ISO3>:<indicatorCode>" (e.g. WB:USA:NY.GDP.MKTP.KD.ZG).
         // Fetch the whole country payload and pull out the one annual indicator series;
         // displayAssets trims it to the timeframe/custom-range window like any other asset.
@@ -356,7 +369,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
       return {
         symbol,
         name: nameCacheRef[symbol] ?? displayName,
-        type: symbol.startsWith('WB:') ? 'index' : (config?.type ?? 'stock'),
+        type: (symbol.startsWith('WB:') || symbol.startsWith('WBX:')) ? 'index' : (config?.type ?? 'stock'),
         color,
         data: displayData,
         rawData: data,
@@ -528,7 +541,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         // short window their last real point can fall BEFORE the window start. Carry that
         // last value forward into the window so the line always shows (flat) rather than
         // vanishing — this is the "show the last available point" behaviour.
-        const laggingMacro = (a.type === 'macro' || a.symbol.startsWith('WB:')) && !isOverlay;
+        const laggingMacro = (a.type === 'macro' || a.symbol.startsWith('WB:') || a.symbol.startsWith('WBX:')) && !isOverlay;
         // rawFiltered: full history for overlay assets (recession bands, FOMC lines)
         // so CompareChart can find all events even on short timeframes.
         let rawFiltered = isOverlay ? raw

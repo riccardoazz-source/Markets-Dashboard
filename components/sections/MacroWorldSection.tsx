@@ -37,7 +37,7 @@ type CountryExtra = { policyRate: HistoricalPoint[]; gdpForecast: HistoricalPoin
 // cards next to the World Bank ones — each has a real time series so it opens a chart.
 const EXTRA_SERIES_KEYS = ['policyRate', 'gdpForecast', 'debt', 'buffett'] as const;
 const EXTRA_INDICATORS: (ImfIndicator & { seriesKey: typeof EXTRA_SERIES_KEYS[number] })[] = [
-  { code: 'x:policyRate',  name: 'Policy Rate',           unit: '%',        category: 'Rates',     higherBetter: false, seriesKey: 'policyRate' },
+  { code: 'x:policyRate',  name: 'Interest Rate',         unit: '%',        category: 'Rates',     higherBetter: false, seriesKey: 'policyRate' },
   { code: 'x:gdpForecast', name: 'Real GDP Growth + Forecast', unit: '%',   category: 'Growth',    higherBetter: true,  seriesKey: 'gdpForecast' },
   { code: 'x:debt',        name: 'Govt Debt (IMF)',       unit: '% of GDP', category: 'Fiscal',    higherBetter: false, seriesKey: 'debt' },
   { code: 'x:buffett',     name: 'Buffett Indicator',     unit: 'ratio',    category: 'Valuation', higherBetter: false, seriesKey: 'buffett' },
@@ -301,10 +301,9 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                {/* Compare only applies to the World Bank series (extra IMF/FRED ones aren't comparable symbols) */}
-                {onCompare && !extraSel && (
+                {onCompare && (
                   <button
-                    onClick={() => onCompare(`WB:${country}:${sel.code}`)}
+                    onClick={() => onCompare(extraSel ? `WBX:${country}:${extraSel.seriesKey}` : `WB:${country}:${sel.code}`)}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
                   >
                     <BarChart2 size={13} /> Compare
@@ -418,7 +417,7 @@ const BOARD_COLUMNS: BoardCol[] = [
   wbCol('FP.CPI.TOTL.ZG', { colorMode: 'band' }), // inflation: healthy ~0-3%, not "lower = greener"
   wbCol('SL.UEM.TOTL.ZS'),
   // Central bank policy rate — left neutral (no "high/low is good" judgement).
-  { key: 'policyRate', src: 'extra', label: 'Policy Rate', unit: '%', higherBetter: false, scale: 1, colored: false },
+  { key: 'policyRate', src: 'extra', label: 'Interest Rate', unit: '%', higherBetter: false, scale: 1, colored: false },
   wbCol('BN.CAB.XOKA.GD.ZS'),
   { key: 'debt', src: 'extra', label: 'Debt/GDP', unit: '% of GDP', higherBetter: false, scale: 1, colored: true, wbFallback: 'GC.DOD.TOTL.GD.ZS' },
   { key: 'buffett', src: 'buffett', label: 'Buffett', unit: 'ratio', higherBetter: false, scale: 1, colored: true, colorMode: 'buffett' },
@@ -530,7 +529,7 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
         </table>
       </div>
       <p className="text-[10px] text-gray-600 leading-snug">
-        <strong>GDP fcst</strong> = IMF WEO <strong>real GDP growth</strong> forecast, % (this year &amp; next, years in the headers) · <strong>Policy Rate</strong> = central bank policy rate · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; policy rate &amp; $ figures neutral. <strong>Buffett</strong> = country index ÷ real GDP, indexed to its own historical average (1.0 = norm): &lt;0.8 cheap (green), 0.8–1.2 fair, 1.2–1.5 rich (amber), &gt;1.5 strongly overvalued (red). <strong>Gini</strong> = income inequality (0–100): &lt;35 green, 35–45 amber, ≥45 red. Hover a cell for its year; “—” = no recent figure.
+        <strong>GDP fcst</strong> = IMF WEO <strong>real GDP growth</strong> forecast, % (this year &amp; next, years in the headers) · <strong>Interest Rate</strong> = central bank policy rate · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; interest rate &amp; $ figures neutral. <strong>Buffett</strong> = country index ÷ real GDP, indexed to its own historical average (1.0 = norm): &lt;0.8 cheap (green), 0.8–1.2 fair, 1.2–1.5 rich (amber), &gt;1.5 strongly overvalued (red). <strong>Gini</strong> = income inequality (0–100): &lt;35 green, 35–45 amber, ≥45 red. Hover a cell for its year; “—” = no recent figure.
       </p>
     </div>
   );
