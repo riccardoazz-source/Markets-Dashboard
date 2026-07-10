@@ -258,29 +258,14 @@ async function yahooMonthly(symbol: string): Promise<{ date: string; close: numb
   } catch { return []; }
 }
 
-async function wbRealGdp(iso3: string): Promise<{ date: string; close: number }[]> {
-  const u = `https://api.worldbank.org/v2/country/${encodeURIComponent(iso3)}/indicator/NY.GDP.MKTP.KD?format=json&per_page=300`;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8_000);
-  try {
-    const r = await fetch(u, { signal: ctrl.signal, headers: { 'User-Agent': UA, 'Accept': 'application/json' } });
-    if (!r.ok) return [];
-    const j = await r.json() as [unknown, Array<{ date: string; value: number | null }>] | null;
-    const rows = Array.isArray(j) ? j[1] : null;
-    if (!Array.isArray(rows)) return [];
-    return rows
-      .filter(x => typeof x.value === 'number' && isFinite(x.value) && /^\d{4}$/.test(x.date))
-      .map(x => ({ date: `${x.date}-01-01`, close: x.value as number }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  } catch { return []; } finally { clearTimeout(t); }
-}
-
 // Index(t) / realGDP(t, carried forward), normalised so its own historical mean = 1.0
 // (1.0 = historical norm). Returns the series + which index was used.
 async function buffettSeries(iso3: string): Promise<{ series: { date: string; close: number }[]; indexName: string; indexSymbol: string } | null> {
   const idx = IMF_COUNTRY_INDEX[iso3];
   if (!idx) return null;
-  const [index, gdp] = await Promise.all([yahooMonthly(idx.symbol), wbRealGdp(iso3)]);
+  // Real GDP from IMF WEO (NGDP_R, national currency) via DBnomics — works from the
+  // edge runtime, unlike a direct World Bank call. Units cancel in the normalisation.
+  const [index, gdp] = await Promise.all([yahooMonthly(idx.symbol), weoCountrySeries(iso3, 'NGDP_R')]);
   if (index.length < 12 || gdp.length < 2) return null;
   let gi = 0; let lastGdp: number | null = null;
   const ratios: { date: string; close: number }[] = [];
@@ -322,7 +307,7 @@ export async function GET(req: Request) {
   if (mode === 'buffett-debug') {
     const country = (url.searchParams.get('country') || 'USA').toUpperCase();
     const idx = IMF_COUNTRY_INDEX[country] ?? null;
-    const [index, gdp] = await Promise.all([idx ? yahooMonthly(idx.symbol) : Promise.resolve([]), wbRealGdp(country)]);
+    const [index, gdp] = await Promise.all([idx ? yahooMonthly(idx.symbol) : Promise.resolve([]), weoCountrySeries(country, 'NGDP_R')]);
     const b = await buffettSeries(country);
     return NextResponse.json({
       country, index: idx,
