@@ -833,18 +833,18 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                       )}
                     >
                       <td className="px-3 py-2 text-[11px] text-gray-600 tabular-nums">{idx + 1}</td>
-                      {/* max-w-0 w-full makes this column absorb the leftover width and truncate
-                          the name, so the fixed metric columns always fit the viewport (no
-                          horizontal overflow / clipping on mobile). */}
-                      <td className="px-3 py-2 max-w-0 w-full">
-                        <div className="flex items-center gap-1.5 min-w-0">
+                      {/* The whole table scrolls horizontally, so let the Asset column size to
+                          its content and keep the name readable (it used to collapse to zero on
+                          mobile, showing only the badges). */}
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
                           <span
                             onClick={(e) => { e.stopPropagation(); toggleSymbol(item.symbol); }}
                             className={clsx('shrink-0 w-2.5 h-2.5 rounded-full transition-opacity', isSelected ? 'opacity-100 ring-1 ring-white/30' : 'opacity-40 hover:opacity-70')}
                             style={{ background: { Indexes:'#3b82f6', Crypto:'#f97316', Commodities:'#f59e0b', Sectors:'#8b5cf6', Stocks:'#f43f5e' }[item.group] ?? '#6b7280' }}
                             title="Click to highlight on chart"
                           />
-                          <span className="truncate text-xs font-medium text-gray-200">{item.name}</span>
+                          <span className="shrink-0 truncate max-w-[160px] text-xs font-medium text-gray-200">{item.name}</span>
                           <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-border text-gray-500 leading-none hidden sm:inline">
                             {item.subCategory}
                           </span>
