@@ -37,7 +37,7 @@ type CountryExtra = { policyRate: HistoricalPoint[]; gdpForecast: HistoricalPoin
 // to the World Bank ones — each has a real time series so it opens a chart.
 const EXTRA_INDICATORS: (ImfIndicator & { seriesKey: keyof CountryExtra })[] = [
   { code: 'x:policyRate',  name: 'Policy Rate',           unit: '%',        category: 'Rates',  higherBetter: false, seriesKey: 'policyRate' },
-  { code: 'x:gdpForecast', name: 'GDP Growth + Forecast', unit: '%',        category: 'Growth', higherBetter: true,  seriesKey: 'gdpForecast' },
+  { code: 'x:gdpForecast', name: 'Real GDP Growth + Forecast', unit: '%',   category: 'Growth', higherBetter: true,  seriesKey: 'gdpForecast' },
   { code: 'x:debt',        name: 'Govt Debt (IMF)',       unit: '% of GDP', category: 'Fiscal', higherBetter: false, seriesKey: 'debt' },
 ];
 const EXTRA_BY_CODE = new Map(EXTRA_INDICATORS.map(e => [e.code, e]));
@@ -347,9 +347,9 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
 
 // Compact per-indicator column labels for the summary board.
 const SUMMARY_COL_LABELS: Record<string, string> = {
-  'NY.GDP.MKTP.KD.ZG': 'GDP Growth',
-  'NY.GDP.MKTP.CD': 'GDP ($)',
-  'NY.GDP.PCAP.CD': 'GDP/capita',
+  'NY.GDP.MKTP.KD.ZG': 'Real GDP Gr.',
+  'NY.GDP.MKTP.CD': 'GDP nom. ($)',
+  'NY.GDP.PCAP.CD': 'GDP/cap. nom.',
   'FP.CPI.TOTL.ZG': 'Inflation',
   'SL.UEM.TOTL.ZS': 'Unemploy.',
   'BN.CAB.XOKA.GD.ZS': 'Curr. Acct',
@@ -490,7 +490,7 @@ function SummaryBoard({ summary, extra, activeCode, onPick }: {
         </table>
       </div>
       <p className="text-[10px] text-gray-600 leading-snug">
-        <strong>GDP fcst</strong> = IMF WEO real-GDP forecast (this year &amp; next, years shown in the headers) · <strong>Policy Rate</strong> = central bank policy rate · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; policy rate &amp; $ figures neutral. Hover a cell for its year; “—” = no recent figure.
+        <strong>GDP fcst</strong> = IMF WEO <strong>real GDP growth</strong> forecast, % (this year &amp; next, years in the headers) · <strong>Policy Rate</strong> = central bank policy rate · <strong>Debt/GDP</strong> = IMF WEO gross govt debt (World Bank fallback). Growth/forecast/current-account green = higher; unemployment/debt green = lower; <strong>inflation</strong> green ≈ 0-3% (healthy), amber 3-6%, red = deflation or &gt;6%; policy rate &amp; $ figures neutral. Hover a cell for its year; “—” = no recent figure.
       </p>
     </div>
   );

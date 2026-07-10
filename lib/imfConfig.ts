@@ -29,8 +29,10 @@ export interface ImfIndicator {
 // Curated cross-country indicators (World Bank codes).
 export const IMF_INDICATORS: ImfIndicator[] = [
   { code: 'NY.GDP.MKTP.KD.ZG', name: 'Real GDP Growth',     unit: '%',        category: 'Growth',   higherBetter: true  },
-  { code: 'NY.GDP.PCAP.CD',    name: 'GDP per Capita',      unit: 'USD',      category: 'Growth',   higherBetter: true  },
+  { code: 'NY.GDP.PCAP.CD',    name: 'GDP per Capita (nom.)', unit: 'USD',    category: 'Growth',   higherBetter: true  },
+  { code: 'NY.GDP.PCAP.KD',    name: 'GDP per Capita (real)', unit: 'USD',    category: 'Growth',   higherBetter: true  },
   { code: 'NY.GDP.MKTP.CD',    name: 'GDP (nominal)',       unit: 'USD bn',   category: 'Growth',   higherBetter: true,  scale: 1e9 },
+  { code: 'NY.GDP.MKTP.KD',    name: 'GDP (real, const. US$)', unit: 'USD bn', category: 'Growth',   higherBetter: true,  scale: 1e9 },
   { code: 'FP.CPI.TOTL.ZG',    name: 'Inflation (CPI)',     unit: '%',        category: 'Prices',   higherBetter: false },
   { code: 'SL.UEM.TOTL.ZS',    name: 'Unemployment Rate',   unit: '%',        category: 'Labor',    higherBetter: false },
   { code: 'GC.DOD.TOTL.GD.ZS', name: 'Govt Debt',           unit: '% of GDP', category: 'Fiscal',   higherBetter: false },
