@@ -251,10 +251,14 @@ let buffettSummaryCache: { data: Record<string, Metric>; ts: number } | null = n
 
 async function yahooMonthly(symbol: string): Promise<{ date: string; close: number }[]> {
   // Reuse the app's crumb-authenticated Yahoo fetch (with Stooq fallback) — a bare
-  // chart request is rejected/rate-limited by Yahoo without a cookie+crumb session.
+  // chart request is rejected/rate-limited without a cookie+crumb session. Fetch
+  // DAILY (some symbols, e.g. 000300.SS, return no monthly history) and downsample
+  // to one point per month (last trading day) to keep the ratio series light.
   try {
-    const pts = await fetchYahooChart(symbol, new Date('1990-01-01'), new Date(), '1mo');
-    return pts.filter(p => typeof p.close === 'number' && isFinite(p.close));
+    const pts = await fetchYahooChart(symbol, new Date('1995-01-01'), new Date(), '1d');
+    const byMonth = new Map<string, number>();
+    for (const p of pts) { if (typeof p.close === 'number' && isFinite(p.close)) byMonth.set(p.date.slice(0, 7), p.close); }
+    return [...byMonth.entries()].map(([m, close]) => ({ date: `${m}-01`, close })).sort((a, b) => a.date.localeCompare(b.date));
   } catch { return []; }
 }
 

@@ -128,7 +128,7 @@ export const IMF_SUMMARY_GROUPS: SummaryGroup[] = [
     { code: 'NLD', name: 'Netherlands' }, { code: 'CHE', name: 'Switzerland' }, { code: 'SWE', name: 'Sweden' },
     { code: 'POL', name: 'Poland' }, { code: 'RUS', name: 'Russia' } ] },
   { region: 'Asia', places: [
-    { code: 'CHN', name: 'China' }, { code: 'JPN', name: 'Japan' }, { code: 'IND', name: 'India' },
+    { code: 'CHN', name: 'China' }, { code: 'HKG', name: 'Hong Kong' }, { code: 'JPN', name: 'Japan' }, { code: 'IND', name: 'India' },
     { code: 'KOR', name: 'South Korea' }, { code: 'IDN', name: 'Indonesia' }, { code: 'SAU', name: 'Saudi Arabia' },
     { code: 'TUR', name: 'Turkey' }, { code: 'ISR', name: 'Israel' }, { code: 'ARE', name: 'UAE' },
     { code: 'SGP', name: 'Singapore' }, { code: 'THA', name: 'Thailand' }, { code: 'VNM', name: 'Vietnam' } ] },
@@ -185,6 +185,7 @@ export const IMF_COUNTRY_INDEX: Record<string, { symbol: string; name: string }>
   CHN: { symbol: '000300.SS',  name: 'CSI 300' },
   IND: { symbol: '^BSESN',     name: 'BSE Sensex' },
   KOR: { symbol: '^KS11',      name: 'KOSPI' },
+  HKG: { symbol: '^HSI',       name: 'Hang Seng' },
   IDN: { symbol: '^JKSE',      name: 'Jakarta Composite' },
   TUR: { symbol: 'XU100.IS',   name: 'BIST 100' },
   ISR: { symbol: '^TA125.TA',  name: 'TA-125' },

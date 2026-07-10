@@ -677,6 +677,7 @@ export const INDEXES: AssetConfig[] = [
   { symbol: '^N225',     name: 'Nikkei 225',            category: 'Japan',          region: 'Asia',    type: 'index' },
   { symbol: '^HSI',      name: 'Hang Seng',             category: 'Hong Kong',      region: 'Asia',    type: 'index' },
   { symbol: '000300.SS', name: 'CSI 300',               category: 'China',          region: 'Asia',    type: 'index' },
+  { symbol: '^STI',      name: 'Straits Times (STI)',   category: 'Singapore',      region: 'Asia',    type: 'index' },
   { symbol: '^BSESN',    name: 'BSE Sensex',            category: 'India',          region: 'Asia',    type: 'index' },
   { symbol: '^KS11',     name: 'KOSPI',                 category: 'Korea',          region: 'Asia',    type: 'index' },
   { symbol: '^AXJO',     name: 'ASX 200',               category: 'Australia',      region: 'Asia',    type: 'index' },
