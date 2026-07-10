@@ -765,15 +765,24 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                 <tr className="border-b border-border">
                   <th className="w-8 px-3 py-2 text-left text-[10px] font-medium text-gray-600">#</th>
                   <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-600">Asset</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === 'day' ? 'text-accent' : 'text-gray-600')}>Day</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium', sortBy === '1m' ? 'text-accent' : 'text-gray-600')}>1M</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium', sortBy === '3m' ? 'text-accent' : 'text-gray-600')}>3M</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '6m' ? 'text-accent' : 'text-gray-600')}>6M</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '1y' ? 'text-accent' : 'text-gray-600')}>1Y</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '5y' ? 'text-accent' : 'text-gray-600')}>5Y</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '52w' ? 'text-accent' : 'text-gray-600')} title="Position within the 52-week range: 0% = on the 52W low, 100% = on the 52W high">52W Range</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '200d' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-day MA (green=above, red=below)">vs 200D</th>
-                  <th className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell', sortBy === '200w' ? 'text-accent' : 'text-gray-600')} title="% gap from 200-week MA (green=above, red=below)">vs 200W</th>
+                  {([
+                    { key: 'day',  label: 'Day' },
+                    { key: '1m',   label: '1M' },
+                    { key: '3m',   label: '3M' },
+                    { key: '6m',   label: '6M' },
+                    { key: '1y',   label: '1Y' },
+                    { key: '5y',   label: '5Y' },
+                    { key: '52w',  label: '52W Range', title: 'Position within the 52-week range: 0% = on the 52W low, 100% = on the 52W high' },
+                    { key: '200d', label: 'vs 200D', title: '% gap from 200-day MA (green=above, red=below)' },
+                    { key: '200w', label: 'vs 200W', title: '% gap from 200-week MA (green=above, red=below)' },
+                  ] as { key: SortKey; label: string; title?: string }[]).map(h => (
+                    <th key={h.key} title={h.title}
+                      onClick={() => setSortBy(h.key)}
+                      className={clsx('px-3 py-2 text-right text-[10px] font-medium table-cell cursor-pointer select-none hover:text-gray-300',
+                        sortBy === h.key ? 'text-accent' : 'text-gray-600')}>
+                      {h.label}{sortBy === h.key ? ' ↓' : ''}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">

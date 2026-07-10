@@ -469,62 +469,85 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
     return null;
   };
 
+  // Click a column header to sort largest→smallest, then smallest→largest, then off.
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const toggleSort = (key: string) => setSort(s =>
+    s?.key !== key ? { key, dir: 'desc' } : s.dir === 'desc' ? { key, dir: 'asc' } : null);
+
+  const sortedPlaces: { code: string; name: string }[] | null = (() => {
+    if (!sort) return null;
+    const col = cols.find(c => c.key === sort.key);
+    if (!col) return null;
+    return IMF_SUMMARY_GROUPS.flatMap(g => g.places)
+      .map(p => { const cell = metricFor(col, p.code); return { p, v: cell ? cell.value / col.scale : null }; })
+      .sort((a, b) => a.v == null ? 1 : b.v == null ? -1 : sort.dir === 'desc' ? b.v - a.v : a.v - b.v)
+      .map(x => x.p);
+  })();
+
+  const renderRow = (p: { code: string; name: string }) => {
+    const isActive = p.code === activeCode;
+    return (
+      <tr key={p.code} onClick={() => onPick(p.code)}
+        className={clsx('cursor-pointer transition-colors', isActive ? 'bg-accent/10' : 'hover:bg-border/20')}>
+        <td className={clsx('px-2 py-1.5 whitespace-nowrap sticky left-0 z-10', isActive ? 'bg-accent/10 text-accent font-semibold' : 'bg-bg-card text-gray-200')}>
+          {p.name}
+        </td>
+        {cols.map(c => {
+          const cell = metricFor(c, p.code);
+          const val = cell ? cell.value / c.scale : null;
+          const color = val == null ? 'text-gray-600'
+            : c.colorMode === 'band' ? inflationColor(val)
+            : c.colorMode === 'buffett' ? buffettColor(val)
+            : c.colorMode === 'gini' ? giniColor(val)
+            : c.colored ? colorForPercent(c.higherBetter ? val : -val)
+            : 'text-gray-200';
+          return (
+            <td key={c.key} title={cell ? `${cell.year}` : 'no data'}
+              className={clsx('text-right px-2 py-1.5 tabular-nums whitespace-nowrap', color)}>
+              {val == null ? '—' : fmtImf(val, c.unit)}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  };
+
   return (
     <div className="rounded-xl border border-border bg-bg-card p-3 sm:p-4 space-y-2">
       <div className="flex items-baseline justify-between gap-2 flex-wrap">
         <h3 className="text-sm font-semibold text-gray-100">Macro-area snapshot</h3>
-        <span className="text-[10px] text-gray-500">Latest available · World Bank + IMF WEO + OECD · click a row to open</span>
+        <span className="text-[10px] text-gray-500">Latest available · click a row to open · click a column to sort</span>
       </div>
       <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
         <table className="w-full text-xs border-separate border-spacing-0 min-w-[1160px]">
           <thead>
             <tr>
               <th className="text-left font-semibold text-gray-400 px-2 py-1.5 sticky left-0 bg-bg-card z-10">Economy</th>
-              {cols.map(c => (
-                <th key={c.key} className="text-right font-semibold text-gray-400 px-2 py-1.5 whitespace-nowrap">{c.label}</th>
-              ))}
+              {cols.map(c => {
+                const active = sort?.key === c.key;
+                return (
+                  <th key={c.key} onClick={() => toggleSort(c.key)}
+                    className={clsx('text-right font-semibold px-2 py-1.5 whitespace-nowrap cursor-pointer select-none hover:text-gray-200',
+                      active ? 'text-accent' : 'text-gray-400')}>
+                    {c.label}{active ? (sort!.dir === 'desc' ? ' ↓' : ' ↑') : ''}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {IMF_SUMMARY_GROUPS.map(group => (
-              <Fragment key={group.region}>
-                <tr>
-                  <td colSpan={cols.length + 1} className="px-2 pt-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600 font-semibold">
-                    {group.region}
-                  </td>
-                </tr>
-                {group.places.map(p => {
-                  const isActive = p.code === activeCode;
-                  return (
-                    <tr
-                      key={p.code}
-                      onClick={() => onPick(p.code)}
-                      className={clsx('cursor-pointer transition-colors', isActive ? 'bg-accent/10' : 'hover:bg-border/20')}
-                    >
-                      <td className={clsx('px-2 py-1.5 whitespace-nowrap sticky left-0 z-10', isActive ? 'bg-accent/10 text-accent font-semibold' : 'bg-bg-card text-gray-200')}>
-                        {p.name}
-                      </td>
-                      {cols.map(c => {
-                        const cell = metricFor(c, p.code);
-                        const val = cell ? cell.value / c.scale : null;
-                        const color = val == null ? 'text-gray-600'
-                          : c.colorMode === 'band' ? inflationColor(val)
-                          : c.colorMode === 'buffett' ? buffettColor(val)
-                          : c.colorMode === 'gini' ? giniColor(val)
-                          : c.colored ? colorForPercent(c.higherBetter ? val : -val)
-                          : 'text-gray-200';
-                        return (
-                          <td key={c.key} title={cell ? `${cell.year}` : 'no data'}
-                            className={clsx('text-right px-2 py-1.5 tabular-nums whitespace-nowrap', color)}>
-                            {val == null ? '—' : fmtImf(val, c.unit)}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </Fragment>
-            ))}
+            {sortedPlaces
+              ? sortedPlaces.map(renderRow)
+              : IMF_SUMMARY_GROUPS.map(group => (
+                <Fragment key={group.region}>
+                  <tr>
+                    <td colSpan={cols.length + 1} className="px-2 pt-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600 font-semibold">
+                      {group.region}
+                    </td>
+                  </tr>
+                  {group.places.map(renderRow)}
+                </Fragment>
+              ))}
           </tbody>
         </table>
       </div>
