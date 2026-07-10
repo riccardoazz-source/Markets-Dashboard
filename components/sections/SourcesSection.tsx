@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ExternalLink, CheckCircle2, XCircle, Loader2, Trash2, Plus, Edit2, Check, X, Eye, EyeOff, Download, Upload, Link2, FlaskConical, ChevronDown, ChevronRight } from 'lucide-react';
 import { MACRO_INDICATORS, INDEXES, CRYPTO_IDS, COMMODITIES, SECTORS, CURRENCY_GROUPS, ALL_COMPARABLE_ASSETS } from '@/lib/config';
+import { MACRO_WORLD_ENABLED, IMF_INDICATORS } from '@/lib/imfConfig';
 import { useGistData, AnalysisEntry, todayStr, makeId } from '@/lib/gist';
 import { AssetSearchInput } from '@/components/ui/AssetSearchInput';
 import { MarketEventsManager } from './MarketEventsManager';
@@ -140,6 +141,22 @@ const NON_MACRO_SECTIONS: { title: string; count: string; provider: string; rows
     rows: SECTORS.map(s => ({ symbol: s.symbol, name: s.name, category: s.category, provider: 'Yahoo Finance', type: 'sector' })),
   },
 ];
+
+// Macro World (removable — gated on MACRO_WORLD_ENABLED). All live, no key needed.
+const MACRO_WORLD_SECTION: { title: string; count: string; provider: string; rows: AssetRow[] } = {
+  title: 'Macro World (country macro)',
+  count: `${IMF_INDICATORS.length + 3} indicators · ~200 countries`,
+  provider: 'World Bank · IMF WEO · IMF IFS · FRED (live)',
+  rows: [
+    ...IMF_INDICATORS.map(i => ({
+      symbol: i.code, name: i.name, category: i.category,
+      provider: 'World Bank Indicators API', type: 'macro-world',
+    })),
+    { symbol: 'FPOLM_PA',      name: 'Policy Rate (central bank)',   category: 'Rates',  provider: 'IMF IFS · FRED (ECB/Fed/BoJ/BoE)', type: 'macro-world' },
+    { symbol: 'NGDP_RPCH',     name: 'Real GDP Growth + forecast',   category: 'Growth', provider: 'IMF WEO (via DBnomics)',           type: 'macro-world' },
+    { symbol: 'GGXWDG_NGDP',   name: 'Govt Gross Debt (% of GDP)',   category: 'Fiscal', provider: 'IMF WEO (via DBnomics)',           type: 'macro-world' },
+  ],
+};
 
 function NonMacroSection({ section }: { section: typeof NON_MACRO_SECTIONS[0] }) {
   const [open, setOpen] = useState(false);
@@ -656,6 +673,7 @@ export function SourcesSection() {
           </p>
         </div>
         {NON_MACRO_SECTIONS.map(s => <NonMacroSection key={s.title} section={s} />)}
+        {MACRO_WORLD_ENABLED && <NonMacroSection section={MACRO_WORLD_SECTION} />}
       </div>
 
       {/* ── Calculation conventions ─────────────────────────────────────── */}
