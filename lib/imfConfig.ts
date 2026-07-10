@@ -188,7 +188,7 @@ export const IMF_COUNTRY_INDEX: Record<string, { symbol: string; name: string }>
   IDN: { symbol: '^JKSE',      name: 'Jakarta Composite' },
   TUR: { symbol: 'XU100.IS',   name: 'BIST 100' },
   ISR: { symbol: '^TA125.TA',  name: 'TA-125' },
-  SGP: { symbol: '^STI',       name: 'Straits Times' },
+  SGP: { symbol: '^STI',       name: 'STI (Straits Times)' },
   ZAF: { symbol: '^J203.JO',   name: 'JSE Top 40' },
   AUS: { symbol: '^AXJO',      name: 'ASX 200' },
   NZL: { symbol: '^NZ50',      name: 'NZX 50' },
