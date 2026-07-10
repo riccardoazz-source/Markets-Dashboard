@@ -190,15 +190,18 @@ function detectReportingFreq(eps: EarningsPoint[]): string {
 
 const TF_OPTIONS: Timeframe[] = ['1D', '1W', 'MTD', '1M', '3M', '6M', 'YTD', '1Y', '3Y', '5Y', '10Y', 'MAX'];
 
-type StockSortKey = 'changePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
+type StockSortKey = 'changePercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
 const WATCHLIST_SORT_OPTIONS: { value: StockSortKey; label: string }[] = [
-  { value: 'changePercent',         label: 'Day' },
-  { value: 'mtdChangePercent',      label: 'MTD' },
-  { value: 'ytdChangePercent',      label: 'YTD' },
-  { value: 'fiveYearChangePercent', label: '5Y' },
-  { value: 'fiveYearCagrPercent',   label: 'CAGR' },
-  { value: 'avgYearly',             label: 'Avg Yr' },
+  { value: 'changePercent',            label: 'Day' },
+  { value: 'oneMonthChangePercent',    label: '1M' },
+  { value: 'threeMonthChangePercent',  label: '3M' },
+  { value: 'sixMonthChangePercent',    label: '6M' },
+  { value: 'mtdChangePercent',         label: 'MTD' },
+  { value: 'ytdChangePercent',         label: 'YTD' },
+  { value: 'fiveYearChangePercent',    label: '5Y' },
+  { value: 'fiveYearCagrPercent',      label: 'CAGR' },
+  { value: 'avgYearly',                label: 'Avg Yr' },
 ];
 
 interface SearchHit { symbol: string; name: string; exchange: string; type: string }
@@ -933,6 +936,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       const q = watchlistQuotes[sym];
       if (!q) return null;
       if (watchlistSort === 'changePercent') return q.changePercent ?? null;
+      if (watchlistSort === 'oneMonthChangePercent') return q.oneMonthChangePercent ?? null;
+      if (watchlistSort === 'threeMonthChangePercent') return q.threeMonthChangePercent ?? null;
+      if (watchlistSort === 'sixMonthChangePercent') return q.sixMonthChangePercent ?? null;
       if (watchlistSort === 'mtdChangePercent') return q.mtdChangePercent ?? null;
       if (watchlistSort === 'ytdChangePercent') return q.ytdChangePercent ?? null;
       if (watchlistSort === 'fiveYearCagrPercent') return q.fiveYearCagrPercent ?? null;
@@ -1043,7 +1049,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               </div>
             )}
             {watchlistSymbols.length > 0 && (
-              <div className="flex gap-1 bg-bg-input rounded-lg p-1 ml-auto shrink-0">
+              <div className="flex gap-1 bg-bg-input rounded-lg p-1 ml-auto overflow-x-auto scrollbar-hide min-w-0 max-w-full">
                 {WATCHLIST_SORT_OPTIONS.map(opt => (
                   <button key={opt.value} onClick={() => setWatchlistSort(opt.value)}
                     className={clsx('px-2.5 py-1 text-xs font-semibold rounded-md transition-all',
@@ -1109,11 +1115,24 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                             <span className="text-[10px] font-medium opacity-70">day</span>
                           </div>
                         )}
-                        {mtd != null && <p className={clsx('text-[10px] mt-0.5', mtd >= 0 ? 'text-emerald-400' : 'text-red-400')}>MTD: {mtd >= 0 ? '+' : ''}{mtd.toFixed(1)}%</p>}
-                        {ytd != null && <p className={clsx('text-[10px] mt-0.5', ytd >= 0 ? 'text-emerald-400' : 'text-red-400')}>YTD: {ytd >= 0 ? '+' : ''}{ytd.toFixed(1)}%</p>}
-                        {fiveYear != null && <p className={clsx('text-[10px] mt-0.5', fiveYear >= 0 ? 'text-emerald-400' : 'text-red-400')}>5Y: {fiveYear >= 0 ? '+' : ''}{fiveYear.toFixed(1)}%</p>}
-                        {cagr != null && <p className={clsx('text-[10px] mt-0.5', cagr >= 0 ? 'text-emerald-400' : 'text-red-400')}>5Y CAGR: {cagr >= 0 ? '+' : ''}{cagr.toFixed(1)}%{cagrFull ? '' : '*'}</p>}
-                        {avgYearlyMap[sym] != null && <p className={clsx('text-[10px] mt-0.5', avgYearlyMap[sym]! >= 0 ? 'text-emerald-400' : 'text-red-400')}>Avg Yr: {avgYearlyMap[sym]! >= 0 ? '+' : ''}{avgYearlyMap[sym]!.toFixed(1)}%</p>}
+                        <div className="grid grid-cols-2 gap-x-2 mt-1.5">
+                          {([
+                            { k: '1M', v: q?.oneMonthChangePercent ?? null },
+                            { k: '3M', v: q?.threeMonthChangePercent ?? null },
+                            { k: '6M', v: q?.sixMonthChangePercent ?? null },
+                            { k: 'MTD', v: mtd },
+                            { k: 'YTD', v: ytd },
+                            { k: '5Y', v: fiveYear },
+                            { k: 'CAGR', v: cagr, cagr: true },
+                            { k: 'Avg Yr', v: avgYearlyMap[sym] ?? null },
+                          ] as { k: string; v: number | null; cagr?: boolean }[])
+                            .filter(s => s.v != null)
+                            .map(s => (
+                              <p key={s.k} className={clsx('text-[9px] leading-[1.35] tabular-nums', (s.v as number) >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                                <span className="text-gray-500">{s.k}:</span> {(s.v as number) >= 0 ? '+' : ''}{(s.v as number).toFixed(1)}%{s.cagr && !cagrFull ? '*' : ''}
+                              </p>
+                            ))}
+                        </div>
                         <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />
                         <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                       </>

@@ -238,8 +238,8 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
         <span className="text-[10px] text-gray-500 bg-bg-input px-2 py-0.5 rounded-full border border-border">
           {filteredSectors.length} sectors
         </span>
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+        <div className="flex items-center gap-2 min-w-0 max-w-full">
+          <div className="flex gap-1 bg-bg-input rounded-lg p-1 overflow-x-auto scrollbar-hide min-w-0">
             {SORT_OPTIONS.map(opt => (
               <button key={opt.value} onClick={() => setSortBy(opt.value)}
                 className={clsx(

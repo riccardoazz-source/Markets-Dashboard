@@ -204,7 +204,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
       </div>
       {/* Sort row — always right-aligned */}
       <div className="flex items-center justify-end gap-2">
-        <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+        <div className="flex gap-1 bg-bg-input rounded-lg p-1 overflow-x-auto scrollbar-hide min-w-0">
           {SORT_OPTIONS.map(opt => (
             <button key={opt.value} onClick={() => setSortBy(opt.value)}
               className={clsx('px-2.5 py-1 text-xs font-semibold rounded-md transition-all',
