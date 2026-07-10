@@ -260,17 +260,25 @@ async function yahooMonthly(symbol: string): Promise<{ date: string; close: numb
 
 // Index(t) / realGDP(t, carried forward), normalised so its own historical mean = 1.0
 // (1.0 = historical norm). Returns the series + which index was used.
-// IMF WEO doesn't use ISO3 for some aggregates (e.g. euro area) — try alternates.
+// IMF WEO doesn't carry the euro-area aggregate, so reconstruct its real GDP by
+// summing the core members (all in EUR) over the years they all report.
+const EMU_CORE = ['DEU', 'FRA', 'ITA', 'ESP', 'NLD'];
+async function euroAreaRealGdp(): Promise<{ date: string; close: number }[]> {
+  const series = await Promise.all(EMU_CORE.map(c => weoCountrySeries(c, 'NGDP_R')));
+  const maps = series.map(s => new Map(s.map(p => [p.date, p.close])));
+  if (!maps[0]) return [];
+  const years = [...maps[0].keys()].filter(y => maps.every(m => m.has(y))).sort();
+  return years.map(y => ({ date: y, close: maps.reduce((sum, m) => sum + (m.get(y) as number), 0) }));
+}
+
+// Kept for the debug probe (shows which WEO codes carry an area's GDP).
 const WEO_GDP_ALT: Record<string, string[]> = {
   EMU: ['U2', 'EA', 'EA19', 'EA20', '163', 'EMU', 'EUR'],
 };
 
 async function realGdpForBuffett(iso3: string): Promise<{ date: string; close: number }[]> {
-  let gdp = await weoCountrySeries(iso3, 'NGDP_R');
-  if (!gdp.length) {
-    for (const alt of WEO_GDP_ALT[iso3] ?? []) { gdp = await weoCountrySeries(alt, 'NGDP_R'); if (gdp.length) break; }
-  }
-  return gdp;
+  if (iso3 === 'EMU') return euroAreaRealGdp();
+  return weoCountrySeries(iso3, 'NGDP_R');
 }
 
 async function buffettSeries(iso3: string): Promise<{ series: { date: string; close: number }[]; indexName: string; indexSymbol: string } | null> {
