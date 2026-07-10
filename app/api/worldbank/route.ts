@@ -126,6 +126,23 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const mode = url.searchParams.get('mode');
 
+  // Diagnose whether World Bank is reachable from this deployment, and whether the
+  // same data is available via DBnomics (which works reliably here).
+  if (mode === 'debug') {
+    const probe = async (u: string) => {
+      try {
+        const r = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } });
+        return { url: u, status: r.status, body: (await r.text()).slice(0, 500) };
+      } catch (e) { return { url: u, error: String(e) }; }
+    };
+    const [direct, dbSearch, dbSeries] = await Promise.all([
+      probe(`${BASE}/country/USA/indicator/NY.GDP.MKTP.CD?format=json&per_page=50&date=2015:2024`),
+      probe(`https://api.db.nomics.world/v22/search?q=World%20Development%20Indicators&limit=4`),
+      probe(`https://api.db.nomics.world/v22/series/WB/WDI?dimensions=${encodeURIComponent(JSON.stringify({ indicator: ['NY.GDP.MKTP.CD'], country: ['USA'] }))}&observations=1&limit=2`),
+    ]);
+    return NextResponse.json({ direct, dbSearch, dbSeries }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
   if (mode === 'summary') {
     const s = await summary();
     if (!Object.keys(s).length) return NextResponse.json({ error: 'wb_unreachable' }, { status: 200 });
