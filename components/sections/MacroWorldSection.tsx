@@ -465,8 +465,8 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
     return '';
   };
   const cols = BOARD_COLUMNS.map(c =>
-    c.key === 'gdpFcstCurr' ? { ...c, label: `Real GDP fcst ${fcYear('gdpFcstCurr') || 'now'}` }
-    : c.key === 'gdpFcstNext' ? { ...c, label: `Real GDP fcst ${fcYear('gdpFcstNext') || 'next'}` }
+    c.key === 'gdpFcstCurr' ? { ...c, label: `Real fcst ${fcYear('gdpFcstCurr') || 'now'}` }
+    : c.key === 'gdpFcstNext' ? { ...c, label: `Real fcst ${fcYear('gdpFcstNext') || 'next'}` }
     : c,
   );
 
@@ -499,7 +499,7 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
     return (
       <tr key={p.code} onClick={() => onPick(p.code)}
         className={clsx('cursor-pointer transition-colors', isActive ? 'bg-accent/10' : 'hover:bg-border/20')}>
-        <td className={clsx('px-2 py-1.5 whitespace-nowrap sticky left-0 z-10', isActive ? 'bg-accent/10 text-accent font-semibold' : 'bg-bg-card text-gray-200')}>
+        <td className={clsx('px-1.5 py-1 whitespace-nowrap sticky left-0 z-10', isActive ? 'bg-accent/10 text-accent font-semibold' : 'bg-bg-card text-gray-200')}>
           {p.name}
         </td>
         {cols.map(c => {
@@ -514,7 +514,7 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
             : 'text-gray-200';
           return (
             <td key={c.key} title={cell ? `${cell.year}` : 'no data'}
-              className={clsx('text-right px-2 py-1.5 tabular-nums whitespace-nowrap', color)}>
+              className={clsx('text-right px-1.5 py-1 tabular-nums whitespace-nowrap', color)}>
               {val == null ? '—' : fmtImf(val, c.unit)}
             </td>
           );
@@ -530,15 +530,15 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
         <span className="text-[10px] text-gray-500">Latest available · click a row to open · click a column to sort</span>
       </div>
       <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
-        <table className="w-full text-xs border-separate border-spacing-0 min-w-[1160px]">
+        <table className="w-full text-[11px] border-separate border-spacing-0 min-w-[900px]">
           <thead>
             <tr>
-              <th className="text-left font-semibold text-gray-400 px-2 py-1.5 sticky left-0 bg-bg-card z-10">Economy</th>
+              <th className="text-left font-semibold text-gray-400 px-1.5 py-1 sticky left-0 bg-bg-card z-10">Economy</th>
               {cols.map(c => {
                 const active = sort?.key === c.key;
                 return (
                   <th key={c.key} onClick={() => toggleSort(c.key)}
-                    className={clsx('text-right font-semibold px-2 py-1.5 whitespace-nowrap cursor-pointer select-none hover:text-gray-200',
+                    className={clsx('text-right font-semibold px-1.5 py-1 whitespace-nowrap cursor-pointer select-none hover:text-gray-200',
                       active ? 'text-accent' : 'text-gray-400')}>
                     {c.label}{active ? (sort!.dir === 'desc' ? ' ↓' : ' ↑') : ''}
                   </th>
@@ -552,7 +552,7 @@ function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
               : IMF_SUMMARY_GROUPS.map(group => (
                 <Fragment key={group.region}>
                   <tr>
-                    <td colSpan={cols.length + 1} className="px-2 pt-2.5 pb-1 text-[10px] uppercase tracking-wider text-gray-600 font-semibold">
+                    <td colSpan={cols.length + 1} className="px-1.5 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-gray-600 font-semibold">
                       {group.region}
                     </td>
                   </tr>
