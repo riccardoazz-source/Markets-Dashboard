@@ -9,8 +9,11 @@ import {
   ModelInput, realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram,
 } from './rotationModel';
 import { computeWeeklyADX } from './adx';
+import { dalioVolumeRatios } from './dalioModel';
 
-export type Hist = { date: string; close: number; high?: number; low?: number }[];
+// Yahoo daily bars include volume when the ticker reports it — carried through so
+// the Dalio EMS volume ratios (M31) are computable at any as-of date.
+export type Hist = { date: string; close: number; high?: number; low?: number; volume?: number }[];
 export interface BtMeta { symbol: string; name: string; group: string }
 export type BtInput = ModelInput & { name: string; group: string };
 
@@ -53,6 +56,26 @@ export function pos52wAtDate(history: Hist, dateStr: string): number | null {
   return Math.max(0, Math.min(100, ((cur - lo) / (hi - lo)) * 100));
 }
 
+// 52-week HIGH as of a past date (trailing 365 calendar days) — the Dalio C gate's
+// HighDist input (M31). Same window as pos52wAtDate, raw high instead of position.
+export function high52wAtDate(history: Hist, dateStr: string): number | null {
+  const d = new Date(dateStr); d.setDate(d.getDate() - 365);
+  const cutoff = d.toISOString().slice(0, 10);
+  let hi = -Infinity, n = 0;
+  for (const p of history) {
+    if (p.date >= cutoff && p.date <= dateStr) { n++; if (p.close > hi) hi = p.close; }
+  }
+  return n >= 2 ? hi : null;
+}
+
+// 20 TRADING-day return (bar-count, not calendar) from closes up to the as-of date.
+export function r20AtDate(closes: number[]): number | null {
+  if (closes.length < 21) return null;
+  const cur = closes[closes.length - 1];
+  const past = closes[closes.length - 21];
+  return past > 0 ? (cur / past - 1) * 100 : null;
+}
+
 // Build the model inputs for every asset AS OF a past date — identical math to the
 // live backtest route. No forward data is read, so it is a faithful reproduction.
 export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, asOfDate: Date): BtInput[] {
@@ -84,6 +107,10 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
       macdHist: macdHistogram(closesAsOf),
       sma200w: null,
       volRatio: null,
+      // M31 Dalio EMS inputs — same as-of window, no look-ahead.
+      rvol5: dalioVolumeRatios(upToAsOf.map(p => p.volume)).rvol5,
+      high52w: high52wAtDate(h, asOf),
+      r20: r20AtDate(upToAsOf.map(p => p.close)),
       adx: adxState?.adx ?? null,
       adxSlope: adxState?.adxSlope ?? null,
       plusDI: adxState?.plusDI ?? null,

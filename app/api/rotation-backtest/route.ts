@@ -4,6 +4,7 @@ import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { scoreRotation, selectPicks, ACCEL_LIMIT, realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
 import { computeWeeklyADX } from '@/lib/adx';
+import { dalioVolumeRatios } from '@/lib/dalioModel';
 
 export const runtime = 'edge';
 
@@ -61,7 +62,9 @@ interface CacheEntry { data: Payload; ts: number }
 const cache = new Map<string, CacheEntry>();
 const TTL = 10 * 60_000;
 
-type Hist = { date: string; close: number; high?: number; low?: number }[];
+// Yahoo daily bars include volume when the ticker reports it — carried through so
+// the Dalio EMS volume ratios (M31) are computable at any as-of date, no look-ahead.
+type Hist = { date: string; close: number; high?: number; low?: number; volume?: number }[];
 
 // Last close at or before a date string (history is ascending by date).
 function priceAsOf(history: Hist, dateStr: string): number | null {
@@ -114,6 +117,26 @@ function pos52wAtDate(history: Hist, dateStr: string): number | null {
   return Math.max(0, Math.min(100, ((cur - lo) / (hi - lo)) * 100));
 }
 
+// 52-week HIGH as of a past date (trailing 365 calendar days) — the Dalio C gate's
+// HighDist input. Same window as pos52wAtDate, but the raw high instead of the position.
+function high52wAtDate(history: Hist, dateStr: string): number | null {
+  const d = new Date(dateStr); d.setDate(d.getDate() - 365);
+  const cutoff = d.toISOString().slice(0, 10);
+  let hi = -Infinity, n = 0;
+  for (const p of history) {
+    if (p.date >= cutoff && p.date <= dateStr) { n++; if (p.close > hi) hi = p.close; }
+  }
+  return n >= 2 ? hi : null;
+}
+
+// 20 TRADING-day return (bar-count, not calendar) from closes up to the as-of date.
+function r20FromCloses(closes: number[]): number | null {
+  if (closes.length < 21) return null;
+  const cur = closes[closes.length - 1];
+  const past = closes[closes.length - 21];
+  return past > 0 ? (cur / past - 1) * 100 : null;
+}
+
 function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: string, key: string, label: string, days: number): Scenario {
   const asOfDate = subDays(new Date(), days);
   const asOf = fmt(asOfDate);
@@ -145,7 +168,11 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
       rsi: rsiWilder(closesAsOf),
       macdHist: macdHistogram(closesAsOf),
       sma200w: null as number | null, // 200W SMA not computed in backtest (too expensive)
-      volRatio: null as number | null, // volume history not available in backtest
+      volRatio: null as number | null, // 20d-vs-latest volume ratio still unused by the score
+      // M31 Dalio EMS inputs — computed from the SAME as-of window (no look-ahead).
+      rvol5: dalioVolumeRatios(upToAsOf.map(p => p.volume)).rvol5,
+      high52w: high52wAtDate(h, asOf),
+      r20: r20FromCloses(closesAsOf),
       adx: adxState?.adx ?? null,
       adxSlope: adxState?.adxSlope ?? null,
       plusDI: adxState?.plusDI ?? null,

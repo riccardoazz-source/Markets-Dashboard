@@ -1110,7 +1110,8 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   {
     id: 24,
     name: 'Restart from the M19 peak — keep the gold-rush fix, unlock the sleeve for the optimizer (RESTORED as live)',
-    current: true,
+    current: false,
+    recordedAt: '2026-07-11',
     formula: [
       'Score = 0.34·ACC + vqW·VQ + 0.08·TRD + 0.08·CYC + 0.12·LEAD + 0.04·REG',
       '        + 0.04·VOL + 0.04·MACD − wEXT·EXT − wOH·OH + REBOUND   (− LOWVQ, now OFF)',
@@ -1152,7 +1153,10 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       'Everything else unchanged: M16 EXT fix (max(r1m,0)), sleeve (pos52w≥15, MA200≥0.70,',
       '8 slots), ACCEL_MAX=25, TRD r1m-primary, LEAD equal-weight, VQ 0.26 tilt.',
     ],
-    results: {}, // M24 is the live model again (byte-identical) — auto-filled from the live backtest run
+    // Never frozen with numbers of its own: M24 is byte-identical to M19 + the gold
+    // fix (see M19's frozen results; last live reliability 34.7 per the M30 notes).
+    // Flip MODEL_MODE back to 'rotation' and rerun the backtest to regenerate.
+    results: {},
   },
   {
     id: 25,
@@ -1483,5 +1487,39 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       '1y': { basket:  59.9, spx: 20.2, picks: 25, winnerHits:  9, winnerTotal: 25 },
       '5y': { basket: 120.3, spx: 71.9, picks: 25, winnerHits:  8, winnerTotal: 25 },
     },
+  },
+  {
+    id: 31,
+    name: 'Dalio EMS — Early-Momentum Composite Score (volume flow × momentum × cycle gate)',
+    current: true,
+    formula: [
+      'EMS = C · (0.45·V + 0.45·M)      — a transaction-flow philosophy, NOT a pillar remix',
+      '',
+      'V = max(0, VolRatio − 1.1)        VolRatio = 5d ADV ÷ 60d ADV, 5-day smoothed',
+      '    Missing volume (futures, indices, some foreign listings) → VolRatio = 1.0',
+      '    NEUTRAL baseline per the directive, so they rank on momentum + cycle gate.',
+      'M = pctile(Ret20 · I(Ret20 > 0))  Ret20 = 20 TRADING-day return; percentile among',
+      '    positive-momentum assets (normalized per the directive — raw returns are not',
+      '    comparable across asset classes). Ret20 ≤ 0 → M = 0.',
+      'C = 1 if (within 5% of the 52w high AND ≤ 15% above the 200D MA)   — healthy momentum',
+      '      OR (> 5% below the 52w high AND VolRatio < 1.2)              — normal flow',
+      '    else 0.  A modest gap from the high with solid volume = healthy transaction',
+      '    flow; a LARGE gap from the high WITH a volume surge = potential blow-off → dropped.',
+      '',
+      'Pre-filter: RelStr = Ret20 − ^GSPC Ret20 > 0 (HARD, per the directive) — only names',
+      '    truly beating the market enter the ranking; RelStr is then the context column.',
+      'Ranking: drop C = 0 / RelStr ≤ 0 / EMS = 0 · sort desc EMS · ties by VolRatio, then Ret20.',
+      'Picks: every qualifying name up to 25 — NO pre-breakout sleeve, no other pillars.',
+      '    The list is as long as the market offers genuine early momentum.',
+      '',
+      'Cycle phase per asset (the "where is it in the cycle" read, shown in the Dalio panel):',
+      '    bottoming → recovering → early trend → stretched → blow-off  (from DistMA/HighDist/VolRatio)',
+      '',
+      'Selectable like M26/M27: MODEL_MODE = \'dalio\' in lib/rotationModel.ts; flip back to',
+      '\'rotation\' to restore M24 exactly. Backtest now feeds real historical volume into the',
+      'as-of inputs (rvol5 / high52w / r20 in backtestCore + the backtest route), no look-ahead.',
+      'SeasonFactor deliberately deferred. ⭐ macro pins are display-only (not in the formula).',
+    ],
+    results: {}, // auto-filled from the live backtest run — this is the current model
   },
 ];

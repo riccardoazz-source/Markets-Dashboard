@@ -149,6 +149,8 @@
  * genuine secular trend (low stretch) is untouched.
  */
 
+import { DALIO_W_V, DALIO_W_M, DALIO_BENCHMARK, dalioVSub, dalioCGate } from './dalioModel';
+
 // ── M28 — "Stage-2 RS Leader" (reality-derived: O'Neil/IBD + Minervini/Weinstein) ──
 // Every prior backbone (ACC pace-ladder) was a bespoke construct. M28 rebuilds the
 // backbone on the frameworks that were themselves DERIVED FROM STUDYING REAL
@@ -413,8 +415,11 @@ export const PRE_SCORE_VQ  = 0.35; // sleeve RANKING weight on upside-vol engine
 //     (consolidation / false-breakout zone) → not tradable.
 // Switch to 'rotation' to restore M25 (or revert the commit). Constants are named so
 // they could later be exposed to the optimizer, but for now they follow Gemini's spec.
-export type ModelMode = 'rotation' | 'gemini' | 'academic';
-export const MODEL_MODE: ModelMode = 'rotation'; // back to M24 (M19 + gold): the academic (M27) & Gemini (M26) experiments underperformed on capture
+export type ModelMode = 'rotation' | 'gemini' | 'academic' | 'dalio';
+// M31 — the Dalio EMS (Early-Momentum Composite Score) is the live model, selectable
+// like the Gemini (M26) and academic (M27) experiments so we can A/B it against M24
+// and revert exactly (flip this flag back to 'rotation'). See lib/dalioModel.ts.
+export const MODEL_MODE: ModelMode = 'dalio';
 
 export const GEMINI_ADX_LIMBO   = 20;  // ADX below this = consolidation → avoid (weekly context filter)
 export const GEMINI_ADX_BIRTH   = 25;  // ADX breaking up through this = momentum "just born" → buyable
@@ -446,6 +451,11 @@ export interface ModelInput {
   adxSlope?: number | null; // recent ADX slope (>0 building, <0 exhausting)
   plusDI?: number | null;   // weekly +DI (up-pressure)
   minusDI?: number | null;  // weekly −DI (down-pressure)
+  // ── M31 "Dalio EMS" inputs (see lib/dalioModel.ts) ─────────────────────────
+  // Only the dalio scoring mode reads these; other modes ignore them.
+  rvol5?: number | null;    // 5d ADV / 60d ADV, 5-day smoothed (VolRatio; null → 1.0 neutral)
+  high52w?: number | null;  // 52-week high (feeds the C gate's HighDist)
+  r20?: number | null;      // 20 TRADING-day return % (Ret20; r1m ≈ 21 td is the fallback)
 }
 
 export interface ScoredItem<T extends ModelInput> {
@@ -578,6 +588,11 @@ export interface RotationFeature<T extends ModelInput> {
   pVQ: number; pTrend: number; pCyc: number; pPos: number; pTq: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
   pMom: number; pVolLow: number; // M27 academic composite: 12-1 momentum & low-vol percentiles
   pRS: number; // M28 — IBD Relative Strength blend percentile (0.4·r3m + 0.2·r6m + 0.2·r1y, renormalised over available horizons)
+  // M31 — Dalio EMS pieces (only the dalio mode reads them; see lib/dalioModel.ts)
+  dalioV: number;           // max(0, VolRatio − 1.1); 0 when volume missing (neutral 1.0)
+  pDalioM: number;          // percentile of the POSITIVE 20d return among positive-momentum assets (M sub-score)
+  dalioC: 0 | 1;            // dual-branch cycle gate (0 when price data missing)
+  dalioRs: number | null;   // Ret20 − benchmark Ret20 (pp) — the hard RelStr pre-filter
   stageFactor: number; // M29 — 0..1 Stage-2 gate on the RS credit (near-high × above-MA200, graduated Minervini template)
   overheat: number; oversold: number;
   isCyc: boolean; isCommod: boolean; structuralUptrend: boolean;
@@ -632,6 +647,18 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
   };
   const byRsAsc  = [...valid].sort((a, b) => rsRawOf(a) - rsRawOf(b));
   const rankRsAsc = new Map(byRsAsc.map((r, i) => [r.symbol, i]));
+  // ── M31 Dalio EMS inputs (param-independent) ─────────────────────────────
+  // M sub-score = PercentileRank of the POSITIVE 20-trading-day return (final
+  // directive: normalize — raw returns are not comparable across classes). The
+  // percentile is taken among positive-momentum assets only; Ret20 ≤ 0 → M = 0.
+  // r1m (~21 trading days) is the fallback when a caller doesn't supply r20.
+  const dalioRetOf = (i: ModelInput): number | null => i.r20 ?? i.r1m ?? null;
+  const validDalioPos = valid.filter(i => (dalioRetOf(i) ?? 0) > 0);
+  const nDalioPos     = validDalioPos.length;
+  const byDalioMAsc   = [...validDalioPos].sort((a, b) => (dalioRetOf(a) ?? 0) - (dalioRetOf(b) ?? 0));
+  const rankDalioMAsc = new Map(byDalioMAsc.map((r, i) => [r.symbol, i]));
+  const dalioBenchItem = items.find(i => i.symbol === DALIO_BENCHMARK);
+  const dalioBenchRet  = dalioBenchItem ? dalioRetOf(dalioBenchItem) : null;
   // sLowVol: pctile(-vol) — the low-volatility anomaly (Ang-Hodrick-Xing-Zhang 2006;
   // Frazzini-Pedersen 2014). Rank on -vol ascending (= vol DESCENDING) so the LOWEST-vol
   // name gets the highest rank (0..n-1 → high percentile). i.e. low vol = high sLowVol.
@@ -805,6 +832,16 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const isCyc = isCyclical(item);
     const isCommod = isCommodity(item);
 
+    // ── M31 Dalio EMS pieces (see lib/dalioModel.ts for the directive text) ──
+    const dRet = dalioRetOf(item);
+    const pDalioM = dRet != null && dRet > 0 && nDalioPos > 0
+      ? toP(rankDalioMAsc.get(item.symbol) ?? 0, nDalioPos)
+      : 0;
+    const dalioV = dalioVSub(item.rvol5);
+    const dalioParts = dalioCGate(item.price, item.ma200, item.high52w, item.rvol5);
+    const dalioC: 0 | 1 = dalioParts?.C ?? 0;
+    const dalioRs = dRet != null && dalioBenchRet != null ? dRet - dalioBenchRet : null;
+
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
     // aRecent > 0 (last month faster than the quarter → acceleration signal).
     // aBuild (quarter vs half-year) is intentionally NOT in the hard gate because:
@@ -842,6 +879,7 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
       stretch,
       pVQ, pTrend, pCyc, pPos, pTq, lead, reg, pVol, pMacd, pExt,
       pMom, pVolLow, pRS, stageFactor,
+      dalioV, pDalioM, dalioC, dalioRs,
       overheat: hasReturns ? overheat : 0, oversold,
       isCyc, isCommod, structuralUptrend,
       passesGate,
@@ -936,6 +974,26 @@ export function scoreFromFeatures<T extends ModelInput>(
 ): ScoredItem<T>[] {
   const P: ModelParams = params ? { ...DEFAULT_PARAMS, ...params } : DEFAULT_PARAMS;
   return features.map(f => {
+    // ── M31 Dalio EMS mode: EMS = C · (0.45·V + 0.45·M), RelStr > 0 hard pre-filter.
+    // Eligible names (passesGate) get 1 + EMS so they rank strictly above everyone;
+    // the rest keep a damped continuous score so the quadrant stays fully populated.
+    // Tie-breaks (VolRatio, then Ret20 — the written order) fold in as epsilon terms.
+    // No sleeve, no other pillars: the formula is exactly the directive.
+    if (MODEL_MODE === 'dalio') {
+      const base = DALIO_W_V * f.dalioV + DALIO_W_M * f.pDalioM;
+      const ret = f.item.r20 ?? f.item.r1m ?? 0;
+      const eligible = f.hasReturns && f.dalioC === 1 && base > 0
+        && f.item.symbol !== DALIO_BENCHMARK
+        && (f.dalioRs == null || f.dalioRs > 0);
+      const tie = 1e-4 * (f.item.rvol5 ?? 1) + 1e-7 * Math.max(-100, ret);
+      const score = !f.hasReturns ? -1 : eligible ? 1 + base + tie : 0.4 * base + tie;
+      return {
+        item: f.item, score, accel: f.accel, accPctile: f.accPctile,
+        aRecent: f.aRecent, aBuild: f.aBuild, aLong: f.aLong,
+        stretch: f.stretch, passesGate: eligible, passesPreBreakout: false,
+        preScore: 0, rsi: f.rsi, overheat: f.overheat,
+      };
+    }
     // ── M27 Academic mode: equal-weight 1/N composite of cited factor percentiles.
     // Disables the sleeve; score is the mean of available academic legs (see academicScore).
     if (MODEL_MODE === 'academic') {
@@ -1046,6 +1104,15 @@ export function selectPicks<T extends ModelInput>(
   maxTotal = ACCEL_MAX,
   preSlots = PRE_BREAKOUT_SLOTS,
 ): ScoredItem<T>[] {
+  // M31 Dalio ranking rule: DROP C = 0 / RelStr ≤ 0 / EMS = 0 names (passesGate
+  // encodes all three) — the list is as long as the market offers genuine early
+  // momentum, and there is no pre-breakout sleeve in this philosophy.
+  if (MODEL_MODE === 'dalio') {
+    return scored
+      .filter(s => s.score > -1 && s.passesGate)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxTotal);
+  }
   const pre = scored
     .filter(s => s.passesPreBreakout)
     .sort((a, b) => b.preScore - a.preScore)

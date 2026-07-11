@@ -5,14 +5,14 @@ import clsx from 'clsx';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import {
   rankEms, DalioInput, EmsEval, CyclePhase,
-  EMS_W_V, EMS_W_M, EMS_W_C, EMS_VOL_FLOOR, DALIO_BENCHMARK,
+  DALIO_W_V, DALIO_W_M, DALIO_VOL_FLOOR, DALIO_VOL_SPIKE, DALIO_BENCHMARK,
 } from '@/lib/dalioModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Dalio EMS panel — the Early-Momentum Composite Score, rendered side-by-side
-// with the quantitative model (which stays untouched). Fully removable:
-// delete this file + lib/dalioModel.ts + the render line in RotationSection
-// (the rvol5/rvol20/r20 route fields are harmless extras).
+// Dalio EMS panel — the transparency view of the LIVE model (M31): the same
+// formula that drives the Accelerating list, the Quadrant Y-axis and the
+// backtest (MODEL_MODE = 'dalio' in lib/rotationModel.ts). This panel shows the
+// full V / M / C decomposition and the cycle phase for every asset.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const fmtX = (v: number | null) => (v == null ? '—' : `${v.toFixed(2)}×`);
@@ -28,10 +28,10 @@ const PHASE_STYLE: Record<CyclePhase, string> = {
 };
 const PHASE_HINT: Record<CyclePhase, string> = {
   'bottoming': 'Below the 200-day MA — early/bottoming part of the cycle',
-  'recovering': 'Above trend but still >5% below the 52-week high',
-  'early trend': 'Above trend (<15% over the 200D MA) and within 5% of the 52w high — the C = 1 zone',
-  'stretched': '15–20% above the 200-day MA — late-cycle warning zone',
-  'blow-off': '>20% above the 200-day MA — blow-off risk',
+  'recovering': 'Above trend, >5% below the 52-week high, volume normal',
+  'early trend': 'Within 5% of the 52w high and ≤15% above the 200D MA — healthy momentum (C = 1)',
+  'stretched': '15–20% above the 200-day MA near the high — late-cycle warning zone',
+  'blow-off': '>20% above the 200D MA, or >5% below the high on a volume spike — over-extension',
 };
 
 export function DalioPanel({ items, pins, groupFilter }: {
@@ -42,8 +42,8 @@ export function DalioPanel({ items, pins, groupFilter }: {
   const [open, setOpen] = useState(false);
   const [showRest, setShowRest] = useState(false);
 
-  // Score the WHOLE universe (the benchmark RS context needs everything),
-  // then filter what is displayed by the active group.
+  // Score the WHOLE universe (the M percentile and the RelStr benchmark need
+  // everything), then filter what is displayed by the active group.
   const scored = useMemo(() => rankEms(items, pins), [items, pins]);
   const visible = groupFilter === 'all' ? scored : scored.filter(e => e.group === groupFilter);
   const ranked = visible.filter(e => e.ranked);
@@ -62,29 +62,30 @@ export function DalioPanel({ items, pins, groupFilter }: {
       <td className="px-2 py-1.5 whitespace-nowrap">
         <span className="text-xs font-medium text-gray-200">{e.name}</span>
         {e.macroFlagged && <Star size={10} className="inline ml-1 -mt-0.5 fill-amber-300 text-amber-300" />}
-        <span className="block text-[9px] text-gray-600">{e.group}{e.hasVolume ? '' : ' · momentum-only (no volume → V = 0)'}</span>
+        <span className="block text-[9px] text-gray-600">{e.group}{e.hasVolume ? '' : ' · no volume → VolRatio 1.0 neutral'}</span>
       </td>
-      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums font-semibold', e.ems == null ? 'text-gray-600' : e.ems > 0.1 ? 'text-green-300' : 'text-gray-300')}>
+      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums font-semibold', e.ems == null ? 'text-gray-600' : e.ems > 0.2 ? 'text-green-300' : 'text-gray-300')}>
         {e.ems == null ? '—' : e.ems.toFixed(3)}
       </td>
       <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', e.V > 0 ? 'text-green-400' : 'text-gray-400')}
-        title={`V = max(0, VolRatio − ${EMS_VOL_FLOOR}) = ${e.V.toFixed(3)}`}>
+        title={`V = max(0, VolRatio − ${DALIO_VOL_FLOOR}) = ${e.V.toFixed(3)}`}>
         {fmtX(e.volRatio)}
       </td>
       <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(e.ret20))}
-        title={`M = ${e.M.toFixed(3)}`}>
+        title={`M = percentile of the positive 20d return = ${e.M.toFixed(2)}`}>
         {fmtPct(e.ret20)}
       </td>
       <td className={clsx('px-2 py-1.5 text-center text-xs tabular-nums', e.C === 1 ? 'text-green-400 font-semibold' : e.C === 0 ? 'text-red-400' : 'text-gray-600')}>
         {e.C ?? '—'}
       </td>
-      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', e.distMA != null && e.distMA >= 0.15 ? (e.distMA > 0.20 ? 'text-red-400' : 'text-amber-400') : 'text-gray-400')}>
+      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', e.distMA != null && e.distMA > 0.15 ? (e.distMA > 0.20 ? 'text-red-400' : 'text-amber-400') : 'text-gray-400')}>
         {e.distMA == null ? '—' : fmtPct(e.distMA * 100, 0)}
       </td>
       <td className="px-2 py-1.5 text-right text-xs tabular-nums text-gray-400">
         {e.highDist == null ? '—' : `${(e.highDist * 100).toFixed(1)}%`}
       </td>
-      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(e.rs20))}>
+      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(e.rs20))}
+        title={`Hard pre-filter: RelStr > 0 vs ${DALIO_BENCHMARK} required to enter the ranking`}>
         {e.rs20 == null ? '—' : `${e.rs20 >= 0 ? '+' : ''}${e.rs20.toFixed(1)}pp`}
       </td>
       <td className="px-2 py-1.5 text-[10px] whitespace-nowrap">
@@ -101,44 +102,44 @@ export function DalioPanel({ items, pins, groupFilter }: {
         className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-bg-hover/20 transition text-left">
         <div className="flex items-center gap-2">
           {open ? <ChevronDown size={14} className="text-gray-500" /> : <ChevronRight size={14} className="text-gray-500" />}
-          <span className="text-sm font-semibold text-sky-300">🌊 Dalio EMS — Early-Momentum Score</span>
+          <span className="text-sm font-semibold text-sky-300">🌊 Dalio EMS — the live model (M31)</span>
           <span className="text-[10px] text-gray-500 bg-bg-input px-2 py-0.5 rounded-full border border-border">
             {ranked.length} ranked
           </span>
         </div>
-        <span className="text-[10px] text-gray-600 hidden sm:inline">EMS = {EMS_W_V}·V + {EMS_W_M}·M + {EMS_W_C}·C — volume surge × momentum × cycle gate</span>
+        <span className="text-[10px] text-gray-600 hidden sm:inline">EMS = C · ({DALIO_W_V}·V + {DALIO_W_M}·M) — volume flow × momentum × cycle gate</span>
       </button>
 
       {open && (
         <div className="px-3 pb-3 space-y-2">
           <p className="text-[10px] text-gray-500 leading-snug px-1">
-            V = max(0, VolRatio − {EMS_VOL_FLOOR}) where VolRatio = 5d ADV ÷ 60d ADV (5-day smoothed) ·
-            M = 20d return if &gt; 0 ·
-            C = 1 when &lt;15% above the 200D MA <em>and</em> within 5% of the 52-week high.
-            Assets with C = 0 are dropped from the ranking; ties break by VolRatio, then 20d return.
-            Cycle phase per asset: bottoming → recovering → early trend → stretched → blow-off.
+            V = max(0, VolRatio − {DALIO_VOL_FLOOR}), VolRatio = 5d ADV ÷ 60d ADV (5-day smoothed; missing volume → 1.0 neutral) ·
+            M = percentile of the positive 20d return ·
+            C = 1 when <em>within 5% of the 52w high and ≤15% above the 200D MA</em> (healthy momentum) or <em>&gt;5% below the high with VolRatio &lt; {DALIO_VOL_SPIKE}</em> (normal flow); a large gap from the high WITH a volume surge = potential blow-off → C = 0.
+            Hard pre-filter: RelStr vs {DALIO_BENCHMARK} &gt; 0. Ties break by VolRatio, then 20d return.
+            This IS the live rotation model — the same ranking drives the Accelerating list, the Quadrant and the Backtest.
           </p>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[820px]">
+            <table className="w-full text-sm min-w-[860px]">
               <thead>
                 <tr className="text-[10px] text-gray-600 font-medium">
                   <th className="w-8 px-2 py-1.5 text-left">#</th>
                   <th className="px-2 py-1.5 text-left">Asset</th>
-                  <th className="px-2 py-1.5 text-right" title={`EMS = ${EMS_W_V}·V + ${EMS_W_M}·M + ${EMS_W_C}·C`}>EMS</th>
+                  <th className="px-2 py-1.5 text-right" title={`EMS = C · (${DALIO_W_V}·V + ${DALIO_W_M}·M)`}>EMS</th>
                   <th className="px-2 py-1.5 text-right" title="5-day ADV ÷ 60-day baseline, 5-day smoothed (feeds V)">VolRatio</th>
-                  <th className="px-2 py-1.5 text-right" title="20 trading-day price return (feeds M)">20d ret</th>
-                  <th className="px-2 py-1.5 text-center" title="Cycle gate: 1 when <15% above the 200D MA and within 5% of the 52w high">C</th>
+                  <th className="px-2 py-1.5 text-right" title="20 trading-day price return (feeds M as a percentile)">20d ret</th>
+                  <th className="px-2 py-1.5 text-center" title="Dual-branch cycle gate — see the formula line above">C</th>
                   <th className="px-2 py-1.5 text-right" title="Distance from the 200-day moving average (DistMA)">vs 200D</th>
                   <th className="px-2 py-1.5 text-right" title="Distance from the 52-week high (HighDist)">vs 52w high</th>
-                  <th className="px-2 py-1.5 text-right" title={`20d return minus ${DALIO_BENCHMARK} (context only — not in the EMS formula)`}>RS vs S&P</th>
+                  <th className="px-2 py-1.5 text-right" title={`20d return minus ${DALIO_BENCHMARK} — HARD pre-filter (> 0) + tie-break`}>RelStr</th>
                   <th className="px-2 py-1.5 text-left">Cycle phase</th>
                 </tr>
               </thead>
               <tbody>
                 {ranked.length === 0 && (
                   <tr><td colSpan={10} className="px-3 py-4 text-center text-xs text-gray-600 border-t border-border/60">
-                    No asset currently passes the cycle gate with a positive signal.
+                    No asset currently passes the cycle gate + RelStr pre-filter with a positive signal.
                   </td></tr>
                 )}
                 {ranked.map((e, i) => row(e, i, false))}
@@ -151,16 +152,16 @@ export function DalioPanel({ items, pins, groupFilter }: {
           </button>
           {showRest && (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[820px]">
+              <table className="w-full text-sm min-w-[860px]">
                 <tbody>{rest.map((e, i) => row(e, i, true))}</tbody>
               </table>
             </div>
           )}
 
           <p className="text-[10px] text-gray-600 leading-snug px-1">
-            Weekly/monthly re-rank recommended (the score updates live here). ⭐ = human macro flag (display only — not in the formula).
-            Assets without reliable volume (futures, indices, some foreign listings) are scored with V = 0, i.e. on momentum + cycle gate only.
-            RS vs {DALIO_BENCHMARK} is shown for context but is not part of the written EMS formula. SeasonFactor deliberately deferred.
+            Assets without reliable volume (futures, indices, some foreign listings) carry the NEUTRAL VolRatio 1.0 per the directive —
+            they rank on momentum + cycle gate and are never penalised for missing data. ⭐ = human macro flag (display only — not in the formula).
+            SeasonFactor deliberately deferred. Run the Backtest panel to compare M31 against the previous models.
           </p>
         </div>
       )}
