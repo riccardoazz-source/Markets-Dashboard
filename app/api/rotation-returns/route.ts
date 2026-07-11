@@ -29,6 +29,10 @@ interface RollingReturn {
   adxSlope: number | null; // weekly ADX slope (M26)
   plusDI: number | null;   // weekly +DI (M26)
   minusDI: number | null;  // weekly −DI (M26)
+  // ── Dalio early-momentum inputs (volume vs its own baseline) ──
+  rvol5: number | null;    // 5-day SMA of (ADV5 / ADV60) — smoothed short-window volume ratio
+  rvol20: number | null;   // ADV20 / ADV60 — raw medium-window volume ratio
+  r20: number | null;      // 20 TRADING-day price return (%) — Dalio's primary momentum filter
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -90,7 +94,51 @@ function range52w(history: { date: string; close: number }[]): { high52w: number
   return { high52w: hi, low52w: lo, pos52w: pos };
 }
 
+// ── Dalio volume ratios ──────────────────────────────────────────────────────
+// ADV over the trailing n days ending at index `end` (inclusive). Null when the
+// window has too few valid (positive) volume days to be trustworthy.
+function advAt(vols: (number | null | undefined)[], end: number, n: number): number | null {
+  if (end + 1 < n) return null;
+  let sum = 0, cnt = 0;
+  for (let i = end - n + 1; i <= end; i++) {
+    const v = vols[i];
+    if (v != null && v > 0) { sum += v; cnt++; }
+  }
+  // Require at least 2/3 of the window to have real volume (index tickers often report 0).
+  return cnt >= Math.ceil((2 * n) / 3) ? sum / cnt : null;
+}
+
+// Dalio spec: Ratio_t = RecentADV_t / BaselineADV60_t computed per day, then the
+// SHORT (5d) ratio is smoothed with a 5-day SMA; the MEDIUM (20d) ratio stays raw.
+function dalioVolumeRatios(history: { volume?: number }[]): { rvol5: number | null; rvol20: number | null } {
+  const vols = history.map(p => p.volume);
+  const last = vols.length - 1;
+  if (last < 64) return { rvol5: null, rvol20: null };
+  // 5-day SMA of the daily (ADV5/ADV60) ratio.
+  const ratios: number[] = [];
+  for (let k = 0; k < 5; k++) {
+    const end = last - k;
+    const a5 = advAt(vols, end, 5);
+    const a60 = advAt(vols, end, 60);
+    if (a5 != null && a60 != null && a60 > 0) ratios.push(a5 / a60);
+  }
+  const rvol5 = ratios.length >= 3 ? ratios.reduce((s, r) => s + r, 0) / ratios.length : null;
+  const a20 = advAt(vols, last, 20);
+  const a60 = advAt(vols, last, 60);
+  const rvol20 = a20 != null && a60 != null && a60 > 0 ? a20 / a60 : null;
+  return { rvol5, rvol20 };
+}
+
+// 20 TRADING-day return (Dalio's momentum filter) — bar-count based, not calendar.
+function r20Trading(history: { close: number }[]): number | null {
+  if (history.length < 21) return null;
+  const cur = history[history.length - 1].close;
+  const past = history[history.length - 21].close;
+  return past > 0 ? (cur / past - 1) * 100 : null;
+}
+
 function buildRow(symbol: string, history: { date: string; close: number; volume?: number; high?: number; low?: number }[]): RollingReturn {
+  const dalio = dalioVolumeRatios(history);
   const r = range52w(history);
   const adxState = computeWeeklyADX(history); // live weekly ADX (M26 Gemini model)
   return {
@@ -115,6 +163,9 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     adxSlope: adxState?.adxSlope ?? null,
     plusDI: adxState?.plusDI ?? null,
     minusDI: adxState?.minusDI ?? null,
+    rvol5: dalio.rvol5,
+    rvol20: dalio.rvol20,
+    r20: r20Trading(history),
   };
 }
 
