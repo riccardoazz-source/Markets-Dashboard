@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import {
   rankEms, DalioInput, EmsEval, CyclePhase,
-  DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_VOL_FLOOR, DALIO_DISTMA_MAX, DALIO_R2_MIN, DALIO_BENCHMARK,
+  DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_W_TREND, DALIO_VOL_FLOOR, DALIO_DISTMA_KNEE, DALIO_R2_MIN, DALIO_BENCHMARK,
 } from '@/lib/dalioModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,17 +84,15 @@ export function DalioPanel({ items, pins, groupFilter }: {
         title="R² of the trailing 12-month trend — a clean, durable trend (> 0.5) vs a spiky/volatile one">
         {e.r2_12m == null ? '—' : e.r2_12m.toFixed(2)}
       </td>
-      <td className={clsx('px-2 py-1.5 text-center text-xs tabular-nums', e.C === 1 ? 'text-green-400 font-semibold' : e.C === 0 ? 'text-red-400' : 'text-gray-600')}>
-        {e.C ?? '—'}
-      </td>
-      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', e.distMA != null && e.distMA > DALIO_DISTMA_MAX ? (e.distMA > 0.20 ? 'text-red-400' : 'text-amber-400') : 'text-gray-400')}>
+      <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', e.distMA != null && e.distMA > DALIO_DISTMA_KNEE ? (e.distMA > 0.20 ? 'text-red-400' : 'text-amber-400') : 'text-gray-400')}>
         {e.distMA == null ? '—' : fmtPct(e.distMA * 100, 0)}
       </td>
       <td className="px-2 py-1.5 text-center text-xs tabular-nums"
-        title={`brakes: Overheat (commodity) ${(e.overheat * 100).toFixed(0)}% · ExitFactor ${e.exitFactor.toFixed(2)}`}>
+        title={`brakes: blow-off decay ${e.decay.toFixed(2)}× · commodity overheat ${(e.overheat * 100).toFixed(0)}% · ExitFactor ${e.exitFactor.toFixed(2)}`}>
+        {e.decay < 1 && <span className="text-red-400">⤵</span>}
         {e.overheat > 0 && <span className="text-red-400">🔥</span>}
         {e.exitFactor < 1 && <span className="text-amber-400">↓</span>}
-        {e.overheat === 0 && e.exitFactor === 1 && <span className="text-gray-600">—</span>}
+        {e.decay === 1 && e.overheat === 0 && e.exitFactor === 1 && <span className="text-gray-600">—</span>}
       </td>
       <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(e.rs20))}
         title={`RelStr = 20d return − ${DALIO_BENCHMARK} — tie-break only in v3`}>
@@ -119,7 +117,7 @@ export function DalioPanel({ items, pins, groupFilter }: {
             {ranked.length} ranked
           </span>
         </div>
-        <span className="text-[10px] text-gray-600 hidden sm:inline">FinalScore = C·({DALIO_W_V}·V + {DALIO_W_M}·M + {DALIO_W_P}·Persist)·(1−0.5·Overheat)·ExitFactor</span>
+        <span className="text-[10px] text-gray-600 hidden sm:inline">Score = decay·({DALIO_W_V}·V + {DALIO_W_M}·M + {DALIO_W_P}·Persist)·(1−0.5·Overheat)·ExitFactor + {DALIO_W_TREND}·TrendQuality</span>
       </button>
 
       {open && (
@@ -128,9 +126,9 @@ export function DalioPanel({ items, pins, groupFilter }: {
             V = max(0, VolRatio − {DALIO_VOL_FLOOR}) (volume-blind → 0.2·range-expansion) ·
             M = 0.4·pctile(20d) + 0.3·pctile(3M) + 0.3·pctile(12M) return ·
             Persistence = pctile(20d ÷ 3M return) (acceleration) ·
-            C = 1 when <em>≤{(DALIO_DISTMA_MAX * 100).toFixed(0)}% above the 200D MA, 3-month return &gt; 0, and a clean 12-month trend (R² &gt; {DALIO_R2_MIN})</em>.
-            Commodity overheat (🔥) and an exhaustion ExitFactor (↓) then damp the score.
-            Ties break by VolRatio, then RelStr. This IS the live rotation model — same ranking as the Accelerating list, Quadrant and Backtest.
+            TrendQuality = min(1, R²/0.8) added with weight {DALIO_W_TREND}.
+            The blow-off <em>decay</em> (⤵) only bites when a name is &gt;{(DALIO_DISTMA_KNEE * 100).toFixed(0)}% above its MA <em>and</em> up &gt;30% in 20 days — no hard gate, so high-beta winners survive.
+            Commodity overheat (🔥) and an exhaustion ExitFactor (↓) also damp the score. Ranked globally by score; ties break by VolRatio, then RelStr.
           </p>
 
           <div className="overflow-x-auto">
@@ -143,18 +141,17 @@ export function DalioPanel({ items, pins, groupFilter }: {
                   <th className="px-2 py-1.5 text-right" title="Flow: VolRatio (5d÷60d ADV, smoothed) for volume assets; range-expansion proxy (~x) for volume-blind">V</th>
                   <th className="px-2 py-1.5 text-right" title="M = 0.4·pctile(20d) + 0.3·pctile(3M) + 0.3·pctile(12M) return">M</th>
                   <th className="px-2 py-1.5 text-right" title="Persistence = percentile of 20d÷3M return — acceleration (recent pace vs older)">Persist</th>
-                  <th className="px-2 py-1.5 text-right" title="R² of the trailing 12-month trend — clean/durable (> 0.5) vs spiky">R²</th>
-                  <th className="px-2 py-1.5 text-center" title="Cycle gate: DistMA ≤ 15% AND 3M return > 0 AND R² > 0.5">C</th>
+                  <th className="px-2 py-1.5 text-right" title="R² of the trailing 12-month trend — soft TrendQuality reward (not a gate)">R²</th>
                   <th className="px-2 py-1.5 text-right" title="Distance from the 200-day moving average (DistMA)">vs 200D</th>
-                  <th className="px-2 py-1.5 text-center" title="Brakes: 🔥 commodity overheat · ↓ exhaustion ExitFactor">brakes</th>
+                  <th className="px-2 py-1.5 text-center" title="Brakes: ⤵ blow-off decay (far above MA + Ret20>30%) · 🔥 commodity overheat · ↓ exhaustion ExitFactor">brakes</th>
                   <th className="px-2 py-1.5 text-right" title={`20d return minus ${DALIO_BENCHMARK} — tie-break only in v3`}>RelStr</th>
                   <th className="px-2 py-1.5 text-left">Cycle phase</th>
                 </tr>
               </thead>
               <tbody>
                 {ranked.length === 0 && (
-                  <tr><td colSpan={12} className="px-3 py-4 text-center text-xs text-gray-600 border-t border-border/60">
-                    No asset currently passes the cycle gate (≤15% over MA200, 3M &gt; 0, clean 12-month trend).
+                  <tr><td colSpan={11} className="px-3 py-4 text-center text-xs text-gray-600 border-t border-border/60">
+                    No asset currently has a positive EMS.
                   </td></tr>
                 )}
                 {ranked.map((e, i) => row(e, i, false))}

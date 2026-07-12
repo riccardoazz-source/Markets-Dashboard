@@ -1,46 +1,50 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// DALIO EMS v3 — the consolidated formula (Ray's final, untruncated block)
+// DALIO EMS v4 — un-biasing the guards (Ray's correction of the v3 collapse)
 //
-// Shared Dalio math, consumed by BOTH the live rotation model
-// (MODEL_MODE = 'dalio' in lib/rotationModel.ts) and the panel (DalioPanel.tsx).
+// v3 collapsed to reliability 0.0 (it bought world indices and MISSED every
+// individual winner) because two HARD gates — DistMA ≤ 0.15 and R2_12m > 0.5 —
+// structurally excluded high-beta stocks (they run far above their MA with a
+// spikier, lower-R² path) and admitted only smooth low-vol indices. Ray's fix:
+// SOFTEN both guards so the winners survive.
 //
-//   FinalScore = C · (0.45·V + 0.45·M + 0.10·Persistence) · (1 − 0.5·Overheat) · ExitFactor
+//   Score = decay · (0.45·V + 0.45·M + 0.10·Persistence) · (1 − 0.5·Overheat) · ExitFactor
+//           + 0.15·TrendQuality
 //
-//   Cycle gate (tightened — the v2 gate let late-cycle pops through):
-//     C = 1 if DistMA ≤ 0.15 AND Ret60 > 0 AND R2_12m > 0.5, else 0
-//       DistMA  = Price/MA200 − 1     → hard 15% distance cap (no blow-offs)
-//       Ret60   ≈ 3-month return > 0  → medium-term up
-//       R2_12m  = R² of the 12-month price trend > 0.5 → CLEAN trend, not a spike
+//   decay (replaces the DistMA hard cap — the #1 fix): only bites when the move
+//     is BOTH far above the MA AND a short-term blow-off:
+//       decay = exp(−k·max(0, DistMA − 0.15))  when Ret20 > 30%,  else 1   (k = 0.7)
+//     A stock 40% above its MA with modest recent gains keeps a full score;
+//     one 40% above AND up 35% in a month is damped.
 //
-//   Flow:  volume assets → V = max(0, VolRatio − 1.1)   VolRatio = 5d ADV ÷ 60d ADV
-//          volume-blind  → V = 0.20 · RangeExpansion    (proxy so the flow thesis lives on)
+//   TrendQuality (replaces the R² hard gate): a SOFT additive reward, not a gate:
+//       TrendQuality = min(1, R2_12m / 0.8)   ·   weight 0.15
+//     Clean trends get a boost, but a volatile winner is no longer disqualified.
 //
-//   Momentum blend (long-horizon-weighted — was short-heavy in v2):
-//          M = 0.4·pctile(Ret20) + 0.3·pctile(Ret60) + 0.3·pctile(Ret12m)   (20d / 3M / 12M)
+//   V           = max(0, VolRatio − 1.1)   (volume-blind → 0.20·RangeExpansion)
+//   M           = 0.4·pctile(Ret20) + 0.3·pctile(Ret60) + 0.3·pctile(Ret12m)
+//   Persistence = pctile(Ret20 / Ret60)   (acceleration)
+//   Overheat    = commodity late-cycle brake (Price/Median12m>1.5 & VolRatio>1.3)
+//   ExitFactor  = (Ret20 ≥ Ret60 ? 1 : 0.7) · (R2_12m < 0.5 ? 0.8 : 1)
 //
-//   Persistence = pctile( Ret20 / Ret60 ) for Ret60 > 0 — ACCELERATION (recent pace ≥ older
-//          pace = early-cycle mover). v2 used the inverse (rewarded deceleration); Ray flipped it.
-//
-//   Overheat (commodity late-cycle brake): for commodities only, when the price is far above
-//          its own 12-month median AND volume is surging:
-//          Overheat = clamp( min(1,(Price/Median12m − 1.5)/0.5) · (VolRatio − 1.3), 0, 1 )
-//          Score ×= (1 − 0.5·Overheat).
-//
-//   ExitFactor (exhaustion brake): 1 if Ret20 ≥ Ret60 else 0.7; ×0.8 more if R2_12m < 0.5.
-//
-//   Rank: FinalScore desc, tie-break VolRatio desc, then RelStr (Ret20 − ^GSPC) desc.
-//         (RelStr is now a TIE-BREAK only — Ray's final formula dropped the hard >0 pre-filter.)
-//
-//   Ret60 ≈ 3-month return, Ret12m ≈ 1-year return, R2_12m = trailing ~12-month trend R².
-//   Missing MA200 / R² (thin history) are NOT read as failing the gate. SeasonFactor deferred.
+//   Ranking is GLOBAL by Score (top N), tie-break VolRatio then RelStr. There is
+//   no hard cycle gate any more — the high-return winners rise to the top on M,
+//   which is what the capture objective needs. (Ray also proposed per-asset-class
+//   slots for portfolio diversification; deliberately NOT applied here because
+//   capping stock slots would cap the very stock-capture we optimise for — it is
+//   a risk-management overlay, not a capture booster. Easy to add if wanted.)
+//   Ret60 ≈ 3-month, Ret12m ≈ 1-year, R2_12m = trailing ~12-month trend R².
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const DALIO_W_V = 0.45;
 export const DALIO_W_M = 0.45;
 export const DALIO_W_P = 0.10;
+export const DALIO_W_TREND = 0.15;          // additive TrendQuality weight (soft R²)
 export const DALIO_VOL_FLOOR = 1.1;         // V = max(0, VolRatio − 1.1)
-export const DALIO_DISTMA_MAX = 0.15;       // C: ≤ 15% above the 200D MA (hard cap)
-export const DALIO_R2_MIN = 0.5;            // C + exit: clean 12-month trend threshold
+export const DALIO_DISTMA_KNEE = 0.15;      // decay knee: no penalty until >15% above MA
+export const DALIO_DECAY_K = 0.7;           // decay steepness
+export const DALIO_DECAY_RET = 30;          // decay only triggers when Ret20 > 30%
+export const DALIO_TREND_SCALE = 0.8;       // TrendQuality = min(1, R²/0.8)
+export const DALIO_R2_MIN = 0.5;            // exit-factor + phase threshold
 export const DALIO_MBLEND_W = [0.4, 0.3, 0.3] as const; // Ret20 / Ret60 / Ret12m
 export const DALIO_RANGE_BOOST = 0.20;      // volume-blind V = 0.20 · RangeExpansion
 export const DALIO_OVERHEAT_PRICE = 1.5;    // commodity overheat: Price/Median12m threshold
@@ -105,6 +109,22 @@ export function dalioVSub(volRatio: number | null | undefined, rangeExp: number 
   return DALIO_RANGE_BOOST * (rangeExp ?? 0);
 }
 
+// ── DistMA decay (Ray's fix #1 — soft, conditional blow-off brake) ───────────
+// Returns the multiplicative factor in (0, 1]. 1 unless the move is BOTH far
+// above the MA (>15%) AND a short-term blow-off (Ret20 > 30%). distMA passed
+// through for display; null MA → no penalty.
+export function dalioDecay(distMA: number | null, ret20Pct: number | null | undefined): number {
+  if (distMA == null || ret20Pct == null || ret20Pct <= DALIO_DECAY_RET) return 1;
+  const over = Math.max(0, distMA - DALIO_DISTMA_KNEE);
+  return over > 0 ? Math.exp(-DALIO_DECAY_K * over) : 1;
+}
+
+// ── TrendQuality (Ray's fix #2 — soft R² reward, not a gate) ─────────────────
+export function dalioTrendQuality(r2_12m: number | null | undefined): number {
+  if (r2_12m == null) return 0.5; // thin history → neutral, never disqualifying
+  return Math.min(1, Math.max(0, r2_12m) / DALIO_TREND_SCALE);
+}
+
 // ── Commodity overheat penalty (0–1) ─────────────────────────────────────────
 export function dalioOverheat(
   isCommodity: boolean,
@@ -128,36 +148,12 @@ export function dalioExitFactor(ret20: number | null | undefined, ret60: number 
   return f;
 }
 
-// ── Cycle gate C ─────────────────────────────────────────────────────────────
-export interface DalioCParts {
-  C: 0 | 1;
-  distMA: number | null;
-  ret60: number | null;
-  r2_12m: number | null;
-}
-
-// Missing MA200 / R² (thin history) are treated as passing that leg (not read as
-// "bad"), matching the rest of the codebase. Ret60 must be present and positive.
-export function dalioCGate(
-  price: number | null | undefined,
-  ma200: number | null | undefined,
-  ret60Pct: number | null | undefined,
-  r2_12m: number | null | undefined,
-): DalioCParts | null {
-  if (price == null || price <= 0) return null;
-  const distMA = ma200 != null && ma200 > 0 ? price / ma200 - 1 : null;
-  const okDist = distMA == null || distMA <= DALIO_DISTMA_MAX;
-  const okRet60 = ret60Pct != null && ret60Pct > 0;
-  const okR2 = r2_12m == null || r2_12m > DALIO_R2_MIN;
-  return { C: okDist && okRet60 && okR2 ? 1 : 0, distMA, ret60: ret60Pct ?? null, r2_12m: r2_12m ?? null };
-}
-
 export type CyclePhase = 'bottoming' | 'recovering' | 'early trend' | 'stretched' | 'blow-off';
 
 export function dalioPhase(distMA: number | null, r2_12m: number | null): CyclePhase | null {
   if (distMA == null) return null;
   if (distMA > DALIO_MA200_BLOWOFF) return 'blow-off';
-  if (distMA > DALIO_DISTMA_MAX) return 'stretched';
+  if (distMA > DALIO_DISTMA_KNEE) return 'stretched';
   if (distMA < 0) return 'bottoming';
   if (r2_12m != null && r2_12m > DALIO_R2_MIN) return 'early trend';
   return 'recovering';
@@ -170,15 +166,15 @@ export interface DalioInput {
   group: string;
   price: number | null;
   ma200: number | null;
-  median12m: number | null;  // 12-month median close (commodity overheat)
-  rvol5: number | null;      // VolRatio (null → volume-blind)
-  rvol20: number | null;     // context only
-  rangeExp: number | null;   // range-expansion proxy (volume-blind flow)
-  r20: number | null;        // Ret20 (20 trading-day return %)
+  median12m: number | null;
+  rvol5: number | null;
+  rvol20: number | null;
+  rangeExp: number | null;
+  r20: number | null;        // Ret20
   r1m: number | null;        // fallback for r20
   r3m: number | null;        // Ret60 (≈3-month)
   r1y: number | null;        // Ret12m (≈1-year)
-  trendR2Long: number | null;// R2_12m (12-month trend R²)
+  trendR2Long: number | null;// R2_12m
 }
 
 export interface EmsEval {
@@ -188,16 +184,17 @@ export interface EmsEval {
   hasVolume: boolean;
   volRatio: number | null;
   ret20: number | null;
-  rs20: number | null;       // Ret20 − benchmark (pp) — tie-break
+  rs20: number | null;
   distMA: number | null;
   r2_12m: number | null;
   V: number;
-  M: number;                 // 0.4·p20 + 0.3·p60 + 0.3·p12
-  persistPct: number;        // pctile(Ret20/Ret60) — acceleration
-  overheat: number;          // commodity overheat 0–1
-  exitFactor: number;        // exhaustion brake 0.56–1
-  C: 0 | 1 | null;
-  ems: number | null;        // FinalScore
+  M: number;
+  persistPct: number;
+  trendQuality: number;
+  decay: number;
+  overheat: number;
+  exitFactor: number;
+  ems: number | null;
   ranked: boolean;
   phase: CyclePhase | null;
   macroFlagged: boolean;
@@ -214,8 +211,8 @@ function pctileIn(sorted: number[], v: number): number {
 const isCommodityGroup = (g: string) => g === 'Commodities';
 
 /**
- * Score and rank the whole universe with EMS v3. Ranked assets first (desc
- * FinalScore, tie-break VolRatio then RelStr), then the rest.
+ * Score and rank the whole universe with EMS v4. Ranked (eligible) assets first,
+ * sorted by Score desc, tie-break VolRatio then RelStr; then the rest.
  */
 export function rankEms(items: DalioInput[], macroFlagged: Set<string> = new Set()): EmsEval[] {
   const r20Of = (i: DalioInput) => i.r20 ?? i.r1m;
@@ -245,37 +242,36 @@ export function rankEms(items: DalioInput[], macroFlagged: Set<string> = new Set
     const persistPct = aj != null ? pctileIn(sAccel, aj) : 0;
 
     const V = dalioVSub(it.rvol5, it.rangeExp);
-    const parts = dalioCGate(it.price, it.ma200, it.r3m, it.trendR2Long);
-    const C = parts?.C ?? null;
+    const distMA = it.price != null && it.ma200 != null && it.ma200 > 0 ? it.price / it.ma200 - 1 : null;
+    const decay = dalioDecay(distMA, ret);
+    const trendQuality = dalioTrendQuality(it.trendR2Long);
     const overheat = dalioOverheat(isCommodityGroup(it.group), it.price, it.median12m, it.rvol5);
     const exitFactor = dalioExitFactor(ret, it.r3m, it.trendR2Long);
     const rs20 = ret != null && benchRet != null ? ret - benchRet : null;
-    const base = DALIO_W_V * V + DALIO_W_M * M + DALIO_W_P * persistPct;
-    const ems = C == null ? null : C * base * (1 - 0.5 * overheat) * exitFactor;
 
-    let ranked = C === 1 && it.symbol !== DALIO_BENCHMARK;
-    if (C == null) reasons.push('no price data');
-    if (C === 0 && parts) {
-      if (parts.distMA != null && parts.distMA > DALIO_DISTMA_MAX) reasons.push(`${(parts.distMA * 100).toFixed(0)}% above 200D MA (> 15% cap)`);
-      else if (!(it.r3m != null && it.r3m > 0)) reasons.push('3-month return ≤ 0');
-      else if (it.trendR2Long != null && it.trendR2Long <= DALIO_R2_MIN) reasons.push(`12-month trend R² ${it.trendR2Long.toFixed(2)} ≤ 0.5 (not a clean trend)`);
-      else reasons.push('cycle gate C = 0');
-    }
+    const base = DALIO_W_V * V + DALIO_W_M * M + DALIO_W_P * persistPct;
+    const ems = it.price == null
+      ? null
+      : decay * base * (1 - 0.5 * overheat) * exitFactor + DALIO_W_TREND * trendQuality;
+
+    let ranked = it.symbol !== DALIO_BENCHMARK && ems != null && ems > 0;
     if (it.symbol === DALIO_BENCHMARK) reasons.push('benchmark itself');
-    if (ranked && (ems == null || ems <= 0)) { ranked = false; reasons.push('FinalScore = 0'); }
+    if (ems == null) reasons.push('no price data');
+    if (decay < 1) reasons.push(`blow-off decay ${decay.toFixed(2)}× (${((distMA ?? 0) * 100).toFixed(0)}% above MA + ${ret?.toFixed(0)}% in 20d)`);
+    if (overheat > 0) reasons.push(`commodity overheat −${(overheat * 50).toFixed(0)}%`);
+    if (exitFactor < 1) reasons.push(`exhaustion ExitFactor ${exitFactor.toFixed(2)}`);
 
     return {
       symbol: it.symbol, name: it.name, group: it.group,
       hasVolume, volRatio: it.rvol5, ret20: ret, rs20,
-      distMA: parts?.distMA ?? null, r2_12m: it.trendR2Long,
-      V, M, persistPct, overheat, exitFactor, C, ems, ranked,
-      phase: dalioPhase(parts?.distMA ?? null, it.trendR2Long),
+      distMA, r2_12m: it.trendR2Long,
+      V, M, persistPct, trendQuality, decay, overheat, exitFactor, ems, ranked,
+      phase: dalioPhase(distMA, it.trendR2Long),
       macroFlagged: macroFlagged.has(it.symbol),
       reasons,
     };
   });
 
-  // Rank: FinalScore desc → VolRatio desc → RelStr desc (Ray's tie-break order).
   const order = (a: EmsEval, b: EmsEval) =>
     ((b.ems ?? -1) - (a.ems ?? -1)) ||
     ((b.volRatio ?? 1.0) - (a.volRatio ?? 1.0)) ||

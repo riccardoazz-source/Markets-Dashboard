@@ -150,8 +150,8 @@
  */
 
 import {
-  DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_MBLEND_W, DALIO_BENCHMARK,
-  dalioVSub, dalioCGate, dalioOverheat, dalioExitFactor,
+  DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_W_TREND, DALIO_MBLEND_W, DALIO_BENCHMARK,
+  dalioVSub, dalioDecay, dalioTrendQuality, dalioOverheat, dalioExitFactor,
 } from './dalioModel';
 
 // ── M28 — "Stage-2 RS Leader" (reality-derived: O'Neil/IBD + Minervini/Weinstein) ──
@@ -593,14 +593,15 @@ export interface RotationFeature<T extends ModelInput> {
   pVQ: number; pTrend: number; pCyc: number; pPos: number; pTq: number; lead: number; reg: number; pVol: number; pMacd: number; pExt: number;
   pMom: number; pVolLow: number; // M27 academic composite: 12-1 momentum & low-vol percentiles
   pRS: number; // M28 — IBD Relative Strength blend percentile (0.4·r3m + 0.2·r6m + 0.2·r1y, renormalised over available horizons)
-  // M31 v3 — Dalio EMS pieces (only the dalio mode reads them; see lib/dalioModel.ts)
+  // M31 v4 — Dalio EMS pieces (only the dalio mode reads them; see lib/dalioModel.ts)
   dalioV: number;           // flow: max(0, VolRatio − 1.1), or 0.2·rangeExp when volume-blind
   dalioM: number;           // momentum blend 0.4·pctile(Ret20)+0.3·pctile(Ret60)+0.3·pctile(Ret12m)
   dalioPersist: number;     // pctile(Ret20/Ret60) — acceleration
+  dalioTrendQuality: number;// min(1, R2_12m/0.8) — soft trend-quality reward (additive)
+  dalioDecay: number;       // soft blow-off decay (0,1] — bites only far above MA + Ret20>30%
   dalioOverheat: number;    // commodity overheat brake 0–1
   dalioExit: number;        // exhaustion ExitFactor 0.56–1
-  dalioC: 0 | 1;            // gate: DistMA≤0.15 ∧ Ret60>0 ∧ R2_12m>0.5 (0 when price missing)
-  dalioRs: number | null;   // Ret20 − benchmark Ret20 (pp) — tie-break only (v3)
+  dalioRs: number | null;   // Ret20 − benchmark Ret20 (pp) — tie-break only
   stageFactor: number; // M29 — 0..1 Stage-2 gate on the RS credit (near-high × above-MA200, graduated Minervini template)
   overheat: number; oversold: number;
   isCyc: boolean; isCommod: boolean; structuralUptrend: boolean;
@@ -851,7 +852,7 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const isCyc = isCyclical(item);
     const isCommod = isCommodity(item);
 
-    // ── M31 v3 Dalio EMS pieces (see lib/dalioModel.ts for the consolidated formula) ──
+    // ── M31 v4 Dalio EMS pieces (see lib/dalioModel.ts for the consolidated formula) ──
     const dRet = dalioRetOf(item);
     const p20 = dRet != null ? pctIn(s20, dRet) : 0.5;
     const p60 = item.r3m != null ? pctIn(s60, item.r3m) : 0.5;
@@ -860,8 +861,9 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const dAccel = dalioAccelOf(item);
     const dalioPersist = dAccel != null ? pctIn(sAccel, dAccel) : 0;
     const dalioV = dalioVSub(item.rvol5, item.rangeExp);
-    const dalioParts = dalioCGate(item.price, item.ma200, item.r3m, item.trendR2Long);
-    const dalioC: 0 | 1 = dalioParts?.C ?? 0;
+    const dalioDistMA = item.price != null && item.ma200 != null && item.ma200 > 0 ? item.price / item.ma200 - 1 : null;
+    const dalioDecayF = dalioDecay(dalioDistMA, dRet);
+    const dalioTQ = dalioTrendQuality(item.trendR2Long);
     const dalioOh = dalioOverheat(isCommodity(item), item.price, item.median12m, item.rvol5);
     const dalioExit = dalioExitFactor(dRet, item.r3m, item.trendR2Long);
     const dalioRs = dRet != null && dalioBenchRet != null ? dRet - dalioBenchRet : null;
@@ -903,7 +905,7 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
       stretch,
       pVQ, pTrend, pCyc, pPos, pTq, lead, reg, pVol, pMacd, pExt,
       pMom, pVolLow, pRS, stageFactor,
-      dalioV, dalioM, dalioPersist, dalioOverheat: dalioOh, dalioExit, dalioC, dalioRs,
+      dalioV, dalioM, dalioPersist, dalioTrendQuality: dalioTQ, dalioDecay: dalioDecayF, dalioOverheat: dalioOh, dalioExit, dalioRs,
       overheat: hasReturns ? overheat : 0, oversold,
       isCyc, isCommod, structuralUptrend,
       passesGate,
@@ -998,17 +1000,17 @@ export function scoreFromFeatures<T extends ModelInput>(
 ): ScoredItem<T>[] {
   const P: ModelParams = params ? { ...DEFAULT_PARAMS, ...params } : DEFAULT_PARAMS;
   return features.map(f => {
-    // ── M31 v3 Dalio EMS mode (Ray's consolidated formula):
-    //   FinalScore = C · (0.45·V + 0.45·M + 0.10·Persistence) · (1 − 0.5·Overheat) · ExitFactor
-    // Eligible names (C=1, positive score) get 1 + FinalScore so they rank strictly
-    // above everyone; the rest keep a damped continuous score so the quadrant stays
-    // populated. Tie-breaks (VolRatio, then RelStr — Ray's order) fold in as epsilon
-    // terms. No sleeve, no other pillars. RelStr is a tie-break only (no hard filter).
+    // ── M31 v4 Dalio EMS mode (Ray's un-biased formula):
+    //   Score = decay·(0.45·V + 0.45·M + 0.10·Persistence)·(1−0.5·Overheat)·ExitFactor + 0.15·TrendQuality
+    // NO hard cycle gate any more — the DistMA cap and R² gate were softened (decay +
+    // additive TrendQuality) so high-beta winners survive and rise on M. Ranking is
+    // GLOBAL by score; eligible = any real asset with a positive score. Eligible names
+    // get 1 + score so they sort above the rest; tie-breaks (VolRatio, then RelStr).
     if (MODEL_MODE === 'dalio') {
       const base = DALIO_W_V * f.dalioV + DALIO_W_M * f.dalioM + DALIO_W_P * f.dalioPersist;
-      const finalScore = base * (1 - 0.5 * f.dalioOverheat) * f.dalioExit;
-      const eligible = f.hasReturns && f.dalioC === 1 && finalScore > 0
-        && f.item.symbol !== DALIO_BENCHMARK;
+      const finalScore = f.dalioDecay * base * (1 - 0.5 * f.dalioOverheat) * f.dalioExit
+        + DALIO_W_TREND * f.dalioTrendQuality;
+      const eligible = f.hasReturns && finalScore > 0 && f.item.symbol !== DALIO_BENCHMARK;
       const tie = 1e-4 * (f.item.rvol5 ?? 1) + 1e-8 * Math.max(-1000, f.dalioRs ?? -1000);
       const score = !f.hasReturns ? -1 : eligible ? 1 + finalScore + tie : 0.4 * finalScore + tie;
       return {
