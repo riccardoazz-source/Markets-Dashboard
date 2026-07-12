@@ -1579,8 +1579,9 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   },
   {
     id: 34,
-    name: 'Dalio EMS v6 — 3-tier accumulation (shallow / deep-drawdown / thin-history)  ← LIVE MODEL',
-    current: true,
+    name: 'Dalio EMS v6 — 3-tier accumulation (shallow / deep-drawdown / thin-history)',
+    current: false,
+    recordedAt: '2026-07-12',
     formula: [
       'FinalScore = (core + 0.10·AccelBoost + 0.30·DrawdownQuality) · ClassWeight  — v5 + a 3-tier DrawdownQuality:',
       '   • SHALLOW (−35%..+5% of MA), quality name (Ret12m > 0): VolRatio ≥ 1.1 + net buying → full weight.',
@@ -1597,27 +1598,34 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       '',
       'MODEL_MODE = \'dalio\'; flip to \'rotation\' to restore M24 exactly.',
     ],
-    results: {}, // auto-filled from the live backtest run — this is the current model (≈ v5: 42/150, reliability 25.8)
+    results: {
+      // Frozen ≈ v5 (v6\'s deep/thin tiers didn\'t measurably change the backtest): 42/150, reliability 25.8.
+      '1m': { basket:  -1.6, spx:  1.8, picks: 25, winnerHits:  6, winnerTotal: 25 },
+      '3m': { basket:  24.9, spx: 10.0, picks: 25, winnerHits: 12, winnerTotal: 25 },
+      '6m': { basket:  15.6, spx:  8.7, picks: 25, winnerHits:  8, winnerTotal: 25 },
+      '1y': { basket:  61.8, spx: 21.0, picks: 25, winnerHits:  8, winnerTotal: 25 },
+      '5y': { basket: 171.1, spx: 73.4, picks: 25, winnerHits:  8, winnerTotal: 25 },
+    },
   },
   {
     id: 35,
-    name: 'Dalio EMS v7 — deep-value/recovery sleeve (6 reserved slots) — REJECTED: crashed reliability 25.8 → 12.9',
-    current: false,
-    recordedAt: '2026-07-12',
+    name: 'Dalio EMS v7 — deep-value/recovery sleeve (6 reserved slots)  ← LIVE MODEL (iterating on the recovery-sleeve precision)',
+    current: true,
     formula: [
-      'The max-recall experiment: reserve 6 of 25 slots for high-beta names in a drawdown (≥10% below the MA,',
-      '> −70%) that HAD a structural trend (R2_12m > 0.3 or Ret12m > 0), ranked by drawdown depth × prior-trend',
-      'strength, with NO positive-money-flow gate (only a soft moneyFlow ≥ −0.35 floor) — to catch the falling',
-      'winners v6 kept missing. Mirrors M24\'s pre-breakout sleeve (which caught 51/150 vs our 42).',
+      'v6 + a reserved-slot RECOVERY sleeve: reserve 6 of the 25 slots for high-beta names in a drawdown',
+      '(≥10% below the MA, > −70%) that HAD a structural trend (R2_12m > 0.3 or Ret12m > 0), ranked by',
+      'drawdown depth × prior-trend strength, with NO positive-money-flow gate (only a soft moneyFlow ≥ −0.35',
+      'floor). selectPicks fills these 6 first, then the top 19 by EMS score. Mirrors M24\'s pre-breakout sleeve.',
       '',
-      'OUTCOME — REJECTED. The reserved slots filled with names that were falling AND kept falling: at the pick',
-      'date a future +686% winner and a future −60% loser both look like "a high-beta stock in a drawdown", and',
-      'there are far MORE falling losers than falling winners. So capture did NOT rise (40/150, actually down 2)',
-      'while the added losers cratered the returns — 1Y +61.8% → +14.3% (BELOW the S&P), reliability 25.8 → 12.9.',
-      'This is the fundamental ceiling: you cannot raise recall on falling winners without dragging in more losers.',
-      'REVERTED to v6 (global top-25 by score, no reserved sleeve).',
+      'FIRST RUN (v7.0): the sleeve filled with names that were falling AND kept falling — at the pick date a',
+      'future +686% winner and a future −60% loser both look like "a high-beta stock in a drawdown", and there',
+      'are far more falling losers than winners. Capture did not rise (40/150) and the losers cratered returns',
+      '(1Y +61.8% → +14.3%, below the S&P) → reliability 25.8 → 12.9. Per the user we are NOT reverting: we are',
+      'iterating on the sleeve\'s PRECISION (asking Ray what separates a falling winner from a falling loser at',
+      'the pick date) so the reserved slots pick winners, not knives. Live results below auto-fill each run.',
     ],
     results: {
+      // v7.0 first run — the sleeve bought falling losers. Being improved (precision).
       '1m': { basket:  -2.4, spx:  1.8, picks: 25, winnerHits:  5, winnerTotal: 25 }, // 1m/1d estimated
       '3m': { basket:  21.3, spx: 10.0, picks: 25, winnerHits: 12, winnerTotal: 25 },
       '6m': { basket:  15.5, spx:  8.7, picks: 25, winnerHits:  8, winnerTotal: 25 },
