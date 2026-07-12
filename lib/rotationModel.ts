@@ -152,8 +152,7 @@
 import {
   DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_W_TREND, DALIO_W_ACCEL, DALIO_W_DRAWDOWN, DALIO_MBLEND_W, DALIO_BENCHMARK,
   dalioVSub, dalioDecay, dalioTrendQuality, dalioOverheat, dalioExitFactor,
-  dalioAccelBoost, dalioDrawdownQuality, dalioClassWeight, dalioRecoveryScore,
-  DALIO_RECOVERY_SLOTS,
+  dalioAccelBoost, dalioDrawdownQuality, dalioClassWeight,
 } from './dalioModel';
 
 // ── M28 — "Stage-2 RS Leader" (reality-derived: O'Neil/IBD + Minervini/Weinstein) ──
@@ -1027,18 +1026,13 @@ export function scoreFromFeatures<T extends ModelInput>(
       const eligible = f.hasReturns && finalScore > 0 && f.item.symbol !== DALIO_BENCHMARK;
       const tie = 1e-4 * (f.item.rvol5 ?? 1) + 1e-8 * Math.max(-1000, f.dalioRs ?? -1000);
       const score = !f.hasReturns ? -1 : eligible ? 1 + finalScore + tie : 0.4 * finalScore + tie;
-      // v7: deep-value / recovery sleeve (reserved slots) — high-beta names falling
-      // with net selling at the pick date that a momentum score can't rank. Reuses the
-      // passesPreBreakout/preScore plumbing that selectPicks honours.
-      const dm = f.item.price != null && f.item.ma200 != null && f.item.ma200 > 0
-        ? f.item.price / f.item.ma200 - 1 : null;
-      const recScore = f.hasReturns && f.item.symbol !== DALIO_BENCHMARK
-        ? dalioRecoveryScore(dm, f.item.trendR2Long, f.item.r1y, f.item.r5, f.item.r20 ?? f.item.r1m, f.dalioRs, f.item.downVolDry) : 0;
+      // (v7/v8 recovery sleeve retired — see selectPicks. dalioRecoveryScore/downVolDry
+      // stay in the codebase, unused, to document the experiment.)
       return {
         item: f.item, score, accel: f.accel, accPctile: f.accPctile,
         aRecent: f.aRecent, aBuild: f.aBuild, aLong: f.aLong,
-        stretch: f.stretch, passesGate: eligible, passesPreBreakout: recScore > 0,
-        preScore: recScore, rsi: f.rsi, overheat: f.overheat,
+        stretch: f.stretch, passesGate: eligible, passesPreBreakout: false,
+        preScore: 0, rsi: f.rsi, overheat: f.overheat,
       };
     }
     // ── M27 Academic mode: equal-weight 1/N composite of cited factor percentiles.
@@ -1151,21 +1145,17 @@ export function selectPicks<T extends ModelInput>(
   maxTotal = ACCEL_MAX,
   preSlots = PRE_BREAKOUT_SLOTS,
 ): ScoredItem<T>[] {
-  // M31 v7 Dalio selection: reserve a block of slots for the deep-value/recovery
-  // sleeve (high-beta names in a drawdown that HAD a trend — the falling winners a
-  // momentum score can't rank), then fill the rest by EMS score. Max-recall design.
+  // M31 Dalio selection: global top-N by EMS score. The reserved-slot recovery
+  // sleeve (v7 no-gate, v8 prove-it-first gate) was RETIRED: Ray confirmed it is an
+  // information ceiling, not a tuning problem — at a new low a future winner and a
+  // future loser are indistinguishable from price/volume alone, so the sleeve either
+  // buys knives (v7 → reliability 12.9) or misses the not-yet-turned winners (v8 →
+  // 24.5), never above the no-sleeve v6 (25.6). Restored to v6.
   if (MODEL_MODE === 'dalio') {
-    const eligible = scored.filter(s => s.score > -1 && s.passesGate);
-    const rec = scored
-      .filter(s => s.passesPreBreakout)
-      .sort((a, b) => b.preScore - a.preScore)
-      .slice(0, DALIO_RECOVERY_SLOTS);
-    const recSet = new Set(rec.map(s => s.item.symbol));
-    const main = eligible
-      .filter(s => !recSet.has(s.item.symbol))
+    return scored
+      .filter(s => s.score > -1 && s.passesGate)
       .sort((a, b) => b.score - a.score)
-      .slice(0, Math.max(0, maxTotal - rec.length));
-    return [...main, ...rec];
+      .slice(0, maxTotal);
   }
   const pre = scored
     .filter(s => s.passesPreBreakout)
