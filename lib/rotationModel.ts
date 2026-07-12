@@ -151,7 +151,6 @@
 
 import {
   DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_W_TREND, DALIO_W_ACCEL, DALIO_W_DRAWDOWN, DALIO_MBLEND_W, DALIO_BENCHMARK,
-  DALIO_TQ_CLEAN, DALIO_W_M_CLEAN, DALIO_W_V_CLEAN,
   dalioVSub, dalioDecay, dalioTrendQuality, dalioOverheat, dalioExitFactor,
   dalioAccelBoost, dalioDrawdownQuality, dalioClassWeight,
 } from './dalioModel';
@@ -1019,12 +1018,11 @@ export function scoreFromFeatures<T extends ModelInput>(
     // GLOBAL by score; eligible = any real asset with a positive score. Eligible names
     // get 1 + score so they sort above the rest; tie-breaks (VolRatio, then RelStr).
     if (MODEL_MODE === 'dalio') {
-      // v9 (Ray #1): on a clean trend (TrendQuality > 0.8), momentum leads (0.6) and
-      // flow is a confirmation filter (0.3); otherwise the balanced 0.45/0.45.
-      const clean = f.dalioTrendQuality > DALIO_TQ_CLEAN;
-      const wM = clean ? DALIO_W_M_CLEAN : DALIO_W_M;
-      const wV = clean ? DALIO_W_V_CLEAN : DALIO_W_V;
-      const base = wV * f.dalioV + wM * f.dalioM + DALIO_W_P * f.dalioPersist;
+      // v9's clean-trend momentum tilt (wM 0.6 / wV 0.3 when TrendQuality > 0.8) was
+      // REVERTED — it reshuffled the 1-year picks into a sub-S&P basket (1Y +61.8% →
+      // +19.8%), and a long-horizon loss craters the reliability BeatFactor (25.6 →
+      // 13.8). Back to v6's balanced 0.45/0.45.
+      const base = DALIO_W_V * f.dalioV + DALIO_W_M * f.dalioM + DALIO_W_P * f.dalioPersist;
       const core = f.dalioDecay * base * (1 - 0.5 * f.dalioOverheat) * f.dalioExit
         + DALIO_W_TREND * f.dalioTrendQuality;
       // v5: + acceleration overlay + quiet-accumulation (falling-winner) boost, then class tilt.

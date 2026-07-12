@@ -1579,9 +1579,8 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   },
   {
     id: 34,
-    name: 'Dalio EMS v6 — 3-tier accumulation + acceleration + class tilt (no recovery sleeve): reliability 25.6',
-    current: false,
-    recordedAt: '2026-07-12',
+    name: 'Dalio EMS v6 — 3-tier accumulation + acceleration + class tilt (no recovery sleeve)  ← LIVE MODEL (best EMS: reliability 25.6)',
+    current: true,
     formula: [
       'FinalScore = (core + 0.10·AccelBoost + 0.30·DrawdownQuality) · ClassWeight  — v5 + a 3-tier DrawdownQuality:',
       '   • SHALLOW (−35%..+5% of MA), quality name (Ret12m > 0): VolRatio ≥ 1.1 + net buying → full weight.',
@@ -1596,18 +1595,12 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       '(+171% vs ~+126%) and it beats the S&P almost everywhere; the capture-primary reliability metric (25.8)',
       'trails M24 (34.7) because ~2/3 of each period\'s top-25 are unpredictable from price/volume at the pick date.',
       '',
-      'Best EMS after v7/v8 (the recovery-sleeve experiments) both underperformed it: Ray confirmed the deep-',
-      'drawdown capture gap is an INFORMATION ceiling, not a tuning problem. Superseded by v9 (Ray\'s #1 review',
-      'suggestion — conditional momentum/flow weights).',
+      'Best EMS. v7/v8 (recovery-sleeve experiments) and v9 (Ray\'s #1 momentum tilt) all UNDERPERFORMED it and',
+      'were reverted: Ray confirmed the deep-drawdown capture gap is an INFORMATION ceiling, and v9\'s momentum',
+      'tilt pushed the 1-year basket below the S&P (reliability 13.8). This is the live model. MODEL_MODE = \'dalio\';',
+      'flip to \'rotation\' to restore M24 exactly.',
     ],
-    results: {
-      // Frozen ≈ v5/v6 live backtest: 42/150, reliability 25.6.
-      '1m': { basket:  -1.6, spx:  1.8, picks: 25, winnerHits:  6, winnerTotal: 25 },
-      '3m': { basket:  24.9, spx: 10.0, picks: 25, winnerHits: 12, winnerTotal: 25 },
-      '6m': { basket:  15.6, spx:  8.7, picks: 25, winnerHits:  8, winnerTotal: 25 },
-      '1y': { basket:  61.8, spx: 21.0, picks: 25, winnerHits:  8, winnerTotal: 25 },
-      '5y': { basket: 171.1, spx: 73.4, picks: 25, winnerHits:  8, winnerTotal: 25 },
-    },
+    results: {}, // auto-filled from the live backtest run — this is the current model (≈ 42/150, reliability 25.6)
   },
   {
     id: 35,
@@ -1661,25 +1654,27 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   },
   {
     id: 37,
-    name: 'Dalio EMS v9 — clean-trend momentum tilt (Ray\'s #1 review point)  ← LIVE MODEL',
-    current: true,
+    name: 'Dalio EMS v9 — clean-trend momentum tilt (Ray\'s #1 review point) — REVERTED: 1Y went sub-S&P → reliability 13.8',
+    current: false,
+    recordedAt: '2026-07-12',
     formula: [
-      'v6 + Ray\'s top review suggestion: separate MOMENTUM from QUALITY. On a clean trend the momentum term',
-      'should lead and volume flow should act as a confirmation filter, not carry equal weight.',
+      'v6 + Ray\'s top review suggestion: on a clean trend (TrendQuality > 0.8, R² > 0.64) momentum leads',
+      '(wM = 0.60) and flow is a confirmation filter (wV = 0.30); else the balanced 0.45/0.45.',
       '',
-      'CONDITIONAL CORE WEIGHTS:',
-      '   if TrendQuality > 0.8  (R² > 0.64):   wM = 0.60,  wV = 0.30   (momentum leads on a clean trend)',
-      '   else:                                 wM = 0.45,  wV = 0.45   (balanced)',
-      '   base = wV·V + wM·M + 0.10·Persistence   (Persistence weight unchanged)',
-      '',
-      'Everything else = v6: core = decay·base·(1−0.5·Overheat)·ExitFactor + 0.15·TrendQuality;',
-      'FinalScore = (core + 0.10·AccelBoost + 0.30·DrawdownQuality)·ClassWeight; global top-25, tie VolRatio then RelStr.',
-      '',
-      'The other Ray review points need data we don\'t have and are DEFERRED: regime-aware decay (#2), a forward',
-      'earnings/macro-surprise overlay (#3), and regime-dynamic ClassWeight (#5) — all require a forward/macro',
-      'feed (the "big project"). The soft-timing gate (#4) was for the retired recovery sleeve → N/A.',
-      'MODEL_MODE = \'dalio\'.',
+      'OUTCOME — REVERTED. The tilt reshuffled the 1-year picks into a basket that returned +19.8% vs the S&P',
+      '+21.0% — a tiny miss, but at the 1-year horizon (loss-severity ×2.5) it collapsed the reliability',
+      'BeatFactor (~0.92 → ~0.48), halving the score: 25.6 → 13.8. Capture was ~unchanged (43/150). A textbook',
+      'illustration that the reliability metric is magnitude-blind and punishes a single long-horizon sub-S&P',
+      'result hard. Reverted to v6. (Ray\'s other review points — regime-aware decay, forward surprise overlay,',
+      'regime-dynamic class weights — need forward/macro data and remain deferred.)',
     ],
-    results: {}, // auto-filled from the live backtest run — this is the current model
+    results: {
+      '1d': { basket:   0.0, spx:  0.1, picks: 25, winnerHits:  9, winnerTotal: 25 }, // 1d/1m estimated
+      '1m': { basket:  -1.0, spx:  1.8, picks: 25, winnerHits:  6, winnerTotal: 25 },
+      '3m': { basket:  23.2, spx: 10.0, picks: 25, winnerHits: 12, winnerTotal: 25 },
+      '6m': { basket:  22.1, spx:  8.7, picks: 25, winnerHits:  9, winnerTotal: 25 },
+      '1y': { basket:  19.8, spx: 21.0, picks: 25, winnerHits:  7, winnerTotal: 25 }, // 1Y < S&P → the score killer
+      '5y': { basket: 171.7, spx: 73.4, picks: 25, winnerHits:  8, winnerTotal: 25 },
+    },
   },
 ];

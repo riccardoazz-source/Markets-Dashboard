@@ -39,11 +39,6 @@ export const DALIO_W_V = 0.45;
 export const DALIO_W_M = 0.45;
 export const DALIO_W_P = 0.10;
 export const DALIO_W_TREND = 0.15;          // additive TrendQuality weight (soft R²)
-// v9 (Ray #1) — on a CLEAN trend, momentum leads and volume is a confirmation filter:
-// if TrendQuality > 0.8 (R² > 0.64), momentum gets 0.6 and flow drops to 0.3.
-export const DALIO_TQ_CLEAN = 0.8;          // TrendQuality threshold for the momentum tilt
-export const DALIO_W_M_CLEAN = 0.6;         // momentum weight on a clean trend
-export const DALIO_W_V_CLEAN = 0.3;         // flow weight on a clean trend
 export const DALIO_VOL_FLOOR = 1.1;         // V = max(0, VolRatio − 1.1)
 export const DALIO_DISTMA_KNEE = 0.15;      // decay knee: no penalty until >15% above MA
 export const DALIO_DECAY_K = 0.7;           // decay steepness
