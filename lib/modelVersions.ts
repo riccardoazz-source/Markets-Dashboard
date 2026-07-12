@@ -1579,8 +1579,9 @@ export const MODEL_VERSIONS: ModelVersion[] = [
   },
   {
     id: 34,
-    name: 'Dalio EMS v6 — 3-tier accumulation + acceleration + class tilt (no recovery sleeve)  ← LIVE MODEL (best EMS: reliability 25.6)',
-    current: true,
+    name: 'Dalio EMS v6 — 3-tier accumulation + acceleration + class tilt (no recovery sleeve): reliability 25.6',
+    current: false,
+    recordedAt: '2026-07-12',
     formula: [
       'FinalScore = (core + 0.10·AccelBoost + 0.30·DrawdownQuality) · ClassWeight  — v5 + a 3-tier DrawdownQuality:',
       '   • SHALLOW (−35%..+5% of MA), quality name (Ret12m > 0): VolRatio ≥ 1.1 + net buying → full weight.',
@@ -1595,12 +1596,18 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       '(+171% vs ~+126%) and it beats the S&P almost everywhere; the capture-primary reliability metric (25.8)',
       'trails M24 (34.7) because ~2/3 of each period\'s top-25 are unpredictable from price/volume at the pick date.',
       '',
-      'RESTORED as the LIVE model after v7/v8 (the recovery-sleeve experiments) both underperformed it: Ray',
-      'confirmed the deep-drawdown capture gap is an INFORMATION ceiling, not a tuning problem — price/volume',
-      'alone cannot separate a future winner from a loser at a new low. v6 is the best EMS. MODEL_MODE = \'dalio\';',
-      'flip to \'rotation\' to restore M24 exactly.',
+      'Best EMS after v7/v8 (the recovery-sleeve experiments) both underperformed it: Ray confirmed the deep-',
+      'drawdown capture gap is an INFORMATION ceiling, not a tuning problem. Superseded by v9 (Ray\'s #1 review',
+      'suggestion — conditional momentum/flow weights).',
     ],
-    results: {}, // auto-filled from the live backtest run — this is the current model (≈ 42/150, reliability 25.6)
+    results: {
+      // Frozen ≈ v5/v6 live backtest: 42/150, reliability 25.6.
+      '1m': { basket:  -1.6, spx:  1.8, picks: 25, winnerHits:  6, winnerTotal: 25 },
+      '3m': { basket:  24.9, spx: 10.0, picks: 25, winnerHits: 12, winnerTotal: 25 },
+      '6m': { basket:  15.6, spx:  8.7, picks: 25, winnerHits:  8, winnerTotal: 25 },
+      '1y': { basket:  61.8, spx: 21.0, picks: 25, winnerHits:  8, winnerTotal: 25 },
+      '5y': { basket: 171.1, spx: 73.4, picks: 25, winnerHits:  8, winnerTotal: 25 },
+    },
   },
   {
     id: 35,
@@ -1651,5 +1658,28 @@ export const MODEL_VERSIONS: ModelVersion[] = [
       '1y': { basket:  62.6, spx: 21.0, picks: 25, winnerHits:  8, winnerTotal: 25 },
       '5y': { basket: 171.0, spx: 73.4, picks: 25, winnerHits:  8, winnerTotal: 25 },
     },
+  },
+  {
+    id: 37,
+    name: 'Dalio EMS v9 — clean-trend momentum tilt (Ray\'s #1 review point)  ← LIVE MODEL',
+    current: true,
+    formula: [
+      'v6 + Ray\'s top review suggestion: separate MOMENTUM from QUALITY. On a clean trend the momentum term',
+      'should lead and volume flow should act as a confirmation filter, not carry equal weight.',
+      '',
+      'CONDITIONAL CORE WEIGHTS:',
+      '   if TrendQuality > 0.8  (R² > 0.64):   wM = 0.60,  wV = 0.30   (momentum leads on a clean trend)',
+      '   else:                                 wM = 0.45,  wV = 0.45   (balanced)',
+      '   base = wV·V + wM·M + 0.10·Persistence   (Persistence weight unchanged)',
+      '',
+      'Everything else = v6: core = decay·base·(1−0.5·Overheat)·ExitFactor + 0.15·TrendQuality;',
+      'FinalScore = (core + 0.10·AccelBoost + 0.30·DrawdownQuality)·ClassWeight; global top-25, tie VolRatio then RelStr.',
+      '',
+      'The other Ray review points need data we don\'t have and are DEFERRED: regime-aware decay (#2), a forward',
+      'earnings/macro-surprise overlay (#3), and regime-dynamic ClassWeight (#5) — all require a forward/macro',
+      'feed (the "big project"). The soft-timing gate (#4) was for the retired recovery sleeve → N/A.',
+      'MODEL_MODE = \'dalio\'.',
+    ],
+    results: {}, // auto-filled from the live backtest run — this is the current model
   },
 ];
