@@ -52,6 +52,18 @@ export const DALIO_OVERHEAT_VOL = 1.3;      // commodity overheat: VolRatio thre
 export const DALIO_EXIT_DECEL = 0.7;        // ExitFactor when Ret20 < Ret60
 export const DALIO_EXIT_R2 = 0.8;           // extra ExitFactor when R2_12m < 0.5
 export const DALIO_MA200_BLOWOFF = 0.20;    // cycle phase label: > 20% above MA200
+// ── v5 additions (Ray's capture-gap fixes) ──────────────────────────────────
+export const DALIO_W_ACCEL = 0.10;          // acceleration overlay weight (Ray: 5–10%)
+export const DALIO_W_DRAWDOWN = 0.30;       // quiet-accumulation (falling-winner) weight
+export const DALIO_DD_BASE_SCALE = 0.15;    // base-proximity decay scale (near MA → 1)
+export const DALIO_DD_ACCUM_SCALE = 0.25;   // accumulation normalization
+export const DALIO_DD_DIST_MIN = -0.35;     // drawdown floor (deeper than −35% = broken)
+export const DALIO_DD_DIST_MAX = 0.05;      // must be at/below the MA (basing), not extended
+// Class tilt (Ray: stocks a slight edge, indices a slight discount — diversification
+// without hard slots). The winners are individual stocks, so this lifts capture.
+export const DALIO_CLASS_WEIGHT: Record<string, number> = {
+  Stocks: 1.2, Sectors: 1.0, Crypto: 1.1, Commodities: 0.9, Indexes: 0.8,
+};
 export const DALIO_BENCHMARK = '^GSPC';
 
 // ── Volume ratios (shared by the live route AND the backtest) ────────────────
@@ -93,6 +105,65 @@ export function rangeExpansion(closes: number[]): number | null {
   const recent = rets.slice(-5).reduce((s, r) => s + r, 0) / 5;
   const base = rets.slice(-60).reduce((s, r) => s + r, 0) / 60;
   return base > 0 ? Math.max(0, Math.min(1, recent / base - 1)) : 0;
+}
+
+// ── Money flow (v5) — net buying pressure over the last n days ───────────────
+// (up-day volume − down-day volume) / total volume ∈ [−1, 1]. A Chaikin-style
+// accumulation gauge: positive = net buying even when price is flat/down. Needs
+// real volume, so it is null for volume-blind assets (indices/futures).
+export function moneyFlow20(closes: number[], vols: (number | null | undefined)[], n = 20): number | null {
+  const len = closes.length;
+  if (len < n + 1) return null;
+  let up = 0, down = 0, tot = 0;
+  for (let i = len - n; i < len; i++) {
+    const v = vols[i];
+    if (v == null || v <= 0) continue;
+    if (closes[i] > closes[i - 1]) up += v;
+    else if (closes[i] < closes[i - 1]) down += v;
+    tot += v;
+  }
+  return tot > 0 ? (up - down) / tot : null;
+}
+
+// ── 5 trading-day return (v5 acceleration overlay input) ─────────────────────
+export function ret5Trading(closes: number[]): number | null {
+  if (closes.length < 6) return null;
+  const cur = closes[closes.length - 1], past = closes[closes.length - 6];
+  return past > 0 ? (cur / past - 1) * 100 : null;
+}
+
+// ── Acceleration overlay (Ray's #1 highest-impact change) ────────────────────
+// accel = Ret5 / Ret20. Boost ramps 0→1 as accel goes 1.0→2.0, only when the
+// 20-day trend is up. Catches names turning up faster than their own trend.
+export function dalioAccelBoost(ret5: number | null | undefined, ret20: number | null | undefined): number {
+  if (ret20 == null || ret20 <= 0 || ret5 == null) return 0;
+  const accel = ret5 / ret20;
+  return Math.max(0, Math.min(1, accel - 1));
+}
+
+// ── Quiet-accumulation / drawdown-quality (the falling-winner fix) ───────────
+// QuietAccumScore ≈ (VolRatio − 1)·PositiveMoneyFlow·BaseProximity, gated to a
+// QUALITY name in a real long-term uptrend sitting at/below its 200-day MA with
+// volume quietly building — Ray's "buyers accumulating before the crowd". Returns
+// 0 unless every condition aligns, so it never rewards a falling knife.
+export function dalioDrawdownQuality(
+  distMA: number | null,
+  rvol5: number | null | undefined,
+  moneyFlow: number | null | undefined,
+  r2_12m: number | null | undefined,
+  r1y: number | null | undefined,
+): number {
+  if (distMA == null || distMA > DALIO_DD_DIST_MAX || distMA < DALIO_DD_DIST_MIN) return 0;
+  if (r1y == null || r1y <= 0) return 0;                       // must have a structural uptrend
+  if (rvol5 == null || moneyFlow == null || rvol5 < 1.1 || moneyFlow <= 0) return 0; // building volume + net buying
+  const baseProximity = Math.exp(-Math.abs(distMA) / DALIO_DD_BASE_SCALE); // near the MA → ~1
+  const accum = Math.min(1, ((rvol5 - 1) * moneyFlow) / DALIO_DD_ACCUM_SCALE);
+  const trendStrength = Math.max(0, Math.min(1, r2_12m ?? 0));
+  return baseProximity * accum * trendStrength;
+}
+
+export function dalioClassWeight(group: string): number {
+  return DALIO_CLASS_WEIGHT[group] ?? 1.0;
 }
 
 // ── Median of the trailing n closes (commodity-overheat reference) ───────────
@@ -170,11 +241,13 @@ export interface DalioInput {
   rvol5: number | null;
   rvol20: number | null;
   rangeExp: number | null;
+  r5: number | null;         // Ret5 (5 trading-day return) — acceleration overlay
   r20: number | null;        // Ret20
   r1m: number | null;        // fallback for r20
   r3m: number | null;        // Ret60 (≈3-month)
   r1y: number | null;        // Ret12m (≈1-year)
   trendR2Long: number | null;// R2_12m
+  moneyFlow: number | null;  // net buying pressure −1..1 (quiet-accumulation sleeve)
 }
 
 export interface EmsEval {
@@ -194,6 +267,8 @@ export interface EmsEval {
   decay: number;
   overheat: number;
   exitFactor: number;
+  accelBoost: number;        // acceleration overlay contribution (0–1)
+  drawdownQuality: number;   // quiet-accumulation contribution (0–1)
   ems: number | null;
   ranked: boolean;
   phase: CyclePhase | null;
@@ -249,14 +324,19 @@ export function rankEms(items: DalioInput[], macroFlagged: Set<string> = new Set
     const exitFactor = dalioExitFactor(ret, it.r3m, it.trendR2Long);
     const rs20 = ret != null && benchRet != null ? ret - benchRet : null;
 
+    const accelBoost = dalioAccelBoost(it.r5, ret);
+    const drawdownQuality = dalioDrawdownQuality(distMA, it.rvol5, it.moneyFlow, it.trendR2Long, it.r1y);
     const base = DALIO_W_V * V + DALIO_W_M * M + DALIO_W_P * persistPct;
+    const core = decay * base * (1 - 0.5 * overheat) * exitFactor + DALIO_W_TREND * trendQuality;
     const ems = it.price == null
       ? null
-      : decay * base * (1 - 0.5 * overheat) * exitFactor + DALIO_W_TREND * trendQuality;
+      : (core + DALIO_W_ACCEL * accelBoost + DALIO_W_DRAWDOWN * drawdownQuality) * dalioClassWeight(it.group);
 
     let ranked = it.symbol !== DALIO_BENCHMARK && ems != null && ems > 0;
     if (it.symbol === DALIO_BENCHMARK) reasons.push('benchmark itself');
     if (ems == null) reasons.push('no price data');
+    if (drawdownQuality > 0) reasons.push(`quiet accumulation in a base (${(drawdownQuality * 100).toFixed(0)}%)`);
+    if (accelBoost > 0) reasons.push(`accelerating (5d/20d) +${(accelBoost * 100).toFixed(0)}%`);
     if (decay < 1) reasons.push(`blow-off decay ${decay.toFixed(2)}× (${((distMA ?? 0) * 100).toFixed(0)}% above MA + ${ret?.toFixed(0)}% in 20d)`);
     if (overheat > 0) reasons.push(`commodity overheat −${(overheat * 50).toFixed(0)}%`);
     if (exitFactor < 1) reasons.push(`exhaustion ExitFactor ${exitFactor.toFixed(2)}`);
@@ -265,7 +345,7 @@ export function rankEms(items: DalioInput[], macroFlagged: Set<string> = new Set
       symbol: it.symbol, name: it.name, group: it.group,
       hasVolume, volRatio: it.rvol5, ret20: ret, rs20,
       distMA, r2_12m: it.trendR2Long,
-      V, M, persistPct, trendQuality, decay, overheat, exitFactor, ems, ranked,
+      V, M, persistPct, trendQuality, decay, overheat, exitFactor, accelBoost, drawdownQuality, ems, ranked,
       phase: dalioPhase(distMA, it.trendR2Long),
       macroFlagged: macroFlagged.has(it.symbol),
       reasons,

@@ -150,8 +150,9 @@
  */
 
 import {
-  DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_W_TREND, DALIO_MBLEND_W, DALIO_BENCHMARK,
+  DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_W_TREND, DALIO_W_ACCEL, DALIO_W_DRAWDOWN, DALIO_MBLEND_W, DALIO_BENCHMARK,
   dalioVSub, dalioDecay, dalioTrendQuality, dalioOverheat, dalioExitFactor,
+  dalioAccelBoost, dalioDrawdownQuality, dalioClassWeight,
 } from './dalioModel';
 
 // ── M28 — "Stage-2 RS Leader" (reality-derived: O'Neil/IBD + Minervini/Weinstein) ──
@@ -461,6 +462,8 @@ export interface ModelInput {
   r20?: number | null;      // 20 TRADING-day return % (Ret20; r1m ≈ 21 td is the fallback)
   rangeExp?: number | null; // range-expansion proxy 0–1 (volume-blind flow substitute)
   median12m?: number | null;// 12-month median close (commodity overheat brake, EMS v3)
+  r5?: number | null;       // 5 trading-day return % (EMS v5 acceleration overlay)
+  moneyFlow?: number | null;// net buying pressure −1..1 (EMS v5 quiet-accumulation sleeve)
 }
 
 export interface ScoredItem<T extends ModelInput> {
@@ -601,6 +604,9 @@ export interface RotationFeature<T extends ModelInput> {
   dalioDecay: number;       // soft blow-off decay (0,1] — bites only far above MA + Ret20>30%
   dalioOverheat: number;    // commodity overheat brake 0–1
   dalioExit: number;        // exhaustion ExitFactor 0.56–1
+  dalioAccel: number;       // acceleration overlay boost 0–1 (Ret5/Ret20)
+  dalioDrawdown: number;    // quiet-accumulation / drawdown-quality boost 0–1
+  dalioClassW: number;      // class tilt (stocks 1.2 … indices 0.8)
   dalioRs: number | null;   // Ret20 − benchmark Ret20 (pp) — tie-break only
   stageFactor: number; // M29 — 0..1 Stage-2 gate on the RS credit (near-high × above-MA200, graduated Minervini template)
   overheat: number; oversold: number;
@@ -866,6 +872,9 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const dalioTQ = dalioTrendQuality(item.trendR2Long);
     const dalioOh = dalioOverheat(isCommodity(item), item.price, item.median12m, item.rvol5);
     const dalioExit = dalioExitFactor(dRet, item.r3m, item.trendR2Long);
+    const dalioAccel = dalioAccelBoost(item.r5, dRet);
+    const dalioDrawdown = dalioDrawdownQuality(dalioDistMA, item.rvol5, item.moneyFlow, item.trendR2Long, item.r1y);
+    const dalioClassW = dalioClassWeight(item.group ?? '');
     const dalioRs = dRet != null && dalioBenchRet != null ? dRet - dalioBenchRet : null;
 
     // Gate: r1m > 0 (rising), r1m < cap (not a blow-off), r3m > 0 (real trend),
@@ -905,7 +914,8 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
       stretch,
       pVQ, pTrend, pCyc, pPos, pTq, lead, reg, pVol, pMacd, pExt,
       pMom, pVolLow, pRS, stageFactor,
-      dalioV, dalioM, dalioPersist, dalioTrendQuality: dalioTQ, dalioDecay: dalioDecayF, dalioOverheat: dalioOh, dalioExit, dalioRs,
+      dalioV, dalioM, dalioPersist, dalioTrendQuality: dalioTQ, dalioDecay: dalioDecayF, dalioOverheat: dalioOh, dalioExit,
+      dalioAccel, dalioDrawdown, dalioClassW, dalioRs,
       overheat: hasReturns ? overheat : 0, oversold,
       isCyc, isCommod, structuralUptrend,
       passesGate,
@@ -1008,8 +1018,10 @@ export function scoreFromFeatures<T extends ModelInput>(
     // get 1 + score so they sort above the rest; tie-breaks (VolRatio, then RelStr).
     if (MODEL_MODE === 'dalio') {
       const base = DALIO_W_V * f.dalioV + DALIO_W_M * f.dalioM + DALIO_W_P * f.dalioPersist;
-      const finalScore = f.dalioDecay * base * (1 - 0.5 * f.dalioOverheat) * f.dalioExit
+      const core = f.dalioDecay * base * (1 - 0.5 * f.dalioOverheat) * f.dalioExit
         + DALIO_W_TREND * f.dalioTrendQuality;
+      // v5: + acceleration overlay + quiet-accumulation (falling-winner) boost, then class tilt.
+      const finalScore = (core + DALIO_W_ACCEL * f.dalioAccel + DALIO_W_DRAWDOWN * f.dalioDrawdown) * f.dalioClassW;
       const eligible = f.hasReturns && finalScore > 0 && f.item.symbol !== DALIO_BENCHMARK;
       const tie = 1e-4 * (f.item.rvol5 ?? 1) + 1e-8 * Math.max(-1000, f.dalioRs ?? -1000);
       const score = !f.hasReturns ? -1 : eligible ? 1 + finalScore + tie : 0.4 * finalScore + tie;
