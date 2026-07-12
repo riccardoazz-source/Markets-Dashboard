@@ -4,7 +4,7 @@ import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { scoreRotation, selectPicks, ACCEL_LIMIT, realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
 import { computeWeeklyADX } from '@/lib/adx';
-import { dalioVolumeRatios } from '@/lib/dalioModel';
+import { dalioVolumeRatios, rangeExpansion } from '@/lib/dalioModel';
 
 export const runtime = 'edge';
 
@@ -173,6 +173,7 @@ function buildScenario(universe: Meta[], histMap: Map<string, Hist>, todayStr: s
       rvol5: dalioVolumeRatios(upToAsOf.map(p => p.volume)).rvol5,
       high52w: high52wAtDate(h, asOf),
       r20: r20FromCloses(closesAsOf),
+      rangeExp: rangeExpansion(closesAsOf),
       adx: adxState?.adx ?? null,
       adxSlope: adxState?.adxSlope ?? null,
       plusDI: adxState?.plusDI ?? null,

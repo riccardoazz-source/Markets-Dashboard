@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { ChevronDown, ChevronRight, Star } from 'lucide-react';
 import {
   rankEms, DalioInput, EmsEval, CyclePhase,
-  DALIO_W_V, DALIO_W_M, DALIO_VOL_FLOOR, DALIO_VOL_SPIKE, DALIO_BENCHMARK,
+  DALIO_W_V, DALIO_W_M, DALIO_W_P, DALIO_VOL_FLOOR, DALIO_VOL_SPIKE, DALIO_BENCHMARK,
 } from '@/lib/dalioModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,21 +68,22 @@ export function DalioPanel({ items, pins, groupFilter }: {
         {e.ems == null ? '—' : e.ems.toFixed(3)}
       </td>
       <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', e.V > 0 ? 'text-green-400' : 'text-gray-400')}
-        title={`V = max(0, VolRatio − ${DALIO_VOL_FLOOR}) = ${e.V.toFixed(3)}`}>
-        {fmtX(e.volRatio)}
+        title={e.hasVolume ? `V = max(0, VolRatio − ${DALIO_VOL_FLOOR}) = ${e.V.toFixed(3)}` : `no volume → V = 0.2·range-expansion = ${e.V.toFixed(3)}`}>
+        {e.hasVolume ? fmtX(e.volRatio) : `~${e.V.toFixed(2)}`}
       </td>
       <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(e.ret20))}
-        title={`M = percentile of the positive 20d return = ${e.M.toFixed(2)}`}>
-        {fmtPct(e.ret20)}
+        title={`M_final = blend(20d/3M/6M) × confirmed × (1−blow-off) = ${e.mFinal.toFixed(2)}${e.confirmed ? '' : ' · UNCONFIRMED (need Price>MA200 & 3M>0)'}`}>
+        {e.mFinal.toFixed(2)}
+      </td>
+      <td className="px-2 py-1.5 text-right text-xs tabular-nums text-sky-300"
+        title="Persistence = percentile of (3-month return ÷ 20-day return) — trend-quality axis">
+        {e.persistPct.toFixed(2)}
       </td>
       <td className={clsx('px-2 py-1.5 text-center text-xs tabular-nums', e.C === 1 ? 'text-green-400 font-semibold' : e.C === 0 ? 'text-red-400' : 'text-gray-600')}>
         {e.C ?? '—'}
       </td>
       <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', e.distMA != null && e.distMA > 0.15 ? (e.distMA > 0.20 ? 'text-red-400' : 'text-amber-400') : 'text-gray-400')}>
         {e.distMA == null ? '—' : fmtPct(e.distMA * 100, 0)}
-      </td>
-      <td className="px-2 py-1.5 text-right text-xs tabular-nums text-gray-400">
-        {e.highDist == null ? '—' : `${(e.highDist * 100).toFixed(1)}%`}
       </td>
       <td className={clsx('px-2 py-1.5 text-right text-xs tabular-nums', pctColor(e.rs20))}
         title={`Hard pre-filter: RelStr > 0 vs ${DALIO_BENCHMARK} required to enter the ranking`}>
@@ -107,15 +108,16 @@ export function DalioPanel({ items, pins, groupFilter }: {
             {ranked.length} ranked
           </span>
         </div>
-        <span className="text-[10px] text-gray-600 hidden sm:inline">EMS = C · ({DALIO_W_V}·V + {DALIO_W_M}·M) — volume flow × momentum × cycle gate</span>
+        <span className="text-[10px] text-gray-600 hidden sm:inline">EMS = C · ({DALIO_W_V}·V + {DALIO_W_M}·M + {DALIO_W_P}·Persist) — flow × momentum × trend-quality</span>
       </button>
 
       {open && (
         <div className="px-3 pb-3 space-y-2">
           <p className="text-[10px] text-gray-500 leading-snug px-1">
-            V = max(0, VolRatio − {DALIO_VOL_FLOOR}), VolRatio = 5d ADV ÷ 60d ADV (5-day smoothed; missing volume → 1.0 neutral) ·
-            M = percentile of the positive 20d return ·
-            C = 1 when <em>within 5% of the 52w high and ≤15% above the 200D MA</em> (healthy momentum) or <em>&gt;5% below the high with VolRatio &lt; {DALIO_VOL_SPIKE}</em> (normal flow); a large gap from the high WITH a volume surge = potential blow-off → C = 0.
+            V = max(0, VolRatio − {DALIO_VOL_FLOOR}) (volume-blind → 0.2·range-expansion) ·
+            M_final = [0.5·pctile(20d) + 0.3·pctile(3M) + 0.2·pctile(6M)] × confirmed(Price&gt;MA200 &amp; 3M&gt;0) × (1 − blow-off) ·
+            Persistence = pctile(3M ÷ 20d return) ·
+            C = 1 when <em>near the 52w high &amp; ≤15% over MA200</em>, or <em>a rebound &gt;5% off the high on a ≥{DALIO_VOL_SPIKE}× volume surge above MA200</em>, or <em>above MA200 in a 6-month uptrend</em>.
             Hard pre-filter: RelStr vs {DALIO_BENCHMARK} &gt; 0. Ties break by VolRatio, then 20d return.
             This IS the live rotation model — the same ranking drives the Accelerating list, the Quadrant and the Backtest.
           </p>
@@ -126,12 +128,12 @@ export function DalioPanel({ items, pins, groupFilter }: {
                 <tr className="text-[10px] text-gray-600 font-medium">
                   <th className="w-8 px-2 py-1.5 text-left">#</th>
                   <th className="px-2 py-1.5 text-left">Asset</th>
-                  <th className="px-2 py-1.5 text-right" title={`EMS = C · (${DALIO_W_V}·V + ${DALIO_W_M}·M)`}>EMS</th>
-                  <th className="px-2 py-1.5 text-right" title="5-day ADV ÷ 60-day baseline, 5-day smoothed (feeds V)">VolRatio</th>
-                  <th className="px-2 py-1.5 text-right" title="20 trading-day price return (feeds M as a percentile)">20d ret</th>
-                  <th className="px-2 py-1.5 text-center" title="Dual-branch cycle gate — see the formula line above">C</th>
+                  <th className="px-2 py-1.5 text-right" title={`EMS = C · (${DALIO_W_V}·V + ${DALIO_W_M}·M_final + ${DALIO_W_P}·Persistence)`}>EMS</th>
+                  <th className="px-2 py-1.5 text-right" title="Flow: VolRatio (5d÷60d ADV, smoothed) for volume assets; range-expansion proxy (~x) for volume-blind">V</th>
+                  <th className="px-2 py-1.5 text-right" title="M_final = blend(20d/3M/6M return percentiles) × confirmed(Price>MA200 & 3M>0) × (1−blow-off)">M_final</th>
+                  <th className="px-2 py-1.5 text-right" title="Persistence = percentile of 3M÷20d return — trend-quality (durable vs one-month pop)">Persist</th>
+                  <th className="px-2 py-1.5 text-center" title="3-branch cycle gate — see the formula line above">C</th>
                   <th className="px-2 py-1.5 text-right" title="Distance from the 200-day moving average (DistMA)">vs 200D</th>
-                  <th className="px-2 py-1.5 text-right" title="Distance from the 52-week high (HighDist)">vs 52w high</th>
                   <th className="px-2 py-1.5 text-right" title={`20d return minus ${DALIO_BENCHMARK} — HARD pre-filter (> 0) + tie-break`}>RelStr</th>
                   <th className="px-2 py-1.5 text-left">Cycle phase</th>
                 </tr>

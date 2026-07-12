@@ -4,7 +4,7 @@ import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
 import { computeWeeklyADX } from '@/lib/adx';
-import { dalioVolumeRatios } from '@/lib/dalioModel';
+import { dalioVolumeRatios, rangeExpansion } from '@/lib/dalioModel';
 
 export const runtime = 'edge';
 
@@ -34,6 +34,7 @@ interface RollingReturn {
   rvol5: number | null;    // 5-day SMA of (ADV5 / ADV60) — smoothed short-window volume ratio
   rvol20: number | null;   // ADV20 / ADV60 — raw medium-window volume ratio
   r20: number | null;      // 20 TRADING-day price return (%) — Dalio's primary momentum filter
+  rangeExp: number | null; // range-expansion proxy 0–1 (volume-blind flow substitute, M31 v2)
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -132,6 +133,7 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     rvol5: dalio.rvol5,
     rvol20: dalio.rvol20,
     r20: r20Trading(history),
+    rangeExp: rangeExpansion(history.map(p => p.close)),
   };
 }
 

@@ -50,6 +50,7 @@ interface RotationItem {
   rvol5?: number | null;    // smoothed 5d/60d ADV ratio (Dalio early-momentum panel)
   rvol20?: number | null;   // raw 20d/60d ADV ratio (Dalio)
   r20?: number | null;      // 20 trading-day return % (Dalio)
+  rangeExp?: number | null; // range-expansion proxy 0–1 (Dalio EMS v2 volume-blind flow)
 }
 
 interface RollingReturn {
@@ -77,6 +78,7 @@ interface RollingReturn {
   rvol5: number | null;
   rvol20: number | null;
   r20: number | null;
+  rangeExp: number | null;
 }
 
 type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w' | '52w';
@@ -345,7 +347,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           high52w: r?.high52w ?? q?.high52w ?? null, low52w: r?.low52w ?? q?.low52w ?? null, pos52wRaw: r?.pos52w ?? null,
           trendR2: r?.trendR2 ?? null, trendR2Long: r?.trendR2Long ?? null, rsi: r?.rsi ?? null, macdHist: r?.macdHist ?? null,
           adx: r?.adx ?? null, adxSlope: r?.adxSlope ?? null, plusDI: r?.plusDI ?? null, minusDI: r?.minusDI ?? null,
-          rvol5: r?.rvol5 ?? null, rvol20: r?.rvol20 ?? null, r20: r?.r20 ?? null,
+          rvol5: r?.rvol5 ?? null, rvol20: r?.rvol20 ?? null, r20: r?.r20 ?? null, rangeExp: r?.rangeExp ?? null,
         };
       });
       setStockItems(built);
@@ -460,7 +462,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
             lastClose: r.lastClose ?? null,
             trendR2: r.trendR2 ?? null, trendR2Long: r.trendR2Long ?? null, rsi: r.rsi ?? null, macdHist: r.macdHist ?? null,
             adx: r.adx ?? null, adxSlope: r.adxSlope ?? null, plusDI: r.plusDI ?? null, minusDI: r.minusDI ?? null,
-            rvol5: r.rvol5 ?? null, rvol20: r.rvol20 ?? null, r20: r.r20 ?? null,
+            rvol5: r.rvol5 ?? null, rvol20: r.rvol20 ?? null, r20: r.r20 ?? null, rangeExp: r.rangeExp ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -630,8 +632,8 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           items={rows.map(i => ({
             symbol: i.symbol, name: i.name, group: i.group,
             price: i.lastClose ?? i.price, ma200: i.ma200, high52w: i.high52w,
-            rvol5: i.rvol5 ?? null, rvol20: i.rvol20 ?? null, r20: i.r20 ?? null,
-            r1m: i.r1m, r3m: i.r3m,
+            rvol5: i.rvol5 ?? null, rvol20: i.rvol20 ?? null, r20: i.r20 ?? null, rangeExp: i.rangeExp ?? null,
+            r1m: i.r1m, r3m: i.r3m, r6m: i.r6m,
           }))}
           pins={pins}
           groupFilter={groupFilter}
