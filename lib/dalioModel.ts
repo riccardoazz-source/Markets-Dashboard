@@ -1,61 +1,54 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// DALIO EMS — EARLY-MOMENTUM COMPOSITE SCORE (directive v2 + refinement Q&A)
+// DALIO EMS v3 — the consolidated formula (Ray's final, untruncated block)
 //
-// The shared Dalio math: consumed by BOTH the live rotation model
-// (MODEL_MODE = 'dalio' in lib/rotationModel.ts — quadrant, Accelerating list,
-// backtest) and the transparency panel (components/sections/DalioPanel.tsx).
+// Shared Dalio math, consumed by BOTH the live rotation model
+// (MODEL_MODE = 'dalio' in lib/rotationModel.ts) and the panel (DalioPanel.tsx).
 //
-//   EMS = C · (wV·V + wM·M_final + wP·PersistenceNorm)   wV=0.40 wM=0.40 wP=0.20
+//   FinalScore = C · (0.45·V + 0.45·M + 0.10·Persistence) · (1 − 0.5·Overheat) · ExitFactor
 //
-//   V  (flow / transaction size):
-//        volume assets  → max(0, VolRatio − 1.1)      VolRatio = 5d ADV ÷ 60d ADV, 5d-smoothed
-//        volume-blind   → 0.20 · RangeExpansion       (indices/futures/foreign listings keep
-//                         the flow thesis alive via a daily-range-expansion proxy, same 0–0.2 scale)
+//   Cycle gate (tightened — the v2 gate let late-cycle pops through):
+//     C = 1 if DistMA ≤ 0.15 AND Ret60 > 0 AND R2_12m > 0.5, else 0
+//       DistMA  = Price/MA200 − 1     → hard 15% distance cap (no blow-offs)
+//       Ret60   ≈ 3-month return > 0  → medium-term up
+//       R2_12m  = R² of the 12-month price trend > 0.5 → CLEAN trend, not a spike
 //
-//   M_final (multi-horizon momentum, confirmed, blow-off-penalised):
-//        M_blend   = 0.5·pctile(Ret20) + 0.3·pctile(Ret60) + 0.2·pctile(Ret180)
-//        Confirmed = Price > MA200 AND Ret60 > 0            (else M_final = 0)
-//        BlowOff   = Ret20 > 0.30 AND VolRatio < 1.2 → penalty = 0.5·(Ret20−0.30)/(1−0.30)
-//        M_final   = M_blend · Confirmed · (1 − BlowOff)
-//        (Ret20 = 20 trading-day return; Ret60 ≈ 3-month; Ret180 ≈ 6-month.)
+//   Flow:  volume assets → V = max(0, VolRatio − 1.1)   VolRatio = 5d ADV ÷ 60d ADV
+//          volume-blind  → V = 0.20 · RangeExpansion    (proxy so the flow thesis lives on)
 //
-//   PersistenceNorm = pctile( Ret60 / Ret20 )   for Ret20 > 0   — trend quality:
-//        a short-term pop that is part of a longer up-trend (durable compounder)
-//        outranks an isolated one-month spike.
+//   Momentum blend (long-horizon-weighted — was short-heavy in v2):
+//          M = 0.4·pctile(Ret20) + 0.3·pctile(Ret60) + 0.3·pctile(Ret12m)   (20d / 3M / 12M)
 //
-//   C (cycle gate — 3 branches, must show SUSTAINABILITY, not just be off the high):
-//        C = 1 if (near the 52w high AND ≤15% above the 200D MA)               // healthy momentum
-//              OR (>5% below the high AND VolRatio ≥ 1.2 AND Price > MA200)     // volume-driven rebound
-//              OR (Price > MA200 AND Ret180 > 0)                               // above trend + 6-month uptrend
-//            else 0.
+//   Persistence = pctile( Ret20 / Ret60 ) for Ret60 > 0 — ACCELERATION (recent pace ≥ older
+//          pace = early-cycle mover). v2 used the inverse (rewarded deceleration); Ray flipped it.
 //
-//   Pre-filter: RelStr = Ret20 − ^GSPC Ret20 > 0 (hard) then tie-break.
-//   Ranking: drop C = 0 / RelStr ≤ 0 / EMS = 0 · sort desc EMS · ties VolRatio, then Ret20.
-//   SeasonFactor deliberately deferred.
+//   Overheat (commodity late-cycle brake): for commodities only, when the price is far above
+//          its own 12-month median AND volume is surging:
+//          Overheat = clamp( min(1,(Price/Median12m − 1.5)/0.5) · (VolRatio − 1.3), 0, 1 )
+//          Score ×= (1 − 0.5·Overheat).
 //
-//   INTERPRETATION NOTES (assembled from the refinement answers — the final
-//   consolidated block arrived truncated, so these are my reconciliations):
-//   • V keeps the "surge above baseline" floor (max(0, VolRatio−1.1)); the
-//     volume-blind proxy is scaled to the SAME 0–0.2 band (0.20·RangeExpansion)
-//     rather than the literal "1.0 + 0.2·RangeExpansion", which would have made
-//     no-volume assets dominate the floored volume assets — the opposite of intent.
-//   • Ret60/Ret180 map to the 3-month/6-month returns already computed everywhere.
-//   • RangeExpansion is a close-only proxy (recent vs baseline mean |daily return|)
-//     so it needs no extra data plumbing and works for volume-blind assets too.
+//   ExitFactor (exhaustion brake): 1 if Ret20 ≥ Ret60 else 0.7; ×0.8 more if R2_12m < 0.5.
+//
+//   Rank: FinalScore desc, tie-break VolRatio desc, then RelStr (Ret20 − ^GSPC) desc.
+//         (RelStr is now a TIE-BREAK only — Ray's final formula dropped the hard >0 pre-filter.)
+//
+//   Ret60 ≈ 3-month return, Ret12m ≈ 1-year return, R2_12m = trailing ~12-month trend R².
+//   Missing MA200 / R² (thin history) are NOT read as failing the gate. SeasonFactor deferred.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const DALIO_W_V = 0.40;
-export const DALIO_W_M = 0.40;
-export const DALIO_W_P = 0.20;
-export const DALIO_VOL_FLOOR = 1.1;        // V = max(0, VolRatio − 1.1)
-export const DALIO_VOL_SPIKE = 1.2;        // volume-spike threshold (C gate + blow-off)
-export const DALIO_DISTMA_MAX = 0.15;      // ≤ 15% above the 200D MA
-export const DALIO_HIGHDIST_MIN = -0.05;   // "within 5% of the 52w high" boundary
-export const DALIO_BLOWOFF_RET = 0.30;     // Ret20 above this without a volume spike = blow-off
-export const DALIO_RANGE_BOOST = 0.20;     // volume-blind V = 0.20 · RangeExpansion
-export const DALIO_MA200_BLOWOFF = 0.20;   // cycle phase: > 20% above MA200 = blow-off
-export const DALIO_MBLEND_W = [0.5, 0.3, 0.2] as const; // Ret20 / Ret60 / Ret180 blend weights
-export const DALIO_BENCHMARK = '^GSPC';    // relative-strength benchmark
+export const DALIO_W_V = 0.45;
+export const DALIO_W_M = 0.45;
+export const DALIO_W_P = 0.10;
+export const DALIO_VOL_FLOOR = 1.1;         // V = max(0, VolRatio − 1.1)
+export const DALIO_DISTMA_MAX = 0.15;       // C: ≤ 15% above the 200D MA (hard cap)
+export const DALIO_R2_MIN = 0.5;            // C + exit: clean 12-month trend threshold
+export const DALIO_MBLEND_W = [0.4, 0.3, 0.3] as const; // Ret20 / Ret60 / Ret12m
+export const DALIO_RANGE_BOOST = 0.20;      // volume-blind V = 0.20 · RangeExpansion
+export const DALIO_OVERHEAT_PRICE = 1.5;    // commodity overheat: Price/Median12m threshold
+export const DALIO_OVERHEAT_VOL = 1.3;      // commodity overheat: VolRatio threshold
+export const DALIO_EXIT_DECEL = 0.7;        // ExitFactor when Ret20 < Ret60
+export const DALIO_EXIT_R2 = 0.8;           // extra ExitFactor when R2_12m < 0.5
+export const DALIO_MA200_BLOWOFF = 0.20;    // cycle phase label: > 20% above MA200
+export const DALIO_BENCHMARK = '^GSPC';
 
 // ── Volume ratios (shared by the live route AND the backtest) ────────────────
 export function advAt(vols: (number | null | undefined)[], end: number, n: number): number | null {
@@ -86,9 +79,6 @@ export function dalioVolumeRatios(vols: (number | null | undefined)[]): { rvol5:
 }
 
 // ── Range-expansion proxy (flow substitute for volume-blind assets) ──────────
-// recent 5-day mean |daily return| ÷ baseline 60-day mean, clamped to 0–1.
-// >0 means the daily range is expanding (rising participation) even when there
-// is no reported volume. Close-only, so identical live and in the backtest.
 export function rangeExpansion(closes: number[]): number | null {
   if (closes.length < 65) return null;
   const rets: number[] = [];
@@ -101,73 +91,75 @@ export function rangeExpansion(closes: number[]): number | null {
   return base > 0 ? Math.max(0, Math.min(1, recent / base - 1)) : 0;
 }
 
+// ── Median of the trailing n closes (commodity-overheat reference) ───────────
+export function medianClose(closes: number[], n = 252): number | null {
+  const w = closes.slice(-n).filter(c => c > 0).sort((a, b) => a - b);
+  if (w.length < 30) return null;
+  const m = Math.floor(w.length / 2);
+  return w.length % 2 ? w[m] : (w[m - 1] + w[m]) / 2;
+}
+
 // ── V sub-score ──────────────────────────────────────────────────────────────
 export function dalioVSub(volRatio: number | null | undefined, rangeExp: number | null | undefined): number {
   if (volRatio != null) return Math.max(0, volRatio - DALIO_VOL_FLOOR);
-  return DALIO_RANGE_BOOST * (rangeExp ?? 0); // volume-blind flow proxy (0–0.2)
+  return DALIO_RANGE_BOOST * (rangeExp ?? 0);
 }
 
-// ── Blow-off penalty on the momentum term ────────────────────────────────────
-// Ret20 given in PERCENT. A large short-term jump with no volume surge is likely
-// a speculative blow-off → linearly discount M up to 50% at Ret20 = 100%.
-export function dalioBlowOffPenalty(ret20Pct: number | null | undefined, volRatio: number | null | undefined): number {
-  if (ret20Pct == null) return 0;
-  const r = ret20Pct / 100;
-  const vr = volRatio ?? 1.0; // volume-blind → treated as no spike (penalty applies)
-  if (r > DALIO_BLOWOFF_RET && vr < DALIO_VOL_SPIKE) {
-    return Math.max(0, Math.min(0.5, 0.5 * (r - DALIO_BLOWOFF_RET) / (1 - DALIO_BLOWOFF_RET)));
+// ── Commodity overheat penalty (0–1) ─────────────────────────────────────────
+export function dalioOverheat(
+  isCommodity: boolean,
+  price: number | null | undefined,
+  median12m: number | null | undefined,
+  volRatio: number | null | undefined,
+): number {
+  if (!isCommodity || price == null || median12m == null || median12m <= 0 || volRatio == null) return 0;
+  const priceRatio = price / median12m;
+  if (priceRatio > DALIO_OVERHEAT_PRICE && volRatio > DALIO_OVERHEAT_VOL) {
+    const raw = Math.min(1, (priceRatio - DALIO_OVERHEAT_PRICE) / 0.5) * (volRatio - DALIO_OVERHEAT_VOL);
+    return Math.max(0, Math.min(1, raw));
   }
   return 0;
 }
 
-// ── Cycle gate C (3 branches) ────────────────────────────────────────────────
-export interface DalioCParts {
-  C: 0 | 1;
-  distMA: number | null;    // decimal above/below the 200d MA
-  highDist: number | null;  // decimal ≤ 0 (0 = at the 52w high)
-  nearHigh: boolean;
-  volSpike: boolean;
-  aboveMA: boolean;
+// ── Exit / exhaustion factor (0.56–1) ────────────────────────────────────────
+export function dalioExitFactor(ret20: number | null | undefined, ret60: number | null | undefined, r2_12m: number | null | undefined): number {
+  let f = ret20 != null && ret60 != null && ret20 >= ret60 ? 1 : DALIO_EXIT_DECEL;
+  if (r2_12m != null && r2_12m < DALIO_R2_MIN) f *= DALIO_EXIT_R2;
+  return f;
 }
 
-// Missing data is never read as "bad": null MA200 → aboveMA true (not penalised)
-// and the DistMA condition passes; null 52w high → treated as not-near-high.
+// ── Cycle gate C ─────────────────────────────────────────────────────────────
+export interface DalioCParts {
+  C: 0 | 1;
+  distMA: number | null;
+  ret60: number | null;
+  r2_12m: number | null;
+}
+
+// Missing MA200 / R² (thin history) are treated as passing that leg (not read as
+// "bad"), matching the rest of the codebase. Ret60 must be present and positive.
 export function dalioCGate(
   price: number | null | undefined,
   ma200: number | null | undefined,
-  high52w: number | null | undefined,
-  volRatio: number | null | undefined,
-  r6mPct: number | null | undefined,
+  ret60Pct: number | null | undefined,
+  r2_12m: number | null | undefined,
 ): DalioCParts | null {
   if (price == null || price <= 0) return null;
   const distMA = ma200 != null && ma200 > 0 ? price / ma200 - 1 : null;
-  const highDist = high52w != null && high52w > 0 ? price / high52w - 1 : null;
-  const vr = volRatio ?? 1.0;
-  const nearHigh = highDist != null && highDist >= DALIO_HIGHDIST_MIN;
-  const volSpike = vr >= DALIO_VOL_SPIKE;
-  const aboveMA = ma200 == null || ma200 <= 0 || price > ma200;
-  const trend6mPos = r6mPct != null && r6mPct > 0;
-  // Branch 1: near the high AND not stretched above trend → healthy momentum.
-  const b1 = nearHigh && (distMA == null || distMA <= DALIO_DISTMA_MAX);
-  // Branch 2: below the high BUT a volume surge above the long-term average → rebound.
-  const b2 = !nearHigh && volSpike && aboveMA;
-  // Branch 3: above the 200D MA AND a 6-month uptrend → sustainable structural trend.
-  const b3 = aboveMA && trend6mPos;
-  return { C: b1 || b2 || b3 ? 1 : 0, distMA, highDist, nearHigh, volSpike, aboveMA };
+  const okDist = distMA == null || distMA <= DALIO_DISTMA_MAX;
+  const okRet60 = ret60Pct != null && ret60Pct > 0;
+  const okR2 = r2_12m == null || r2_12m > DALIO_R2_MIN;
+  return { C: okDist && okRet60 && okR2 ? 1 : 0, distMA, ret60: ret60Pct ?? null, r2_12m: r2_12m ?? null };
 }
 
 export type CyclePhase = 'bottoming' | 'recovering' | 'early trend' | 'stretched' | 'blow-off';
 
-export function dalioPhase(parts: DalioCParts | null): CyclePhase | null {
-  if (!parts || parts.distMA == null) return null;
-  const { distMA, nearHigh, volSpike } = parts;
-  if (nearHigh) {
-    if (distMA > DALIO_MA200_BLOWOFF) return 'blow-off';
-    if (distMA > DALIO_DISTMA_MAX) return 'stretched';
-    return 'early trend';
-  }
-  if (volSpike) return 'blow-off'; // >5% off the high on a volume surge = distribution/over-extension
+export function dalioPhase(distMA: number | null, r2_12m: number | null): CyclePhase | null {
+  if (distMA == null) return null;
+  if (distMA > DALIO_MA200_BLOWOFF) return 'blow-off';
+  if (distMA > DALIO_DISTMA_MAX) return 'stretched';
   if (distMA < 0) return 'bottoming';
+  if (r2_12m != null && r2_12m > DALIO_R2_MIN) return 'early trend';
   return 'recovering';
 }
 
@@ -178,14 +170,15 @@ export interface DalioInput {
   group: string;
   price: number | null;
   ma200: number | null;
-  high52w: number | null;
-  rvol5: number | null;      // VolRatio (null → volume-blind, uses rangeExp)
+  median12m: number | null;  // 12-month median close (commodity overheat)
+  rvol5: number | null;      // VolRatio (null → volume-blind)
   rvol20: number | null;     // context only
   rangeExp: number | null;   // range-expansion proxy (volume-blind flow)
   r20: number | null;        // Ret20 (20 trading-day return %)
   r1m: number | null;        // fallback for r20
   r3m: number | null;        // Ret60 (≈3-month)
-  r6m: number | null;        // Ret180 (≈6-month)
+  r1y: number | null;        // Ret12m (≈1-year)
+  trendR2Long: number | null;// R2_12m (12-month trend R²)
 }
 
 export interface EmsEval {
@@ -195,23 +188,22 @@ export interface EmsEval {
   hasVolume: boolean;
   volRatio: number | null;
   ret20: number | null;
-  rs20: number | null;       // Ret20 − benchmark (pp) — hard pre-filter + tie-break
+  rs20: number | null;       // Ret20 − benchmark (pp) — tie-break
   distMA: number | null;
-  highDist: number | null;
+  r2_12m: number | null;
   V: number;
-  mBlend: number;            // 0.5·p20 + 0.3·p60 + 0.2·p180 (before confirm/blow-off)
-  confirmed: boolean;        // Price > MA200 AND Ret60 > 0
-  mFinal: number;            // mBlend · confirmed · (1 − blowOff)
-  persistPct: number;        // pctile(Ret60/Ret20) — trend-quality axis
+  M: number;                 // 0.4·p20 + 0.3·p60 + 0.3·p12
+  persistPct: number;        // pctile(Ret20/Ret60) — acceleration
+  overheat: number;          // commodity overheat 0–1
+  exitFactor: number;        // exhaustion brake 0.56–1
   C: 0 | 1 | null;
-  ems: number | null;
+  ems: number | null;        // FinalScore
   ranked: boolean;
   phase: CyclePhase | null;
   macroFlagged: boolean;
   reasons: string[];
 }
 
-// Ascending percentile of v among a sorted array (0..1); neutral 0.5 if too few.
 function pctileIn(sorted: number[], v: number): number {
   if (sorted.length < 2) return 0.5;
   let lo = 0;
@@ -219,25 +211,25 @@ function pctileIn(sorted: number[], v: number): number {
   return lo / (sorted.length - 1);
 }
 
+const isCommodityGroup = (g: string) => g === 'Commodities';
+
 /**
- * Score and rank the whole universe with the revised EMS (v2). Ranked assets
- * first (desc EMS, tie-break VolRatio then Ret20), then the rest so the UI can
- * show why each one is out.
+ * Score and rank the whole universe with EMS v3. Ranked assets first (desc
+ * FinalScore, tie-break VolRatio then RelStr), then the rest.
  */
 export function rankEms(items: DalioInput[], macroFlagged: Set<string> = new Set()): EmsEval[] {
   const r20Of = (i: DalioInput) => i.r20 ?? i.r1m;
   const bench = items.find(i => i.symbol === DALIO_BENCHMARK);
   const benchRet = bench ? r20Of(bench) : null;
 
-  // Cross-sectional percentile pools for the momentum blend.
-  const s20  = items.map(r20Of).filter((v): v is number => v != null).sort((a, b) => a - b);
-  const s60  = items.map(i => i.r3m).filter((v): v is number => v != null).sort((a, b) => a - b);
-  const s180 = items.map(i => i.r6m).filter((v): v is number => v != null).sort((a, b) => a - b);
-  const persistOf = (i: DalioInput): number | null => {
+  const s20 = items.map(r20Of).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const s60 = items.map(i => i.r3m).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const s12 = items.map(i => i.r1y).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const accelOf = (i: DalioInput): number | null => {
     const r20 = r20Of(i);
-    return r20 != null && r20 > 0 && i.r3m != null ? i.r3m / r20 : null;
+    return r20 != null && i.r3m != null && i.r3m > 0 ? r20 / i.r3m : null;
   };
-  const sPersist = items.map(persistOf).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const sAccel = items.map(accelOf).filter((v): v is number => v != null).sort((a, b) => a - b);
 
   const evals: EmsEval[] = items.map(it => {
     const hasVolume = it.rvol5 != null;
@@ -245,51 +237,49 @@ export function rankEms(items: DalioInput[], macroFlagged: Set<string> = new Set
     if (!hasVolume) reasons.push('no volume → V from range-expansion proxy');
 
     const ret = r20Of(it);
-    const p20  = ret != null ? pctileIn(s20, ret) : 0.5;
-    const p60  = it.r3m != null ? pctileIn(s60, it.r3m) : 0.5;
-    const p180 = it.r6m != null ? pctileIn(s180, it.r6m) : 0.5;
-    const mBlend = DALIO_MBLEND_W[0] * p20 + DALIO_MBLEND_W[1] * p60 + DALIO_MBLEND_W[2] * p180;
-    const confirmed = (it.ma200 == null || (it.price != null && it.price > it.ma200)) && it.r3m != null && it.r3m > 0;
-    const blowOff = dalioBlowOffPenalty(ret, it.rvol5);
-    const mFinal = confirmed ? mBlend * (1 - blowOff) : 0;
-    const pj = persistOf(it);
-    const persistPct = pj != null ? pctileIn(sPersist, pj) : 0;
+    const p20 = ret != null ? pctileIn(s20, ret) : 0.5;
+    const p60 = it.r3m != null ? pctileIn(s60, it.r3m) : 0.5;
+    const p12 = it.r1y != null ? pctileIn(s12, it.r1y) : 0.5;
+    const M = DALIO_MBLEND_W[0] * p20 + DALIO_MBLEND_W[1] * p60 + DALIO_MBLEND_W[2] * p12;
+    const aj = accelOf(it);
+    const persistPct = aj != null ? pctileIn(sAccel, aj) : 0;
 
     const V = dalioVSub(it.rvol5, it.rangeExp);
-    const parts = dalioCGate(it.price, it.ma200, it.high52w, it.rvol5, it.r6m);
+    const parts = dalioCGate(it.price, it.ma200, it.r3m, it.trendR2Long);
     const C = parts?.C ?? null;
+    const overheat = dalioOverheat(isCommodityGroup(it.group), it.price, it.median12m, it.rvol5);
+    const exitFactor = dalioExitFactor(ret, it.r3m, it.trendR2Long);
     const rs20 = ret != null && benchRet != null ? ret - benchRet : null;
-    const ems = C == null ? null : C * (DALIO_W_V * V + DALIO_W_M * mFinal + DALIO_W_P * persistPct);
+    const base = DALIO_W_V * V + DALIO_W_M * M + DALIO_W_P * persistPct;
+    const ems = C == null ? null : C * base * (1 - 0.5 * overheat) * exitFactor;
 
-    let ranked = C === 1;
+    let ranked = C === 1 && it.symbol !== DALIO_BENCHMARK;
     if (C == null) reasons.push('no price data');
-    if (C === 0) reasons.push('cycle gate C = 0 (not near-high/no rebound/not in a 6-month uptrend above MA200)');
-    if (ranked && !confirmed) reasons.push('momentum not confirmed (need Price > MA200 and 3-month return > 0)');
-    if (ranked && it.symbol !== DALIO_BENCHMARK && rs20 != null && rs20 <= 0) {
-      ranked = false;
-      reasons.push(`RelStr ${rs20.toFixed(1)}pp vs ${DALIO_BENCHMARK} ≤ 0`);
+    if (C === 0 && parts) {
+      if (parts.distMA != null && parts.distMA > DALIO_DISTMA_MAX) reasons.push(`${(parts.distMA * 100).toFixed(0)}% above 200D MA (> 15% cap)`);
+      else if (!(it.r3m != null && it.r3m > 0)) reasons.push('3-month return ≤ 0');
+      else if (it.trendR2Long != null && it.trendR2Long <= DALIO_R2_MIN) reasons.push(`12-month trend R² ${it.trendR2Long.toFixed(2)} ≤ 0.5 (not a clean trend)`);
+      else reasons.push('cycle gate C = 0');
     }
-    if (it.symbol === DALIO_BENCHMARK) { ranked = false; reasons.push('benchmark itself'); }
-    if (ranked && (ems == null || ems <= 0)) {
-      ranked = false;
-      reasons.push('EMS = 0 (no flow, and momentum unconfirmed or ≤ 0)');
-    }
+    if (it.symbol === DALIO_BENCHMARK) reasons.push('benchmark itself');
+    if (ranked && (ems == null || ems <= 0)) { ranked = false; reasons.push('FinalScore = 0'); }
 
     return {
       symbol: it.symbol, name: it.name, group: it.group,
       hasVolume, volRatio: it.rvol5, ret20: ret, rs20,
-      distMA: parts?.distMA ?? null, highDist: parts?.highDist ?? null,
-      V, mBlend, confirmed, mFinal, persistPct, C, ems, ranked,
-      phase: dalioPhase(parts),
+      distMA: parts?.distMA ?? null, r2_12m: it.trendR2Long,
+      V, M, persistPct, overheat, exitFactor, C, ems, ranked,
+      phase: dalioPhase(parts?.distMA ?? null, it.trendR2Long),
       macroFlagged: macroFlagged.has(it.symbol),
       reasons,
     };
   });
 
+  // Rank: FinalScore desc → VolRatio desc → RelStr desc (Ray's tie-break order).
   const order = (a: EmsEval, b: EmsEval) =>
     ((b.ems ?? -1) - (a.ems ?? -1)) ||
     ((b.volRatio ?? 1.0) - (a.volRatio ?? 1.0)) ||
-    ((b.ret20 ?? -Infinity) - (a.ret20 ?? -Infinity));
+    ((b.rs20 ?? -Infinity) - (a.rs20 ?? -Infinity));
 
   const rankedList = evals.filter(e => e.ranked).sort(order);
   const rest = evals.filter(e => !e.ranked).sort(order);
