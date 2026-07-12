@@ -9,7 +9,7 @@ import {
   ModelInput, realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram,
 } from './rotationModel';
 import { computeWeeklyADX } from './adx';
-import { dalioVolumeRatios, rangeExpansion, medianClose, moneyFlow20, ret5Trading } from './dalioModel';
+import { dalioVolumeRatios, rangeExpansion, medianClose, moneyFlow20, ret5Trading, downVolDryUp } from './dalioModel';
 
 // Yahoo daily bars include volume when the ticker reports it — carried through so
 // the Dalio EMS volume ratios (M31) are computable at any as-of date.
@@ -115,6 +115,7 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
       median12m: medianClose(closesAsOf),
       r5: ret5Trading(closesAsOf),
       moneyFlow: moneyFlow20(closesAsOf, upToAsOf.map(p => p.volume)),
+      downVolDry: downVolDryUp(closesAsOf, upToAsOf.map(p => p.volume)),
       adx: adxState?.adx ?? null,
       adxSlope: adxState?.adxSlope ?? null,
       plusDI: adxState?.plusDI ?? null,

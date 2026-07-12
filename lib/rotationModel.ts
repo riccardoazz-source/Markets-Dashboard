@@ -465,6 +465,7 @@ export interface ModelInput {
   median12m?: number | null;// 12-month median close (commodity overheat brake, EMS v3)
   r5?: number | null;       // 5 trading-day return % (EMS v5 acceleration overlay)
   moneyFlow?: number | null;// net buying pressure −1..1 (EMS v5 quiet-accumulation sleeve)
+  downVolDry?: number | null;// down-day volume dry-up 0..1 (EMS v8 recovery precision)
 }
 
 export interface ScoredItem<T extends ModelInput> {
@@ -1032,7 +1033,7 @@ export function scoreFromFeatures<T extends ModelInput>(
       const dm = f.item.price != null && f.item.ma200 != null && f.item.ma200 > 0
         ? f.item.price / f.item.ma200 - 1 : null;
       const recScore = f.hasReturns && f.item.symbol !== DALIO_BENCHMARK
-        ? dalioRecoveryScore(dm, f.item.moneyFlow, f.item.trendR2Long, f.item.r1y) : 0;
+        ? dalioRecoveryScore(dm, f.item.trendR2Long, f.item.r1y, f.item.r5, f.item.r20 ?? f.item.r1m, f.dalioRs, f.item.downVolDry) : 0;
       return {
         item: f.item, score, accel: f.accel, accPctile: f.accPctile,
         aRecent: f.aRecent, aBuild: f.aBuild, aLong: f.aLong,

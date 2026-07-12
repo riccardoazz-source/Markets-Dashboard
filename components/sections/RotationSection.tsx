@@ -54,6 +54,7 @@ interface RotationItem {
   median12m?: number | null;// 12-month median close (Dalio EMS v3 commodity overheat)
   r5?: number | null;       // 5 trading-day return % (Dalio EMS v5 acceleration overlay)
   moneyFlow?: number | null;// net buying pressure −1..1 (Dalio EMS v5 quiet-accumulation)
+  downVolDry?: number | null;// down-day volume dry-up 0..1 (Dalio EMS v8 recovery precision)
 }
 
 interface RollingReturn {
@@ -85,6 +86,7 @@ interface RollingReturn {
   median12m: number | null;
   r5: number | null;
   moneyFlow: number | null;
+  downVolDry: number | null;
 }
 
 type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w' | '52w';
@@ -353,7 +355,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           high52w: r?.high52w ?? q?.high52w ?? null, low52w: r?.low52w ?? q?.low52w ?? null, pos52wRaw: r?.pos52w ?? null,
           trendR2: r?.trendR2 ?? null, trendR2Long: r?.trendR2Long ?? null, rsi: r?.rsi ?? null, macdHist: r?.macdHist ?? null,
           adx: r?.adx ?? null, adxSlope: r?.adxSlope ?? null, plusDI: r?.plusDI ?? null, minusDI: r?.minusDI ?? null,
-          rvol5: r?.rvol5 ?? null, rvol20: r?.rvol20 ?? null, r20: r?.r20 ?? null, rangeExp: r?.rangeExp ?? null, median12m: r?.median12m ?? null, r5: r?.r5 ?? null, moneyFlow: r?.moneyFlow ?? null,
+          rvol5: r?.rvol5 ?? null, rvol20: r?.rvol20 ?? null, r20: r?.r20 ?? null, rangeExp: r?.rangeExp ?? null, median12m: r?.median12m ?? null, r5: r?.r5 ?? null, moneyFlow: r?.moneyFlow ?? null, downVolDry: r?.downVolDry ?? null,
         };
       });
       setStockItems(built);
@@ -468,7 +470,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
             lastClose: r.lastClose ?? null,
             trendR2: r.trendR2 ?? null, trendR2Long: r.trendR2Long ?? null, rsi: r.rsi ?? null, macdHist: r.macdHist ?? null,
             adx: r.adx ?? null, adxSlope: r.adxSlope ?? null, plusDI: r.plusDI ?? null, minusDI: r.minusDI ?? null,
-            rvol5: r.rvol5 ?? null, rvol20: r.rvol20 ?? null, r20: r.r20 ?? null, rangeExp: r.rangeExp ?? null, median12m: r.median12m ?? null, r5: r.r5 ?? null, moneyFlow: r.moneyFlow ?? null,
+            rvol5: r.rvol5 ?? null, rvol20: r.rvol20 ?? null, r20: r.r20 ?? null, rangeExp: r.rangeExp ?? null, median12m: r.median12m ?? null, r5: r.r5 ?? null, moneyFlow: r.moneyFlow ?? null, downVolDry: r.downVolDry ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -639,7 +641,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
             symbol: i.symbol, name: i.name, group: i.group,
             price: i.lastClose ?? i.price, ma200: i.ma200, median12m: i.median12m ?? null,
             rvol5: i.rvol5 ?? null, rvol20: i.rvol20 ?? null, r20: i.r20 ?? null, rangeExp: i.rangeExp ?? null,
-            r5: i.r5 ?? null, moneyFlow: i.moneyFlow ?? null,
+            r5: i.r5 ?? null, moneyFlow: i.moneyFlow ?? null, downVolDry: i.downVolDry ?? null,
             r1m: i.r1m, r3m: i.r3m, r1y: i.r1y, trendR2Long: i.trendR2Long ?? null,
           }))}
           pins={pins}

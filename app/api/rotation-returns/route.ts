@@ -4,7 +4,7 @@ import { subDays } from 'date-fns';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
 import { computeWeeklyADX } from '@/lib/adx';
-import { dalioVolumeRatios, rangeExpansion, medianClose, moneyFlow20, ret5Trading } from '@/lib/dalioModel';
+import { dalioVolumeRatios, rangeExpansion, medianClose, moneyFlow20, ret5Trading, downVolDryUp } from '@/lib/dalioModel';
 
 export const runtime = 'edge';
 
@@ -38,6 +38,7 @@ interface RollingReturn {
   median12m: number | null;// 12-month median close (commodity overheat brake, M31 v3)
   r5: number | null;       // 5 trading-day return % (M31 v5 acceleration overlay)
   moneyFlow: number | null;// net buying pressure −1..1 (M31 v5 quiet-accumulation sleeve)
+  downVolDry: number | null;// down-day volume dry-up 0..1 (M31 v8 recovery precision)
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -140,6 +141,7 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     median12m: medianClose(history.map(p => p.close)),
     r5: ret5Trading(history.map(p => p.close)),
     moneyFlow: moneyFlow20(history.map(p => p.close), history.map(p => p.volume)),
+    downVolDry: downVolDryUp(history.map(p => p.close), history.map(p => p.volume)),
   };
 }
 

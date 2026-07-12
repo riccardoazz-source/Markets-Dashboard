@@ -68,11 +68,16 @@ export const DALIO_DD_DEEP_FLOW = 0.1;      // deep tier: net-buying (≈ Up/Dow
 // money-flow gate (that's what blocked MU/WULF/AMD, which were falling with net
 // selling at the pick date) — only a soft "not in freefall" floor keeps out pure
 // knives. This trades precision for recall, as the objective is max winner capture.
-export const DALIO_RECOVERY_SLOTS = 6;      // of 25 (≈ 24%, Ray's 20–30%)
+export const DALIO_RECOVERY_SLOTS = 4;      // v8: 6 → 4 (fewer, higher-conviction; Ray)
 export const DALIO_RECOVERY_DIST_MAX = -0.10; // must be ≥10% below the MA (a real drawdown)
 export const DALIO_RECOVERY_DIST_MIN = -0.70; // …but not utterly broken
-export const DALIO_RECOVERY_MF_FLOOR = -0.35; // soft: allow net selling down to −0.35 (not freefall)
 export const DALIO_RECOVERY_TREND_MIN = 0.3;  // prior-trend proxy (12-month R²) or Ret12m > 0
+// v8 composite weights (Ray): down-day volume dry-up dominates, then drawdown
+// deceleration, relative strength, depth. Gated by a "prove-it-first" timing rule.
+export const DALIO_REC_W_DRY = 0.40;   // down-day volume drying up (seller exhaustion)
+export const DALIO_REC_W_DECEL = 0.25; // the decline is decelerating (recent pace > longer pace)
+export const DALIO_REC_W_RS = 0.20;    // falling less than the benchmark (relative strength)
+export const DALIO_REC_W_DEPTH = 0.15; // deeper drawdown = more recovery upside
 // Class tilt (Ray: stocks a slight edge, indices a slight discount — diversification
 // without hard slots). The winners are individual stocks, so this lifts capture.
 export const DALIO_CLASS_WEIGHT: Record<string, number> = {
@@ -119,6 +124,28 @@ export function rangeExpansion(closes: number[]): number | null {
   const recent = rets.slice(-5).reduce((s, r) => s + r, 0) / 5;
   const base = rets.slice(-60).reduce((s, r) => s + r, 0) / 60;
   return base > 0 ? Math.max(0, Math.min(1, recent / base - 1)) : 0;
+}
+
+// ── Down-day volume dry-up (v8 — the strongest recovery discriminator, Ray) ──
+// Recent 5-day average DOWN-day volume vs the prior 20 down-days' average. When
+// sellers exhaust, down-day volume collapses → the ratio drops. Returns 0..1
+// (higher = more dry-up = stronger "seller exhaustion" signal); null when volume
+// is missing or there aren't enough down days.
+export function downVolDryUp(closes: number[], vols: (number | null | undefined)[]): number | null {
+  const len = closes.length;
+  if (len < 26) return null;
+  const avgDownVol = (start: number, end: number): number | null => {
+    let sum = 0, cnt = 0;
+    for (let i = Math.max(1, start); i < end; i++) {
+      const v = vols[i];
+      if (v != null && v > 0 && closes[i] < closes[i - 1]) { sum += v; cnt++; }
+    }
+    return cnt >= 2 ? sum / cnt : null;
+  };
+  const recent = avgDownVol(len - 5, len);
+  const base = avgDownVol(len - 25, len - 5);
+  if (recent == null || base == null || base <= 0) return null;
+  return Math.max(0, Math.min(1, 1 - recent / base));
 }
 
 // ── Money flow (v5) — net buying pressure over the last n days ───────────────
@@ -204,25 +231,35 @@ export function dalioClassWeight(group: string): number {
   return DALIO_CLASS_WEIGHT[group] ?? 1.0;
 }
 
-// ── Deep-value / recovery sleeve score (0 = not a candidate) ─────────────────
-// A high-beta name in a real drawdown that HAD a structural trend. Ranked by
-// drawdown depth × prior-trend strength × a light accumulation bonus. Softened
-// money-flow floor (not a hard positive gate) so falling-with-net-selling future
-// winners still qualify. Returns 0 unless it's a genuine recovery candidate.
+// ── Deep-value / recovery sleeve score (v8 — precision, 0 = not a candidate) ──
+// A high-beta name in a real drawdown that HAD a structural trend, that is NOW
+// TURNING (Ray's "prove-it-first": positive 5-day return — don't buy a name still
+// making new lows). Ranked by a composite that puts most weight on down-day volume
+// DRYING UP (seller exhaustion), then the decline decelerating, relative strength,
+// and depth. Returns 0 unless it clears the timing gate — that is the whole fix for
+// v7 (which bought falling names that kept falling).
 export function dalioRecoveryScore(
   distMA: number | null,
-  moneyFlow: number | null | undefined,
   r2_12m: number | null | undefined,
   r1y: number | null | undefined,
+  r5: number | null | undefined,
+  r20: number | null | undefined,
+  rs20: number | null | undefined,
+  downVolDry: number | null | undefined,
 ): number {
   if (distMA == null || distMA > DALIO_RECOVERY_DIST_MAX || distMA < DALIO_RECOVERY_DIST_MIN) return 0;
-  if (moneyFlow != null && moneyFlow < DALIO_RECOVERY_MF_FLOOR) return 0; // pure freefall → out
+  if (r5 == null || r5 <= 0) return 0;                         // PROVE-IT-FIRST: must be turning up
   const priorTrend = (r2_12m != null && r2_12m > DALIO_RECOVERY_TREND_MIN) || (r1y != null && r1y > 0);
   if (!priorTrend) return 0;
-  const depth = Math.min(1, -distMA / 0.50);                 // deeper = higher, cap at −50%
-  const trendStrength = Math.max(0.3, Math.min(1, r2_12m ?? 0.3));
-  const flowBonus = 1 + Math.max(0, moneyFlow ?? 0);         // a little extra if flow is turning up
-  return depth * trendStrength * flowBonus;
+
+  const dry = downVolDry ?? 0;                                 // 0..1 seller-exhaustion (strongest)
+  // Deceleration: recent daily pace better than the 20-day daily pace (the fall is fading).
+  const decel = r20 != null && r20 < 0 && r5 != null
+    ? Math.max(0, Math.min(1, (r5 / 5 - r20 / 20) / 1.0))
+    : 0.5;
+  const rel = rs20 != null ? Math.max(0, Math.min(1, (rs20 + 10) / 20)) : 0.5; // vs benchmark
+  const depth = Math.min(1, -distMA / 0.50);                  // deeper = more upside, cap −50%
+  return DALIO_REC_W_DRY * dry + DALIO_REC_W_DECEL * decel + DALIO_REC_W_RS * rel + DALIO_REC_W_DEPTH * depth;
 }
 
 // ── Median of the trailing n closes (commodity-overheat reference) ───────────
@@ -307,6 +344,7 @@ export interface DalioInput {
   r1y: number | null;        // Ret12m (≈1-year)
   trendR2Long: number | null;// R2_12m
   moneyFlow: number | null;  // net buying pressure −1..1 (quiet-accumulation sleeve)
+  downVolDry: number | null; // down-day volume dry-up 0..1 (v8 recovery precision)
 }
 
 export interface EmsEval {
