@@ -62,6 +62,17 @@ export const DALIO_DD_DIST_DEEP = -0.60;    // deep-drawdown floor (−60%..−3
 export const DALIO_DD_DIST_MAX = 0.05;      // must be at/below the MA (basing), not extended
 export const DALIO_DD_DEEP_VOL = 1.5;       // deep tier: VolRatio surge threshold
 export const DALIO_DD_DEEP_FLOW = 0.1;      // deep tier: net-buying (≈ Up/Down-Vol-Ratio > 1.2)
+// ── Deep-value / recovery sleeve (Ray's max-recall lever — reserved slots) ───
+// Reserve a block of slots for high-beta names in a real drawdown that HAD a
+// structural trend, ranked by drawdown depth × prior-trend strength. NO positive
+// money-flow gate (that's what blocked MU/WULF/AMD, which were falling with net
+// selling at the pick date) — only a soft "not in freefall" floor keeps out pure
+// knives. This trades precision for recall, as the objective is max winner capture.
+export const DALIO_RECOVERY_SLOTS = 6;      // of 25 (≈ 24%, Ray's 20–30%)
+export const DALIO_RECOVERY_DIST_MAX = -0.10; // must be ≥10% below the MA (a real drawdown)
+export const DALIO_RECOVERY_DIST_MIN = -0.70; // …but not utterly broken
+export const DALIO_RECOVERY_MF_FLOOR = -0.35; // soft: allow net selling down to −0.35 (not freefall)
+export const DALIO_RECOVERY_TREND_MIN = 0.3;  // prior-trend proxy (12-month R²) or Ret12m > 0
 // Class tilt (Ray: stocks a slight edge, indices a slight discount — diversification
 // without hard slots). The winners are individual stocks, so this lifts capture.
 export const DALIO_CLASS_WEIGHT: Record<string, number> = {
@@ -191,6 +202,27 @@ export function dalioDrawdownQuality(
 
 export function dalioClassWeight(group: string): number {
   return DALIO_CLASS_WEIGHT[group] ?? 1.0;
+}
+
+// ── Deep-value / recovery sleeve score (0 = not a candidate) ─────────────────
+// A high-beta name in a real drawdown that HAD a structural trend. Ranked by
+// drawdown depth × prior-trend strength × a light accumulation bonus. Softened
+// money-flow floor (not a hard positive gate) so falling-with-net-selling future
+// winners still qualify. Returns 0 unless it's a genuine recovery candidate.
+export function dalioRecoveryScore(
+  distMA: number | null,
+  moneyFlow: number | null | undefined,
+  r2_12m: number | null | undefined,
+  r1y: number | null | undefined,
+): number {
+  if (distMA == null || distMA > DALIO_RECOVERY_DIST_MAX || distMA < DALIO_RECOVERY_DIST_MIN) return 0;
+  if (moneyFlow != null && moneyFlow < DALIO_RECOVERY_MF_FLOOR) return 0; // pure freefall → out
+  const priorTrend = (r2_12m != null && r2_12m > DALIO_RECOVERY_TREND_MIN) || (r1y != null && r1y > 0);
+  if (!priorTrend) return 0;
+  const depth = Math.min(1, -distMA / 0.50);                 // deeper = higher, cap at −50%
+  const trendStrength = Math.max(0.3, Math.min(1, r2_12m ?? 0.3));
+  const flowBonus = 1 + Math.max(0, moneyFlow ?? 0);         // a little extra if flow is turning up
+  return depth * trendStrength * flowBonus;
 }
 
 // ── Median of the trailing n closes (commodity-overheat reference) ───────────
