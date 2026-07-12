@@ -12,7 +12,6 @@ import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart'
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
 import { SentimentPanel, SentimentSnapshot } from '@/components/sections/SentimentPanel';
-import { DalioPanel } from '@/components/sections/DalioPanel';
 
 type Group = 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors' | 'Stocks';
 
@@ -631,23 +630,6 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     <div className="space-y-4">
       {/* Daily sentiment */}
       <SentimentPanel buildSnapshot={buildSnapshot} getQuadrant={buildQuadrant} ready={!rollingLoading} onBeforeRun={resetTableForSentiment} />
-
-      {/* Dalio early-momentum model — coefficient-free, side-by-side with the quant model.
-          Evaluated over the FULL universe (benchmark + cross-sectional RS need it);
-          the panel filters its display by the active group. */}
-      {!rollingLoading && (
-        <DalioPanel
-          items={rows.map(i => ({
-            symbol: i.symbol, name: i.name, group: i.group,
-            price: i.lastClose ?? i.price, ma200: i.ma200, median12m: i.median12m ?? null,
-            rvol5: i.rvol5 ?? null, rvol20: i.rvol20 ?? null, r20: i.r20 ?? null, rangeExp: i.rangeExp ?? null,
-            r5: i.r5 ?? null, moneyFlow: i.moneyFlow ?? null, downVolDry: i.downVolDry ?? null,
-            r1m: i.r1m, r3m: i.r3m, r1y: i.r1y, trendR2Long: i.trendR2Long ?? null,
-          }))}
-          pins={pins}
-          groupFilter={groupFilter}
-        />
-      )}
 
       {/* Controls */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
