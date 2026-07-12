@@ -55,10 +55,13 @@ export const DALIO_MA200_BLOWOFF = 0.20;    // cycle phase label: > 20% above MA
 // ── v5 additions (Ray's capture-gap fixes) ──────────────────────────────────
 export const DALIO_W_ACCEL = 0.10;          // acceleration overlay weight (Ray: 5–10%)
 export const DALIO_W_DRAWDOWN = 0.30;       // quiet-accumulation (falling-winner) weight
-export const DALIO_DD_BASE_SCALE = 0.15;    // base-proximity decay scale (near MA → 1)
+export const DALIO_DD_BASE_SCALE = 0.20;    // base-proximity decay scale (near MA → 1)
 export const DALIO_DD_ACCUM_SCALE = 0.25;   // accumulation normalization
-export const DALIO_DD_DIST_MIN = -0.35;     // drawdown floor (deeper than −35% = broken)
+export const DALIO_DD_DIST_MIN = -0.35;     // shallow/basing floor (−35%..+5%)
+export const DALIO_DD_DIST_DEEP = -0.60;    // deep-drawdown floor (−60%..−35%, strict signature)
 export const DALIO_DD_DIST_MAX = 0.05;      // must be at/below the MA (basing), not extended
+export const DALIO_DD_DEEP_VOL = 1.5;       // deep tier: VolRatio surge threshold
+export const DALIO_DD_DEEP_FLOW = 0.1;      // deep tier: net-buying (≈ Up/Down-Vol-Ratio > 1.2)
 // Class tilt (Ray: stocks a slight edge, indices a slight discount — diversification
 // without hard slots). The winners are individual stocks, so this lifts capture.
 export const DALIO_CLASS_WEIGHT: Record<string, number> = {
@@ -141,25 +144,49 @@ export function dalioAccelBoost(ret5: number | null | undefined, ret20: number |
   return Math.max(0, Math.min(1, accel - 1));
 }
 
-// ── Quiet-accumulation / drawdown-quality (the falling-winner fix) ───────────
-// QuietAccumScore ≈ (VolRatio − 1)·PositiveMoneyFlow·BaseProximity, gated to a
-// QUALITY name in a real long-term uptrend sitting at/below its 200-day MA with
-// volume quietly building — Ray's "buyers accumulating before the crowd". Returns
-// 0 unless every condition aligns, so it never rewards a falling knife.
+// ── Quiet-accumulation / drawdown-quality (the falling-winner fix, v6) ───────
+// Three tiers of "buyers accumulating before the crowd" (Ray): moneyFlow is the
+// 20-day net directional volume — it doubles as OBV-slope-up AND Up/Down-Volume-
+// Ratio, so a positive value is Ray's transaction signature.
+//   • SHALLOW basing (−35%..+5% of MA), quality name (Ret12m > 0): volume building
+//     (VolRatio ≥ 1.1) + net buying. Full weight.
+//   • DEEP drawdown (−60%..−35%): the STRICT signature only — a real volume surge
+//     (VolRatio ≥ 1.5) AND strong net buying (moneyFlow > 0.1 ≈ UDR > 1.2). No
+//     Ret12m gate (deep winners have crashed), capped at half weight — separates a
+//     base from a knife by transaction flow, not by price.
+//   • THIN history (no Ret12m — spin-offs/IPOs like SNDK): a short-term uptrend
+//     (Ret20 > 0 AND Ret5 > 0) + volume accumulation, lower weight.
+// Returns 0 unless a tier's conditions align, so a falling knife (moneyFlow ≤ 0)
+// never scores.
 export function dalioDrawdownQuality(
   distMA: number | null,
   rvol5: number | null | undefined,
   moneyFlow: number | null | undefined,
   r2_12m: number | null | undefined,
   r1y: number | null | undefined,
+  r20: number | null | undefined,
+  r5: number | null | undefined,
 ): number {
-  if (distMA == null || distMA > DALIO_DD_DIST_MAX || distMA < DALIO_DD_DIST_MIN) return 0;
-  if (r1y == null || r1y <= 0) return 0;                       // must have a structural uptrend
-  if (rvol5 == null || moneyFlow == null || rvol5 < 1.1 || moneyFlow <= 0) return 0; // building volume + net buying
-  const baseProximity = Math.exp(-Math.abs(distMA) / DALIO_DD_BASE_SCALE); // near the MA → ~1
+  if (distMA == null || distMA > DALIO_DD_DIST_MAX || distMA < DALIO_DD_DIST_DEEP) return 0;
+  if (rvol5 == null || moneyFlow == null) return 0;
+
+  // DEEP drawdown (−60%..−35%): strict transaction signature, no trend gate.
+  if (distMA < DALIO_DD_DIST_MIN) {
+    if (rvol5 < DALIO_DD_DEEP_VOL || moneyFlow <= DALIO_DD_DEEP_FLOW) return 0;
+    const accum = Math.min(1, ((rvol5 - 1) * moneyFlow) / DALIO_DD_ACCUM_SCALE);
+    return 0.5 * accum;
+  }
+
+  // SHALLOW/basing (−35%..+5%): a quality uptrend OR a thin-history early uptrend.
+  const uptrend = r1y != null && r1y > 0;
+  const thin = r1y == null && r20 != null && r20 > 0 && r5 != null && r5 > 0;
+  if (!uptrend && !thin) return 0;
+  if (rvol5 < 1.1 || moneyFlow <= 0) return 0;
+  const baseProximity = Math.exp(-Math.abs(distMA) / DALIO_DD_BASE_SCALE);
   const accum = Math.min(1, ((rvol5 - 1) * moneyFlow) / DALIO_DD_ACCUM_SCALE);
-  const trendStrength = Math.max(0, Math.min(1, r2_12m ?? 0));
-  return baseProximity * accum * trendStrength;
+  const trendStrength = uptrend ? Math.max(0, Math.min(1, r2_12m ?? 0.4)) : 0.4; // thin → neutral
+  const w = thin ? 0.6 : 1.0; // thin-history sleeve gets a lower weight (Ray)
+  return w * baseProximity * accum * trendStrength;
 }
 
 export function dalioClassWeight(group: string): number {
@@ -325,7 +352,7 @@ export function rankEms(items: DalioInput[], macroFlagged: Set<string> = new Set
     const rs20 = ret != null && benchRet != null ? ret - benchRet : null;
 
     const accelBoost = dalioAccelBoost(it.r5, ret);
-    const drawdownQuality = dalioDrawdownQuality(distMA, it.rvol5, it.moneyFlow, it.trendR2Long, it.r1y);
+    const drawdownQuality = dalioDrawdownQuality(distMA, it.rvol5, it.moneyFlow, it.trendR2Long, it.r1y, ret, it.r5);
     const base = DALIO_W_V * V + DALIO_W_M * M + DALIO_W_P * persistPct;
     const core = decay * base * (1 - 0.5 * overheat) * exitFactor + DALIO_W_TREND * trendQuality;
     const ems = it.price == null

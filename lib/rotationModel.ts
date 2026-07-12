@@ -873,7 +873,7 @@ export function computeRotationFeatures<T extends ModelInput>(items: T[]): Rotat
     const dalioOh = dalioOverheat(isCommodity(item), item.price, item.median12m, item.rvol5);
     const dalioExit = dalioExitFactor(dRet, item.r3m, item.trendR2Long);
     const dalioAccel = dalioAccelBoost(item.r5, dRet);
-    const dalioDrawdown = dalioDrawdownQuality(dalioDistMA, item.rvol5, item.moneyFlow, item.trendR2Long, item.r1y);
+    const dalioDrawdown = dalioDrawdownQuality(dalioDistMA, item.rvol5, item.moneyFlow, item.trendR2Long, item.r1y, dRet, item.r5);
     const dalioClassW = dalioClassWeight(item.group ?? '');
     const dalioRs = dRet != null && dalioBenchRet != null ? dRet - dalioBenchRet : null;
 
