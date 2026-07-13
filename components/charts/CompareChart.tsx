@@ -454,6 +454,9 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     legendItems.push({ key: a.symbol, name: a.name, color: MARKET_EVENT_COLORS[cat], dashed: true });
   });
 
+  const selYears = range
+    ? Math.max(0, (new Date(range.right).getTime() - new Date(range.left).getTime()) / (365.25 * 86_400_000))
+    : 0;
   const selStats = range
     ? plottableAssets.map(a => {
         const rows = chartData as { date: string; [k: string]: unknown }[];
@@ -468,7 +471,19 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
             pct = lv !== 0 ? (rv - lv) / Math.abs(lv) * 100 : null;
           }
         }
-        return { symbol: a.symbol, name: a.name, color: a.color, pct };
+        // Annualised CAGR of the sub-period return, and the dividend-inclusive IRR
+        // (from this asset's total-return series) when it differs from the price CAGR.
+        const cagr = pct != null && selYears > 0.02 ? (Math.pow(1 + pct / 100, 1 / selYears) - 1) * 100 : null;
+        let irr: number | null = null;
+        if (a.trData && a.trData.length && selYears > 0.02) {
+          const tl = valueAtOrAfter(a.trData, range.left, 'close');
+          const tr = valueAtOrBefore(a.trData, range.right, 'close');
+          if (tl != null && tr != null && tl > 0 && tr > 0) {
+            const trCagr = (Math.pow(tr / tl, 1 / selYears) - 1) * 100;
+            if (cagr == null || Math.abs(trCagr - cagr) > 0.05) irr = trCagr;
+          }
+        }
+        return { symbol: a.symbol, name: a.name, color: a.color, pct, cagr, irr };
       })
     : null;
 
@@ -507,6 +522,16 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
                 <span className={`font-bold tabular-nums ${s.pct == null ? 'text-gray-600' : s.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                   {s.pct == null ? '—' : `${s.pct >= 0 ? '+' : ''}${s.pct.toFixed(2)}%`}
                 </span>
+                {s.cagr != null && (
+                  <span className="text-[10px] text-gray-500 tabular-nums" title="Annualised return (CAGR) over the highlighted period">
+                    CAGR {s.cagr >= 0 ? '+' : ''}{s.cagr.toFixed(1)}%
+                  </span>
+                )}
+                {s.irr != null && (
+                  <span className="text-[10px] text-sky-400 tabular-nums" title="Dividend-inclusive annualised return (IRR)">
+                    IRR {s.irr >= 0 ? '+' : ''}{s.irr.toFixed(1)}%
+                  </span>
+                )}
               </span>
             ))}
           </div>
@@ -786,19 +811,6 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               strokeWidth={1.5}
               strokeOpacity={0.9}
               label={{ value: item.year, fill: '#9ca3af', fontSize: 9, position: 'insideTopLeft', fontWeight: 'bold' }}
-            />
-          ))}
-          {/* Duration band from start → end for events that have ended (e.g. wars) */}
-          {visibleEventItems.filter(e => e.snappedEnd && e.snappedEnd !== e.snapped).map((evt, i) => (
-            <ReferenceArea
-              key={`event-span-${i}`}
-              yAxisId="left"
-              x1={evt.snapped}
-              x2={evt.snappedEnd!}
-              fill={MARKET_EVENT_COLORS[evt.category]}
-              fillOpacity={0.12}
-              stroke="none"
-              ifOverflow="visible"
             />
           ))}
           {visibleEventItems.map((evt, i) => (
