@@ -464,13 +464,26 @@ function DualChart({
   const toolMin = toolCloses.length > 0 ? Math.min(...toolCloses) : null;
   const toolMax = toolCloses.length > 0 ? Math.max(...toolCloses) : null;
 
-  // Drag-selection price change
-  let selStats: { leftVal: number; rightVal: number; pct: number } | null = null;
+  // Drag-selection: price change, annualised CAGR, and dividend-inclusive IRR (when
+  // dividends were paid inside the window — from the total-return series).
+  let selStats: { leftVal: number; rightVal: number; pct: number; cagr: number | null; irr: number | null } | null = null;
   if (range) {
     const lv = valueAtOrAfter(prices, range.left, 'close');
     const rv = valueAtOrBefore(prices, range.right, 'close');
     if (lv != null && rv != null && lv !== 0) {
-      selStats = { leftVal: lv, rightVal: rv, pct: (rv - lv) / Math.abs(lv) * 100 };
+      const years = Math.max(0, (new Date(range.right).getTime() - new Date(range.left).getTime()) / (365.25 * 86_400_000));
+      const cagr = years > 0.02 && lv > 0 && rv > 0 ? (Math.pow(rv / lv, 1 / years) - 1) * 100 : null;
+      let irr: number | null = null;
+      if (hasDivs && years > 0.02) {
+        const trSeries = prices.map(d => ({ date: d.date, close: trMap.get(d.date) ?? NaN })).filter(d => isFinite(d.close));
+        const tl = valueAtOrAfter(trSeries, range.left, 'close');
+        const tr = valueAtOrBefore(trSeries, range.right, 'close');
+        if (tl != null && tr != null && tl > 0 && tr > 0) {
+          const trCagr = (Math.pow(tr / tl, 1 / years) - 1) * 100;
+          if (cagr == null || Math.abs(trCagr - cagr) > 0.05) irr = trCagr;
+        }
+      }
+      selStats = { leftVal: lv, rightVal: rv, pct: (rv - lv) / Math.abs(lv) * 100, cagr, irr };
     }
   }
   const fmtD = (d: string) => { try { return format(parseISO(d), 'MMM d, yyyy'); } catch { return d; } };
@@ -487,9 +500,25 @@ function DualChart({
             <span className="text-gray-500 tabular-nums">
               {formatPrice(selStats.leftVal, currency)} → {formatPrice(selStats.rightVal, currency)}
             </span>
-            <span className={`font-bold tabular-nums ${selStats.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {selStats.pct >= 0 ? '+' : ''}{selStats.pct.toFixed(2)}%
-            </span>
+            <div className="flex flex-col items-end leading-tight">
+              <span className={`font-bold tabular-nums ${selStats.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {selStats.pct >= 0 ? '+' : ''}{selStats.pct.toFixed(2)}%
+              </span>
+              {(selStats.cagr != null || selStats.irr != null) && (
+                <span className="text-[10px] text-gray-500 tabular-nums whitespace-nowrap">
+                  {selStats.cagr != null && (
+                    <span title="Annualised return (CAGR) over the highlighted period">
+                      CAGR {selStats.cagr >= 0 ? '+' : ''}{selStats.cagr.toFixed(1)}%
+                    </span>
+                  )}
+                  {selStats.irr != null && (
+                    <span className="text-sky-400" title="Dividend-inclusive annualised return (IRR) — dividends paid in this window, reinvested">
+                      {selStats.cagr != null ? ' · ' : ''}IRR {selStats.irr >= 0 ? '+' : ''}{selStats.irr.toFixed(1)}%
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
             {onSetRange && (
               <button
                 onClick={() => { onSetRange(range.left, range.right); clear(); }}
