@@ -304,7 +304,14 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
   const visibleEventItems = eventCatAssets.length > 0 && allDates.length > 0
     ? mergedEvents
         .filter(e => selectedEventCats.has(e.category) && e.date >= allDates[0] && e.date <= allDates[allDates.length - 1])
-        .map(e => ({ ...e, snapped: snapToDates(e.date, allDates) }))
+        .map(e => ({
+          ...e,
+          snapped: snapToDates(e.date, allDates),
+          // End of a war/conflict, clipped to the visible range, so the duration band renders.
+          snappedEnd: e.endDate
+            ? snapToDates(e.endDate > allDates[allDates.length - 1] ? allDates[allDates.length - 1] : e.endDate, allDates)
+            : null,
+        }))
     : [];
 
   // "Today" vertical marker — shown when the chart contains future-dated data
@@ -781,6 +788,19 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               label={{ value: item.year, fill: '#9ca3af', fontSize: 9, position: 'insideTopLeft', fontWeight: 'bold' }}
             />
           ))}
+          {/* Duration band from start → end for events that have ended (e.g. wars) */}
+          {visibleEventItems.filter(e => e.snappedEnd && e.snappedEnd !== e.snapped).map((evt, i) => (
+            <ReferenceArea
+              key={`event-span-${i}`}
+              yAxisId="left"
+              x1={evt.snapped}
+              x2={evt.snappedEnd!}
+              fill={MARKET_EVENT_COLORS[evt.category]}
+              fillOpacity={0.12}
+              stroke="none"
+              ifOverflow="visible"
+            />
+          ))}
           {visibleEventItems.map((evt, i) => (
             <ReferenceLine
               key={`event-${i}`}
@@ -796,6 +816,18 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
                 fontSize: 8,
                 position: i % 2 === 0 ? 'insideTopRight' : 'insideBottomRight',
               } : undefined}
+            />
+          ))}
+          {/* End line for ended events */}
+          {visibleEventItems.filter(e => e.snappedEnd && e.snappedEnd !== e.snapped).map((evt, i) => (
+            <ReferenceLine
+              key={`event-end-${i}`}
+              yAxisId="left"
+              x={evt.snappedEnd!}
+              stroke={MARKET_EVENT_COLORS[evt.category]}
+              strokeWidth={1}
+              strokeDasharray="2 3"
+              strokeOpacity={0.5}
             />
           ))}
           {todaySnapped && (
