@@ -13,6 +13,7 @@ import { classifyPhase, PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
 import { SentimentPanel, SentimentSnapshot } from '@/components/sections/SentimentPanel';
+import { StrategyPanel } from '@/components/sections/StrategyPanel';
 
 type Group = 'Indexes' | 'Crypto' | 'Commodities' | 'Sectors' | 'Stocks';
 
@@ -601,6 +602,9 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     <div className="space-y-4">
       {/* Daily sentiment */}
       <SentimentPanel buildSnapshot={buildSnapshot} getQuadrant={buildQuadrant} ready={!rollingLoading} onBeforeRun={resetTableForSentiment} />
+
+      {/* User's own rotation strategy — listed and evaluated live */}
+      <StrategyPanel onCompare={onCompare} />
 
       {/* Controls */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
