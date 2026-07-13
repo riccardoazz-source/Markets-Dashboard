@@ -325,9 +325,15 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           fetch('/api/sectors'),
         ]);
 
-        const quotes: QuoteData[]  = await quotesRes.json();
-        const cryptos: CryptoData[] = await cryptoRes.json();
-        const sectors = await sectorsRes.json() as Array<{
+        // Defensive: a rate-limited/error response returns an object, not an array —
+        // default to [] so one flaky endpoint degrades gracefully instead of throwing
+        // and blanking the whole table.
+        const rawQuotes = await quotesRes.json().catch(() => []);
+        const rawCryptos = await cryptoRes.json().catch(() => []);
+        const rawSectors = await sectorsRes.json().catch(() => []);
+        const quotes: QuoteData[]  = Array.isArray(rawQuotes) ? rawQuotes : [];
+        const cryptos: CryptoData[] = Array.isArray(rawCryptos) ? rawCryptos : [];
+        const sectors = (Array.isArray(rawSectors) ? rawSectors : []) as Array<{
           symbol: string; name: string; category: string;
           price: number | null; currency: string;
           changePercent: number | null; fiveYearReturn: number | null;
@@ -398,10 +404,20 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
         setItems(allItems);
         setLoading(false);
 
-        // Phase 2: rolling returns (server computes 1Y history for all 71 assets)
-        const rollingRes = await fetch('/api/rotation-returns');
-        const rollingData: RollingReturn[] = await rollingRes.json();
+        // Phase 2: rolling returns (server computes 1Y history for all 71 assets).
+        // Retry a couple of times — the ~90-asset Yahoo burst gets rate-limited and
+        // returns an error/empty; a short backoff usually clears it.
+        let rollingData: RollingReturn[] = [];
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt));
+          const rollingRes = await fetch('/api/rotation-returns');
+          const raw = await rollingRes.json().catch(() => []);
+          if (Array.isArray(raw) && raw.length) { rollingData = raw; break; }
+        }
         if (cancelled) return;
+        // Returns are the essential data (scores, phases, quadrant) — if the burst
+        // never cleared, surface the retry prompt rather than a blank table.
+        if (!rollingData.length) throw new Error('rotation-returns unavailable');
 
         const rollingMap = new Map<string, RollingReturn>(rollingData.map(r => [r.symbol, r]));
 
