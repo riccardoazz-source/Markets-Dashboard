@@ -6,9 +6,10 @@ import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData, QuadrantPoint } from '@/lib/gist';
-import { scoreRotation, selectPicks, ScoredItem, MODEL_WEIGHTS, PRE_BREAKOUT_SLOTS, PRE_BREAKOUT_POS52W_MIN, PRE_BREAKOUT_R1M_FLOOR } from '@/lib/rotationModel';
+import { scoreRotation, selectPicks, ScoredItem } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
+import { classifyPhase, PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
 import { SentimentPanel, SentimentSnapshot } from '@/components/sections/SentimentPanel';
@@ -156,98 +157,41 @@ function pctColor(v: number | null): string {
   return 'text-gray-500';
 }
 
-// Acceleration arrow from the asset's acceleration percentile (0..1): how strongly
-// it is speeding up relative to the universe right now.
-function accelArrow(accPctile: number | null): { arrow: string; color: string } | null {
-  if (accPctile == null) return null;
-  if (accPctile >= 0.85) return { arrow: '↑↑', color: 'text-green-300' };
-  if (accPctile >= 0.65) return { arrow: '↑',  color: 'text-green-500' };
-  if (accPctile <= 0.15) return { arrow: '↓↓', color: 'text-red-300'   };
-  if (accPctile <= 0.35) return { arrow: '↓',  color: 'text-red-500'   };
-  return                       { arrow: '→',  color: 'text-gray-500'  };
-}
-
-// Collapsible legend: explains every badge AND prints the live model formula.
-// The formula weights come straight from MODEL_WEIGHTS, so this can never drift
-// from the actual calculation in lib/rotationModel.ts.
+// Collapsible model formula — the live EMS (Dalio) model that ranks the
+// Accelerating list, sets the Quadrant Y-axis and drives the Backtest.
 function RotationLegend() {
-  const W = MODEL_WEIGHTS;
-  const pct = (n: number) => `${Math.round(n * 100)}%`;
   return (
     <details className="rounded-lg border border-border bg-bg-input/40 text-[11px]">
       <summary className="cursor-pointer select-none px-3 py-2 text-gray-300 font-medium hover:text-gray-100">
-        Legend &amp; model formula
+        Model formula (Dalio EMS)
       </summary>
-      <div className="px-3 pb-3 pt-1 space-y-3 text-gray-400">
-        <div>
-          <p className="text-gray-300 font-semibold mb-1">Badges</p>
-          <ul className="space-y-1">
-            <li><span className="inline-block w-2 h-2 rounded-full bg-blue-500 align-middle mr-1.5" />Coloured dot = asset class (Indexes blue · Crypto orange · Commodities amber · Sectors purple · Stocks pink)</li>
-            <li><span className="text-green-300">🌱 early</span> — strong acceleration and the 1-year run is still small: caught early, before the crowd</li>
-            <li><span className="text-amber-300">↩ rebound</span> — accelerating off a negative 6M/1Y base: a bounce off oversold, riskier than a confirmed trend</li>
-            <li><span className="text-blue-300">✓ trend</span> — up across every horizon (3M, 6M, 1Y all positive): a confirmed uptrend</li>
-            <li><span className="text-emerald-300">🐂 200W</span> — price above its 200-week moving average: structural long-term bull (display only — not in the score)</li>
-            <li><span className="text-green-400 font-bold">↑↑ ↑ → ↓ ↓↓</span> — acceleration: how strongly the asset is speeding up (pace ladder: last month vs quarter vs half-year) relative to the universe</li>
-            <li><span className="text-amber-300">★</span> — pinned (saved to your database)</li>
-          </ul>
-        </div>
-        <div>
-          <p className="text-gray-300 font-semibold mb-1">RotationScore — how &quot;Accelerating&quot; is ranked</p>
-          <p className="mb-1.5">Each input is a cross-sectional percentile vs the whole universe (0–1). The list shows <span className="text-gray-200">every name that clears the gate</span>, ranked by score — the count is whatever the market warrants, not a fixed number.</p>
-          <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
-{`3-horizon pace ladder (geometric monthly pace at each horizon):
-  p1  = r1m
-  p3  = ((1+r3m/100)^(1/3) − 1)·100
-  p6  = ((1+r6m/100)^(1/6) − 1)·100
-  p1y = ((1+r1y/100)^(1/12) − 1)·100
+      <div className="px-3 pb-3 pt-1 space-y-2 text-gray-400">
+        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. One score ranks the Accelerating list, sets the Quadrant Y-axis and drives the Backtest.</p>
+        <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
+{`FinalScore = ( core + 0.10·AccelBoost + 0.30·DrawdownQuality ) · ClassWeight
 
-  aRecent = p1 − p3         (last month faster than the quarter?)
-  aBuild  = p3 − p6         (quarter faster than the half-year? → BUILDING)
-  aLong   = p6 − p1y        (half-year vs annual → only the NEGATIVE side counts)
-  ACCEL   = 0.55·aRecent + 0.35·aBuild + 0.20·min(0, aLong)
-            (2-horizon fallback 0.60/0.40 when r1y unavailable)
+core = decay·(0.45·V + 0.45·M + 0.10·Persistence)·(1 − 0.5·Overheat)·ExitFactor
+       + 0.15·TrendQuality
 
-VQ = net upside volatility — the "good volatility" engine (M6):
-  upRms   = √mean(r² on UP days)      downRms = √mean(r² on DOWN days)
-  volEdge = (upRms − downRms)·√21·100     VQ = pctile(volEdge)
-  HIGH = upside-dominated mover (capacity for big moves: NVDA, MU)
-  ~0   = low-vol bond (capped) OR symmetric churner ·  <0 = downside-heavy
-  (replaces the old Sharpe term, which divided by vol → picked smooth LOSERS)
+V  (flow)     = max(0, VolRatio − 1.1)      VolRatio = 5d ADV ÷ 60d ADV (smoothed)
+                volume-blind → 0.20·RangeExpansion
+M  (momentum) = 0.4·pctile(Ret20) + 0.3·pctile(Ret60) + 0.3·pctile(Ret12m)
+Persistence   = pctile(Ret20 ÷ Ret60)       (acceleration)
+TrendQuality  = min(1, R²₁₂ₘ / 0.8)         (soft reward for a clean trend)
 
-TRD = raw durable momentum:  0.60 · p3m  +  0.40 · p6m   (percentile ranks)
+decay         = exp(−0.7·max(0, DistMA − 0.15))  when Ret20 > 30%, else 1   (blow-off brake)
+Overheat      = commodity brake: Price/Median12m > 1.5 AND VolRatio > 1.3 → dampens the score
+ExitFactor    = (Ret20 ≥ Ret60 ? 1 : 0.7) · (R²₁₂ₘ < 0.5 ? 0.8 : 1)          (exhaustion brake)
+AccelBoost    = clamp(Ret5/Ret20 − 1, 0, 1)      (turning up faster than its own trend)
+DrawdownQuality = quiet accumulation in a base (volume building + net buying) — 3 tiers
+ClassWeight   = Stocks ×1.2 · Sectors ×1.0 · Crypto ×1.1 · Commodities ×0.9 · Indexes ×0.8
 
-CYC = pctile( trendR2 over ~12 months )   secular vs cyclical:
-  HIGH = a compounder marching up for a year+ (NVDA)
-  LOW  = a flat/choppy base with a recent vertical spike (oil on a war) → demoted
+Ranking: eligible names (score > 0, not the S&P) sorted by FinalScore; ties by
+VolRatio, then relative strength vs the S&P. The Accelerating list = the top of this.
 
-Over-extension guard — EXT = max of two signals:
-  STRETCH = max(0, price/MA200 − 1)·100 / monthlyVol   (σ above MA200)
-  R1M_ABS = cross-sectional percentile of |r1m|
-  EXT     = max(STRETCH_pctile, R1M_ABS_pctile)
-
-Score = ${pct(W.acceleration)} · ACC   (3-horizon acceleration percentile — an asset isn't a winner if it doesn't accelerate)
-      + ${pct(W.volQuality)} · VQ   (net upside volatility — the engine of big returns)
-      + ${pct(W.trend)} · TRD   (raw 3M/6M momentum)
-      + ${pct(W.cycle)} · CYC   (12-month trend persistence — secular, not cyclical)
-      + ${pct(W.lead)} · LEAD  (52w-high position + 6mo trend smoothness)
-      + ${pct(W.regime)} · REG   (graduated percentile of price vs 200-day MA)
-      + ${pct(W.volume)} · VOL   (volume: latestVol/avg20dVol percentile; null→neutral)
-      − wEXT · EXT   (over-extension; wEXT = 20% · commodities 32%)
-
-Gate:  r1m > 0  AND  r3m > 0  AND  aRecent > 0  AND  r1m < cap
-       AND  price ≥ 200-day MA   (regime confirmation — uses daily close, matches backtest)
-       (cap = 50% · commodities 25%)
-       aBuild / aLong: ranking signals, not gate blockers
-
-Pre-breakout sleeve (M7) — ${PRE_BREAKOUT_SLOTS} reserved "coiled spring" slots 🔒:
-  r1y > 0  AND  pos52w ≥ ${PRE_BREAKOUT_POS52W_MIN}  AND  price ≥ 200-day MA  AND  r1m > ${PRE_BREAKOUT_R1M_FLOOR}%
-  → a year-long uptrend basing near its 52w high, last month flat/down so it
-    FAILS the momentum gate. Catches the next-leg winners (semis pre-AI-run) the
-    pure-acceleration gate would reject. Commodities excluded (their high bases
-    are cyclical tops). Ranked by 52w-high closeness + secular trend + upside vol.`}
-          </pre>
-          <p className="mt-1.5 text-gray-500"><span className="text-gray-300">Regime confirmation</span>: a pick must trade at/above its 200-day MA — this filters low-quality momentum pops that flash up while still below trend (and then revert), while keeping genuine rebounds that have reclaimed the MA. aLong is a <span className="text-gray-300">brake, not a booster</span>: a maturing trend (1Y pace &gt; 6M pace → aLong&lt;0) is demoted, but a dormant asset that just popped gets no bonus. EXT catches two blow-off types: price stretched above MA200 AND extreme recent 1M magnitude. <span className="text-gray-300">Commodities mean-revert harder</span> — event spikes (Iran war → Brent/WTI, fear → Silver/Gold) get bought then crash — so they carry a heavier EXT weight (32%) and a tighter 1M cap (25%). VOL rewards breakouts on elevated volume (backtest-neutral when volume history is unavailable). Every input is point-in-time, so the backtest stays honest.</p>
-        </div>
+DistMA = Price/MA200 − 1 · Ret5/20/60/12m = 5-day / 20-day / 3-month / 1-year returns
+R²₁₂ₘ = R² of the trailing 12-month trend · Median12m = 12-month median close.`}
+        </pre>
       </div>
     </details>
   );
@@ -572,6 +516,17 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     }));
   }, [groupFiltered, scoreMap, accelItems, selectedSymbols, pins]);
 
+  // Rotation phase (quadrant label) per symbol, derived from the same quadrant data.
+  const phaseMap = useMemo(() => {
+    const m = new Map<string, RotationPhase>();
+    for (const a of quadrantAssets) {
+      const p = classifyPhase(a.accScore, a.r3m);
+      if (p) m.set(a.symbol, p);
+    }
+    return m;
+  }, [quadrantAssets]);
+  const phaseOf = (symbol: string): RotationPhase | null => phaseMap.get(symbol) ?? null;
+
   // When the user hits Refresh on the sentiment panel, snap the table back to the
   // canonical view (All classes, sorted by today's move) so what they see equals
   // what Gemini is fed.
@@ -818,25 +773,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                 {sortedItems.map((item, idx) => {
                   const isSelected = selectedSymbols.has(item.symbol);
                   const scored     = scoreMap.get(item.symbol);
-                  const accel      = accelArrow(scored?.accPctile ?? null);
-                  // Flag names in the bottom half of 1Y extension: the run is still young.
-                  const isFresh    = accelOnly && (scored?.accPctile ?? 0) > 0.7 && (item.r1y == null || item.r1y < 30);
-                  // Rebound vs trend: if the acceleration sits on a deeply negative 6M or
-                  // 1Y base, it's a bounce off oversold (riskier) rather than a confirmed
-                  // uptrend. Solid = up across every horizon.
-                  const isRebound  = accelOnly &&
-                    ((item.r6m != null && item.r6m < 0) || (item.r1y != null && item.r1y < 0));
-                  const isSolid    = accelOnly && !isRebound &&
-                    item.r6m != null && item.r6m > 0 && item.r1y != null && item.r1y > 0;
-                  // Pre-breakout "coiled spring": picked by the reserved sleeve, NOT the
-                  // momentum gate — a year-long uptrend basing near its 52w high (M7).
-                  const isCoiled   = accelOnly && (scored?.passesPreBreakout ?? false) && !(scored?.passesGate ?? false);
-                  // Overheated cyclical (M8): RSI is hot AND the overheat guard is
-                  // actively demoting it (so the badge only shows on the cyclicals it bites).
-                  const isHot      = accelOnly && (scored?.overheat ?? 0) > 0.33 && (scored?.rsi ?? 0) >= 70
-                    && (item.group === 'Commodities' || item.group === 'Crypto');
-                  // Above 200W = structural long-term bull (mega-cycle confirmed).
-                  const above200w  = item.price != null && item.sma200w != null && item.price > item.sma200w;
+                  const phase      = phaseOf(item.symbol); // rotation quadrant label (shared)
                   const isPinned   = pins.has(item.symbol);
                   const vs200d     = vsMa(item.price, item.ma200);
                   const vs200w     = vsMa(item.price, item.sma200w);
@@ -866,43 +803,14 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                           <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-border text-gray-500 leading-none hidden sm:inline">
                             {item.subCategory}
                           </span>
-                          {isFresh && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-300 leading-none" title="Run still young — bottom half of 1-year gains">
-                              🌱 early
+                          {phase && !rollingLoading && (
+                            <span className={clsx('shrink-0 text-[9px] px-1.5 py-0.5 rounded leading-none font-medium', PHASE_META[phase].cls)}
+                              title={PHASE_META[phase].hint}>
+                              {PHASE_META[phase].label}
                             </span>
                           )}
-                          {isRebound && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-300 leading-none" title="Accelerating off a negative 6M/1Y base — a bounce off oversold, riskier than a confirmed trend">
-                              ↩ rebound
-                            </span>
-                          )}
-                          {isSolid && !isCoiled && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-blue-500/15 text-blue-300 leading-none" title="Up across every horizon — a confirmed trend, not just a bounce">
-                              ✓ trend
-                            </span>
-                          )}
-                          {isCoiled && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-violet-500/15 text-violet-300 leading-none" title="Coiled spring — a year-long uptrend basing near its 52-week high, not accelerating yet. Reserved pre-breakout slot (M7).">
-                              🔒 coiled
-                            </span>
-                          )}
-                          {isHot && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-red-500/15 text-red-300 leading-none" title="Overheated cyclical — RSI in the overbought zone on a commodity/crypto. The M8 overheat guard demotes it (these mean-revert hardest off an overbought RSI, like oil before the Iran-war crash). A secular grower running hot is barely touched.">
-                              🔥 hot
-                            </span>
-                          )}
-                          {above200w && !rollingLoading && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-300 leading-none" title="Price above 200-week MA — structural long-term bull">
-                              🐂 200W
-                            </span>
-                          )}
-                          {accel && !rollingLoading && (
-                            <span className={clsx('shrink-0 text-[10px] font-bold leading-none', accel.color)}>
-                              {accel.arrow}
-                            </span>
-                          )}
-                          {accelOnly && !rollingLoading && scored && !isCoiled && (
-                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-accent/15 text-accent leading-none tabular-nums" title="Composite RotationScore (0–100) from the CURRENT model — this is what changes when the model changes. The list is ordered by it.">
+                          {accelOnly && !rollingLoading && scored && (
+                            <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-accent/15 text-accent leading-none tabular-nums" title="Composite EMS score (0–100) from the current model — the list is ordered by it.">
                               {Math.round(scored.score * 100)}
                             </span>
                           )}
