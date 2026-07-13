@@ -21,6 +21,9 @@ import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
+import { usePins } from '@/lib/gist';
+import { useRotationPhases } from '@/lib/useRotationPhases';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
 
 const REGIONS = ['All', 'America', 'EU', 'Asia', 'Global', 'EM'];
 
@@ -42,6 +45,10 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [loading, setLoading] = useState(true);
   const [selectedRegion, setSelectedRegion] = useState('All');
+  const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const { pins, togglePin } = usePins();
+  const phases = useRotationPhases();
   const [sortBy, setSortBy] = useState<SortKey>('changePercent');
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
@@ -144,8 +151,10 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     return computeAssetIRR(historical, divData.dividends);
   }, [historical, divData]);
 
-  const filtered = INDEXES.filter(
-    i => selectedRegion === 'All' || i.region === selectedRegion
+  const filtered = INDEXES.filter(i =>
+    (selectedRegion === 'All' || i.region === selectedRegion)
+    && (phaseFilter === 'all' || phases.get(i.symbol) === phaseFilter)
+    && (!pinnedOnly || pins.has(i.symbol))
   );
 
   const avgYearlyMap = useAvgYearly(INDEXES.map(i => i.symbol));
@@ -188,6 +197,9 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           {INDEXES.length} indexes
         </span>
       </div>
+      {/* Rotation phase + pinned filter (above the region/sort filters) */}
+      <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={INDEXES.filter(i => pins.has(i.symbol)).length} />
       {/* Filters row */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {REGIONS.map(r => (
@@ -242,14 +254,18 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                   <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none">
                     {idx.category}
                   </p>
-                  {q?.currency && (
-                    <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
-                      {q.currency}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {q?.currency && (
+                      <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                        {q.currency}
+                      </span>
+                    )}
+                    <PinButton pinned={pins.has(idx.symbol)} onToggle={() => togglePin(idx.symbol)} />
+                  </div>
                 </div>
                 <div className="flex items-start justify-between gap-1 mb-2">
                   <p className="text-sm font-semibold text-gray-100 leading-snug">{idx.name}</p>
+                  <PhaseChip phase={phases.get(idx.symbol)} />
                   {q?.dividendYield != null && q.dividendYield > 0 && (
                     <span className="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
                       DIV

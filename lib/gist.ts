@@ -265,6 +265,20 @@ export function useGistData() {
   return { data, update };
 }
 
+// Shared pin store — the SAME gist-backed set the Rotation tab uses, so pinning an
+// asset anywhere (Rotation or its own section) reflects everywhere. Returns the set
+// of pinned symbols + a toggle.
+export function usePins() {
+  const { data, update } = useGistData();
+  const pins = new Set<string>(data.pins ?? []);
+  const togglePin = (symbol: string) => {
+    const next = new Set(pins);
+    if (next.has(symbol)) next.delete(symbol); else next.add(symbol);
+    update({ pins: [...next] });
+  };
+  return { pins, togglePin };
+}
+
 export function useSyncStatus(): SyncStatus {
   const [status, setStatus] = useState<SyncStatus>(_syncStatus);
   useEffect(() => {
