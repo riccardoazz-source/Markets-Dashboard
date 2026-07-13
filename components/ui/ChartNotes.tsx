@@ -50,6 +50,17 @@ export function ChartNotes({ chartId, defaultCategory, captureView, onRestoreVie
     setNewCategory(defaultCategory ?? '');
   };
 
+  // Quick-save the current Compare view as a "Strategy" chart — these show up in the
+  // Rotation → My Strategy panel, where each rule can link one or more of them.
+  const saveToStrategy = async () => {
+    const view = captureView?.();
+    if (!view) return;
+    const entry: NoteEntry = { id: makeId(), text: newText.trim() || 'Strategy chart', date: todayStr(), category: 'Strategy', view };
+    await update({ notes: { [chartId]: [...notes, entry] } });
+    setNewText('');
+    setNewCategory(defaultCategory ?? '');
+  };
+
   const deleteNote = async (id: string) => {
     await update({ notes: { [chartId]: notes.filter(n => n.id !== id) } });
   };
@@ -188,6 +199,15 @@ export function ChartNotes({ chartId, defaultCategory, captureView, onRestoreVie
               >
                 <Plus size={12} /> Save
               </button>
+              {captureView && (
+                <button
+                  onClick={saveToStrategy}
+                  title="Save this comparison as a Strategy chart — link it from Rotation → My Strategy"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 text-xs font-semibold hover:bg-amber-500/30 transition shrink-0"
+                >
+                  🎯 Add to strategy
+                </button>
+              )}
             </div>
           </div>
         </div>

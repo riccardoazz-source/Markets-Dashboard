@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { useGistData } from '@/lib/gist';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // "My Strategy" — the user's own rotation playbook, listed AND evaluated live
@@ -74,7 +75,60 @@ function useStrategySignals(): { s: Signals; loading: boolean } {
   return { s, loading };
 }
 
-function Row({ on, label, detail }: { on: boolean; label: string; detail: React.ReactNode }) {
+interface StrategyChart { id: string; label: string; symbols: string[] }
+
+// Linked "Strategy" charts for one statement: chips that reopen the saved comparison,
+// plus a picker of the charts saved from Compare's "🎯 Add to strategy" that aren't
+// yet attached. Persisted per statement in the gist (strategyLinks).
+function LinkChips({
+  id, allCharts, linkedIds, onToggle, onCompare,
+}: {
+  id: string;
+  allCharts: StrategyChart[];
+  linkedIds: string[];
+  onToggle: (statementId: string, chartId: string) => void;
+  onCompare?: (symbol: string) => void;
+}) {
+  const [picking, setPicking] = useState(false);
+  const linked = allCharts.filter(c => linkedIds.includes(c.id));
+  const available = allCharts.filter(c => !linkedIds.includes(c.id));
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+      <span className="text-[10px] text-gray-600">Charts:</span>
+      {linked.length === 0 && <span className="text-[10px] text-gray-600 italic">none linked</span>}
+      {linked.map(c => (
+        <span key={c.id} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-sky-500/40 bg-sky-500/10 text-sky-300">
+          <button onClick={() => c.symbols.forEach(s => onCompare?.(s))} title={`Open in Compare: ${c.symbols.join(', ')}`} className="hover:underline">
+            📈 {c.label}
+          </button>
+          <button onClick={() => onToggle(id, c.id)} title="Unlink" className="text-gray-500 hover:text-red-400"><X size={9} /></button>
+        </span>
+      ))}
+      {available.length > 0 && (
+        picking ? (
+          <select
+            autoFocus
+            onChange={e => { if (e.target.value) onToggle(id, e.target.value); setPicking(false); }}
+            onBlur={() => setPicking(false)}
+            className="text-[10px] bg-bg-input border border-border rounded px-1 py-0.5 text-gray-300"
+            defaultValue=""
+          >
+            <option value="" disabled>link a saved chart…</option>
+            {available.map(c => <option key={c.id} value={c.id}>{c.label} ({c.symbols.length})</option>)}
+          </select>
+        ) : (
+          <button onClick={() => setPicking(true)} className="text-[10px] px-1.5 py-0.5 rounded border border-dashed border-border text-gray-500 hover:text-gray-300 hover:border-border-light">＋ link</button>
+        )
+      )}
+    </div>
+  );
+}
+
+function Row({ id, on, label, detail, allCharts, linkedIds, onToggle, onCompare }: {
+  id: string; on: boolean; label: string; detail: React.ReactNode;
+  allCharts: StrategyChart[]; linkedIds: string[];
+  onToggle: (statementId: string, chartId: string) => void; onCompare?: (symbol: string) => void;
+}) {
   return (
     <div className={clsx('rounded-lg border px-3 py-2', on ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border bg-bg-input/40')}>
       <div className="flex items-center gap-2">
@@ -84,6 +138,7 @@ function Row({ on, label, detail }: { on: boolean; label: string; detail: React.
         <span className="text-xs font-semibold text-gray-200">{label}</span>
       </div>
       <div className="text-[11px] text-gray-400 mt-1 leading-snug">{detail}</div>
+      <LinkChips id={id} allCharts={allCharts} linkedIds={linkedIds} onToggle={onToggle} onCompare={onCompare} />
     </div>
   );
 }
@@ -92,16 +147,33 @@ export function StrategyPanel({ onCompare }: { onCompare?: (symbol: string) => v
   const [open, setOpen] = useState(false);
   const [highVal, setHighVal] = useState(false); // valuation is subjective → manual toggle
   const { s, loading } = useStrategySignals();
+  const { data, update } = useGistData();
+
+  // Charts the user saved from Compare → Notes → "🎯 Add to strategy" (category 'Strategy').
+  const allCharts: StrategyChart[] = useMemo(() => {
+    const out: StrategyChart[] = [];
+    for (const list of Object.values(data.notes ?? {})) {
+      for (const n of list) {
+        if (n.category === 'Strategy' && n.view?.symbols?.length) {
+          out.push({ id: n.id, label: n.text?.trim() || n.view.symbols.join(', '), symbols: n.view.symbols });
+        }
+      }
+    }
+    return out;
+  }, [data.notes]);
+
+  const links = data.strategyLinks ?? {};
+  const toggleLink = (statementId: string, chartId: string) => {
+    const cur = new Set(links[statementId] ?? []);
+    if (cur.has(chartId)) cur.delete(chartId); else cur.add(chartId);
+    update({ strategyLinks: { ...links, [statementId]: [...cur] } });
+  };
+  const linkProps = (id: string) => ({ id, allCharts, linkedIds: links[id] ?? [], onToggle: toggleLink, onCompare });
 
   const usdStrong = s.eurusd != null && s.eurusdAvg5y != null ? s.eurusd < s.eurusdAvg5y : null; // EURUSD below 5Y avg = strong dollar
   const cryptoBuy = s.btc != null && s.btc200w != null ? s.btc < s.btc200w : null;
   const ratesFalling = s.rateNow != null && s.rate12m != null ? s.rateNow < s.rate12m - 0.05 : null;
   const ratesRising = s.rateNow != null && s.rate12m != null ? s.rateNow > s.rate12m + 0.05 : null;
-
-  const cmp = (syms: string[]) => onCompare && (
-    <button onClick={() => syms.forEach(sy => onCompare(sy))}
-      className="ml-1 text-[10px] px-1.5 py-0.5 rounded border border-accent/50 text-accent hover:bg-accent/10">Compare</button>
-  );
 
   const summary = useMemo(() => {
     const picks: string[] = [];
@@ -137,25 +209,24 @@ export function StrategyPanel({ onCompare }: { onCompare?: (symbol: string) => v
 
           {/* The rules + live evaluation */}
           <div className="space-y-2">
-            <Row on={usdStrong === true} label="USD/EUR below its 5-year average → USD stocks"
+            <Row {...linkProps('usd-strong')} on={usdStrong === true} label="USD/EUR below its 5-year average → USD stocks"
               detail={<>EUR/USD <b className="text-gray-200">{fmt(s.eurusd)}</b> vs 5Y avg <b className="text-gray-200">{fmt(s.eurusdAvg5y)}</b>{usdStrong === true && ' → dollar strong'}.
                 <span className="block mt-1">Valuation of USD stocks:
                   <button onClick={() => setHighVal(false)} className={clsx('ml-2 text-[10px] px-1.5 py-0.5 rounded border', !highVal ? 'border-accent text-accent' : 'border-border text-gray-500')}>Low → no options</button>
                   <button onClick={() => setHighVal(true)} className={clsx('ml-1 text-[10px] px-1.5 py-0.5 rounded border', highVal ? 'border-accent text-accent' : 'border-border text-gray-500')}>High → options</button>
-                </span>
-                {cmp(['^GSPC'])}</>} />
-            <Row on={usdStrong === false} label="USD/EUR above its 5-year average → EU stocks + Emerging Markets"
-              detail={<>Weak dollar favours European equities and EM. {cmp(['^STOXX50E'])}</>} />
-            <Row on={cryptoBuy === true} label="Crypto 4-year cycle → buy below the 200-week MA"
-              detail={<>BTC <b className="text-gray-200">{s.btc == null ? '—' : `$${Math.round(s.btc).toLocaleString()}`}</b> vs 200W MA <b className="text-gray-200">{s.btc200w == null ? '—' : `$${Math.round(s.btc200w).toLocaleString()}`}</b>{cryptoBuy === true ? ' → below = accumulation zone' : cryptoBuy === false ? ' → above = wait' : ''}. {cmp(['BTC-USD'])}</>} />
-            <Row on={ratesFalling === true} label="Rates falling → REITs + mortgage REITs + gold + silver"
-              detail={<>Fed funds <b className="text-gray-200">{fmt(s.rateNow, 2)}%</b> vs 12m ago <b className="text-gray-200">{fmt(s.rate12m, 2)}%</b>{ratesFalling === true && ' → easing'}. {cmp(['GC=F', 'SI=F'])}</>} />
-            <Row on={ratesRising === true} label="Rates rising → Banks + BDCs"
+                </span></>} />
+            <Row {...linkProps('usd-weak')} on={usdStrong === false} label="USD/EUR above its 5-year average → EU stocks + Emerging Markets"
+              detail={<>Weak dollar favours European equities and EM.</>} />
+            <Row {...linkProps('crypto')} on={cryptoBuy === true} label="Crypto 4-year cycle → buy below the 200-week MA"
+              detail={<>BTC <b className="text-gray-200">{s.btc == null ? '—' : `$${Math.round(s.btc).toLocaleString()}`}</b> vs 200W MA <b className="text-gray-200">{s.btc200w == null ? '—' : `$${Math.round(s.btc200w).toLocaleString()}`}</b>{cryptoBuy === true ? ' → below = accumulation zone' : cryptoBuy === false ? ' → above = wait' : ''}.</>} />
+            <Row {...linkProps('rates-falling')} on={ratesFalling === true} label="Rates falling → REITs + mortgage REITs + gold + silver"
+              detail={<>Fed funds <b className="text-gray-200">{fmt(s.rateNow, 2)}%</b> vs 12m ago <b className="text-gray-200">{fmt(s.rate12m, 2)}%</b>{ratesFalling === true && ' → easing'}.</>} />
+            <Row {...linkProps('rates-rising')} on={ratesRising === true} label="Rates rising → Banks + BDCs"
               detail={<>Fed funds <b className="text-gray-200">{fmt(s.rateNow, 2)}%</b> vs 12m ago <b className="text-gray-200">{fmt(s.rate12m, 2)}%</b>{ratesRising === true && ' → tightening'}.</>} />
           </div>
 
           <p className="text-[10px] text-gray-600 leading-snug px-1">
-            EUR/USD 5-year average, BTC vs its 200-week MA and the Fed-funds 12-month direction are read live; the USD-stock <em>valuation</em> (high/low) is your call (the toggle above). Rates use the effective Fed Funds rate.
+            EUR/USD 5-year average, BTC vs its 200-week MA and the Fed-funds 12-month direction are read live; the USD-stock <em>valuation</em> (high/low) is your call. To attach a chart to a rule: build the comparison in the <b>Compare</b> tab, open <b>Notes</b>, click <b>🎯 Add to strategy</b> — then it appears in the <b>＋ link</b> picker here.
           </p>
         </div>
       )}

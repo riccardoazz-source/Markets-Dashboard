@@ -64,6 +64,7 @@ export interface GistData {
   sentiments?: SentimentRecord[];
   pins?: string[]; // Rotation "remember to check" symbols
   rotationStockLists?: string[]; // Stock watchlist categories activated in Rotation
+  strategyLinks?: Record<string, string[]>; // My Strategy: statement id → linked "Strategy" note ids
 }
 
 /**
@@ -138,6 +139,7 @@ function mergeCloud(other: GistData, winner: GistData): GistData {
     sentiments: mergeSentiments(other.sentiments, winner.sentiments),
     pins: winner.pins ?? other.pins,
     rotationStockLists: winner.rotationStockLists ?? other.rotationStockLists,
+    strategyLinks: winner.strategyLinks ?? other.strategyLinks,
   };
 }
 
@@ -213,6 +215,7 @@ export async function updateGistData(patch: Partial<GistData>): Promise<GistData
     ...(patch.sentiments !== undefined ? { sentiments: patch.sentiments } : {}),
     ...(patch.pins !== undefined ? { pins: patch.pins } : {}),
     ...(patch.rotationStockLists !== undefined ? { rotationStockLists: patch.rotationStockLists } : {}),
+    ...(patch.strategyLinks !== undefined ? { strategyLinks: patch.strategyLinks } : {}),
   };
   _cache = merged;
   saveLocal(merged);
