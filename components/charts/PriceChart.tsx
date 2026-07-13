@@ -470,13 +470,27 @@ export function PriceChart({
   const momWeeklyData  = momWeeklyVals  ? data.map((d, i) => ({ date: d.date, value: momWeeklyVals[i]  })) : null;
   const momMonthlyData = momMonthlyVals ? data.map((d, i) => ({ date: d.date, value: momMonthlyVals[i] })) : null;
 
-  // Selection stats
-  let selStats: { leftVal: number; rightVal: number; pct: number } | null = null;
+  // Selection stats — period return, annualised CAGR, and (when the total-return
+  // series carries dividends paid in the window) the dividend-inclusive IRR.
+  let selStats: { leftVal: number; rightVal: number; pct: number; cagr: number | null; irr: number | null } | null = null;
   if (range) {
     const lv = valueAtOrAfter(data, range.left, 'close');
     const rv = valueAtOrBefore(data, range.right, 'close');
     if (lv != null && rv != null && lv !== 0) {
-      selStats = { leftVal: lv, rightVal: rv, pct: (rv - lv) / Math.abs(lv) * 100 };
+      const years = Math.max(0, (new Date(range.right).getTime() - new Date(range.left).getTime()) / (365.25 * 86_400_000));
+      const cagr = years > 0.02 && lv > 0 && rv > 0 ? (Math.pow(rv / lv, 1 / years) - 1) * 100 : null;
+      // IRR ≈ CAGR of the dividend-reinvested total-return path over the same window;
+      // only shown when it differs from the price CAGR (i.e. dividends were paid in-period).
+      let irr: number | null = null;
+      if (trByDate && years > 0.02) {
+        const tl = valueAtOrAfter(data.map(d => ({ date: d.date, close: trByDate.get(d.date) ?? NaN })).filter(d => isFinite(d.close)), range.left, 'close');
+        const tr = valueAtOrBefore(data.map(d => ({ date: d.date, close: trByDate.get(d.date) ?? NaN })).filter(d => isFinite(d.close)), range.right, 'close');
+        if (tl != null && tr != null && tl > 0 && tr > 0) {
+          const trCagr = (Math.pow(tr / tl, 1 / years) - 1) * 100;
+          if (cagr == null || Math.abs(trCagr - cagr) > 0.05) irr = trCagr;
+        }
+      }
+      selStats = { leftVal: lv, rightVal: rv, pct: (rv - lv) / Math.abs(lv) * 100, cagr, irr };
     }
   }
 
@@ -492,9 +506,25 @@ export function PriceChart({
             <span className="text-gray-500 tabular-nums">
               {selStats.leftVal.toFixed(decimals)} → {selStats.rightVal.toFixed(decimals)}
             </span>
-            <span className={`font-bold tabular-nums ${selStats.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {selStats.pct >= 0 ? '+' : ''}{selStats.pct.toFixed(2)}%
-            </span>
+            <div className="flex flex-col items-end leading-tight">
+              <span className={`font-bold tabular-nums ${selStats.pct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {selStats.pct >= 0 ? '+' : ''}{selStats.pct.toFixed(2)}%
+              </span>
+              {(selStats.cagr != null || selStats.irr != null) && (
+                <span className="text-[10px] text-gray-500 tabular-nums whitespace-nowrap">
+                  {selStats.cagr != null && (
+                    <span title="Annualised return (CAGR) over the highlighted period">
+                      CAGR {selStats.cagr >= 0 ? '+' : ''}{selStats.cagr.toFixed(1)}%
+                    </span>
+                  )}
+                  {selStats.irr != null && (
+                    <span className="text-sky-400" title="Dividend-inclusive annualised return (IRR) — dividends paid in this window, reinvested">
+                      {selStats.cagr != null ? ' · ' : ''}IRR {selStats.irr >= 0 ? '+' : ''}{selStats.irr.toFixed(1)}%
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
             {onSetRange && (
               <button
                 onClick={() => { onSetRange(range.left, range.right); clear(); }}
