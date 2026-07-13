@@ -1109,6 +1109,15 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           captureView={() => ({
             tools: { ...stackTools } as Record<string, boolean>,
             timeframe, customRange, symbols: selectedSymbols,
+            // Tiny normalized thumbnail per series so My Strategy can draw this chart inline.
+            preview: assets.slice(0, 8).map(a => {
+              const norm = pctChangeFromStart(a.rawData ?? a.data).map(p => p.close).filter(v => isFinite(v));
+              const max = 100;
+              const pts = norm.length <= max
+                ? norm
+                : Array.from({ length: max }, (_, i) => norm[Math.round(i * (norm.length - 1) / (max - 1))]);
+              return { label: a.name || a.symbol, color: a.color, pts };
+            }).filter(p => p.pts.length > 1),
             // Full Compare setup so Restore brings back exactly what was saved.
             spreads: spreads.map(s => ({ ...s })),
             normalized, alignStart, logScale, showStack, stackAssetIdx,

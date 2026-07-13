@@ -7,6 +7,10 @@ export interface NoteView {
   timeframe?: string;                           // e.g. '1D','1Y','MAX'
   customRange?: { from: string; to: string } | null;
   symbols?: string[];                           // Compare: the set of compared symbols
+  // Tiny normalized (% change) thumbnail of each compared series, captured at save
+  // time so the Rotation → My Strategy panel can DRAW the linked chart inline
+  // without re-fetching/re-resolving every symbol.
+  preview?: { label: string; color: string; pts: number[] }[];
   // Compare-only extra state, so "Restore view" brings back the FULL setup.
   spreads?: { a: string; b: string }[];         // spread pairs (A − B)
   normalized?: boolean;                         // % Change (true) vs Absolute price (false)
@@ -65,6 +69,7 @@ export interface GistData {
   pins?: string[]; // Rotation "remember to check" symbols
   rotationStockLists?: string[]; // Stock watchlist categories activated in Rotation
   strategyLinks?: Record<string, string[]>; // My Strategy: statement id → linked "Strategy" note ids
+  strategyCustom?: { id: string; label: string }[]; // My Strategy: user-added statements
 }
 
 /**
@@ -140,6 +145,7 @@ function mergeCloud(other: GistData, winner: GistData): GistData {
     pins: winner.pins ?? other.pins,
     rotationStockLists: winner.rotationStockLists ?? other.rotationStockLists,
     strategyLinks: winner.strategyLinks ?? other.strategyLinks,
+    strategyCustom: winner.strategyCustom ?? other.strategyCustom,
   };
 }
 
@@ -216,6 +222,7 @@ export async function updateGistData(patch: Partial<GistData>): Promise<GistData
     ...(patch.pins !== undefined ? { pins: patch.pins } : {}),
     ...(patch.rotationStockLists !== undefined ? { rotationStockLists: patch.rotationStockLists } : {}),
     ...(patch.strategyLinks !== undefined ? { strategyLinks: patch.strategyLinks } : {}),
+    ...(patch.strategyCustom !== undefined ? { strategyCustom: patch.strategyCustom } : {}),
   };
   _cache = merged;
   saveLocal(merged);
