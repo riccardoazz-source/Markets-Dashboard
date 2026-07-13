@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchYahooData, fetchYahooEarnings, type YahooEarnings } from '@/lib/yahoo';
 import { fetchSecEarnings } from '@/lib/sec';
-import { subDays, subWeeks, subMonths, subYears, startOfYear } from 'date-fns';
+import { subDays, subWeeks, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 
 export const runtime = 'edge';
 
@@ -25,6 +25,7 @@ function getStartDate(timeframe: string): Date {
   switch (timeframe) {
     case '1D':  return subDays(now, 4);
     case '1W':  return subWeeks(now, 1);
+    case 'MTD': return startOfMonth(now);
     case '1M':  return subMonths(now, 1);
     case '3M':  return subMonths(now, 3);
     case '6M':  return subMonths(now, 6);
