@@ -203,7 +203,9 @@ export function MarketEventsManager({ config, persist, mounted }: Props) {
                     {/* Built-in events (read-only) */}
                     {builtins.map((e, i) => (
                       <tr key={`builtin-${i}`} className="border-t border-border hover:bg-bg-hover/20">
-                        <td className="px-4 py-1.5 font-mono text-gray-400 whitespace-nowrap">{e.date}</td>
+                        <td className="px-4 py-1.5 font-mono text-gray-400 whitespace-nowrap">
+                          {e.date}{e.endDate && <span className="text-gray-600"> → {e.endDate}</span>}
+                        </td>
                         <td className="px-4 py-1.5 text-gray-200">{e.label}</td>
                         <td className="px-4 py-1.5 text-gray-500">{e.description}</td>
                         <td className="px-4 py-1.5">

@@ -144,6 +144,7 @@ function CategoryPanel({
                     <span className="text-xs font-semibold text-gray-200">{evt.label}</span>
                     <span className="text-[10px] text-gray-500 font-mono">
                       {format(parseISO(evt.date), 'd MMM yyyy')}
+                      {evt.endDate && <span className="text-gray-600"> → {format(parseISO(evt.endDate), 'd MMM yyyy')}</span>}
                     </span>
                   </div>
                   <p className="text-[11px] text-gray-500 leading-snug mt-0.5">{evt.description}</p>

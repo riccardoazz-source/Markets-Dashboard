@@ -43,7 +43,8 @@ export interface MacroIndicator {
 export type MarketEventCategory = 'financial' | 'war' | 'terrorism' | 'pandemic' | 'geopolitical' | 'elections' | 'crypto' | 'ipo' | 'personal';
 
 export interface MarketEvent {
-  date: string;               // YYYY-MM-DD
+  date: string;               // YYYY-MM-DD — the START (outbreak / trigger)
+  endDate?: string;           // YYYY-MM-DD — the official END (ceasefire / withdrawal), when the event has one
   label: string;              // Short display name for the chart line
   description: string;        // Tooltip / longer description
   category: MarketEventCategory;
@@ -133,24 +134,25 @@ export const MARKET_EVENTS: MarketEvent[] = [
   { date: '2020-03-11', label: 'COVID Pandemic',        category: 'pandemic',     description: 'WHO officially declares COVID-19 a global pandemic' },
   { date: '2022-07-23', label: 'Mpox PHEIC',            category: 'pandemic',     description: 'WHO declares the multi-country mpox (monkeypox) outbreak a global emergency' },
 
-  // Wars / military conflicts
-  { date: '1973-10-06', label: 'Yom Kippur War',        category: 'war',          description: 'Egypt and Syria attack Israel; war triggers the OPEC oil embargo', source: 'https://en.wikipedia.org/wiki/Yom_Kippur_War' },
-  { date: '1975-04-30', label: 'Fall of Saigon',        category: 'war',          description: 'North Vietnam captures Saigon — end of the Vietnam War', source: 'https://en.wikipedia.org/wiki/Fall_of_Saigon' },
-  { date: '1979-12-24', label: 'USSR Invades Afghanistan', category: 'war',       description: 'Soviet invasion begins a 10-year war; Cold War tensions spike', source: 'https://en.wikipedia.org/wiki/Soviet%E2%80%93Afghan_War' },
-  { date: '1980-09-22', label: 'Iran-Iraq War',         category: 'war',          description: 'Iraq invades Iran — 8-year Gulf war; major oil disruption', source: 'https://en.wikipedia.org/wiki/Iran%E2%80%93Iraq_War' },
-  { date: '1990-08-02', label: 'Iraq Invades Kuwait',   category: 'war',          description: 'Iraq invades Kuwait — oil shock; sets up the Gulf War', source: 'https://en.wikipedia.org/wiki/Invasion_of_Kuwait' },
-  { date: '1991-01-17', label: 'Desert Storm',          category: 'war',          description: 'US-led coalition launches the Gulf War air campaign; markets rally', source: 'https://en.wikipedia.org/wiki/Gulf_War' },
-  { date: '1999-03-24', label: 'NATO Strikes Kosovo',   category: 'war',          description: 'NATO begins a 78-day bombing campaign against Yugoslavia', source: 'https://en.wikipedia.org/wiki/NATO_bombing_of_Yugoslavia' },
-  { date: '2001-10-07', label: 'Afghanistan War',       category: 'war',          description: 'US launches Operation Enduring Freedom — Afghanistan War begins' },
-  { date: '2003-03-20', label: 'Iraq War',              category: 'war',          description: 'US-led coalition invades Iraq — Iraq War begins' },
-  { date: '2011-03-15', label: 'Syria War',             category: 'war',          description: 'Syrian civil war begins amid Arab Spring uprising' },
-  { date: '2014-03-18', label: 'Crimea Annexed',        category: 'war',          description: 'Russia formally annexes Crimea from Ukraine' },
-  { date: '2021-08-15', label: 'Fall of Kabul',         category: 'war',          description: 'Taliban take Kabul as US completes withdrawal from Afghanistan' },
-  { date: '2022-02-24', label: 'Ukraine Invasion',      category: 'war',          description: 'Russia launches full-scale invasion of Ukraine; global energy and food shock' },
-  { date: '2023-10-07', label: 'Hamas Attack',          category: 'war',          description: 'Hamas attacks southern Israel; Israel-Gaza war begins' },
-  { date: '2024-04-13', label: 'Iran Strikes Israel',   category: 'war',          description: "Iran's first-ever direct missile/drone attack on Israel" },
-  { date: '2025-06-13', label: '12-Day War',            category: 'war',          description: 'Israel strikes Iran nuclear/military sites; US joins; ceasefire 24 Jun 2025', source: 'https://en.wikipedia.org/wiki/Twelve-Day_War' },
-  { date: '2026-02-28', label: '2026 Iran War',         category: 'war',          description: 'US strikes Iran; Iran closes the Strait of Hormuz; WTI crude +66% ($67→$111)', source: 'https://en.wikipedia.org/wiki/2026_Iran_war' },
+  // Wars / military conflicts — `date` = start, `endDate` = official end (ceasefire /
+  // withdrawal). Ongoing conflicts have no endDate. Sources verified per event.
+  { date: '1973-10-06', endDate: '1973-10-25', label: 'Yom Kippur War',        category: 'war',          description: 'Egypt and Syria attack Israel (6 Oct); UN ceasefire holds 25 Oct 1973; triggers the OPEC oil embargo', source: 'https://en.wikipedia.org/wiki/Yom_Kippur_War' },
+  { date: '1975-04-30', label: 'Fall of Saigon',        category: 'war',          description: 'North Vietnam captures Saigon — the END of the Vietnam War', source: 'https://en.wikipedia.org/wiki/Fall_of_Saigon' },
+  { date: '1979-12-24', endDate: '1989-02-15', label: 'USSR-Afghan War',       category: 'war',          description: 'Soviet invasion begins (24 Dec 1979); Soviet withdrawal completed 15 Feb 1989 — a 10-year war', source: 'https://en.wikipedia.org/wiki/Soviet%E2%80%93Afghan_War' },
+  { date: '1980-09-22', endDate: '1988-08-20', label: 'Iran-Iraq War',         category: 'war',          description: 'Iraq invades Iran (22 Sep 1980); UN-brokered ceasefire 20 Aug 1988 — 8-year war, major oil disruption', source: 'https://en.wikipedia.org/wiki/Iran%E2%80%93Iraq_War' },
+  { date: '1990-08-02', endDate: '1991-02-28', label: 'Gulf War (Kuwait)',     category: 'war',          description: 'Iraq invades Kuwait (2 Aug 1990) → oil shock; coalition liberates Kuwait, ceasefire 28 Feb 1991', source: 'https://en.wikipedia.org/wiki/Gulf_War' },
+  { date: '1991-01-17', endDate: '1991-02-28', label: 'Desert Storm',          category: 'war',          description: 'US-led coalition launches the Gulf War air campaign (17 Jan); ceasefire 28 Feb 1991; markets rally', source: 'https://en.wikipedia.org/wiki/Gulf_War' },
+  { date: '1999-03-24', endDate: '1999-06-10', label: 'NATO Strikes Kosovo',   category: 'war',          description: 'NATO begins a 78-day bombing campaign against Yugoslavia (24 Mar); ends 10 Jun 1999', source: 'https://en.wikipedia.org/wiki/NATO_bombing_of_Yugoslavia' },
+  { date: '2001-10-07', endDate: '2021-08-30', label: 'Afghanistan War',       category: 'war',          description: 'US launches Operation Enduring Freedom (7 Oct 2001); US withdrawal completed 30 Aug 2021 — the 20-year war', source: 'https://en.wikipedia.org/wiki/War_in_Afghanistan_(2001%E2%80%932021)' },
+  { date: '2003-03-20', endDate: '2011-12-18', label: 'Iraq War',              category: 'war',          description: 'US-led coalition invades Iraq (20 Mar 2003); US withdrawal completed 18 Dec 2011', source: 'https://en.wikipedia.org/wiki/Iraq_War' },
+  { date: '2011-03-15', endDate: '2024-12-08', label: 'Syrian Civil War',      category: 'war',          description: 'Civil war begins amid the Arab Spring (Mar 2011); Assad regime falls 8 Dec 2024', source: 'https://en.wikipedia.org/wiki/Syrian_civil_war' },
+  { date: '2014-03-18', label: 'Crimea Annexed',        category: 'war',          description: 'Russia formally annexes Crimea from Ukraine (a discrete annexation, not a war)', source: 'https://en.wikipedia.org/wiki/Annexation_of_Crimea_by_the_Russian_Federation' },
+  { date: '2021-08-15', label: 'Fall of Kabul',         category: 'war',          description: 'Taliban take Kabul as the US completes withdrawal from Afghanistan', source: 'https://en.wikipedia.org/wiki/Fall_of_Kabul_(2021)' },
+  { date: '2022-02-24', label: 'Ukraine Invasion',      category: 'war',          description: 'Russia launches a full-scale invasion of Ukraine (24 Feb 2022) — ongoing; global energy and food shock', source: 'https://en.wikipedia.org/wiki/Russian_invasion_of_Ukraine' },
+  { date: '2023-10-07', label: 'Israel-Gaza War',       category: 'war',          description: 'Hamas attacks southern Israel (7 Oct 2023); the Israel-Gaza war begins — ongoing', source: 'https://en.wikipedia.org/wiki/Israel%E2%80%93Hamas_war' },
+  { date: '2024-04-13', label: 'Iran Strikes Israel',   category: 'war',          description: "Iran's first-ever direct missile/drone attack on Israel (a discrete strike)", source: 'https://en.wikipedia.org/wiki/April_2024_Iranian_strikes_on_Israel' },
+  { date: '2025-06-13', endDate: '2025-06-24', label: '12-Day War',            category: 'war',          description: 'Israel strikes Iran nuclear/military sites (13 Jun); US joins; ceasefire 24 Jun 2025', source: 'https://en.wikipedia.org/wiki/Twelve-Day_War' },
+  { date: '2026-02-28', label: '2026 Iran War',         category: 'war',          description: 'US strikes Iran; Iran closes the Strait of Hormuz; WTI crude +66% ($67→$111) — ongoing', source: 'https://en.wikipedia.org/wiki/2026_Iran_war' },
 
   // Terrorism
   { date: '1972-09-05', label: 'Munich Massacre',       category: 'terrorism',    description: '11 Israeli Olympic athletes taken hostage and killed in Munich', source: 'https://en.wikipedia.org/wiki/Munich_massacre' },
