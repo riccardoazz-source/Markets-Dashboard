@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine,
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, ReferenceLine, ReferenceArea,
 } from 'recharts';
 import { MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEventCategory, MarketEvent } from '@/lib/config';
 import { getMergedMarketEvents } from '@/lib/userSources';
@@ -116,6 +116,18 @@ function CategoryPanel({
                 label={{ value: 'Today', fill: '#9ca3af', fontSize: 9, position: 'insideTopLeft' }}
               />
 
+              {/* Shaded duration band from start → end for events that have ended */}
+              {sorted.filter(e => e.endDate).map((evt, i) => (
+                <ReferenceArea
+                  key={`span-${evt.date}-${i}`}
+                  x1={snapTo(axis, evt.date)}
+                  x2={snapTo(axis, evt.endDate!)}
+                  fill={color}
+                  fillOpacity={0.14}
+                  stroke="none"
+                  ifOverflow="visible"
+                />
+              ))}
               {sorted.map((evt, i) => (
                 <ReferenceLine
                   key={`${evt.date}-${i}`}
@@ -129,6 +141,17 @@ function CategoryPanel({
                     fontSize: 9,
                     position: i % 2 === 0 ? 'insideTop' : 'insideBottom',
                   }}
+                />
+              ))}
+              {/* Dashed end line for events that have ended */}
+              {sorted.filter(e => e.endDate).map((evt, i) => (
+                <ReferenceLine
+                  key={`end-${evt.date}-${i}`}
+                  x={snapTo(axis, evt.endDate!)}
+                  stroke={color}
+                  strokeWidth={1}
+                  strokeOpacity={0.6}
+                  strokeDasharray="4 3"
                 />
               ))}
             </LineChart>
