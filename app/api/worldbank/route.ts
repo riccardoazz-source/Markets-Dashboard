@@ -113,15 +113,20 @@ async function dbnomicsCountry(country: string): Promise<Record<string, { date: 
   const codes = IMF_INDICATORS.map(i => i.code);
   const scaleByCode = new Map(IMF_INDICATORS.map(i => [i.code, i.scale ?? 1]));
   const dims = encodeURIComponent(JSON.stringify({ indicator: codes, country: [country] }));
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 14_000);
+  const dbUrl = `${DB}/series/WB/WDI?dimensions=${dims}&observations=1&limit=200&metadata=false`;
+  // Retry the single DBnomics call a couple of times — intermittent network blips /
+  // slow responses were leaving the whole country grid empty (it then fell back to the
+  // rate-limited direct-WB path, which often also failed). Small backoff between tries.
   let json: { series?: { docs?: DbDoc[] } } | null = null;
-  try {
-    const r = await fetch(`${DB}/series/WB/WDI?dimensions=${dims}&observations=1&limit=200&metadata=false`, {
-      signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
-    });
-    if (r.ok) json = await r.json();
-  } catch { /* fall through */ } finally { clearTimeout(timer); }
+  for (let attempt = 0; attempt < 3 && !json; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 400 * attempt));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
+    try {
+      const r = await fetch(dbUrl, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } });
+      if (r.ok) json = await r.json();
+    } catch { /* retry */ } finally { clearTimeout(timer); }
+  }
   const docs = json?.series?.docs ?? [];
   const out: Record<string, { date: string; close: number }[]> = {};
   for (const d of docs) {
