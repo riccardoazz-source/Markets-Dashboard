@@ -18,6 +18,9 @@ import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
+import { usePins } from '@/lib/gist';
+import { useRotationPhases } from '@/lib/useRotationPhases';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
 
 type SortKey = 'change24hPercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 const coinYahooSym = (c: { id: string; symbol: string }) => CRYPTO_YAHOO_SYMBOLS[c.id] ?? `${c.symbol}-USD`;
@@ -43,6 +46,10 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<SortKey>('change24hPercent');
   const [selectedCat, setSelectedCat] = useState('All');
+  const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const { pins, togglePin } = usePins();
+  const phases = useRotationPhases();
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
@@ -182,9 +189,11 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
   // Double-guard: cryptoData is initialised as [] but could be stale if a fetch
   // overwrote state with a non-array error object. Spread on non-array throws.
   const safeData = Array.isArray(cryptoData) ? cryptoData : [];
-  const catFiltered = selectedCat === 'All'
-    ? safeData
-    : safeData.filter(c => CRYPTO_CATEGORY_BY_ID.get(c.id) === selectedCat);
+  const catFiltered = safeData.filter(c =>
+    (selectedCat === 'All' || CRYPTO_CATEGORY_BY_ID.get(c.id) === selectedCat)
+    && (phaseFilter === 'all' || phases.get(coinYahooSym(c)) === phaseFilter)
+    && (!pinnedOnly || pins.has(coinYahooSym(c)))
+  );
   const avgYearlyMap = useAvgYearly(CRYPTO_IDS.map(coinYahooSym));
   const sorted = [...catFiltered].sort((a, b) => {
     const av = (sortBy === 'avgYearly' ? avgYearlyMap[coinYahooSym(a)] : (a as unknown as Record<string, number | null>)[sortBy]) ?? -Infinity;
@@ -219,6 +228,9 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
         </div>
       </div>
 
+      {/* Rotation phase + pinned filter */}
+      <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={CRYPTO_IDS.filter(c => pins.has(coinYahooSym(c))).length} />
       {/* Category filter tabs */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {CRYPTO_CATEGORIES.map(c => (
@@ -241,6 +253,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           {sorted.map(coin => {
             const isUp = coin.change24hPercent >= 0;
             const isSelected = selected === coin.id;
+            const ysym = coinYahooSym(coin);
             return (
               <button key={coin.id}
                 onClick={() => setSelected(isSelected ? null : coin.id)}
@@ -252,13 +265,19 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                   <div className="flex items-center gap-2">
                     {coin.image && <img src={coin.image} alt={coin.name} className="w-6 h-6 rounded-full" />}
                     <div>
-                      <p className="text-xs font-bold text-gray-100 leading-none">{coin.name}</p>
+                      <div className="flex items-center gap-1">
+                        <p className="text-xs font-bold text-gray-100 leading-none">{coin.name}</p>
+                        <PhaseChip phase={phases.get(ysym)} />
+                      </div>
                       <p className="text-[10px] text-gray-500">{coin.symbol}</p>
                     </div>
                   </div>
-                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none shrink-0">
-                    USD
-                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                      USD
+                    </span>
+                    <PinButton pinned={pins.has(ysym)} onToggle={() => togglePin(ysym)} />
+                  </div>
                 </div>
                 <p className="text-lg font-bold text-white tabular-nums">{formatPrice(coin.price)}</p>
                 <div className={clsx('flex items-center gap-1 mt-0.5 text-sm font-bold', colorForPercent(coin.change24hPercent))}>

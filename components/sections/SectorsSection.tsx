@@ -21,6 +21,9 @@ import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
+import { usePins } from '@/lib/gist';
+import { useRotationPhases } from '@/lib/useRotationPhases';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
 
 interface SectorLiveData {
   price: number | null;
@@ -72,6 +75,10 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   const [sortBy, setSortBy] = useState<SectorSortKey>('changePercent');
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const { pins, togglePin } = usePins();
+  const phases = useRotationPhases();
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
@@ -181,9 +188,11 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     avgYearly: avgYearlyMap[s.symbol] ?? null,
   }));
 
-  const filteredSectors = selectedCategory === 'All'
-    ? merged
-    : merged.filter(s => s.category === selectedCategory);
+  const filteredSectors = merged.filter(s =>
+    (selectedCategory === 'All' || s.category === selectedCategory)
+    && (phaseFilter === 'all' || phases.get(s.symbol) === phaseFilter)
+    && (!pinnedOnly || pins.has(s.symbol))
+  );
 
   const getValue = (s: typeof merged[0]) =>
     (s as unknown as Record<string, number | null>)[sortBy] ?? null;
@@ -259,6 +268,9 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
         </div>
       </div>
 
+      {/* Rotation phase + pinned filter */}
+      <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={SECTORS.filter(s => pins.has(s.symbol)).length} />
       {/* Category filter */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {SECTOR_CATEGORIES.map(c => (
@@ -292,14 +304,20 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                   <span className="text-[10px] font-bold text-gray-600">#{sector.rank}</span>
                   <span className="text-[10px] text-gray-500 uppercase tracking-wider">{sector.category}</span>
                 </div>
-                {sector.currency && (
-                  <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
-                    {sector.currency}
-                  </span>
-                )}
+                <div className="flex items-center gap-1">
+                  {sector.currency && (
+                    <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                      {sector.currency}
+                    </span>
+                  )}
+                  <PinButton pinned={pins.has(sector.symbol)} onToggle={() => togglePin(sector.symbol)} />
+                </div>
               </div>
               <div className="flex items-start justify-between gap-1 mb-2">
-                <p className="text-sm font-semibold text-gray-100 leading-snug">{sector.name}</p>
+                <div className="flex items-center gap-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-100 leading-snug truncate">{sector.name}</p>
+                  <PhaseChip phase={phases.get(sector.symbol)} />
+                </div>
                 {sector.dividendYield != null && sector.dividendYield > 0 && (
                   <span className="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
                     DIV

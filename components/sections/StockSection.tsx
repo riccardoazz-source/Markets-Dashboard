@@ -14,7 +14,9 @@ import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
-import { useGistData } from '@/lib/gist';
+import { useGistData, usePins } from '@/lib/gist';
+import { useRotationPhases } from '@/lib/useRotationPhases';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
@@ -819,6 +821,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [watchlistQuotes, setWatchlistQuotes] = useState<Record<string, QuoteData>>({});
   const [watchlistCategory, setWatchlistCategory] = useState('Watchlist');
   const [watchlistSort, setWatchlistSort] = useState<StockSortKey>('changePercent');
+  const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const { pins, togglePin } = usePins();
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -928,6 +933,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   }, [gistData, watchlistCategory]);
 
   const avgYearlyMap = useAvgYearly(watchlistSymbols);
+  const phases = useRotationPhases(watchlistSymbols);
 
   // Watchlist sorted by the active sort key (Day / MTD / YTD); symbols whose
   // quote hasn't loaded yet sink to the bottom.
@@ -953,6 +959,11 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       return bv - av;
     });
   }, [watchlistSymbols, watchlistQuotes, watchlistSort]);
+
+  // Rotation-phase + pinned filter applied to the sorted watchlist.
+  const visibleWatchlist = sortedWatchlistSymbols.filter(sym =>
+    (phaseFilter === 'all' || phases.get(sym) === phaseFilter)
+    && (!pinnedOnly || pins.has(sym)));
 
   useEffect(() => {
     if (!watchlistSymbols.length) { setWatchlistQuotes({}); return; }
@@ -1061,9 +1072,13 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             )}
           </div>
 
+          {watchlistSymbols.length > 0 && (
+            <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
+              pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={watchlistSymbols.filter(s => pins.has(s)).length} />
+          )}
           {watchlistSymbols.length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {sortedWatchlistSymbols.map(sym => {
+              {visibleWatchlist.map(sym => {
                 const q = watchlistQuotes[sym];
                 const change = q?.changePercent ?? null;
                 const mtd = q?.mtdChangePercent ?? null;
@@ -1096,12 +1111,16 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                             {q.currency}
                           </span>
                         )}
+                        <PhaseChip phase={phases.get(sym)} />
                       </div>
-                      {q?.dividendYield != null && q.dividendYield > 0 && (
-                        <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none shrink-0">
-                          DIV
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {q?.dividendYield != null && q.dividendYield > 0 && (
+                          <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 leading-none">
+                            DIV
+                          </span>
+                        )}
+                        <PinButton pinned={pins.has(sym)} onToggle={() => togglePin(sym)} />
+                      </div>
                     </div>
                     {/* Company name */}
                     {q?.name && <p className="text-[10px] text-gray-500 truncate mb-1.5">{q.name}</p>}

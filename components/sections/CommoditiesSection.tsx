@@ -18,6 +18,9 @@ import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
+import { usePins } from '@/lib/gist';
+import { useRotationPhases } from '@/lib/useRotationPhases';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
 
 type SortKey = 'changePercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
@@ -41,6 +44,10 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
   const [sortBy, setSortBy] = useState<SortKey>('changePercent');
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const { pins, togglePin } = usePins();
+  const phases = useRotationPhases();
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
@@ -112,9 +119,11 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
     return q.fiveYearChangePercent ?? null;
   };
 
-  const filteredCommodities = selectedCategory === 'All'
-    ? COMMODITIES
-    : COMMODITIES.filter(c => c.category === selectedCategory);
+  const filteredCommodities = COMMODITIES.filter(c =>
+    (selectedCategory === 'All' || c.category === selectedCategory)
+    && (phaseFilter === 'all' || phases.get(c.symbol) === phaseFilter)
+    && (!pinnedOnly || pins.has(c.symbol))
+  );
 
   const sorted = [...filteredCommodities].sort((a, b) => {
     const av = getValue(quotes[a.symbol], sortBy);
@@ -153,6 +162,9 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
         </div>
       </div>
 
+      {/* Rotation phase + pinned filter */}
+      <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={COMMODITIES.filter(c => pins.has(c.symbol)).length} />
       {/* Category filter */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {COMMODITY_CATEGORIES.map(c => (
@@ -189,13 +201,19 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                 )}>
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none">{com.category}</p>
-                  {q?.currency && (
-                    <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
-                      {q.currency}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {q?.currency && (
+                      <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">
+                        {q.currency}
+                      </span>
+                    )}
+                    <PinButton pinned={pins.has(com.symbol)} onToggle={() => togglePin(com.symbol)} />
+                  </div>
                 </div>
-                <p className="text-sm font-semibold text-gray-100 leading-snug mb-2">{com.name}</p>
+                <div className="flex items-start justify-between gap-1 mb-2">
+                  <p className="text-sm font-semibold text-gray-100 leading-snug">{com.name}</p>
+                  <PhaseChip phase={phases.get(com.symbol)} />
+                </div>
                 {q && q.price > 0 ? (
                   <>
                     <p className="text-lg font-bold text-white tabular-nums">{formatPrice(q.price)}</p>

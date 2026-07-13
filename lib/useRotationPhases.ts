@@ -21,16 +21,22 @@ CRYPTO_IDS.forEach(e => { GROUP_OF[CRYPTO_YAHOO_SYMBOLS[e.id] ?? `${e.symbol}-US
 
 interface Row { symbol: string; [k: string]: unknown }
 
-let cache: { map: Map<string, RotationPhase>; ts: number } | null = null;
-let inflight: Promise<Map<string, RotationPhase>> | null = null;
+const cache = new Map<string, { map: Map<string, RotationPhase>; ts: number }>();
+const inflight = new Map<string, Promise<Map<string, RotationPhase>>>();
 const TTL = 5 * 60_000;
 
-async function load(): Promise<Map<string, RotationPhase>> {
-  const res = await fetch('/api/rotation-returns');
-  const rows: Row[] = await res.json();
+async function load(extra: string[]): Promise<Map<string, RotationPhase>> {
+  // Base universe (Indexes/Commodities/Crypto/Sectors) + any extra symbols (stocks),
+  // scored together so the percentile matches the Rotation tab's universe.
+  const reqs: Promise<Row[]>[] = [fetch('/api/rotation-returns').then(r => r.json())];
+  if (extra.length) reqs.push(fetch(`/api/rotation-returns?extra=${encodeURIComponent(extra.join(','))}`).then(r => r.json()));
+  const parts = await Promise.all(reqs);
+  const seen = new Set<string>();
+  const rows: Row[] = [];
+  for (const p of parts) for (const r of (Array.isArray(p) ? p : [])) { if (!seen.has(r.symbol)) { seen.add(r.symbol); rows.push(r); } }
   const inputs: ModelInput[] = rows.map(r => ({
     symbol: r.symbol,
-    group: GROUP_OF[r.symbol],
+    group: GROUP_OF[r.symbol] ?? 'Stocks',
     r1m: r.r1m as number | null, r3m: r.r3m as number | null, r6m: r.r6m as number | null, r1y: r.r1y as number | null,
     price: (r.lastClose ?? r.ma200) as number | null, ma200: r.ma200 as number | null,
     vol: r.vol as number | null, volEdge: r.volEdge as number | null,
@@ -53,16 +59,20 @@ async function load(): Promise<Map<string, RotationPhase>> {
   return map;
 }
 
-export function useRotationPhases(): Map<string, RotationPhase> {
-  const [map, setMap] = useState<Map<string, RotationPhase>>(() => cache?.map ?? new Map());
+export function useRotationPhases(extra?: string[]): Map<string, RotationPhase> {
+  const key = extra && extra.length ? [...extra].sort().join(',') : '';
+  const [map, setMap] = useState<Map<string, RotationPhase>>(() => cache.get(key)?.map ?? new Map());
   useEffect(() => {
-    if (cache && Date.now() - cache.ts < TTL) { setMap(cache.map); return; }
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.ts < TTL) { setMap(hit.map); return; }
     let cancelled = false;
-    (inflight ??= load()).then(m => {
-      cache = { map: m, ts: Date.now() }; inflight = null;
+    let p = inflight.get(key);
+    if (!p) { p = load(key ? key.split(',') : []); inflight.set(key, p); }
+    p.then(m => {
+      cache.set(key, { map: m, ts: Date.now() }); inflight.delete(key);
       if (!cancelled) setMap(m);
-    }).catch(() => { inflight = null; });
+    }).catch(() => { inflight.delete(key); });
     return () => { cancelled = true; };
-  }, []);
+  }, [key]);
   return map;
 }
