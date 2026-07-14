@@ -327,6 +327,27 @@ export function StrategyPanel({ onCompare }: { onCompare?: (symbol: string) => v
   const ratesFalling = s.rateNow != null && s.rate12m != null ? s.rateNow < s.rate12m - 0.05 : null;
   const ratesRising = s.rateNow != null && s.rate12m != null ? s.rateNow > s.rate12m + 0.05 : null;
 
+  // Each outcome is its OWN point (own live badge + own chart links). The
+  // valuation (CAPE) is its own point too — not merged into the USD-stocks rule.
+  const rateFall = <>Fed funds <b className="text-gray-200">{fmt(s.rateNow, 2)}%</b> vs 12m ago <b className="text-gray-200">{fmt(s.rate12m, 2)}%</b>{ratesFalling === true ? ' → easing' : ''}.</>;
+  const rateRise = <>Fed funds <b className="text-gray-200">{fmt(s.rateNow, 2)}%</b> vs 12m ago <b className="text-gray-200">{fmt(s.rate12m, 2)}%</b>{ratesRising === true ? ' → tightening' : ''}.</>;
+  const builtins: { id: string; on: boolean; unknown: boolean; label: string; detail?: React.ReactNode }[] = [
+    { id: 'usd-strong', on: usdStocks === true, unknown: usdStocks === null, label: 'EUR/USD above its 5-year average → USD stocks',
+      detail: <>EUR/USD <b className="text-gray-200">{fmt(s.eurusd)}</b> vs 5Y avg <b className="text-gray-200">{fmt(s.eurusdAvg5y)}</b>{usdStocks === true ? ' → above = USD stocks' : usdStocks === false ? ' → below = not this branch' : ''}.</> },
+    { id: 'valuation', on: capeHigh === true, unknown: capeHigh === null, label: 'Shiller CAPE above its 5-year average → buy options',
+      detail: <>CAPE <b className="text-gray-200">{fmt(s.cape, 1)}</b> vs 5Y avg <b className="text-gray-200">{fmt(s.capeAvg5y, 1)}</b> — {capeHigh === true ? <b className="text-amber-300">rich → buy options</b> : capeHigh === false ? <b className="text-emerald-300">cheap → no options</b> : <span className="text-gray-500">no data</span>}.</> },
+    { id: 'usd-weak', on: usdStocks === false, unknown: usdStocks === null, label: 'EUR/USD below its 5-year average → Emerging Markets',
+      detail: <>Weak dollar (EUR/USD below its 5Y average) favours Emerging Markets.</> },
+    { id: 'crypto', on: cryptoBuy === true, unknown: cryptoBuy === null, label: 'Crypto 4-year cycle → buy below the 200-week MA',
+      detail: <>BTC <b className="text-gray-200">{usd(s.btc)}</b> vs 200W MA <b className="text-gray-200">{usd(s.btc200w)}</b>{cryptoBuy === true ? ' → below = accumulation zone' : cryptoBuy === false ? ' → above = wait' : ''}.</> },
+    { id: 'reits', on: ratesFalling === true, unknown: ratesFalling === null, label: 'Rates falling → REITs', detail: rateFall },
+    { id: 'mreits', on: ratesFalling === true, unknown: ratesFalling === null, label: 'Rates falling → mortgage REITs' },
+    { id: 'gold', on: ratesFalling === true, unknown: ratesFalling === null, label: 'Rates falling → Gold' },
+    { id: 'silver', on: ratesFalling === true, unknown: ratesFalling === null, label: 'Rates falling → Silver' },
+    { id: 'banks', on: ratesRising === true, unknown: ratesRising === null, label: 'Rates rising → Banks', detail: rateRise },
+    { id: 'bdc', on: ratesRising === true, unknown: ratesRising === null, label: 'Rates rising → BDCs' },
+  ];
+
   const summary = useMemo(() => {
     const picks: string[] = [];
     if (usdStocks === true) picks.push(capeHigh === true ? 'USD stocks + options (CAPE rich)' : capeHigh === false ? 'USD stocks, no options (CAPE cheap)' : 'USD stocks');
@@ -359,25 +380,9 @@ export function StrategyPanel({ onCompare }: { onCompare?: (symbol: string) => v
           </div>
 
           <div className="space-y-2">
-            <Row {...linkProps('usd-strong')} on={usdStocks === true} unknown={usdStocks === null}
-              label="EUR/USD above its 5-year average → USD stocks"
-              detail={<>EUR/USD <b className="text-gray-200">{fmt(s.eurusd)}</b> vs 5Y avg <b className="text-gray-200">{fmt(s.eurusdAvg5y)}</b>{usdStocks === true ? ' → above = USD stocks' : usdStocks === false ? ' → below = not this branch' : ''}.
-                <span className="block mt-1">Valuation (Shiller CAPE <b className="text-gray-200">{fmt(s.cape, 1)}</b> vs 5Y avg <b className="text-gray-200">{fmt(s.capeAvg5y, 1)}</b>):{' '}
-                  {capeHigh === true ? <b className="text-amber-300">rich → buy options</b> : capeHigh === false ? <b className="text-emerald-300">cheap → no options</b> : <span className="text-gray-500">no CAPE data</span>}.
-                </span></>} />
-            <Row {...linkProps('usd-weak')} on={usdStocks === false} unknown={usdStocks === null}
-              label="EUR/USD below its 5-year average → Emerging Markets"
-              detail={<>Weak dollar (EUR/USD below its 5Y average) favours Emerging Markets.</>} />
-            <Row {...linkProps('crypto')} on={cryptoBuy === true} unknown={cryptoBuy === null}
-              label="Crypto 4-year cycle → buy below the 200-week MA"
-              detail={<>BTC <b className="text-gray-200">{usd(s.btc)}</b> vs 200W MA <b className="text-gray-200">{usd(s.btc200w)}</b>{cryptoBuy === true ? ' → below = accumulation zone' : cryptoBuy === false ? ' → above = wait' : ''}.</>} />
-            <Row {...linkProps('rates-falling')} on={ratesFalling === true} unknown={ratesFalling === null}
-              label="Rates falling → REITs + mortgage REITs + gold + silver"
-              detail={<>Fed funds <b className="text-gray-200">{fmt(s.rateNow, 2)}%</b> vs 12m ago <b className="text-gray-200">{fmt(s.rate12m, 2)}%</b>{ratesFalling === true ? ' → easing' : ''}.</>} />
-            <Row {...linkProps('rates-rising')} on={ratesRising === true} unknown={ratesRising === null}
-              label="Rates rising → Banks + BDCs"
-              detail={<>Fed funds <b className="text-gray-200">{fmt(s.rateNow, 2)}%</b> vs 12m ago <b className="text-gray-200">{fmt(s.rate12m, 2)}%</b>{ratesRising === true ? ' → tightening' : ''}.</>} />
-
+            {builtins.map(b => (
+              <Row key={b.id} {...linkProps(b.id)} on={b.on} unknown={b.unknown} label={b.label} detail={b.detail} />
+            ))}
             {custom.map(p => (
               <Row key={p.id} {...linkProps(p.id)} on={false} unknown label={p.label} onDelete={() => removePoint(p.id)} />
             ))}
