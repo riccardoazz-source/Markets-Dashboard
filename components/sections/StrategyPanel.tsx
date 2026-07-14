@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { ChevronDown, ChevronRight, X, Plus, Trash2 } from 'lucide-react';
 import { useGistData, makeId } from '@/lib/gist';
 import { ALL_COMPARABLE_ASSETS } from '@/lib/config';
+import { computeSMA, computeEMA, computeSma200wDaily } from '@/lib/indicators';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // "My Strategy" — the user's own rotation playbook, evaluated live against
@@ -93,6 +94,29 @@ async function fetchSeries(symbol: string, tf: string): Promise<{ date: string; 
 }
 
 interface Line { label: string; color: string; pts: (number | null)[] }
+
+// Price-overlay tools (drawn as extra lines on one asset's ABSOLUTE price).
+const OVERLAY_KEYS = ['sma20', 'sma50', 'sma200', 'sma200w', 'ema20', 'ema100'] as const;
+const hasOverlay = (t?: Record<string, boolean>) => !!t && OVERLAY_KEYS.some(k => t[k]);
+
+// Single-asset chart with the technical tool(s) the user activated in Compare
+// (e.g. BTC + SMA 200W) — absolute price so the price/MA crossing is visible.
+async function buildToolChart(symbol: string, tf: string, tools: Record<string, boolean>): Promise<Line[]> {
+  const s = await fetchSeries(symbol, tf);
+  if (s.length < 2) return [];
+  const dates = s.map(p => p.date), closes = s.map(p => p.close);
+  const n = closes.length;
+  const idx = n > 160 ? Array.from({ length: 160 }, (_, i) => Math.round(i * (n - 1) / 159)) : closes.map((_, i) => i);
+  const pick = (v: (number | null)[]) => idx.map(i => v[i] ?? null);
+  const lines: Line[] = [{ label: ASSET_NAME.get(symbol) ?? symbol, color: '#e5e7eb', pts: idx.map(i => closes[i]) }];
+  if (tools.sma20) lines.push({ label: 'SMA 20', color: '#22d3ee', pts: pick(computeSMA(closes, 20)) });
+  if (tools.sma50) lines.push({ label: 'SMA 50', color: '#a78bfa', pts: pick(computeSMA(closes, 50)) });
+  if (tools.sma200) lines.push({ label: 'SMA 200', color: '#c084fc', pts: pick(computeSMA(closes, 200)) });
+  if (tools.sma200w) lines.push({ label: 'SMA 200W', color: '#facc15', pts: pick(computeSma200wDaily(dates, closes)) });
+  if (tools.ema20) lines.push({ label: 'EMA 20', color: '#fb7185', pts: pick(computeEMA(closes, 20)) });
+  if (tools.ema100) lines.push({ label: 'EMA 100', color: '#f43f5e', pts: pick(computeEMA(closes, 100)) });
+  return lines.filter(l => l.pts.some(v => v != null));
+}
 
 // Fetch every symbol of a linked chart, normalise each to % change and align by
 // the union of dates so the comparison reads exactly like Compare (normalized mode).
@@ -194,13 +218,13 @@ function LineChart({ lines, height = 64 }: { lines: Line[]; height?: number }) {
   );
 }
 
-interface StrategyChart { id: string; label: string; symbols: string[]; timeframe: string; preview?: Line[] }
+interface StrategyChart { id: string; label: string; symbols: string[]; timeframe: string; preview?: Line[]; tools?: Record<string, boolean>; focusIdx?: number }
 
 // One linked chart: fetches its symbols live (falls back to the saved thumbnail).
 function LinkedChartCard({ chart, active, onOpen, onUnlink }: {
   chart: StrategyChart; active: boolean; onOpen: () => void; onUnlink: () => void;
 }) {
-  const [lines, setLines] = useState<Line[] | null>(chart.preview ?? null);
+  const [lines, setLines] = useState<Line[] | null>(hasOverlay(chart.tools) ? null : (chart.preview ?? null));
   const [loading, setLoading] = useState(false);
   const done = useRef(false);
   useEffect(() => {
@@ -208,13 +232,20 @@ function LinkedChartCard({ chart, active, onOpen, onUnlink }: {
     done.current = true;
     let cancelled = false;
     setLoading(true);
-    buildLines(chart.symbols, chart.timeframe || '1Y').then(l => {
+    const tf = chart.timeframe || '1Y';
+    // If the saved Compare view had a tool active on an asset, draw that asset
+    // with its tool overlay; otherwise a normalized multi-asset comparison.
+    const focusSym = chart.symbols[chart.focusIdx ?? 0] ?? chart.symbols[0];
+    const job = hasOverlay(chart.tools) && focusSym
+      ? buildToolChart(focusSym, tf, chart.tools!)
+      : buildLines(chart.symbols, tf);
+    job.then(l => {
       if (cancelled) return;
       if (l.length) setLines(l);
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [active, chart.symbols, chart.timeframe]);
+  }, [active, chart.symbols, chart.timeframe, chart.tools, chart.focusIdx]);
   return (
     <div className="rounded-lg border border-sky-500/25 bg-sky-500/5 px-2.5 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -294,7 +325,7 @@ export function StrategyPanel({ onCompare }: { onCompare?: (symbol: string) => v
     for (const list of Object.values(data.notes ?? {})) {
       for (const n of list) {
         if (n.category === 'Strategy' && n.view?.symbols?.length) {
-          out.push({ id: n.id, label: n.text?.trim() || n.view.symbols.join(', '), symbols: n.view.symbols, timeframe: n.view.timeframe || '1Y', preview: n.view.preview });
+          out.push({ id: n.id, label: n.text?.trim() || n.view.symbols.join(', '), symbols: n.view.symbols, timeframe: n.view.timeframe || '1Y', preview: n.view.preview, tools: n.view.tools, focusIdx: n.view.stackAssetIdx });
         }
       }
     }
@@ -398,7 +429,7 @@ export function StrategyPanel({ onCompare }: { onCompare?: (symbol: string) => v
           </div>
 
           <p className="text-[10px] text-gray-600 leading-snug px-1">
-            To attach a chart to any rule: build the comparison yourself in <b>Compare</b>, open <b>Notes</b>, click <b>🎯 Add to strategy</b>, then link it with <b>＋ link a chart</b> here — it’s fetched live and drawn inline. You can link more than one chart per rule.
+            To attach a chart to any rule: build it in <b>Compare</b> (to add an indicator, open the <b>Stack</b> panel, pick the asset and toggle a tool e.g. SMA 200W), open <b>Notes</b>, click <b>🎯 Add to strategy</b>, then link it with <b>＋ link a chart</b> here — it’s fetched live and drawn inline, tool included. You can link more than one chart per rule.
           </p>
         </div>
       )}
