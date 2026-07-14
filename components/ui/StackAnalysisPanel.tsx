@@ -40,6 +40,17 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
   const avgDPB = useMemo(() => avgCalendarDaysPerBar(prices.map(p => p.date)), [prices]);
   const P      = useMemo(() => computeIndicatorPeriods(avgDPB), [avgDPB]);
 
+  // Mean / ±1σ / min / max of the visible window — for the Avg, Std Dev and
+  // Min/Max tools (these were previously chips with no line drawn).
+  const stats = useMemo(() => {
+    if (closes.length < 1) return null;
+    const mean = closes.reduce((s, v) => s + v, 0) / closes.length;
+    const sd = Math.sqrt(closes.reduce((s, v) => s + (v - mean) ** 2, 0) / closes.length);
+    let mn = closes[0], mx = closes[0];
+    for (const v of closes) { if (v < mn) mn = v; if (v > mx) mx = v; }
+    return { mean, sd, min: mn, max: mx };
+  }, [closes]);
+
   const sma20Vals   = activeTools.sma20    && P.sma20.ok   ? computeSMA(closes, P.sma20.period)               : null;
   const sma50Vals   = activeTools.sma50    && P.sma50.ok   ? computeSMA(closes, P.sma50.period)               : null;
   const sma200Vals  = activeTools.sma200   && P.sma200.ok  ? computeSMA(closes, P.sma200.period)              : null;
@@ -124,8 +135,11 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
 
       {/* Price chart with overlays */}
       <div className="space-y-1">
-        {(activeTools.sma20 || activeTools.sma50 || activeTools.sma200 || activeTools.sma200w || activeTools.ema20 || activeTools.ema100 || activeTools.bollinger) && (
+        {(activeTools.avg || activeTools.stdDev || activeTools.minMax || activeTools.sma20 || activeTools.sma50 || activeTools.sma200 || activeTools.sma200w || activeTools.ema20 || activeTools.ema100 || activeTools.bollinger) && (
           <div className="flex items-center gap-3 px-1 flex-wrap text-[10px]">
+            {activeTools.avg      && <span className="flex items-center gap-1 text-amber-400"><span className="inline-block w-5 border-t-2 border-dashed border-amber-400" />Avg</span>}
+            {activeTools.stdDev   && <span className="flex items-center gap-1 text-sky-400"><span className="inline-block w-5 border-t-2 border-dashed border-sky-400" />±1σ</span>}
+            {activeTools.minMax   && <span className="flex items-center gap-1 text-violet-400"><span className="inline-block w-5 border-t-2 border-dotted border-violet-400" />Min/Max</span>}
             {activeTools.sma20    && <span className="flex items-center gap-1 text-cyan-400"><span className="inline-block w-5 border-t-2 border-cyan-400" />SMA 20</span>}
             {activeTools.sma50    && <span className="flex items-center gap-1 text-amber-400"><span className="inline-block w-5 border-t-2 border-amber-400" />SMA 50</span>}
             {activeTools.sma200   && <span className="flex items-center gap-1 text-purple-400"><span className="inline-block w-5 border-t-2 border-purple-400" />SMA 200</span>}
@@ -188,6 +202,11 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
               <Line type="monotone" dataKey="bbMid" stroke="#eab308" strokeWidth={1} strokeOpacity={0.3} strokeDasharray="4 2" dot={false} connectNulls={false} legendType="none" />
             )}
             {normalized && <ReferenceLine y={0} stroke="#6b7280" strokeDasharray="3 3" strokeOpacity={0.4} />}
+            {activeTools.avg && stats && <ReferenceLine y={stats.mean} stroke="#f59e0b" strokeWidth={1} strokeDasharray="5 3" />}
+            {activeTools.stdDev && stats && <ReferenceLine y={stats.mean + stats.sd} stroke="#38bdf8" strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.8} />}
+            {activeTools.stdDev && stats && <ReferenceLine y={stats.mean - stats.sd} stroke="#38bdf8" strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.8} />}
+            {activeTools.minMax && stats && <ReferenceLine y={stats.max} stroke="#a78bfa" strokeWidth={1} strokeDasharray="2 2" strokeOpacity={0.8} />}
+            {activeTools.minMax && stats && <ReferenceLine y={stats.min} stroke="#a78bfa" strokeWidth={1} strokeDasharray="2 2" strokeOpacity={0.8} />}
             <Line type="monotone" dataKey="price" stroke={color} strokeWidth={1.5} dot={false} connectNulls={false} name={normalized ? '% Change' : 'Price'} />
             {activeTools.sma20   && <Line type="monotone" dataKey="sma20"   stroke="#22d3ee" strokeWidth={1}   dot={false} connectNulls={false} legendType="none" />}
             {activeTools.sma50   && <Line type="monotone" dataKey="sma50"   stroke="#fbbf24" strokeWidth={1}   dot={false} connectNulls={false} legendType="none" />}

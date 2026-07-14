@@ -96,7 +96,7 @@ async function fetchSeries(symbol: string, tf: string): Promise<{ date: string; 
 interface Line { label: string; color: string; pts: (number | null)[] }
 
 // Price-overlay tools (drawn as extra lines on one asset's ABSOLUTE price).
-const OVERLAY_KEYS = ['sma20', 'sma50', 'sma200', 'sma200w', 'ema20', 'ema100'] as const;
+const OVERLAY_KEYS = ['sma20', 'sma50', 'sma200', 'sma200w', 'ema20', 'ema100', 'avg', 'stdDev', 'minMax'] as const;
 const hasOverlay = (t?: Record<string, boolean>) => !!t && OVERLAY_KEYS.some(k => t[k]);
 
 // Single-asset chart with the technical tool(s) the user activated in Compare
@@ -115,6 +115,14 @@ async function buildToolChart(symbol: string, tf: string, tools: Record<string, 
   if (tools.sma200w) lines.push({ label: 'SMA 200W', color: '#facc15', pts: pick(computeSma200wDaily(dates, closes)) });
   if (tools.ema20) lines.push({ label: 'EMA 20', color: '#fb7185', pts: pick(computeEMA(closes, 20)) });
   if (tools.ema100) lines.push({ label: 'EMA 100', color: '#f43f5e', pts: pick(computeEMA(closes, 100)) });
+  if (tools.avg || tools.stdDev || tools.minMax) {
+    const mean = closes.reduce((a, b) => a + b, 0) / closes.length;
+    const sd = Math.sqrt(closes.reduce((a, b) => a + (b - mean) ** 2, 0) / closes.length);
+    const flat = (v: number, label: string, color: string) => lines.push({ label, color, pts: idx.map(() => v) });
+    if (tools.avg) flat(mean, 'Avg', '#f59e0b');
+    if (tools.stdDev) { flat(mean + sd, '+1σ', '#38bdf8'); flat(mean - sd, '−1σ', '#38bdf8'); }
+    if (tools.minMax) { flat(Math.max(...closes), 'Max', '#a78bfa'); flat(Math.min(...closes), 'Min', '#a78bfa'); }
+  }
   return lines.filter(l => l.pts.some(v => v != null));
 }
 
@@ -183,7 +191,7 @@ function useStrategySignals(active: boolean): { s: Signals; loading: boolean } {
 }
 
 // ── Inline multi-line % chart ────────────────────────────────────────────────
-function LineChart({ lines, height = 64 }: { lines: Line[]; height?: number }) {
+function LineChart({ lines, height = 150 }: { lines: Line[]; height?: number }) {
   const all = lines.flatMap(l => l.pts).filter((v): v is number => v != null && isFinite(v));
   if (all.length < 2) return null;
   const min = Math.min(...all), max = Math.max(...all), span = max - min || 1;
@@ -218,7 +226,35 @@ function LineChart({ lines, height = 64 }: { lines: Line[]; height?: number }) {
   );
 }
 
-interface StrategyChart { id: string; label: string; symbols: string[]; timeframe: string; preview?: Line[]; tools?: Record<string, boolean>; focusIdx?: number }
+// Compact correlation heat-table (green = +, red = −) saved with a Compare view.
+function CorrMatrix({ labels, matrix }: { labels: string[]; matrix: (number | null)[][] }) {
+  if (labels.length < 2) return null;
+  const short = (s: string) => (ASSET_NAME.get(s) ?? s).slice(0, 6);
+  const cell = (v: number | null) => {
+    if (v == null || !isFinite(v)) return { bg: 'transparent', t: '—' };
+    const a = Math.abs(v);
+    const hue = v >= 0 ? '52,211,153' : '248,113,113';
+    return { bg: `rgba(${hue},${(0.12 + a * 0.5).toFixed(2)})`, t: v.toFixed(2) };
+  };
+  return (
+    <div className="mt-2 overflow-x-auto">
+      <p className="text-[10px] text-gray-500 mb-1">Correlation</p>
+      <table className="text-[9px] border-collapse">
+        <thead><tr><th className="p-1"></th>{labels.map(l => <th key={l} className="p-1 text-gray-400 font-medium">{short(l)}</th>)}</tr></thead>
+        <tbody>
+          {labels.map((l, i) => (
+            <tr key={l}>
+              <td className="p-1 text-gray-400 font-medium whitespace-nowrap">{short(l)}</td>
+              {labels.map((_, j) => { const c = cell(matrix[i]?.[j] ?? null); return <td key={j} className="p-1 text-center text-gray-200" style={{ background: c.bg }}>{c.t}</td>; })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+interface StrategyChart { id: string; label: string; symbols: string[]; timeframe: string; preview?: Line[]; tools?: Record<string, boolean>; focusIdx?: number; correlation?: { labels: string[]; matrix: (number | null)[][] } }
 
 // One linked chart: fetches its symbols live (falls back to the saved thumbnail).
 function LinkedChartCard({ chart, active, onOpen, onUnlink }: {
@@ -255,6 +291,7 @@ function LinkedChartCard({ chart, active, onOpen, onUnlink }: {
       {lines && lines.length ? <LineChart lines={lines} />
         : loading ? <p className="text-[10px] text-gray-500 italic mt-1">loading chart…</p>
         : <p className="text-[10px] text-gray-600 italic mt-1">Couldn’t draw this one — click the title to open it in Compare.</p>}
+      {chart.correlation && chart.correlation.labels.length > 1 && <CorrMatrix labels={chart.correlation.labels} matrix={chart.correlation.matrix} />}
     </div>
   );
 }
@@ -325,7 +362,7 @@ export function StrategyPanel({ onCompare }: { onCompare?: (symbol: string) => v
     for (const list of Object.values(data.notes ?? {})) {
       for (const n of list) {
         if (n.category === 'Strategy' && n.view?.symbols?.length) {
-          out.push({ id: n.id, label: n.text?.trim() || n.view.symbols.join(', '), symbols: n.view.symbols, timeframe: n.view.timeframe || '1Y', preview: n.view.preview, tools: n.view.tools, focusIdx: n.view.stackAssetIdx });
+          out.push({ id: n.id, label: n.text?.trim() || n.view.symbols.join(', '), symbols: n.view.symbols, timeframe: n.view.timeframe || '1Y', preview: n.view.preview, tools: n.view.tools, focusIdx: n.view.stackAssetIdx, correlation: n.view.correlation });
         }
       }
     }

@@ -11,6 +11,8 @@ export interface NoteView {
   // time so the Rotation → My Strategy panel can DRAW the linked chart inline
   // without re-fetching/re-resolving every symbol.
   preview?: { label: string; color: string; pts: number[] }[];
+  // Correlation matrix of the compared assets at save time (shown in My Strategy).
+  correlation?: { labels: string[]; matrix: (number | null)[][] };
   // Compare-only extra state, so "Restore view" brings back the FULL setup.
   spreads?: { a: string; b: string }[];         // spread pairs (A − B)
   normalized?: boolean;                         // % Change (true) vs Absolute price (false)

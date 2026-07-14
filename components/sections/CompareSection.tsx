@@ -1118,6 +1118,8 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                 : Array.from({ length: max }, (_, i) => norm[Math.round(i * (norm.length - 1) / (max - 1))]);
               return { label: a.name || a.symbol, color: a.color, pts };
             }).filter(p => p.pts.length > 1),
+            // Correlation matrix of the compared assets (rendered in My Strategy).
+            correlation: correl.labels.length ? { labels: correl.labels.slice(), matrix: correl.matrix.map(r => r.slice()) } : undefined,
             // Full Compare setup so Restore brings back exactly what was saved.
             spreads: spreads.map(s => ({ ...s })),
             normalized, alignStart, logScale, showStack, stackAssetIdx,
