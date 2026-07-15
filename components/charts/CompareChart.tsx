@@ -6,6 +6,8 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceArea, ReferenceLine,
 } from 'recharts';
 import { CompareAsset } from '@/lib/types';
+import { type ActiveTools } from '@/components/ui/ChartTools';
+import { computeSMA, computeEMA, computeSma200wDaily, avgCalendarDaysPerBar, computeIndicatorPeriods } from '@/lib/indicators';
 import { BTC_HALVING_DATES, FOMC_MEETING_DATES, FOMC_DOT_PLOT_SET, RECESSION_SERIES, RECESSION_META, FED_CHAIR_CHANGES, MARKET_EVENTS, MARKET_EVENT_COLORS, EVENT_INDICATOR_CATEGORY, MarketEvent } from '@/lib/config';
 import { getMergedMarketEvents } from '@/lib/userSources';
 import { HalvingChart } from './HalvingChart';
@@ -37,9 +39,22 @@ interface Props {
   height?: number;
   logScale?: boolean;
   percentMode?: boolean;
+  /** Technical-analysis overlay for ONE compared asset (drawn on its own axis). */
+  overlay?: { symbol: string; tools: ActiveTools };
   /** Called when the user clicks "Set as period" on the drag-select banner. */
   onSetRange?: (from: string, to: string) => void;
 }
+
+// Overlay line colours — match the Stack panel / My Strategy so a tool looks the
+// same everywhere it's drawn.
+const OVERLAY_LINES: { key: keyof ActiveTools; label: string; color: string; dash?: string; period?: number; kind: 'sma' | 'ema' | 'sma200w' }[] = [
+  { key: 'sma20', label: 'SMA 20', color: '#22d3ee', period: 20, kind: 'sma' },
+  { key: 'sma50', label: 'SMA 50', color: '#fbbf24', period: 50, kind: 'sma' },
+  { key: 'sma200', label: 'SMA 200', color: '#a78bfa', period: 200, kind: 'sma' },
+  { key: 'sma200w', label: 'SMA 200W', color: '#d97706', kind: 'sma200w' },
+  { key: 'ema20', label: 'EMA 20', color: '#f472b6', dash: '4 2', period: 20, kind: 'ema' },
+  { key: 'ema100', label: 'EMA 100', color: '#ec4899', dash: '6 3', period: 100, kind: 'ema' },
+];
 
 function formatDate(dateStr: string, allDates: string[]) {
   try {
@@ -113,7 +128,7 @@ function axisProps(group: CompareAsset[], logScale: boolean): object {
   };
 }
 
-export function CompareChart({ assets, height = 340, logScale = false, percentMode = false, onSetRange }: Props) {
+export function CompareChart({ assets, height = 340, logScale = false, percentMode = false, overlay, onSetRange }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
   // Built-in curated events + the user's custom events (from the Sources tab).
   const [mergedEvents, setMergedEvents] = useState<MarketEvent[]>(MARKET_EVENTS);
@@ -205,6 +220,45 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
     });
     return point;
   });
+
+  // ── Technical-analysis overlay for the chosen asset ───────────────────────
+  // Computed on the exact values plotted (a.data — % change in percentMode,
+  // absolute otherwise) so the SMA/EMA lines sit on the same axis as the asset.
+  const overlayTarget = overlay ? plottableAssets.find(a => a.symbol === overlay.symbol) : undefined;
+  const overlayLines: { label: string; color: string; dash?: string; dataKey: string }[] = [];
+  const overlayRefs: { label: string; color: string; dash?: string; y: number }[] = [];
+  if (overlay && overlayTarget) {
+    const t = overlay.tools;
+    const dates = overlayTarget.data.map(d => d.date);
+    const closes = overlayTarget.data.map(d => d.close);
+    const P = computeIndicatorPeriods(avgCalendarDaysPerBar(dates));
+    const inject = (key: string, vals: (number | null)[]) => {
+      const byDate = new Map(dates.map((d, i) => [d, vals[i]]));
+      chartData.forEach(p => { p[key] = byDate.get(p.date as string) ?? null; });
+    };
+    for (const ov of OVERLAY_LINES) {
+      if (!t[ov.key]) continue;
+      let vals: (number | null)[] | null = null;
+      if (ov.kind === 'sma200w') vals = computeSma200wDaily(dates, closes);
+      else if (ov.kind === 'ema' && ov.period && P[ov.key as 'ema20' | 'ema100']?.ok) vals = computeEMA(closes, P[ov.key as 'ema20' | 'ema100'].period);
+      else if (ov.kind === 'sma' && ov.period && P[ov.key as 'sma20' | 'sma50' | 'sma200']?.ok) vals = computeSMA(closes, P[ov.key as 'sma20' | 'sma50' | 'sma200'].period);
+      if (!vals) continue;
+      const dk = `__ov_${ov.key}`;
+      inject(dk, vals);
+      overlayLines.push({ label: ov.label, color: ov.color, dash: ov.dash, dataKey: dk });
+    }
+    // Horizontal stat lines: mean / ±1σ / min / max.
+    if (t.avg || t.stdDev || t.minMax) {
+      const finite = closes.filter(c => isFinite(c));
+      if (finite.length) {
+        const mean = finite.reduce((a, b) => a + b, 0) / finite.length;
+        const sd = Math.sqrt(finite.reduce((a, b) => a + (b - mean) ** 2, 0) / finite.length);
+        if (t.avg) overlayRefs.push({ label: 'Avg', color: '#f59e0b', dash: '5 3', y: mean });
+        if (t.stdDev) { overlayRefs.push({ label: '+1σ', color: '#38bdf8', dash: '4 3', y: mean + sd }); overlayRefs.push({ label: '−1σ', color: '#38bdf8', dash: '4 3', y: mean - sd }); }
+        if (t.minMax) { overlayRefs.push({ label: 'Max', color: '#a78bfa', dash: '2 2', y: Math.max(...finite) }); overlayRefs.push({ label: 'Min', color: '#a78bfa', dash: '2 2', y: Math.min(...finite) }); }
+      }
+    }
+  }
 
   // Halving dates visible in the current range, snapped to the nearest category
   // value so the ReferenceLine actually renders on the (categorical) X axis.
@@ -493,6 +547,21 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
 
   return (
     <div className="relative select-none">
+      {overlayTarget && (overlayLines.length > 0 || overlayRefs.length > 0) && (
+        <div className="mb-1 flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[10px] px-1">
+          <span className="text-gray-500">Tools on <b className="text-gray-300">{overlayTarget.name}</b>:</span>
+          {overlayLines.map(l => (
+            <span key={l.dataKey} className="flex items-center gap-1" style={{ color: l.color }}>
+              <span className="inline-block w-4 border-t-2" style={{ borderColor: l.color, borderStyle: l.dash ? 'dashed' : 'solid' }} />{l.label}
+            </span>
+          ))}
+          {overlayRefs.map((r, i) => (
+            <span key={`ovl-${i}`} className="flex items-center gap-1" style={{ color: r.color }}>
+              <span className="inline-block w-4 border-t-2 border-dashed" style={{ borderColor: r.color }} />{r.label}
+            </span>
+          ))}
+        </div>
+      )}
       {range && selStats && (
         <div className="mb-2 bg-bg-input rounded-lg px-3 py-2 text-xs space-y-1">
           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -734,6 +803,18 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
               type="monotone" dataKey={`${a.symbol}_tr`}
               stroke={a.color} strokeWidth={1.5} strokeDasharray="6 3"
               dot={false} activeDot={{ r: 3 }} connectNulls />
+          ))}
+          {overlayTarget && overlayLines.map(l => (
+            <Line key={l.dataKey}
+              yAxisId={axisMap[overlayTarget.symbol] ?? 'left'}
+              type="monotone" dataKey={l.dataKey}
+              stroke={l.color} strokeWidth={1.25} strokeDasharray={l.dash}
+              dot={false} connectNulls legendType="none" name={l.label} />
+          ))}
+          {overlayTarget && overlayRefs.map((r, i) => (
+            <ReferenceLine key={`ovref-${i}`} yAxisId={axisMap[overlayTarget.symbol] ?? 'left'}
+              y={r.y} stroke={r.color} strokeWidth={1} strokeDasharray={r.dash}
+              label={{ value: r.label, fill: r.color, fontSize: 8, position: 'right' }} />
           ))}
           {visibleHalvingDates.map(d => (
             <ReferenceLine

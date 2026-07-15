@@ -621,14 +621,14 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   );
 
   const safeStackIdx = Math.min(stackAssetIdx, Math.max(0, displayAssets.length - 1));
-  // A tool is active on the chosen asset → isolate it below (even without Stack)
-  // so the overlay (SMA/EMA/Avg…) is actually visible on its own chart.
-  const anyToolActive = Object.values(stackTools).some(Boolean);
-  const showSub = showStack || anyToolActive;
-  const mainChartAssets = (showSub && displayAssets.length > 1
+  // Stack isolates the chosen asset in its own chart below. Tools draw on the
+  // chosen asset WHEREVER it is: on the main overlay when not stacked, on the
+  // sub-chart when it is.
+  const mainChartAssets = (showStack && displayAssets.length > 1
     ? displayAssets.filter((_, i) => i !== safeStackIdx)
     : displayAssets
   ).concat(spreadAssets);
+  const toolAsset = displayAssets[safeStackIdx];
 
   const correl = useMemo(() => {
     try {
@@ -986,10 +986,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         <ChartErrorBoundary>
           <div className="rounded-xl border border-border bg-bg-card p-4">
             <CompareChart assets={mainChartAssets} height={360} logScale={!normalized && logScale} percentMode={normalized}
+              overlay={toolAsset ? { symbol: toolAsset.symbol, tools: stackTools } : undefined}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           </div>
 
-          {showSub && displayAssets.length > 0 && (
+          {showStack && displayAssets.length > 0 && (
             <StackAnalysisPanel
               assets={displayAssets}
               assetIdx={safeStackIdx}
@@ -1189,7 +1190,7 @@ function ToolsControl({ assets, assetIdx, onAssetSelect, tools, onToolsChange, n
         ))}
       </div>
       <ChartTools data={data} activeTools={tools} onChange={onToolsChange} symbol={asset?.symbol} />
-      <p className="text-[10px] text-gray-600 leading-snug">Active tools are drawn on <b className="text-gray-400">{asset?.name ?? 'the chosen asset'}</b>’s chart below.</p>
+      <p className="text-[10px] text-gray-600 leading-snug">Tools are drawn on <b className="text-gray-400">{asset?.name ?? 'the chosen asset'}</b> on the chart above — or on the chart below if you put it in <b className="text-gray-400">Stack</b>.</p>
     </div>
   );
 }
