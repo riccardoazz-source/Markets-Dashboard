@@ -8,7 +8,7 @@ import {
   computeBollingerBands, computeFibLevels, computeMomentum,
   computeSma200wDaily, computeRsiResampledDaily, computeMacdResampledDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
-import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
+import { ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
 import {
   ResponsiveContainer, LineChart, ComposedChart, Line, Area, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
@@ -19,15 +19,13 @@ import clsx from 'clsx';
 interface Props {
   assets: CompareAsset[];
   assetIdx: number;
-  onAssetSelect: (i: number) => void;
   activeTools: ActiveTools;
-  onToolsChange: (t: ActiveTools) => void;
   normalized?: boolean;
 }
 
 const fmtD = (d: string) => { try { return format(parseISO(d), 'MMM d, yyyy'); } catch { return d; } };
 
-export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTools, onToolsChange, normalized }: Props) {
+export function StackAnalysisPanel({ assets, assetIdx, activeTools, normalized }: Props) {
   const asset = assets[assetIdx];
   const prices = normalized ? (asset?.data ?? []) : (asset?.rawData ?? asset?.data ?? []);
   const color = asset?.color ?? CHART_COLORS[assetIdx % CHART_COLORS.length];
@@ -110,27 +108,14 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
 
   return (
     <div className="rounded-xl border border-border bg-bg-card p-4 space-y-3">
-      {/* Header: asset selector */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      {/* Header: which asset this stacked chart shows (chosen in the Tools control) */}
+      <div className="flex items-center gap-2 flex-wrap">
         <p className="text-xs font-semibold text-gray-300">Technical Analysis</p>
-        <div className="flex gap-1.5 flex-wrap">
-          {assets.map((a, i) => (
-            <button
-              key={a.symbol}
-              onClick={() => onAssetSelect(i)}
-              className={clsx(
-                'flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium transition-all border',
-                i === assetIdx
-                  ? 'text-white border-transparent'
-                  : 'border-border text-gray-500 hover:text-gray-300',
-              )}
-              style={i === assetIdx ? { backgroundColor: a.color + '33', borderColor: a.color + '99' } : {}}
-            >
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
-              {a.name.length > 18 ? a.symbol : a.name}
-            </button>
-          ))}
-        </div>
+        <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium border border-transparent text-white"
+          style={{ backgroundColor: color + '33', borderColor: color + '99' }}>
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+          {asset.name}
+        </span>
       </div>
 
       {/* Price chart with overlays */}
@@ -309,8 +294,6 @@ export function StackAnalysisPanel({ assets, assetIdx, onAssetSelect, activeTool
           </div>
         );
       })}
-
-      <ChartTools data={prices} activeTools={activeTools} onChange={onToolsChange} />
     </div>
   );
 }

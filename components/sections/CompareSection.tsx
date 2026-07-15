@@ -17,7 +17,7 @@ import { X, Search, ChevronDown, ChevronUp, Layers, Minus, Plus } from 'lucide-r
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { StackAnalysisPanel, DEFAULT_TOOLS } from '@/components/ui/StackAnalysisPanel';
-import type { ActiveTools } from '@/components/ui/ChartTools';
+import { ChartTools, type ActiveTools } from '@/components/ui/ChartTools';
 import { IMF_INDICATOR_BY_CODE, MACRO_WORLD_ENABLED, imfCompareAssets, imfCompareClass } from '@/lib/imfConfig';
 
 // Comparable universe = the static config assets plus (when enabled) the curated
@@ -621,7 +621,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   );
 
   const safeStackIdx = Math.min(stackAssetIdx, Math.max(0, displayAssets.length - 1));
-  const mainChartAssets = (showStack && displayAssets.length > 1
+  // A tool is active on the chosen asset → isolate it below (even without Stack)
+  // so the overlay (SMA/EMA/Avg…) is actually visible on its own chart.
+  const anyToolActive = Object.values(stackTools).some(Boolean);
+  const showSub = showStack || anyToolActive;
+  const mainChartAssets = (showSub && displayAssets.length > 1
     ? displayAssets.filter((_, i) => i !== safeStackIdx)
     : displayAssets
   ).concat(spreadAssets);
@@ -818,12 +822,12 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
             )}
             <button
               onClick={() => setShowStack(v => !v)}
-              title="Technical-analysis tools (SMA, EMA, RSI, MACD, Bollinger, Avg…) — pick an asset and toggle tools on it"
+              title="Stack an asset in its own chart below the main overlay"
               className={clsx('flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full transition-all border',
                 showStack ? 'border-violet-400 text-violet-400 bg-violet-400/10' : 'border-border text-gray-400 hover:text-gray-200')}
             >
               <Layers size={12} />
-              Tools
+              Stack
             </button>
             <button
               onClick={() => setShowSpreadPanel(v => !v)}
@@ -985,13 +989,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           </div>
 
-          {showStack && displayAssets.length > 0 && (
+          {showSub && displayAssets.length > 0 && (
             <StackAnalysisPanel
               assets={displayAssets}
               assetIdx={safeStackIdx}
-              onAssetSelect={setStackAssetIdx}
               activeTools={stackTools}
-              onToolsChange={setStackTools}
               normalized={normalized}
             />
           )}
@@ -1102,6 +1104,17 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         </div>
       )}
 
+      {displayAssets.length > 0 && (
+        <ToolsControl
+          assets={displayAssets}
+          assetIdx={safeStackIdx}
+          onAssetSelect={setStackAssetIdx}
+          tools={stackTools}
+          onToolsChange={setStackTools}
+          normalized={normalized}
+        />
+      )}
+
       {selectedSymbols.length > 0 && (
         <ChartNotes
           chartId={`compare:${[...selectedSymbols].sort().join(',')}`}
@@ -1140,6 +1153,43 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// ── Tools control ──────────────────────────────────────────────────────────
+// The standard ChartTools panel (same as every other asset), but with an asset
+// selector on top so you choose WHICH compared asset the tool applies to. The
+// tool is drawn on that asset's isolated chart below (Stack auto-opens for it).
+function ToolsControl({ assets, assetIdx, onAssetSelect, tools, onToolsChange, normalized }: {
+  assets: CompareAsset[];
+  assetIdx: number;
+  onAssetSelect: (i: number) => void;
+  tools: ActiveTools;
+  onToolsChange: (t: ActiveTools) => void;
+  normalized: boolean;
+}) {
+  const asset = assets[assetIdx];
+  const data = normalized ? (asset?.data ?? []) : (asset?.rawData ?? asset?.data ?? []);
+  return (
+    <div className="rounded-xl border border-border bg-bg-card p-3 space-y-2">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider mr-0.5">Tools · apply to</span>
+        {assets.map((a, i) => (
+          <button
+            key={a.symbol}
+            onClick={() => onAssetSelect(i)}
+            className={clsx('flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-medium transition-all border',
+              i === assetIdx ? 'text-white border-transparent' : 'border-border text-gray-500 hover:text-gray-300')}
+            style={i === assetIdx ? { backgroundColor: a.color + '33', borderColor: a.color + '99' } : {}}
+          >
+            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
+            {a.name.length > 18 ? a.symbol : a.name}
+          </button>
+        ))}
+      </div>
+      <ChartTools data={data} activeTools={tools} onChange={onToolsChange} symbol={asset?.symbol} />
+      <p className="text-[10px] text-gray-600 leading-snug">Active tools are drawn on <b className="text-gray-400">{asset?.name ?? 'the chosen asset'}</b>’s chart below.</p>
     </div>
   );
 }
