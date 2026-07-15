@@ -151,8 +151,8 @@ async function dbnomicsCountry(country: string): Promise<Record<string, { date: 
 
 // Macro-area board: one multi-country WB call per summary indicator (much cheaper
 // than N×M single fetches), keeping each place's most recent non-null value.
-async function summary(): Promise<SummaryMap> {
-  if (summaryCache && Date.now() - summaryCache.ts < TTL) return summaryCache.data;
+// Direct World Bank multi-country board — cheap but often blocked on this deployment.
+async function summaryFromWb(): Promise<SummaryMap> {
   const codes = IMF_SUMMARY_CODES.join(';');
   const out: SummaryMap = {};
   await Promise.all(IMF_SUMMARY_INDICATORS.map(async indCode => {
@@ -167,6 +167,45 @@ async function summary(): Promise<SummaryMap> {
       if (!cur || r.date > cur.year) (out[iso] ??= {})[indCode] = { value: r.value, year: r.date };
     }
   }));
+  return out;
+}
+
+// DBnomics fallback — the SAME reliable source the country grid uses. One call
+// for every summary country × indicator; keeps the most recent value per cell.
+async function summaryFromDbnomics(): Promise<SummaryMap> {
+  const dims = encodeURIComponent(JSON.stringify({ indicator: IMF_SUMMARY_INDICATORS, country: IMF_SUMMARY_CODES }));
+  const dbUrl = `${DB}/series/WB/WDI?dimensions=${dims}&limit=1000&metadata=false`;
+  let json: { series?: { docs?: DbDoc[] } } | null = null;
+  for (let attempt = 0; attempt < 3 && !json; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 400 * attempt));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
+    try {
+      const r = await fetch(dbUrl, { signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } });
+      if (r.ok) json = await r.json();
+    } catch { /* retry */ } finally { clearTimeout(timer); }
+  }
+  const out: SummaryMap = {};
+  for (const d of json?.series?.docs ?? []) {
+    const ind = d.dimensions?.indicator, iso = d.dimensions?.country;
+    if (!ind || !iso) continue;
+    const periods = d.period ?? [], values = d.value ?? [];
+    let best: { value: number; year: string } | null = null;
+    for (let i = 0; i < periods.length; i++) {
+      const p = String(periods[i]); const v = values[i];
+      const num = typeof v === 'number' ? v : v == null ? NaN : parseFloat(String(v));
+      if (/^\d{4}$/.test(p) && isFinite(num) && (!best || p > best.year)) best = { value: num, year: p };
+    }
+    if (best) (out[iso] ??= {})[ind] = best;
+  }
+  return out;
+}
+
+async function summary(): Promise<SummaryMap> {
+  if (summaryCache && Date.now() - summaryCache.ts < TTL) return summaryCache.data;
+  // World Bank direct first (cheap); DBnomics fallback when it's blocked/empty.
+  let out = await summaryFromWb();
+  if (!Object.keys(out).length) out = await summaryFromDbnomics();
   if (Object.keys(out).length) summaryCache = { data: out, ts: Date.now() };
   return out;
 }

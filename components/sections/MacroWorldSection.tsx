@@ -105,25 +105,34 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
   const [timeframe, setTimeframe] = useState<Timeframe>('MAX');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
 
+  // The macro-area board (summary + extra + buffett) sometimes fails on the first
+  // try when the upstream data source is slow/blocked. Retry a few times so the
+  // "tabellone" reliably fills instead of silently staying empty.
+  const loadBoard = useCallback(async () => {
+    const tryFetch = async (url: string, attempts = 3): Promise<unknown | null> => {
+      for (let i = 0; i < attempts; i++) {
+        try { const j = await fetch(url).then(r => r.json()); if (j && !j.error) return j; } catch { /* retry */ }
+        if (i < attempts - 1) await new Promise(r => setTimeout(r, 600 * (i + 1)));
+      }
+      return null;
+    };
+    const [s, e, b] = await Promise.all([
+      tryFetch('/api/worldbank?mode=summary'),
+      tryFetch('/api/macroworld-extra?mode=summary'),
+      tryFetch('/api/macroworld-extra?mode=buffett-summary'),
+    ]);
+    if (s) setSummary(s as SummaryMap);
+    if (e) setExtra(e as ExtraMap);
+    if (b) setBuffettMap(b as Record<string, { value: number; year: string }>);
+  }, []);
+
   useEffect(() => {
     fetch('/api/worldbank?mode=countries')
       .then(r => r.json())
       .then((j) => { if (Array.isArray(j)) setCountries(j); })
       .catch(() => {});
-    fetch('/api/worldbank?mode=summary')
-      .then(r => r.json())
-      .then((j) => { if (j && !j.error) setSummary(j as SummaryMap); })
-      .catch(() => {});
-    fetch('/api/macroworld-extra?mode=summary')
-      .then(r => r.json())
-      .then((j) => { if (j && !j.error) setExtra(j as ExtraMap); })
-      .catch(() => {});
-    // Buffett indicator (index ÷ real GDP) — separate/lazy so it never slows the board.
-    fetch('/api/macroworld-extra?mode=buffett-summary')
-      .then(r => r.json())
-      .then((j) => { if (j && !j.error) setBuffettMap(j as Record<string, { value: number; year: string }>); })
-      .catch(() => {});
-  }, []);
+    loadBoard();
+  }, [loadBoard]);
 
   const fetchCountry = useCallback(async (code: string) => {
     setLoading(true); setError(null);
@@ -289,7 +298,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       )}
 
       {/* Macro-area summary board — headline economies & aggregates side by side */}
-      <SummaryBoard summary={summary} extra={extra} buffett={buffettMap} activeCode={country} onPick={code => { setSelected(null); setCountry(code); }} />
+      <SummaryBoard summary={summary} extra={extra} buffett={buffettMap} activeCode={country} onPick={code => { setSelected(null); setCountry(code); }} onRetry={loadBoard} />
 
       {/* Detail modal — same structure ("mascherina") as the Macro section */}
       {selected && sel && (
@@ -445,18 +454,39 @@ function inflationColor(v: number): string {
 // aggregates (Euro area, World) grouped by region, compared across a few key
 // indicators. Latest available value per cell; click a row to open that place.
 // ─────────────────────────────────────────────────────────────────────────────
-function SummaryBoard({ summary, extra, buffett, activeCode, onPick }: {
+function SummaryBoard({ summary, extra, buffett, activeCode, onPick, onRetry }: {
   summary: SummaryMap | null;
   extra: ExtraMap | null;
   buffett: Record<string, { value: number; year: string }> | null;
   activeCode: string;
   onPick: (code: string) => void;
+  onRetry?: () => void | Promise<void>;
 }) {
   // Click a column header to sort largest→smallest, then smallest→largest, then off.
   // (Declared before any early return so the Rules of Hooks are respected.)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
-  if (!summary) return null;
+  // Don't vanish silently when the board data hasn't arrived — show a retry.
+  if (!summary) {
+    return (
+      <div className="rounded-xl border border-border bg-bg-card p-4 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-100">Macro-area snapshot</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">{retrying ? 'Loading the comparison table…' : 'Couldn’t load the comparison table.'}</p>
+        </div>
+        {onRetry && (
+          <button
+            onClick={async () => { setRetrying(true); try { await onRetry(); } finally { setRetrying(false); } }}
+            disabled={retrying}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-gray-300 hover:text-white hover:border-border-light disabled:opacity-50"
+          >
+            {retrying ? 'Loading…' : '↻ Retry'}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   // Forecast years vary over time (2026/2027 today, 2027/2028 next year), so the two
   // forecast column headers are derived from whatever years the WEO data carries.
