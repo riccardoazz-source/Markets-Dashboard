@@ -818,12 +818,12 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
             )}
             <button
               onClick={() => setShowStack(v => !v)}
-              title="Stack a technical analysis panel below the main chart"
+              title="Technical-analysis tools (SMA, EMA, RSI, MACD, Bollinger, Avg…) — pick an asset and toggle tools on it"
               className={clsx('flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-full transition-all border',
                 showStack ? 'border-violet-400 text-violet-400 bg-violet-400/10' : 'border-border text-gray-400 hover:text-gray-200')}
             >
               <Layers size={12} />
-              Stack
+              Tools
             </button>
             <button
               onClick={() => setShowSpreadPanel(v => !v)}
