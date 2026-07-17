@@ -17,11 +17,12 @@ export function Ma200dLine({
   sma200d: number | null | undefined;
   currency?: string | null;
 }) {
-  if (price == null || sma200d == null) return null;
+  if (price == null || sma200d == null || sma200d <= 0) return null;
   const below = sma200d < price;
+  const pct = (price / sma200d - 1) * 100; // how far the price is above/below the MA
   return (
     <p className={clsx('text-[10px] mt-0.5', below ? 'text-red-400' : 'text-emerald-400')}>
-      200D: {formatPrice(sma200d, currency ?? 'USD')}
+      200D: {formatPrice(sma200d, currency ?? 'USD')} <span className="opacity-70">({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)</span>
     </p>
   );
 }
@@ -35,11 +36,12 @@ export function Sma200wLine({
   sma200w: number | null | undefined;
   currency?: string | null;
 }) {
-  if (price == null || sma200w == null) return null;
+  if (price == null || sma200w == null || sma200w <= 0) return null;
   const below = sma200w < price;
+  const pct = (price / sma200w - 1) * 100; // how far the price is above/below the MA
   return (
     <p className={clsx('text-[10px] mt-0.5', below ? 'text-red-400' : 'text-emerald-400')}>
-      200W: {formatPrice(sma200w, currency ?? 'USD')}
+      200W: {formatPrice(sma200w, currency ?? 'USD')} <span className="opacity-70">({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)</span>
     </p>
   );
 }
