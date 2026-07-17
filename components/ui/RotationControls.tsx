@@ -31,15 +31,25 @@ export function PinButton({ pinned, onToggle, className }: { pinned: boolean; on
 
 export type PhaseFilter = RotationPhase | 'all';
 
-// Filter row: All / the four phases / Pinned. Place it above a section's existing filters.
+// True when a price sits below the given moving average (i.e. "under the 200D/200W MA").
+export const isBelowMA = (price?: number | null, ma?: number | null): boolean =>
+  ma != null && isFinite(ma) && price != null && price > 0 && price < ma;
+
+// Filter row: All / the four phases / Pinned / < 200D / < 200W. Place it above a
+// section's existing filters. The two MA toggles are independent (combine with phase).
 export function RotationFilterBar({
   phaseFilter, setPhaseFilter, pinnedOnly, setPinnedOnly, pinnedCount,
+  below200d, setBelow200d, below200w, setBelow200w,
 }: {
   phaseFilter: PhaseFilter;
   setPhaseFilter: (p: PhaseFilter) => void;
   pinnedOnly: boolean;
   setPinnedOnly: (v: boolean) => void;
   pinnedCount: number;
+  below200d?: boolean;
+  setBelow200d?: (v: boolean) => void;
+  below200w?: boolean;
+  setBelow200w?: (v: boolean) => void;
 }) {
   const chip = (active: boolean) => clsx(
     'px-2.5 py-1 text-[11px] font-semibold rounded-full transition-all whitespace-nowrap shrink-0 border',
@@ -58,6 +68,16 @@ export function RotationFilterBar({
       <button onClick={() => setPinnedOnly(!pinnedOnly)} className={chip(pinnedOnly)} title="Show only pinned assets">
         ★ Pinned{pinnedCount ? ` (${pinnedCount})` : ''}
       </button>
+      {setBelow200d && (
+        <button onClick={() => setBelow200d(!below200d)} className={chip(!!below200d)} title="Only assets trading below their 200-day moving average">
+          &lt; 200D
+        </button>
+      )}
+      {setBelow200w && (
+        <button onClick={() => setBelow200w(!below200w)} className={chip(!!below200w)} title="Only assets trading below their 200-week moving average">
+          &lt; 200W
+        </button>
+      )}
     </div>
   );
 }

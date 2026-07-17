@@ -23,7 +23,7 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 
 const REGIONS = ['All', 'America', 'EU', 'Asia', 'Global', 'EM'];
 
@@ -47,6 +47,8 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [below200d, setBelow200d] = useState(false);
+  const [below200w, setBelow200w] = useState(false);
   const { pins, togglePin } = usePins();
   const phases = useRotationPhases();
   const [sortBy, setSortBy] = useState<SortKey>('changePercent');
@@ -151,11 +153,14 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     return computeAssetIRR(historical, divData.dividends);
   }, [historical, divData]);
 
-  const filtered = INDEXES.filter(i =>
-    (selectedRegion === 'All' || i.region === selectedRegion)
-    && (phaseFilter === 'all' || phases.get(i.symbol) === phaseFilter)
-    && (!pinnedOnly || pins.has(i.symbol))
-  );
+  const filtered = INDEXES.filter(i => {
+    const q = quotes[i.symbol];
+    return (selectedRegion === 'All' || i.region === selectedRegion)
+      && (phaseFilter === 'all' || phases.get(i.symbol) === phaseFilter)
+      && (!pinnedOnly || pins.has(i.symbol))
+      && (!below200d || isBelowMA(q?.price, q?.sma200d))
+      && (!below200w || isBelowMA(q?.price, q?.sma200w));
+  });
 
   const avgYearlyMap = useAvgYearly(INDEXES.map(i => i.symbol));
 
@@ -199,7 +204,8 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
       </div>
       {/* Rotation phase + pinned filter (above the region/sort filters) */}
       <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={INDEXES.filter(i => pins.has(i.symbol)).length} />
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={INDEXES.filter(i => pins.has(i.symbol)).length}
+        below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
       {/* Filters row */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {REGIONS.map(r => (

@@ -20,7 +20,7 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 
 type SortKey = 'changePercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
@@ -46,6 +46,8 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [below200d, setBelow200d] = useState(false);
+  const [below200w, setBelow200w] = useState(false);
   const { pins, togglePin } = usePins();
   const phases = useRotationPhases();
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
@@ -119,11 +121,14 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
     return q.fiveYearChangePercent ?? null;
   };
 
-  const filteredCommodities = COMMODITIES.filter(c =>
-    (selectedCategory === 'All' || c.category === selectedCategory)
-    && (phaseFilter === 'all' || phases.get(c.symbol) === phaseFilter)
-    && (!pinnedOnly || pins.has(c.symbol))
-  );
+  const filteredCommodities = COMMODITIES.filter(c => {
+    const q = quotes[c.symbol];
+    return (selectedCategory === 'All' || c.category === selectedCategory)
+      && (phaseFilter === 'all' || phases.get(c.symbol) === phaseFilter)
+      && (!pinnedOnly || pins.has(c.symbol))
+      && (!below200d || isBelowMA(q?.price, q?.sma200d))
+      && (!below200w || isBelowMA(q?.price, q?.sma200w));
+  });
 
   const sorted = [...filteredCommodities].sort((a, b) => {
     const av = getValue(quotes[a.symbol], sortBy);
@@ -164,7 +169,8 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
 
       {/* Rotation phase + pinned filter */}
       <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={COMMODITIES.filter(c => pins.has(c.symbol)).length} />
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={COMMODITIES.filter(c => pins.has(c.symbol)).length}
+        below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
       {/* Category filter */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {COMMODITY_CATEGORIES.map(c => (

@@ -16,7 +16,7 @@ import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { useGistData, usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
@@ -853,6 +853,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [watchlistSort, setWatchlistSort] = useState<StockSortKey>('changePercent');
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [below200d, setBelow200d] = useState(false);
+  const [below200w, setBelow200w] = useState(false);
   const { pins, togglePin } = usePins();
 
   useEffect(() => {
@@ -1002,9 +1004,13 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   }, [watchlistSymbols, watchlistQuotes, watchlistSort]);
 
   // Rotation-phase + pinned filter applied to the sorted watchlist.
-  const visibleWatchlist = sortedWatchlistSymbols.filter(sym =>
-    (phaseFilter === 'all' || phases.get(sym) === phaseFilter)
-    && (!pinnedOnly || pins.has(sym)));
+  const visibleWatchlist = sortedWatchlistSymbols.filter(sym => {
+    const q = watchlistQuotes[sym];
+    return (phaseFilter === 'all' || phases.get(sym) === phaseFilter)
+      && (!pinnedOnly || pins.has(sym))
+      && (!below200d || isBelowMA(q?.price, q?.sma200d))
+      && (!below200w || isBelowMA(q?.price, q?.sma200w));
+  });
 
   useEffect(() => {
     if (!watchlistSymbols.length) { setWatchlistQuotes({}); return; }
@@ -1115,7 +1121,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
           {watchlistSymbols.length > 0 && (
             <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-              pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={watchlistSymbols.filter(s => pins.has(s)).length} />
+              pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={watchlistSymbols.filter(s => pins.has(s)).length}
+              below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
           )}
           {watchlistSymbols.length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">

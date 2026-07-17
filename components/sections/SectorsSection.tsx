@@ -23,7 +23,7 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 
 interface SectorLiveData {
   price: number | null;
@@ -77,6 +77,8 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [below200d, setBelow200d] = useState(false);
+  const [below200w, setBelow200w] = useState(false);
   const { pins, togglePin } = usePins();
   const phases = useRotationPhases();
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
@@ -192,6 +194,8 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
     (selectedCategory === 'All' || s.category === selectedCategory)
     && (phaseFilter === 'all' || phases.get(s.symbol) === phaseFilter)
     && (!pinnedOnly || pins.has(s.symbol))
+    && (!below200d || isBelowMA(s.price, s.sma200d))
+    && (!below200w || isBelowMA(s.price, s.sma200w))
   );
 
   const getValue = (s: typeof merged[0]) =>
@@ -270,7 +274,8 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
       {/* Rotation phase + pinned filter */}
       <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={SECTORS.filter(s => pins.has(s.symbol)).length} />
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={SECTORS.filter(s => pins.has(s.symbol)).length}
+        below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
       {/* Category filter */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {SECTOR_CATEGORIES.map(c => (
