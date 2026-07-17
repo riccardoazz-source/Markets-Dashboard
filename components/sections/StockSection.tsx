@@ -844,6 +844,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   );
   const [dataMsg, setDataMsg] = useState<string | null>(null);
   const [spyPrices, setSpyPrices] = useState<HistoricalPoint[]>([]);
+  const [selQuote, setSelQuote] = useState<QuoteData | null>(null); // for the open stock's forward P/E
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { data: gistData } = useGistData();
@@ -895,6 +896,17 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   useEffect(() => {
     if (selected) fetchAsset(selected.symbol, timeframe, customRange ?? undefined);
   }, [selected, timeframe, customRange, fetchAsset]);
+
+  // Quote for the open stock — used for the forward P/E (Yahoo analyst estimate).
+  useEffect(() => {
+    if (!selected) { setSelQuote(null); return; }
+    let cancelled = false;
+    fetch(`/api/quotes?symbols=${encodeURIComponent(selected.symbol)}`)
+      .then(r => r.json())
+      .then((d: QuoteData[]) => { if (!cancelled) setSelQuote(Array.isArray(d) ? d[0] ?? null : null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selected]);
 
   // Earnings — fetched once per symbol (cheap; doesn't depend on timeframe)
   useEffect(() => {
@@ -1380,6 +1392,13 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               ) : epsList.length > 0 && peTtm == null ? (
                 <Stat label="P/E (TTM)" value="N/A" color="text-gray-600" />
               ) : null}
+              {/* ETFs / funds carry no EPS → show Yahoo's trailing P/E instead. */}
+              {peTtm == null && epsList.length === 0 && selQuote?.trailingPE != null && selQuote.trailingPE > 0 && selQuote.trailingPE <= 1000 && (
+                <Stat label="P/E" value={`${selQuote.trailingPE.toFixed(1)}x`} color="text-sky-400" />
+              )}
+              {selQuote?.forwardPE != null && selQuote.forwardPE > 0 && selQuote.forwardPE <= 1000 && (
+                <Stat label="Fwd P/E" value={`${selQuote.forwardPE.toFixed(1)}x`} color="text-sky-400" />
+              )}
               {avgPe != null && avgPe > 0 && avgPe <= 1000 ? (
                 <Stat label={`Avg P/E (${timeframe})`} value={`${avgPe.toFixed(1)}x`} color="text-sky-400" />
               ) : epsList.length > 0 ? (

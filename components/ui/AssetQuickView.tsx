@@ -106,6 +106,8 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
             {q.fiveYearChangePercent != null && <Stat label="5Y" value={formatPercent(q.fiveYearChangePercent)} color={colorForPercent(q.fiveYearChangePercent)} />}
             {q.high52w != null && <Stat label="52W High" value={formatPrice(q.high52w)} />}
             {q.low52w != null && <Stat label="52W Low" value={formatPrice(q.low52w)} />}
+            {q.trailingPE != null && q.trailingPE > 0 && <Stat label="P/E" value={`${q.trailingPE.toFixed(1)}x`} color="text-sky-400" />}
+            {q.forwardPE != null && q.forwardPE > 0 && <Stat label="Fwd P/E" value={`${q.forwardPE.toFixed(1)}x`} color="text-sky-400" />}
           </div>
         )}
 
