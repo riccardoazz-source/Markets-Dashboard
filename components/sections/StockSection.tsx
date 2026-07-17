@@ -16,7 +16,7 @@ import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { useGistData, usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
@@ -1115,14 +1115,14 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                     {opt.label}
                   </button>
                 ))}
+                <MAFilterChips below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
               </div>
             )}
           </div>
 
           {watchlistSymbols.length > 0 && (
             <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-              pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={watchlistSymbols.filter(s => pins.has(s)).length}
-              below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
+              pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={watchlistSymbols.filter(s => pins.has(s)).length} />
           )}
           {watchlistSymbols.length > 0 ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">

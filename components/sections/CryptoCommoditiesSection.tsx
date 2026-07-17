@@ -20,7 +20,7 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 
 type SortKey = 'change24hPercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 const coinYahooSym = (c: { id: string; symbol: string }) => CRYPTO_YAHOO_SYMBOLS[c.id] ?? `${c.symbol}-USD`;
@@ -222,6 +222,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 {opt.label}
               </button>
             ))}
+            <MAFilterChips below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
           </div>
           {lastUpdate && (
             <div className="flex items-center gap-1 text-[10px] text-gray-600">
@@ -234,8 +235,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
 
       {/* Rotation phase + pinned filter */}
       <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={CRYPTO_IDS.filter(c => pins.has(coinYahooSym(c))).length}
-        below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={CRYPTO_IDS.filter(c => pins.has(coinYahooSym(c))).length} />
       {/* Category filter tabs */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {CRYPTO_CATEGORIES.map(c => (

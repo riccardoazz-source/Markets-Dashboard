@@ -35,21 +35,15 @@ export type PhaseFilter = RotationPhase | 'all';
 export const isBelowMA = (price?: number | null, ma?: number | null): boolean =>
   ma != null && isFinite(ma) && price != null && price > 0 && price < ma;
 
-// Filter row: All / the four phases / Pinned / < 200D / < 200W. Place it above a
-// section's existing filters. The two MA toggles are independent (combine with phase).
+// Filter row: All / the four phases / Pinned. Place it above a section's existing filters.
 export function RotationFilterBar({
   phaseFilter, setPhaseFilter, pinnedOnly, setPinnedOnly, pinnedCount,
-  below200d, setBelow200d, below200w, setBelow200w,
 }: {
   phaseFilter: PhaseFilter;
   setPhaseFilter: (p: PhaseFilter) => void;
   pinnedOnly: boolean;
   setPinnedOnly: (v: boolean) => void;
   pinnedCount: number;
-  below200d?: boolean;
-  setBelow200d?: (v: boolean) => void;
-  below200w?: boolean;
-  setBelow200w?: (v: boolean) => void;
 }) {
   const chip = (active: boolean) => clsx(
     'px-2.5 py-1 text-[11px] font-semibold rounded-full transition-all whitespace-nowrap shrink-0 border',
@@ -68,16 +62,29 @@ export function RotationFilterBar({
       <button onClick={() => setPinnedOnly(!pinnedOnly)} className={chip(pinnedOnly)} title="Show only pinned assets">
         ★ Pinned{pinnedCount ? ` (${pinnedCount})` : ''}
       </button>
-      {setBelow200d && (
-        <button onClick={() => setBelow200d(!below200d)} className={chip(!!below200d)} title="Only assets trading below their 200-day moving average">
-          &lt; 200D
-        </button>
-      )}
-      {setBelow200w && (
-        <button onClick={() => setBelow200w(!below200w)} className={chip(!!below200w)} title="Only assets trading below their 200-week moving average">
-          &lt; 200W
-        </button>
-      )}
     </div>
+  );
+}
+
+// "< 200D" / "< 200W" toggles, styled to sit INSIDE the timeframe / sort pill bar
+// (rounded-md like the sort buttons), after the timeframe options.
+export function MAFilterChips({
+  below200d, setBelow200d, below200w, setBelow200w,
+}: {
+  below200d: boolean;
+  setBelow200d: (v: boolean) => void;
+  below200w: boolean;
+  setBelow200w: (v: boolean) => void;
+}) {
+  const chip = (active: boolean) => clsx(
+    'px-2.5 py-1 text-xs font-semibold rounded-md transition-all whitespace-nowrap shrink-0',
+    active ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100',
+  );
+  return (
+    <>
+      <span className="w-px h-4 bg-border shrink-0 self-center mx-0.5" />
+      <button onClick={() => setBelow200d(!below200d)} className={chip(below200d)} title="Only assets trading below their 200-day moving average">&lt; 200D</button>
+      <button onClick={() => setBelow200w(!below200w)} className={chip(below200w)} title="Only assets trading below their 200-week moving average">&lt; 200W</button>
+    </>
   );
 }

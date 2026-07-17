@@ -23,7 +23,7 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 
 const REGIONS = ['All', 'America', 'EU', 'Asia', 'Global', 'EM'];
 
@@ -204,8 +204,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
       </div>
       {/* Rotation phase + pinned filter (above the region/sort filters) */}
       <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={INDEXES.filter(i => pins.has(i.symbol)).length}
-        below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={INDEXES.filter(i => pins.has(i.symbol)).length} />
       {/* Filters row */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {REGIONS.map(r => (
@@ -230,6 +229,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               {opt.label}
             </button>
           ))}
+          <MAFilterChips below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
         </div>
         {lastUpdate && (
           <div className="flex items-center gap-1 text-[10px] text-gray-600">

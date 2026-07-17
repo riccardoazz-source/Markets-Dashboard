@@ -20,7 +20,7 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 
 type SortKey = 'changePercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
@@ -157,6 +157,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                 {opt.label}
               </button>
             ))}
+            <MAFilterChips below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
           </div>
           {lastUpdate && (
             <div className="flex items-center gap-1 text-[10px] text-gray-600">
@@ -169,8 +170,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
 
       {/* Rotation phase + pinned filter */}
       <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={COMMODITIES.filter(c => pins.has(c.symbol)).length}
-        below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={COMMODITIES.filter(c => pins.has(c.symbol)).length} />
       {/* Category filter */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {COMMODITY_CATEGORIES.map(c => (

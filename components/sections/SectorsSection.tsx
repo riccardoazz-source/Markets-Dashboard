@@ -23,7 +23,7 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 
 interface SectorLiveData {
   price: number | null;
@@ -262,6 +262,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                 {opt.label}
               </button>
             ))}
+            <MAFilterChips below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
           </div>
           {loading && <span className="text-accent animate-pulse text-[10px]">updating…</span>}
           {lastUpdate && !loading && (
@@ -274,8 +275,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
       {/* Rotation phase + pinned filter */}
       <RotationFilterBar phaseFilter={phaseFilter} setPhaseFilter={setPhaseFilter}
-        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={SECTORS.filter(s => pins.has(s.symbol)).length}
-        below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
+        pinnedOnly={pinnedOnly} setPinnedOnly={setPinnedOnly} pinnedCount={SECTORS.filter(s => pins.has(s.symbol)).length} />
       {/* Category filter */}
       <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
         {SECTOR_CATEGORIES.map(c => (
