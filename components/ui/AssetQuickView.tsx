@@ -8,6 +8,7 @@ import { PriceChart } from '@/components/charts/PriceChart';
 import { ReturnsTableButton } from './ReturnsTableButton';
 import { GeminiCommentButton } from './GeminiCommentButton';
 import { ChartNotes } from './ChartNotes';
+import { ChartTools, ActiveTools, DEFAULT_TOOLS } from './ChartTools';
 import { LoadingSpinner } from './LoadingSpinner';
 import { HistoricalPoint, QuoteData, Timeframe } from '@/lib/types';
 import { formatPrice, formatPercent, colorForPercent, calculateCAGR, buildTotalReturnSeries, computeAssetIRR } from '@/lib/utils';
@@ -25,6 +26,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
   const [dividends, setDividends] = useState<{ date: string; amount: number }[]>([]);
   const [quote, setQuote] = useState<QuoteData | null>(null);
   const [histLoading, setHistLoading] = useState(false);
+  const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,9 +129,12 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
         {histLoading ? (
           <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
         ) : (
-          <PriceChart data={historical} color="auto" height={200}
-            totalReturnData={totalReturn}
+          <PriceChart data={historical} symbol={symbol} color="auto" height={200}
+            totalReturnData={totalReturn} toolsOverlay={activeTools}
             onSetRange={(from, to) => setCustomRange({ from, to })} />
+        )}
+        {historical.length > 1 && (
+          <ChartTools data={historical} activeTools={activeTools} onChange={setActiveTools} symbol={symbol} />
         )}
         <ChartNotes chartId={symbol} />
       </div>
