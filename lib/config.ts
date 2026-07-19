@@ -430,6 +430,9 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'BTC_HASHRATE', name: 'Bitcoin Network Hashrate', category: 'Crypto', unit: 'EH/s',
     source: { type: 'computed', label: 'Network hashrate in EH/s (blockchain.info)',
               url: 'https://www.blockchain.com/explorer/charts/hash-rate' } },
+  { id: 'BCADPS', name: 'BITA Crypto Assets & Digital Payments Index', category: 'Crypto', unit: 'idx',
+    source: { type: 'computed', label: 'BITA (bitadata.com) — user-supplied snapshot; tracked by the CEPI ETF',
+              url: 'https://www.bitadata.com/index/BCADPS' } },
   // Debt — US federal debt and sustainability metrics
   { id: 'GFDEGDQ188S', name: 'Debt / GDP Ratio',     category: 'Debt',        unit: '%',
     source: { type: 'fred',    label: 'FRED',

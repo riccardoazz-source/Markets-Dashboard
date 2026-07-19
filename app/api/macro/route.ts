@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { MACRO_INDICATORS, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, MarketEventCategory } from '@/lib/config';
+import { BCADPS_SERIES } from '@/lib/bcadpsData';
 
 // Source map: look up MacroSource by indicator id for dispatch in fetchMacroSeries.
 const indicatorSourceMap = new Map(
@@ -1595,6 +1596,11 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_PRODUCTION_COST')  return fetchBitcoinProductionCost(fromDate);
     if (fredId === 'BTC_HASHRATE')         return fetchBitcoinHashrate(fromDate);
     if (fredId === 'BTC_DOMINANCE')        return fetchBitcoinDominance(fromDate);
+    if (fredId === 'BCADPS') {
+      // Static end-of-day snapshot of the BITA BCADPS index (user-supplied CSV).
+      const pts = BCADPS_SERIES.map(([date, value]) => ({ date, value }));
+      return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
+    }
     if (fredId === 'FOMC_MEETINGS') {
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
