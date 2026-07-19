@@ -1543,6 +1543,51 @@ async function fetchBLSBatch(
 }
 
 // ---------- Master fetch: all sources in parallel, first hit wins ----------
+// BITA BCADPS index — direct CSV download link from bitadata.com (no auth). BITA
+// is behind Cloudflare bot-protection, so this may or may not be reachable from a
+// server; when it isn't we fall back to the bundled snapshot so the chart is never
+// empty. The live path keeps the value current whenever the server can reach it.
+const BCADPS_DOWNLOAD_URL = 'https://www.bitadata.com/d348c2b3-e2ba-4335-9b32-0aceedd94fec';
+
+function parseBcadpsCsv(text: string): { date: string; value: number }[] {
+  const seen = new Set<string>();
+  const out: { date: string; value: number }[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const comma = line.indexOf(',');
+    if (comma < 0) continue;
+    const date = line.slice(0, comma).trim().slice(0, 10);
+    const value = parseFloat(line.slice(comma + 1).trim());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !isFinite(value)) continue;
+    if (seen.has(date)) continue;
+    seen.add(date);
+    out.push({ date, value });
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date));
+  return out;
+}
+
+async function fetchBcadps(fromDate?: string): Promise<{ date: string; value: number }[]> {
+  const window = (pts: { date: string; value: number }[]) => (fromDate ? pts.filter(p => p.date >= fromDate) : pts);
+  // Try the live download (browser-like headers); a couple of quick retries.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 400));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    try {
+      const r = await fetch(BCADPS_DOWNLOAD_URL, {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': UA, 'Accept': 'text/csv,application/octet-stream,text/plain,*/*' },
+      });
+      if (r.ok) {
+        const pts = parseBcadpsCsv(await r.text());
+        if (pts.length > 100) return window(pts);
+      }
+    } catch { /* fall through to snapshot */ } finally { clearTimeout(timer); }
+  }
+  // Blocked/unreachable → bundled snapshot so the series is never empty.
+  return window(BCADPS_SERIES.map(([date, value]) => ({ date, value })));
+}
+
 async function fetchMacroSeries(
   fredId: string,
   fromDate?: string,
@@ -1596,11 +1641,7 @@ async function fetchMacroSeries(
     if (fredId === 'BTC_PRODUCTION_COST')  return fetchBitcoinProductionCost(fromDate);
     if (fredId === 'BTC_HASHRATE')         return fetchBitcoinHashrate(fromDate);
     if (fredId === 'BTC_DOMINANCE')        return fetchBitcoinDominance(fromDate);
-    if (fredId === 'BCADPS') {
-      // Static end-of-day snapshot of the BITA BCADPS index (user-supplied CSV).
-      const pts = BCADPS_SERIES.map(([date, value]) => ({ date, value }));
-      return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
-    }
+    if (fredId === 'BCADPS')               return fetchBcadps(fromDate);
     if (fredId === 'FOMC_MEETINGS') {
       const pts = FOMC_MEETING_DATES.map(d => ({ date: d, value: 1 }));
       return fromDate ? pts.filter(p => p.date >= fromDate) : pts;
