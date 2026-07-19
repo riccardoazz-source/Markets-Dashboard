@@ -266,12 +266,12 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                   'rounded-xl border p-3 text-left transition-all duration-150 hover:border-accent/50',
                   isSelected ? 'border-accent bg-accent/10' : 'border-border bg-bg-card'
                 )}>
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    {coin.image && <img src={coin.image} alt={coin.name} className="w-6 h-6 rounded-full" />}
-                    <div>
-                      <div className="flex items-center gap-1">
-                        <p className="text-xs font-bold text-gray-100 leading-none">{coin.name}</p>
+                <div className="flex items-start justify-between mb-2 gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {coin.image && <img src={coin.image} alt={coin.name} className="w-6 h-6 rounded-full shrink-0" />}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <p className="text-xs font-bold text-gray-100 leading-none truncate">{coin.name}</p>
                         <PhaseChip phase={phases.get(ysym)} />
                       </div>
                       <p className="text-[10px] text-gray-500">{coin.symbol}</p>
