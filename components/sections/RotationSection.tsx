@@ -9,7 +9,7 @@ import { useGistData, QuadrantPoint } from '@/lib/gist';
 import { scoreRotation, selectPicks, ScoredItem } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
-import { classifyPhase, PHASE_META, RotationPhase } from '@/lib/rotationPhase';
+import { classifyPhase, PHASE_META, RotationPhase, ROTATION_PHASES } from '@/lib/rotationPhase';
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
 import { SentimentPanel, SentimentSnapshot } from '@/components/sections/SentimentPanel';
@@ -210,6 +210,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   const [sortBy, setSortBy] = useState<SortKey>('3m');
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
   const [accelOnly, setAccelOnly] = useState(false);
+  const [phaseFilter, setPhaseFilter] = useState<RotationPhase | 'all'>('all');
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
   const userHasToggled = useRef(false);
 
@@ -544,6 +545,11 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   }, [quadrantAssets]);
   const phaseOf = (symbol: string): RotationPhase | null => phaseMap.get(symbol) ?? null;
 
+  // Final list after the phase filter (Recovering / Trending / Fading / Lagging).
+  const displayItems = phaseFilter === 'all'
+    ? sortedItems
+    : sortedItems.filter(i => phaseOf(i.symbol) === phaseFilter);
+
   // When the user hits Refresh on the sentiment panel, snap the table back to the
   // canonical view (All classes, sorted by today's move) so what they see equals
   // what Gemini is fed.
@@ -638,6 +644,27 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
             <Star size={12} className={pinnedOnly ? 'fill-amber-300' : ''} />
             Pinned{pins.size > 0 ? ` (${pins.size})` : ''}
           </button>
+          {/* Rotation-phase filter: All / Recovering / Trending / Fading / Lagging */}
+          <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+            <button
+              onClick={() => setPhaseFilter('all')}
+              className={clsx('px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
+                phaseFilter === 'all' ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}
+            >
+              All
+            </button>
+            {ROTATION_PHASES.map(p => (
+              <button
+                key={p}
+                onClick={() => setPhaseFilter(phaseFilter === p ? 'all' : p)}
+                title={PHASE_META[p].hint}
+                className={clsx('px-2.5 py-1.5 text-xs font-semibold rounded-md transition-all',
+                  phaseFilter === p ? PHASE_META[p].cls : 'text-gray-400 hover:text-gray-100')}
+              >
+                {PHASE_META[p].label}
+              </button>
+            ))}
+          </div>
           <div className={clsx('flex gap-1 bg-bg-input rounded-lg p-1', accelOnly && 'opacity-40 pointer-events-none')}>
             {SORT_OPTIONS.map(opt => (
               <button
@@ -779,18 +806,20 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {sortedItems.length === 0 && (
+                {displayItems.length === 0 && (
                   <tr>
                     <td colSpan={11} className="px-3 py-10 text-center text-xs text-gray-500">
                       {accelOnly
                         ? 'Nothing is accelerating right now — no asset is both rising and speeding up.'
                         : pinnedOnly
                           ? 'No pinned assets in this view — tap the ☆ on a row to pin it.'
-                          : 'No assets match this filter.'}
+                          : phaseFilter !== 'all'
+                            ? `No assets are ${PHASE_META[phaseFilter].label} in this view.`
+                            : 'No assets match this filter.'}
                     </td>
                   </tr>
                 )}
-                {sortedItems.map((item, idx) => {
+                {displayItems.map((item, idx) => {
                   const isSelected = selectedSymbols.has(item.symbol);
                   const scored     = scoreMap.get(item.symbol);
                   const phase      = phaseOf(item.symbol); // rotation quadrant label (shared)
