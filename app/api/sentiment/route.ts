@@ -174,27 +174,31 @@ export async function POST(req: Request) {
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 55_000);
+  // camelCase payload; Google-Search grounding requires thinking (so no
+  // thinkingBudget:0), and we retry without the search tool if the grounded call
+  // 400s so sentiment still works.
+  const MODEL = 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+  const payload = (withSearch: boolean) => ({
+    systemInstruction: { parts: [{ text: systemInstruction }] },
+    contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+    ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
+    generationConfig: { maxOutputTokens: 2500, temperature: 0.2 },
+  });
+  const callGemini = (withSearch: boolean) => fetch(url, {
+    signal: ctrl.signal,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload(withSearch)),
+  });
+
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
-    const r = await fetch(url, {
-      signal: ctrl.signal,
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemInstruction }] },
-        contents: [{ role: 'user', parts: [{ text: userMessage }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: {
-          maxOutputTokens: 1500,
-          temperature: 0.2,
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-      }),
-    });
+    let r = await callGemini(true);
+    if (r.status === 400) r = await callGemini(false);
 
     if (!r.ok) {
       const body = await r.text().catch(() => '');
-      return NextResponse.json({ error: 'upstream', status: r.status, message: body.slice(0, 300) }, { status: 200 });
+      return NextResponse.json({ error: 'upstream', status: r.status, message: body.slice(0, 600) }, { status: 200 });
     }
 
     const json = await r.json() as {
