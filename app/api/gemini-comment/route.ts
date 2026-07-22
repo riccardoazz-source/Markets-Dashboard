@@ -121,31 +121,32 @@ export async function POST(req: Request) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 55_000);
 
+  // camelCase payload (per current Gemini REST docs). `withSearch` controls the
+  // Google-Search grounding tool, so we can retry without it if the model/region
+  // rejects grounding — the AI still answers, just without live news.
+  const MODEL = 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+  const payload = (withSearch: boolean) => ({
+    systemInstruction: { parts: [{ text: systemInstruction }] },
+    contents,
+    ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
+    generationConfig: { maxOutputTokens: 2048, temperature: 0.3 },
+  });
+  const callGemini = (withSearch: boolean) => fetch(url, {
+    signal: ctrl.signal,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload(withSearch)),
+  });
+
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
-    const r = await fetch(url, {
-      signal: ctrl.signal,
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemInstruction }] },
-        contents,
-        tools: [{ google_search: {} }],
-        // NOTE: don't force thinkingBudget:0 here — Google-Search grounding
-        // requires the model to think, and disabling it returns 400
-        // INVALID_ARGUMENT. Let the model use its default thinking budget.
-        generationConfig: {
-          // Room for the model's (default) thinking tokens + the short reply, so
-          // thinking doesn't eat the whole budget and leave an empty answer.
-          maxOutputTokens: 2048,
-          temperature: 0.3,
-        },
-      }),
-    });
+    let r = await callGemini(true);
+    // Grounding unsupported for this model/region → retry once without it.
+    if (r.status === 400) r = await callGemini(false);
 
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
-      return NextResponse.json({ error: 'upstream', status: r.status, message: txt.slice(0, 300) }, { status: 200 });
+      return NextResponse.json({ error: 'upstream', status: r.status, message: txt.slice(0, 600) }, { status: 200 });
     }
 
     const json = await r.json() as {
