@@ -131,10 +131,14 @@ export async function POST(req: Request) {
         system_instruction: { parts: [{ text: systemInstruction }] },
         contents,
         tools: [{ google_search: {} }],
+        // NOTE: don't force thinkingBudget:0 here — Google-Search grounding
+        // requires the model to think, and disabling it returns 400
+        // INVALID_ARGUMENT. Let the model use its default thinking budget.
         generationConfig: {
-          maxOutputTokens: 600,
+          // Room for the model's (default) thinking tokens + the short reply, so
+          // thinking doesn't eat the whole budget and leave an empty answer.
+          maxOutputTokens: 2048,
           temperature: 0.3,
-          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
     });
