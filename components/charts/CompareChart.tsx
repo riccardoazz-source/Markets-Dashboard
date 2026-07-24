@@ -525,16 +525,24 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
             pct = lv !== 0 ? (rv - lv) / Math.abs(lv) * 100 : null;
           }
         }
-        // Annualised CAGR of the sub-period return, and the dividend-inclusive IRR
-        // (from this asset's total-return series) when it differs from the price CAGR.
-        const cagr = pct != null && selYears > 0.02 ? (Math.pow(1 + pct / 100, 1 / selYears) - 1) * 100 : null;
+        // Annualised CAGR of the sub-period return — only for ≥ 1-year selections
+        // (same rule as calculateCAGR; annualizing days-long windows explodes).
+        const cagr = pct != null && selYears >= 1 ? (Math.pow(1 + pct / 100, 1 / selYears) - 1) * 100 : null;
+        // Dividend-inclusive IRR from this asset's total-return series. In percent
+        // mode trData holds % CHANGE values, not levels — de-normalize exactly like
+        // the price path above, otherwise pow(tr/tl) on percents is nonsense.
         let irr: number | null = null;
-        if (a.trData && a.trData.length && selYears > 0.02) {
+        if (a.trData && a.trData.length && selYears >= 1) {
           const tl = valueAtOrAfter(a.trData, range.left, 'close');
           const tr = valueAtOrBefore(a.trData, range.right, 'close');
-          if (tl != null && tr != null && tl > 0 && tr > 0) {
-            const trCagr = (Math.pow(tr / tl, 1 / selYears) - 1) * 100;
-            if (cagr == null || Math.abs(trCagr - cagr) > 0.05) irr = trCagr;
+          if (tl != null && tr != null) {
+            const trTotal = percentMode
+              ? (1 + tl / 100) > 0 ? ((1 + tr / 100) / (1 + tl / 100) - 1) : null
+              : tl > 0 && tr > 0 ? (tr / tl - 1) : null;
+            if (trTotal != null && 1 + trTotal > 0) {
+              const trCagr = (Math.pow(1 + trTotal, 1 / selYears) - 1) * 100;
+              if (cagr != null && Math.abs(trCagr - cagr) > 0.05) irr = trCagr;
+            }
           }
         }
         return { symbol: a.symbol, name: a.name, color: a.color, pct, cagr, irr };

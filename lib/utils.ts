@@ -81,7 +81,11 @@ export function calculateCAGR(
   // "1D" means the single most recent day's change (previous close → latest),
   // matching Yahoo/Google. The 1D window is fetched a few days wide so the chart
   // has a line, so measuring first→last would overstate it as a multi-day return.
-  const start = timeframe === '1D' ? data[data.length - 2] : data[0];
+  // Span guard: sections keep timeframe='1D' in state while a CUSTOM range is
+  // active, so only apply the special case when the data actually spans ≤ 7 days
+  // — a 5-year custom range mislabeled '1D' must use its true first point.
+  const spanDays = (new Date(data[data.length - 1].date).getTime() - new Date(data[0].date).getTime()) / 86_400_000;
+  const start = timeframe === '1D' && spanDays <= 7 ? data[data.length - 2] : data[0];
   const end = data[data.length - 1];
   const startPrice = start.close;
   const endPrice = end.close;
@@ -365,6 +369,11 @@ export function computeAssetIRR(
   const start = prices[0];
   const end = prices[prices.length - 1];
   if (!start.close || !end.close) return null;
+  // IRR is an ANNUALIZED rate: over a sub-year window annualization explodes a
+  // small move into a huge misleading % (a +2% month reads as "+28% IRR").
+  // Only report it when the window is at least ~1 year.
+  const spanYears = (new Date(end.date).getTime() - new Date(start.date).getTime()) / (365.25 * 86_400_000);
+  if (spanYears < 0.99) return null;
   const flows: { date: string; amount: number }[] = [{ date: start.date, amount: -start.close }];
   for (const d of dividends) {
     if (d.date > start.date && d.date <= end.date && d.amount > 0) {

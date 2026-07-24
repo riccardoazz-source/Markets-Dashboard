@@ -38,7 +38,9 @@ async function load(extra: string[]): Promise<Map<string, RotationPhase>> {
     symbol: r.symbol,
     group: GROUP_OF[r.symbol] ?? 'Stocks',
     r1m: r.r1m as number | null, r3m: r.r3m as number | null, r6m: r.r6m as number | null, r1y: r.r1y as number | null,
-    price: (r.lastClose ?? r.ma200) as number | null, ma200: r.ma200 as number | null,
+    // No ma200 fallback for price: that would fabricate "exactly at the MA"
+    // (distMA = 0) and feed a synthetic value into decay/overheat. Null is honest.
+    price: (r.lastClose ?? null) as number | null, ma200: r.ma200 as number | null,
     vol: r.vol as number | null, volEdge: r.volEdge as number | null,
     pos52w: r.pos52w as number | null, trendR2: r.trendR2 as number | null, trendR2Long: r.trendR2Long as number | null,
     rsi: r.rsi as number | null, macdHist: r.macdHist as number | null, volRatio: r.volRatio as number | null,

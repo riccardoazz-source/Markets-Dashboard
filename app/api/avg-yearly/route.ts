@@ -13,7 +13,11 @@ const cache = new Map<string, CacheEntry>();
 const TTL = 12 * 60 * 60_000; // 12 hours
 
 // Mean of consecutive calendar-year returns from year-END closes (last close of each
-// year). Matches ReturnsTableButton's Yearly "Average" row exactly.
+// year). Two guards keep the average honest:
+//  - the CURRENT (incomplete) year is excluded — three weeks of January must not be
+//    averaged as if it were a full year;
+//  - only CONSECUTIVE calendar years count — across a data gap the ratio spans two+
+//    years and would enter the mean as a single "yearly" observation.
 function avgYearly(points: { date: string; close: number }[]): number | null {
   const yearEnd = new Map<number, number>();
   for (const p of points) {
@@ -22,10 +26,12 @@ function avgYearly(points: { date: string; close: number }[]): number | null {
     if (!Number.isFinite(y)) continue;
     yearEnd.set(y, p.close); // ascending dates → last write per year = year-end
   }
-  const years = [...yearEnd.keys()].sort((a, b) => a - b);
+  const currentYear = new Date().getUTCFullYear();
+  const years = [...yearEnd.keys()].filter(y => y < currentYear).sort((a, b) => a - b);
   if (years.length < 2) return null;
   const rets: number[] = [];
   for (let i = 1; i < years.length; i++) {
+    if (years[i] !== years[i - 1] + 1) continue; // gap year → not a 1-year return
     const a = yearEnd.get(years[i - 1])!, b = yearEnd.get(years[i])!;
     if (a > 0) rets.push((b / a - 1) * 100);
   }

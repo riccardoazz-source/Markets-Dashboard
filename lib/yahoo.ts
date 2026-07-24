@@ -43,7 +43,7 @@ export interface YahooQuote {
   volume: number | null;
   /** Trailing annual dividend yield as a decimal (e.g. 0.012 = 1.2%). Null when no dividend. */
   dividendYield: number | null;
-  /** Latest 200-week SMA (≈1400 calendar days, cadence-scaled). Null when <~4y of data. */
+  /** Latest 200-week SMA (mean of the last 200 weekly closes). Null when <~200 weeks of data. */
   sma200w: number | null;
   /** Latest 200-day SMA (last 200 trading-day closes). Null when <200 closes available. */
   sma200d: number | null;
@@ -75,82 +75,80 @@ function computeSma200w(timestamps: number[], closes: (number | null)[]): number
   return computeSma200wLatest(dates, vals);
 }
 
-// YTD reference: first valid close on/after Jan 1 of the current year.
-// timestamps and closes are aligned 1:1 from the Yahoo chart response.
-function computeYtd(price: number, timestamps: number[], closes: (number | null)[]): number | null {
-  const yearStart = Math.floor(new Date(new Date().getUTCFullYear(), 0, 1).getTime() / 1000);
+// ── Window baselines ─────────────────────────────────────────────────────────
+// Every trailing/period return anchors on the LAST valid close AT-OR-BEFORE the
+// boundary (the standard convention — matches Yahoo/Google). The previous code
+// took the first close AFTER the boundary, which (a) showed YTD/MTD = 0.00% on
+// the first trading day and excluded the first day's move all period, and
+// (b) systematically shortened 1M/3M/6M/52W windows across weekends/holidays.
+// Falls back to the first valid close after the boundary (asset inception) so
+// young assets still get a figure measured from their first data point.
+function baselineAtOrBefore(
+  timestamps: number[], closes: (number | null)[], cutoffSec: number,
+): { close: number; ts: number } | null {
+  let best: { close: number; ts: number } | null = null;
   for (let i = 0; i < timestamps.length; i++) {
     const c = closes[i];
-    if (c != null && c > 0 && timestamps[i] >= yearStart) {
-      return ((price - c) / c) * 100;
-    }
+    if (c == null || c <= 0) continue;
+    if (timestamps[i] <= cutoffSec) best = { close: c, ts: timestamps[i] };
+    else if (best) break;
+    else return { close: c, ts: timestamps[i] }; // inception after the boundary
   }
-  return null;
+  return best;
 }
 
-// MTD reference: first valid close on/after the 1st of the current month.
+const pctVs = (price: number, base: { close: number } | null): number | null =>
+  base ? ((price - base.close) / base.close) * 100 : null;
+
+// YTD: last close of the PRIOR year → current price.
+function computeYtd(price: number, timestamps: number[], closes: (number | null)[]): number | null {
+  const now = new Date();
+  const yearStart = Math.floor(Date.UTC(now.getUTCFullYear(), 0, 1) / 1000);
+  return pctVs(price, baselineAtOrBefore(timestamps, closes, yearStart - 1));
+}
+
+// MTD: last close of the PRIOR month → current price.
 function computeMtd(price: number, timestamps: number[], closes: (number | null)[]): number | null {
   const now = new Date();
-  const monthStart = Math.floor(new Date(now.getFullYear(), now.getMonth(), 1).getTime() / 1000);
-  for (let i = 0; i < timestamps.length; i++) {
-    const c = closes[i];
-    if (c != null && c > 0 && timestamps[i] >= monthStart) {
-      return ((price - c) / c) * 100;
-    }
-  }
-  return null;
+  const monthStart = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000);
+  return pctVs(price, baselineAtOrBefore(timestamps, closes, monthStart - 1));
 }
 
-// 5Y reference: first valid close on/after 5 years ago.
-function computeFiveYear(price: number, timestamps: number[], closes: (number | null)[]): number | null {
-  const fiveYearsAgo = Math.floor((Date.now() - 5 * 365 * 86_400_000) / 1000);
-  for (let i = 0; i < timestamps.length; i++) {
-    const c = closes[i];
-    if (c != null && c > 0 && timestamps[i] >= fiveYearsAgo) {
-      return ((price - c) / c) * 100;
-    }
-  }
-  return null;
+// Calendar-months-ago cutoff (true month arithmetic, not 30.44-day approximations).
+function monthsAgoSec(months: number): number {
+  const d = new Date();
+  d.setUTCMonth(d.getUTCMonth() - months);
+  return Math.floor(d.getTime() / 1000);
 }
-// % change vs the first close on/after N months ago (trailing 1M/3M/6M return).
+
+// 5Y: close at-or-before 5 years ago (or inception) → current price.
+function computeFiveYear(price: number, timestamps: number[], closes: (number | null)[]): number | null {
+  return pctVs(price, baselineAtOrBefore(timestamps, closes, monthsAgoSec(60)));
+}
+
+// % change vs the close at-or-before N calendar months ago (trailing 1M/3M/6M).
 function computeMonthsAgo(price: number, timestamps: number[], closes: (number | null)[], months: number): number | null {
-  const cutoff = Math.floor((Date.now() - months * 30.44 * 86_400_000) / 1000);
-  for (let i = 0; i < timestamps.length; i++) {
-    const c = closes[i];
-    if (c != null && c > 0 && timestamps[i] >= cutoff) return ((price - c) / c) * 100;
-  }
-  return null;
+  return pctVs(price, baselineAtOrBefore(timestamps, closes, monthsAgoSec(months)));
 }
 
 // 5Y CAGR (annualized) + whether a full ≥5-year window of data exists.
-// Baseline = first valid close on/after 5 years ago. If the asset is younger
-// than 5y, that baseline is its inception, so the CAGR is annualized over the
-// actual (shorter) span and `full` is false → caller marks the figure with an
+// Baseline = close at-or-before 5 years ago. If the asset is younger than 5y,
+// the baseline is its inception, so the CAGR is annualized over the actual
+// (shorter) span and `full` is false → caller marks the figure with an
 // asterisk to signal "less than 5 years of data".
 function computeFiveYearCagr(price: number, timestamps: number[], closes: (number | null)[]): { cagr: number | null; full: boolean } {
-  const fiveYearsAgo = Math.floor((Date.now() - 5 * 365 * 86_400_000) / 1000);
-  for (let i = 0; i < timestamps.length; i++) {
-    const c = closes[i];
-    if (c != null && c > 0 && timestamps[i] >= fiveYearsAgo) {
-      const years = (Date.now() / 1000 - timestamps[i]) / (365.25 * 86_400);
-      if (years < 0.5 || price <= 0) return { cagr: null, full: false };
-      const cagr = (Math.pow(price / c, 1 / years) - 1) * 100;
-      return { cagr, full: years >= 4.9 };
-    }
-  }
-  return { cagr: null, full: false };
+  const base = baselineAtOrBefore(timestamps, closes, monthsAgoSec(60));
+  if (!base || price <= 0) return { cagr: null, full: false };
+  const years = (Date.now() / 1000 - base.ts) / (365.25 * 86_400);
+  if (years < 0.5) return { cagr: null, full: false };
+  const cagr = (Math.pow(price / base.close, 1 / years) - 1) * 100;
+  return { cagr, full: years >= 4.9 };
 }
 
-// 52-week reference: first valid close on/after 365 days ago.
+// 52-week: close at-or-before 365 days ago (or inception) → current price.
 function computeFiftyTwoWeek(price: number, timestamps: number[], closes: (number | null)[]): number | null {
   const oneYearAgo = Math.floor((Date.now() - 365 * 86_400_000) / 1000);
-  for (let i = 0; i < timestamps.length; i++) {
-    const c = closes[i];
-    if (c != null && c > 0 && timestamps[i] >= oneYearAgo) {
-      return ((price - c) / c) * 100;
-    }
-  }
-  return null;
+  return pctVs(price, baselineAtOrBefore(timestamps, closes, oneYearAgo));
 }
 
 // Compute trailing-12-month dividend yield from v8/chart events.

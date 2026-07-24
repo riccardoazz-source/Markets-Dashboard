@@ -67,7 +67,9 @@ function formatMacroValue(value: number, unit: MacroUnit): string {
 
 function formatMacroChange(change: number, unit: MacroUnit): string {
   const sign = change >= 0 ? '+' : '';
-  if (unit === '%') return `${sign}${change.toFixed(2)}${change === 0 ? '' : ' bps'}`;
+  // A change between two %-unit readings is percentage POINTS ("pp"). The old
+  // " bps" label was 100× off: 4.50%→4.75% is +0.25 pp = +25 bps, not "+0.25 bps".
+  if (unit === '%') return `${sign}${change.toFixed(2)}${change === 0 ? '' : ' pp'}`;
   if (unit === 'B$') return `${sign}$${change.toFixed(0)}B`;
   if (unit === 'K') {
     if (Math.abs(change) >= 1_000) return `${sign}${(change / 1_000).toFixed(0)}M`;
@@ -584,8 +586,19 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   color={colorForChange(data[selected].latest!.value - data[selected].prev!.value)}
                 />
               )}
+              {/* %-unit series (rates, CPI, unemployment): the change over the window
+                  is an ABSOLUTE pp difference — a relative % of a rate is misleading
+                  (0.25%→5.25% would read "+2000%") and flips sign on negative bases. */}
               {cagrData && (
-                <Stat label={`Change (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.return)} color={cagrData.return >= 0 ? 'text-up-text' : 'text-down-text'} />
+                selectedIndicator.unit === '%' ? (
+                  <Stat
+                    label={`Change (${customRange ? 'Custom' : timeframe})`}
+                    value={formatMacroChange(cagrData.endPrice - cagrData.startPrice, selectedIndicator.unit)}
+                    color={colorForChange(cagrData.endPrice - cagrData.startPrice)}
+                  />
+                ) : (
+                  <Stat label={`Change (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.return)} color={cagrData.return >= 0 ? 'text-up-text' : 'text-down-text'} />
+                )
               )}
             </div>
           )}

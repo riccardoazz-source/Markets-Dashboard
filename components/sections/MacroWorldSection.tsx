@@ -358,9 +358,18 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                   <Stat label="Change" value={changeStr(latest.close - prev.close, sel.unit)}
                     color={colorForPercent(sel.higherBetter ? latest.close - prev.close : prev.close - latest.close)} />
                 )}
+                {/* %-unit indicators (rates, inflation, debt-to-GDP…): show the pp
+                    difference — a relative % of a percentage is misleading and flips
+                    sign when the series starts negative. */}
                 {cagr && (
-                  <Stat label={`Change (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagr.return)}
-                    color={colorForPercent(sel.higherBetter ? cagr.return : -cagr.return)} />
+                  sel.unit === '%' ? (
+                    <Stat label={`Change (${customRange ? 'Custom' : timeframe})`}
+                      value={changeStr(cagr.endPrice - cagr.startPrice, sel.unit)}
+                      color={colorForPercent(sel.higherBetter ? cagr.endPrice - cagr.startPrice : cagr.startPrice - cagr.endPrice)} />
+                  ) : (
+                    <Stat label={`Change (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagr.return)}
+                      color={colorForPercent(sel.higherBetter ? cagr.return : -cagr.return)} />
+                  )
                 )}
               </div>
             )}

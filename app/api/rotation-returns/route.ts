@@ -47,9 +47,14 @@ const TTL = 5 * 60_000;
 
 function rolling(history: { date: string; close: number }[], daysAgo: number): number | null {
   if (history.length < 2) return null;
-  const current = history[history.length - 1].close;
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
+  const last = history[history.length - 1];
+  const current = last.close;
+  // Anchor the window to the LAST BAR's date, not to "now": on weekends/holidays
+  // "now − 30d" would give equities a ~28-day window while 24/7 crypto gets the
+  // full 30 — and those returns are ranked against each other cross-sectionally.
+  // The backtest anchors both ends to the as-of date; this matches it.
+  const d = new Date(`${last.date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - daysAgo);
   const targetStr = d.toISOString().slice(0, 10);
   let past: number | null = null;
   for (const pt of history) {

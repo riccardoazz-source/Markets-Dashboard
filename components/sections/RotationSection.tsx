@@ -534,15 +534,25 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     }));
   }, [groupFiltered, scoreMap, accelItems, selectedSymbols, pins]);
 
-  // Rotation phase (quadrant label) per symbol, derived from the same quadrant data.
+  // Rotation phase per symbol. Ranked over the FULL universe (all rows), NOT the
+  // group-filtered view: the label an asset carries must not change because the
+  // user clicked a class filter, and must match the badge the other sections show
+  // (useRotationPhases also ranks universe-wide).
   const phaseMap = useMemo(() => {
+    const scored = rows
+      .map(item => ({ item, s: scoreMap.get(item.symbol) }))
+      .filter((c): c is { item: RotationItem; s: ScoredItem<RotationItem> } =>
+        c.s != null && c.s.score > -1 && c.item.r3m != null);
+    const byScoreAsc = [...scored].sort((a, b) => a.s.score - b.s.score);
+    const n = byScoreAsc.length;
     const m = new Map<string, RotationPhase>();
-    for (const a of quadrantAssets) {
-      const p = classifyPhase(a.accScore, a.r3m);
-      if (p) m.set(a.symbol, p);
-    }
+    byScoreAsc.forEach((c, i) => {
+      const pctile = n > 1 ? (i / (n - 1)) * 100 : 50;
+      const p = classifyPhase(pctile, c.item.r3m as number);
+      if (p) m.set(c.item.symbol, p);
+    });
     return m;
-  }, [quadrantAssets]);
+  }, [rows, scoreMap]);
   const phaseOf = (symbol: string): RotationPhase | null => phaseMap.get(symbol) ?? null;
 
   // Final list after the phase filter (Recovering / Trending / Fading / Lagging).

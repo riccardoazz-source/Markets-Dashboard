@@ -301,7 +301,8 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                     { k: '6M', v: coin.sixMonthChangePercent },
                     { k: 'MTD', v: coin.mtdChangePercent },
                     { k: 'YTD', v: coin.ytdChangePercent },
-                    { k: '5Y', v: coin.fiveYearChangePercent },
+                    // '5Y*' when history < 5y — the figure covers a shorter span.
+                    { k: coin.fiveYearFull ? '5Y' : '5Y*', v: coin.fiveYearChangePercent },
                     { k: 'CAGR', v: coin.fiveYearCagrPercent, cagr: true },
                     { k: 'Avg Yr', v: avgYearlyMap[coinYahooSym(coin)] ?? null },
                   ] as { k: string; v: number | null | undefined; cagr?: boolean }[])

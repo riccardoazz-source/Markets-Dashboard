@@ -478,16 +478,18 @@ export function PriceChart({
     const rv = valueAtOrBefore(data, range.right, 'close');
     if (lv != null && rv != null && lv !== 0) {
       const years = Math.max(0, (new Date(range.right).getTime() - new Date(range.left).getTime()) / (365.25 * 86_400_000));
-      const cagr = years > 0.02 && lv > 0 && rv > 0 ? (Math.pow(rv / lv, 1 / years) - 1) * 100 : null;
+      // Annualize ONLY for windows ≥ 1 year (same rule as calculateCAGR). Raising a
+      // 10-day move to the power 36.5 produced absurd "+500% CAGR" readings.
+      const cagr = years >= 1 && lv > 0 && rv > 0 ? (Math.pow(rv / lv, 1 / years) - 1) * 100 : null;
       // IRR ≈ CAGR of the dividend-reinvested total-return path over the same window;
-      // only shown when it differs from the price CAGR (i.e. dividends were paid in-period).
+      // annualized, so likewise only meaningful for ≥ 1-year windows.
       let irr: number | null = null;
-      if (trByDate && years > 0.02) {
+      if (trByDate && years >= 1) {
         const tl = valueAtOrAfter(data.map(d => ({ date: d.date, close: trByDate.get(d.date) ?? NaN })).filter(d => isFinite(d.close)), range.left, 'close');
         const tr = valueAtOrBefore(data.map(d => ({ date: d.date, close: trByDate.get(d.date) ?? NaN })).filter(d => isFinite(d.close)), range.right, 'close');
         if (tl != null && tr != null && tl > 0 && tr > 0) {
           const trCagr = (Math.pow(tr / tl, 1 / years) - 1) * 100;
-          if (cagr == null || Math.abs(trCagr - cagr) > 0.05) irr = trCagr;
+          if (cagr != null && Math.abs(trCagr - cagr) > 0.05) irr = trCagr;
         }
       }
       selStats = { leftVal: lv, rightVal: rv, pct: (rv - lv) / Math.abs(lv) * 100, cagr, irr };

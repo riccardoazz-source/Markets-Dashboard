@@ -189,32 +189,30 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
     const closes = r?.indicators?.quote?.[0]?.close ?? [];
     if (!ts.length || !closes.length) return empty;
 
-    const findFirstValid = (fromTs: number): number | null => {
+    // Anchor = last valid close AT-OR-BEFORE the boundary (matches the Yahoo quote
+    // helpers and the CoinGecko Jan-1 snapshot, which is effectively the Dec-31
+    // close). Falls back to the first valid close after (coin inception) so young
+    // coins still get a figure. The old first-close-AFTER scan missed the whole
+    // first day of the window (YTD/MTD read 0.00% on day one).
+    const findAnchor = (cutTs: number): { c: number; t: number } | null => {
+      let best: { c: number; t: number } | null = null;
       for (let i = 0; i < ts.length; i++) {
-        if (ts[i] < fromTs) continue;
         const c = closes[i];
-        if (typeof c === 'number' && isFinite(c) && c > 0) return c;
+        if (typeof c !== 'number' || !isFinite(c) || c <= 0) continue;
+        if (ts[i] <= cutTs) best = { c, t: ts[i] };
+        else if (best) break;
+        else return { c, t: ts[i] };
       }
-      return null;
+      return best;
     };
-    // Same scan as findFirstValid, but also returns the bar's timestamp so the
-    // caller can annualize the 5Y CAGR over the actual data span (coins younger
-    // than 5y get a shorter span and an asterisk).
-    const findFirstValidTs = (fromTs: number): number | null => {
-      for (let i = 0; i < ts.length; i++) {
-        if (ts[i] < fromTs) continue;
-        const c = closes[i];
-        if (typeof c === 'number' && isFinite(c) && c > 0) return ts[i];
-      }
-      return null;
-    };
+    const findFirstValid = (cutTs: number): number | null => findAnchor(cutTs)?.c ?? null;
 
     const now = new Date();
     const year = now.getUTCFullYear();
     const jan1 = Math.floor(Date.UTC(year, 0, 1) / 1000);
     const monthStart = Math.floor(Date.UTC(year, now.getUTCMonth(), 1) / 1000);
     const fiveYearsAgo = Math.floor((Date.now() - 5 * 365 * 86_400_000) / 1000);
-    const fiveYTs = findFirstValidTs(fiveYearsAgo);
+    const fiveYTs = findAnchor(fiveYearsAgo)?.t ?? null;
 
     // 200-week SMA — mean of the last 200 WEEKLY closes (TradingView methodology).
     let sma200w: number | null = null;
@@ -242,12 +240,15 @@ async function fetchYahooCryptoAnchors(coinId: string): Promise<YahooAnchors> {
       }
     }
 
-    const monthsAgo = (m: number) => Math.floor((Date.now() - m * 30.44 * 86_400_000) / 1000);
+    // Calendar-month cutoffs (true month arithmetic, not 30.44-day approximations).
+    const monthsAgo = (m: number) => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - m); return Math.floor(d.getTime() / 1000); };
     const anchors: YahooAnchors = {
       fiveY: findFirstValid(fiveYearsAgo),
       fiveYTs,
-      ytd: findFirstValid(jan1),
-      mtd: findFirstValid(monthStart),
+      // jan1/monthStart - 1: the Yahoo bar timestamped AT the boundary is the new
+      // period's first bar — the YTD/MTD baseline is the bar strictly before it.
+      ytd: findFirstValid(jan1 - 1),
+      mtd: findFirstValid(monthStart - 1),
       oneM: findFirstValid(monthsAgo(1)),
       threeM: findFirstValid(monthsAgo(3)),
       sixM: findFirstValid(monthsAgo(6)),
@@ -330,14 +331,15 @@ export async function GET(req: NextRequest) {
             ? ((currentPrice - jan1Price) / jan1Price) * 100
             : null;
 
-        // MTD: CoinGecko anchor → Yahoo anchor → 30d rolling proxy from markets endpoint.
+        // MTD: CoinGecko anchor → Yahoo anchor. NO 30d-rolling fallback: a rolling
+        // 30-day return is a different metric and must not appear under "MTD"
+        // (early in a month they diverge wildly). Better a blank than a wrong label.
         const monthStartPrice = mtdAnchors.get(id) ?? ya.mtd;
-        const mtdFromAnchor =
+        const mtdChangePercent =
           monthStartPrice != null && currentPrice > 0
             ? ((currentPrice - monthStartPrice) / monthStartPrice) * 100
             : null;
         const mtd30d = coin.price_change_percentage_30d_in_currency as number | null | undefined;
-        const mtdChangePercent = mtdFromAnchor ?? (typeof mtd30d === 'number' && isFinite(mtd30d) ? mtd30d : null);
 
         // Trailing 1M / 3M / 6M from the Yahoo 5y anchors (1M falls back to CG's 30d).
         const pctFrom = (anchor: number | null | undefined) => anchor != null && currentPrice > 0 ? ((currentPrice - anchor) / anchor) * 100 : null;

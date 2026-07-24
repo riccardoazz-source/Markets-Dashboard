@@ -20,6 +20,7 @@ function getStartDate(timeframe: string): string {
   switch (timeframe) {
     case '1D':  return format(subDays(now, 4), 'yyyy-MM-dd');
     case '1W':  return format(subWeeks(now, 1), 'yyyy-MM-dd');
+    case 'MTD': return format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
     case '1M':  return format(subMonths(now, 1), 'yyyy-MM-dd');
     case '3M':  return format(subMonths(now, 3), 'yyyy-MM-dd');
     case '6M':  return format(subMonths(now, 6), 'yyyy-MM-dd');
@@ -57,26 +58,33 @@ export async function GET(req: NextRequest) {
 
     try {
       const targets = ALL_CURRENCIES.filter(c => c !== 'USD').join(',');
-      // One time-series call (start of year → today) covers the latest rate,
-      // the previous trading day (daily change) and the YTD baseline.
+      // One time-series call (mid-December of LAST year → today) covers the latest
+      // rate, the previous trading day (daily change) and — crucially — the
+      // year-end/month-end baselines: YTD and MTD must anchor on the LAST business
+      // day of the prior year/month, not the first day of the new one (which
+      // misses the first day's move and shows 0.00% on day one).
       const now = new Date();
-      const ytdStart = `${now.getFullYear()}-01-01`;
+      const fetchStart = `${now.getFullYear() - 1}-12-15`;
       const today = format(now, 'yyyy-MM-dd');
       const data = await fetchFrankfurter(
-        `https://api.frankfurter.app/${ytdStart}..${today}?from=USD&to=${targets}`,
+        `https://api.frankfurter.app/${fetchStart}..${today}?from=USD&to=${targets}`,
       );
       const series = data.rates as Record<string, Record<string, number>>;
       const dates = Object.keys(series).sort();
       if (dates.length === 0) throw new Error('empty timeseries');
 
       const latestDay = series[dates[dates.length - 1]];
-      const prevDay   = series[dates[dates.length - 2]] ?? latestDay;
-      const ytdDay    = series[dates[0]];
+      const prevDay   = dates.length >= 2 ? series[dates[dates.length - 2]] : null;
 
-      const now2 = new Date();
-      const monthStartStr = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}-01`;
-      const mtdDate = dates.find(d => d >= monthStartStr);
-      const mtdDay = mtdDate ? series[mtdDate] : null;
+      const yearStartStr = `${now.getFullYear()}-01-01`;
+      const monthStartStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      const lastBefore = (boundary: string): Record<string, number> | null => {
+        let best: string | null = null;
+        for (const d of dates) { if (d < boundary) best = d; else break; }
+        return best ? series[best] : null;
+      };
+      const ytdDay = lastBefore(yearStartStr);
+      const mtdDay = lastBefore(monthStartStr);
 
       // usdRate(X) = units of X per 1 USD. Cross rate A→B = usdRate(B)/usdRate(A).
       const usdRate = (day: Record<string, number>, c: string): number | null =>
@@ -93,8 +101,9 @@ export async function GET(req: NextRequest) {
           const rate = cross(latestDay, f, t);
           return {
             from: f, to: t, rate,
-            change1d: pct(rate, cross(prevDay, f, t)),
-            ytd:      pct(rate, cross(ytdDay, f, t)),
+            // prevDay null (single-observation window) → null, not a fake 0.00%.
+            change1d: prevDay ? pct(rate, cross(prevDay, f, t)) : null,
+            ytd:      ytdDay ? pct(rate, cross(ytdDay, f, t)) : null,
             mtd:      mtdDay ? pct(rate, cross(mtdDay, f, t)) : null,
           };
         }),
@@ -133,11 +142,15 @@ export async function GET(req: NextRequest) {
         .filter(p => p.rate > 0)
         .sort((a, b) => a.date.localeCompare(b.date));
 
+      // Period average over the FULL fetched window, computed BEFORE any 1D trim —
+      // a mean of the 2 surviving points would mechanically read as half the daily
+      // change, masquerading as an independent statistic.
+      const avg = points.reduce((s, p) => s + p.rate, 0) / (points.length || 1);
+
       // 1D is fetched a few days wide so a line can be drawn, but should show only
       // the most recent day (previous close → latest): keep the last 2 points.
       if (timeframe === '1D' && !isCustom && points.length > 2) points = points.slice(-2);
 
-      const avg = points.reduce((s, p) => s + p.rate, 0) / (points.length || 1);
       const result = { points, average: avg };
 
       setCached(key, result);

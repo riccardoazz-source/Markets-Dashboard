@@ -68,10 +68,27 @@ function periodLabel(gran: Gran, row: string, col: number): string {
   }
 }
 
+// Sequential index of a period on the calendar — used to require ADJACENT periods
+// when pairing period-end closes. Daily is exempt (weekend gaps are normal there;
+// day-over-day on trading days is the standard convention).
+function periodIndex(d: Date, gran: Gran): number | null {
+  const y = d.getUTCFullYear();
+  switch (gran) {
+    case 'Yearly':    return y;
+    case 'Quarterly': return y * 4 + Math.floor(d.getUTCMonth() / 3);
+    case 'Monthly':   return y * 12 + d.getUTCMonth();
+    case 'Weekly':    return y * 53 + Math.min(52, Math.floor((dayOfYear(d) - 1) / 7));
+    case 'Daily':     return null;
+  }
+}
+
 // Period returns from period-END closes: last close of each period, in chronological
 // order, then consecutive % changes. A month's return = monthEnd/prevMonthEnd − 1
 // (so January is measured against the prior December — cross-year, exactly like the
 // standard seasonality table). The first period in the whole series has no base → blank.
+// Guards: (a) only ADJACENT calendar periods are paired — across a data gap the ratio
+// spans multiple periods and would be filed as a single period's return; (b) the
+// CURRENT (incomplete) period is shown but excluded from the Average/Median rows.
 function buildMatrix(points: HistoricalPoint[], gran: Gran): Matrix {
   const pts = points
     .map(p => ({ t: new Date(p.date + 'T00:00:00Z'), c: p.close }))
@@ -79,18 +96,22 @@ function buildMatrix(points: HistoricalPoint[], gran: Gran): Matrix {
     .sort((a, b) => a.t.getTime() - b.t.getTime());
 
   // Last close per period, preserving chronological order of first appearance.
-  const periods = new Map<string, { row: string; col: number; c: number; order: number }>();
+  const periods = new Map<string, { row: string; col: number; c: number; order: number; idx: number | null }>();
   let order = 0;
   for (const p of pts) {
     const b = bucket(p.t, gran);
     const e = periods.get(b.id);
     if (e) e.c = p.c;                                   // keep updating → period-end close
-    else periods.set(b.id, { row: b.row, col: b.col, c: p.c, order: order++ });
+    else periods.set(b.id, { row: b.row, col: b.col, c: p.c, order: order++, idx: periodIndex(p.t, gran) });
   }
   const seq = [...periods.values()].sort((a, b) => a.order - b.order);
+  const nowB = bucket(new Date(), gran);                // the current, incomplete period
 
   const grid = new Map<string, Map<number, number>>();
   for (let i = 1; i < seq.length; i++) {
+    // Adjacency guard: skip when the two period-end closes are not consecutive
+    // calendar periods (data gap → multi-period return, not a period return).
+    if (seq[i].idx != null && seq[i - 1].idx != null && seq[i].idx !== (seq[i - 1].idx as number) + 1) continue;
     const ret = (seq[i].c / seq[i - 1].c - 1) * 100;
     if (!isFinite(ret)) continue;
     if (!grid.has(seq[i].row)) grid.set(seq[i].row, new Map());
@@ -103,7 +124,11 @@ function buildMatrix(points: HistoricalPoint[], gran: Gran): Matrix {
   const median: (number | null)[] = [];
   for (let c = 0; c < cols.length; c++) {
     const vals: number[] = [];
-    for (const r of rows) { const v = grid.get(r)?.get(c); if (v != null) vals.push(v); }
+    for (const r of rows) {
+      if (r === nowB.row && c === nowB.col) continue;   // partial current period → not in stats
+      const v = grid.get(r)?.get(c);
+      if (v != null) vals.push(v);
+    }
     if (vals.length === 0) { avg.push(null); median.push(null); continue; }
     avg.push(vals.reduce((s, v) => s + v, 0) / vals.length);
     const sorted = [...vals].sort((a, b) => a - b);

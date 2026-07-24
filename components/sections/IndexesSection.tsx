@@ -295,7 +295,8 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                         { k: '6M', v: q.sixMonthChangePercent },
                         { k: 'MTD', v: q.mtdChangePercent },
                         { k: 'YTD', v: ytd },
-                        { k: '5Y', v: q.fiveYearChangePercent },
+                        // '5Y*' when history < 5y — the figure covers a shorter span.
+                        { k: q.fiveYearFull ? '5Y' : '5Y*', v: q.fiveYearChangePercent },
                         { k: 'CAGR', v: q.fiveYearCagrPercent, cagr: true },
                         { k: 'Avg Yr', v: avgYearlyMap[q.symbol] ?? null },
                       ] as { k: string; v: number | null | undefined; cagr?: boolean }[])
