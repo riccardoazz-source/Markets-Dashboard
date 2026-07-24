@@ -753,6 +753,26 @@ export async function fetchYahooQuotes(symbols: string[]): Promise<YahooQuote[]>
   const noAuth = await fetchQuotesNoAuth(symbols);
   if (noAuth.length > 0) {
     console.log(`[yahoo] v8-noauth OK: ${noAuth.length}/${symbols.length}`);
+    // Futures continuous contracts (…=F) get a WRONG previous close from the v8
+    // chart around contract rolls, so their daily % is way off (e.g. Corn showed
+    // +5% vs the real +0.4%). Yahoo's authenticated v7 quote carries the official
+    // previous close (like the Yahoo site / Google), so for those symbols override
+    // just the day-change fields, recomputed from that authoritative prev close.
+    const futures = symbols.filter(s => s.endsWith('=F'));
+    if (futures.length) {
+      try {
+        const v7 = await fetchQuotesV7(futures);
+        const bySym = new Map(v7.filter(q => q.previousClose > 0 && q.price > 0).map(q => [q.symbol, q]));
+        for (const q of noAuth) {
+          const o = bySym.get(q.symbol);
+          if (!o) continue;
+          q.previousClose = o.previousClose;
+          q.price = o.price;
+          q.change = o.price - o.previousClose;
+          q.changePercent = ((o.price - o.previousClose) / o.previousClose) * 100;
+        }
+      } catch { /* keep the v8 values */ }
+    }
     return noAuth;
   }
 

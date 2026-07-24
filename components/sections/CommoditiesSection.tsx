@@ -322,7 +322,15 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
             {selectedQuote.ytdChangePercent != null && (
               <Stat label="YTD Return" value={formatPercent(selectedQuote.ytdChangePercent)} color={colorForPercent(selectedQuote.ytdChangePercent)} />
             )}
-            {cagrData && (
+            {/* For 1D use the authoritative quote day change (futures' daily price
+                series from Yahoo has contract-roll artifacts, so the series-based
+                return would disagree with the corrected Day Change). */}
+            {timeframe === '1D' && !customRange ? (
+              <>
+                <Stat label="Return (1D)" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
+                <Stat label="CAGR (1D)" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
+              </>
+            ) : cagrData && (
               <>
                 <Stat label={`Return (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.return)} color={colorForPercent(cagrData.return)} />
                 <Stat label={`CAGR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrData.cagr)} color={colorForPercent(cagrData.cagr)} />
