@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData, CryptoData } from '@/lib/types';
-import { formatPrice, formatPercent, formatCagr, formatMarketCap, colorForPercent, calculateCAGR, dataAvailabilityMessage } from '@/lib/utils';
+import { formatPrice, formatPercent, formatCagr, formatMarketCap, colorForPercent, calculateCAGR, dataAvailabilityMessage, getTimeframeStart } from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
@@ -159,6 +159,11 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
         } else {
           // Shorter ranges: prefer CoinGecko's granularity, fall back to Yahoo.
           data = cgData.length ? cgData : yData;
+          // CoinGecko fetches by DAYS (rolling window), so calendar timeframes like
+          // MTD/YTD would show ~35/365 rolling days instead of "since month/year
+          // start" — clip to the timeframe's true start so the chart matches its label.
+          const tfStart = getTimeframeStart(tf);
+          data = data.filter(p => p.date >= tfStart);
         }
       }
 
