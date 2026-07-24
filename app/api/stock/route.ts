@@ -184,11 +184,17 @@ export async function GET(req: NextRequest) {
 
   try {
     const data = await fetchYahooData(symbol, from, to, interval, true);
+    // "1D" fetches a few days wide so a line can be drawn even after weekends,
+    // but it should SHOW only the most recent day's move (previous close → latest)
+    // — otherwise the chart spans several days and misleads. Keep the last 2 daily
+    // bars for 1D. (Live intraday would need an intraday data feed.)
+    const trimTo1D = (pts: typeof data.points) =>
+      timeframe === '1D' && !isCustom && pts.length > 2 ? pts.slice(-2) : pts;
     const payload = {
       symbol,
       meta: data.meta,
-      prices: data.points,
-      adjPrices: data.adjPoints ?? [],
+      prices: trimTo1D(data.points),
+      adjPrices: trimTo1D(data.adjPoints ?? []),
       dividends: data.dividends ?? [],
     };
     if (data.points.length > 0) {
