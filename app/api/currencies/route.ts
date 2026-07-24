@@ -128,10 +128,14 @@ export async function GET(req: NextRequest) {
       const data = await fetchFrankfurter(url);
 
       const rates = data.rates as Record<string, Record<string, number>>;
-      const points = Object.entries(rates)
+      let points = Object.entries(rates)
         .map(([date, r]) => ({ date, rate: r[to] ?? 0 }))
         .filter(p => p.rate > 0)
         .sort((a, b) => a.date.localeCompare(b.date));
+
+      // 1D is fetched a few days wide so a line can be drawn, but should show only
+      // the most recent day (previous close → latest): keep the last 2 points.
+      if (timeframe === '1D' && !isCustom && points.length > 2) points = points.slice(-2);
 
       const avg = points.reduce((s, p) => s + p.rate, 0) / (points.length || 1);
       const result = { points, average: avg };

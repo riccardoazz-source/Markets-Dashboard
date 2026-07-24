@@ -148,7 +148,12 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           new Promise<HistoricalPoint[]>(res => setTimeout(() => res([]), 1500)),
         ]);
 
-        if (tf === 'MAX') {
+        if (tf === '1D') {
+          // 1D should show only the last day. Yahoo's daily series is trimmed to
+          // the last 2 bars server-side (prev close → latest); CoinGecko at days=3
+          // returns hourly points spanning ~3 days, so prefer Yahoo here.
+          data = yData.length >= 2 ? yData : cgData.slice(-2);
+        } else if (tf === 'MAX') {
           // MAX: prefer whichever has the longer usable history.
           data = cgData.length >= yData.length ? cgData : yData;
         } else {

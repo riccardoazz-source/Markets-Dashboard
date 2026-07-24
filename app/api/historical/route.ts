@@ -62,6 +62,12 @@ export async function GET(req: NextRequest) {
   // Always daily — never reduce or thin data for any timeframe or custom range.
   const interval: '1d' | '1wk' | '1mo' = '1d';
 
+  // "1D" is fetched a few days wide so a line can always be drawn (weekends), but
+  // it should SHOW only the most recent day (previous close → latest). Keep the
+  // last 2 daily bars for 1D so the chart doesn't span several days.
+  const trim1D = (d: { date: string; close: number }[]) =>
+    timeframe === '1D' && !isCustom && d.length > 2 ? d.slice(-2) : d;
+
   try {
     let data = await fetchYahooChart(symbol, from, to, interval);
 
@@ -70,13 +76,14 @@ export async function GET(req: NextRequest) {
       data = await fetchStooqDaily(symbol, from, to, toStooqInterval(interval));
     }
 
+    data = trim1D(data);
     cache.set(key, { data, ts: Date.now() });
     return NextResponse.json(data);
   } catch (err) {
     console.error('historical error', symbol, err);
     // Last-resort Stooq attempt even on exception
     try {
-      const data = await fetchStooqDaily(symbol, from, to, toStooqInterval(interval));
+      const data = trim1D(await fetchStooqDaily(symbol, from, to, toStooqInterval(interval)));
       cache.set(key, { data, ts: Date.now() });
       return NextResponse.json(data);
     } catch {
