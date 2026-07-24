@@ -78,7 +78,10 @@ export function calculateCAGR(
   // was on 1Y) and returned the trailing-window return instead of the selected period's.
   if (!data || data.length < 2) return null;
 
-  const start = data[0];
+  // "1D" means the single most recent day's change (previous close → latest),
+  // matching Yahoo/Google. The 1D window is fetched a few days wide so the chart
+  // has a line, so measuring first→last would overstate it as a multi-day return.
+  const start = timeframe === '1D' ? data[data.length - 2] : data[0];
   const end = data[data.length - 1];
   const startPrice = start.close;
   const endPrice = end.close;
