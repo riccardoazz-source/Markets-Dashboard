@@ -617,7 +617,8 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   return (
     <div className="space-y-4">
       {/* Daily sentiment */}
-      <SentimentPanel buildSnapshot={buildSnapshot} getQuadrant={buildQuadrant} ready={!rollingLoading} onBeforeRun={resetTableForSentiment} />
+      <SentimentPanel buildSnapshot={buildSnapshot} getQuadrant={buildQuadrant} ready={!rollingLoading} onBeforeRun={resetTableForSentiment}
+        onAssetClick={a => setQuickView({ symbol: a.symbol, name: a.name, group: a.group })} />
 
       {/* User's own rotation strategy — listed and evaluated live */}
       <StrategyPanel onCompare={onCompare} />

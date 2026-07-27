@@ -164,7 +164,12 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
 
 // Re-draws a saved Rotation Quadrant from stored points. Collapsed by default so
 // the history stays scannable; expand to see that day's full rotation picture.
-function SavedQuadrant({ points, modelId }: { points: QuadrantPoint[]; modelId?: number }) {
+function SavedQuadrant({ points, modelId, onAssetClick }: {
+  points: QuadrantPoint[];
+  modelId?: number;
+  /** Opening an asset works here exactly as on the live quadrant. */
+  onAssetClick?: (asset: QuadrantAsset) => void;
+}) {
   const [open, setOpen] = useState(false);
   const assets = useMemo<QuadrantAsset[]>(
     () => points.map(p => ({ ...p, isSelected: p.isPinned ?? false })),
@@ -198,14 +203,21 @@ function SavedQuadrant({ points, modelId }: { points: QuadrantPoint[]; modelId?:
       </button>
       {open && (
         <div className="px-1.5 pb-2">
-          <QuadrantChart assets={assets} />
+          <QuadrantChart assets={assets} onAssetClick={onAssetClick} />
         </div>
       )}
     </div>
   );
 }
 
-export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun }: { buildSnapshot: () => SentimentSnapshot; getQuadrant?: () => QuadrantPoint[]; ready: boolean; onBeforeRun?: () => void }) {
+export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun, onAssetClick }: {
+  buildSnapshot: () => SentimentSnapshot;
+  getQuadrant?: () => QuadrantPoint[];
+  ready: boolean;
+  onBeforeRun?: () => void;
+  /** Click an asset on a SAVED quadrant to open it, same as on the live one. */
+  onAssetClick?: (asset: QuadrantAsset) => void;
+}) {
   const { data: gistData, update } = useGistData();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -325,7 +337,7 @@ export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun 
       {d && showLatest && (
         <div className={clsx(loading && 'opacity-50')}>
           <SentimentBody d={d} />
-          {latest?.quadrant && latest.quadrant.length > 0 && <SavedQuadrant points={latest.quadrant} modelId={latest.modelId} />}
+          {latest?.quadrant && latest.quadrant.length > 0 && <SavedQuadrant points={latest.quadrant} modelId={latest.modelId} onAssetClick={onAssetClick} />}
           <p className="mt-3 text-[10px] text-gray-600 italic text-right">AI + web search — not financial advice.</p>
         </div>
       )}
@@ -365,7 +377,7 @@ export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun 
                     {isOpen && (
                       <div className="px-2.5 pb-2.5 pt-1 border-t border-border">
                         <SentimentBody d={rd} compact />
-                        {rec.quadrant && rec.quadrant.length > 0 && <SavedQuadrant points={rec.quadrant} modelId={rec.modelId} />}
+                        {rec.quadrant && rec.quadrant.length > 0 && <SavedQuadrant points={rec.quadrant} modelId={rec.modelId} onAssetClick={onAssetClick} />}
                       </div>
                     )}
                   </div>
