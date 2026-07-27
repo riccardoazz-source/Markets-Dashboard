@@ -554,11 +554,19 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           ? withCarryIn(raw, commonStart, tfEnd)
           : raw.filter(d => d.date >= commonStart);
         if (tfEnd && !laggingMacro) displayFiltered = displayFiltered.filter(d => d.date <= tfEnd);
-        let trFiltered = a.totalReturnData?.filter(d => d.date >= commonStart);
-        if (tfEnd && trFiltered) trFiltered = trFiltered.filter(d => d.date <= tfEnd);
         const divsFiltered = (a.dividends ?? []).filter(d =>
           d.date >= commonStart && (!tfEnd || d.date <= tfEnd)
         );
+        // Total-return line ONLY when a dividend actually falls inside the displayed
+        // window. With no payment in the window the reinvestment factor is constant,
+        // so the TR series is the price series — drawing it would put an identical
+        // line under the price line while the legend advertised a "(Total Return)"
+        // series that is nowhere to be seen. Now the line, the legend entry and the
+        // IRR appear together, or not at all.
+        let trFiltered = divsFiltered.length > 0
+          ? a.totalReturnData?.filter(d => d.date >= commonStart)
+          : undefined;
+        if (tfEnd && trFiltered) trFiltered = trFiltered.filter(d => d.date <= tfEnd);
         const isRec = RECESSION_SET.has(a.symbol);
         // Macro series: only extend to today (so the line reaches "now" visually).
         // Removed dedupStepSeries: it dropped any data point whose value matched
