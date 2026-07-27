@@ -587,6 +587,10 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         // assets only). computeAssetIRR handles an empty in-window dividend list = the price
         // IRR, so a dividend payer with no distribution inside the window shows its price return
         // rather than falling back to a stale full-history value.
+        // Dividend-inclusive figure over the ALIGNED window. Never fall back to the
+        // full-fetch-window IRR: when the chart is aligned to a younger asset's start
+        // (commonStart) that value covers a different period, so the card showed e.g.
+        // "CAGR +3.5%" (5 months) next to "IRR +10.8%" (12 months) — two windows, one row.
         const irrTrim = a.totalReturnData
           ? computeAssetIRR(rawFiltered, divsFiltered)
           : null;
@@ -600,7 +604,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           cagr: cagrPrice?.cagr,
           totalReturn: cagrPrice?.return,
           cagrWithDiv: cagrTR?.cagr,
-          irr: irrTrim != null ? irrTrim * 100 : a.irr,
+          irr: irrTrim != null ? irrTrim * 100 : undefined,
         };
       });
     } catch (e) {
@@ -1044,9 +1048,21 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                         <p className={clsx('text-sm font-semibold', colorForPercent(a.cagr))}>{formatPercent(a.cagr)}</p>
                       </div>
                     )}
+                    {/* Dividend-inclusive return over the SAME window as Return/CAGR
+                        (and the same series as the dashed total-return line), so the
+                        three numbers are always comparable. Like CAGR, it is annualized
+                        only for windows ≥ 1 year. */}
+                    {a.totalReturnData && a.cagrWithDiv != null && (
+                      <div className="mt-1">
+                        <p className="text-[10px] text-gray-500">CAGR w/ div.</p>
+                        <p className={clsx('text-sm font-semibold', colorForPercent(a.cagrWithDiv))}>{formatPercent(a.cagrWithDiv)}</p>
+                      </div>
+                    )}
+                    {/* Cash-flow IRR (dividends taken as cash, not reinvested) — only
+                        meaningful, and only computed, over windows of at least a year. */}
                     {a.totalReturnData && a.irr != null && (
                       <div className="mt-1">
-                        <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
+                        <p className="text-[10px] text-gray-500">IRR (cash flow)</p>
                         <p className={clsx('text-sm font-semibold', colorForPercent(a.irr))}>{formatPercent(a.irr)}</p>
                       </div>
                     )}
