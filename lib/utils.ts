@@ -369,13 +369,13 @@ export function computeAssetIRR(
   const start = prices[0];
   const end = prices[prices.length - 1];
   if (!start.close || !end.close) return null;
-  // IRR is an ANNUALIZED rate: over a sub-year window annualization explodes a
-  // small move into a huge misleading % (a +2% month reads as "+28% IRR").
-  // Only report it when the window is at least ~1 year.
-  // 0.95 ≈ 347 days: comfortably above any 6M window (0.50) yet tolerant of a 1Y
-  // window whose first bar lands days late after a long market holiday.
+  // IRR is an ANNUALIZED rate, so it only means something over a window with some
+  // length to it: across a few days or weeks, annualising turns a small move into a
+  // wild number (a +2% week would read as several hundred percent). A 3-month floor
+  // keeps those out while leaving every normal view intact — including a
+  // start-aligned window of only a few months.
   const spanYears = (new Date(end.date).getTime() - new Date(start.date).getTime()) / (365.25 * 86_400_000);
-  if (spanYears < 0.95) return null;
+  if (spanYears < 0.25) return null;
   const flows: { date: string; amount: number }[] = [{ date: start.date, amount: -start.close }];
   for (const d of dividends) {
     if (d.date > start.date && d.date <= end.date && d.amount > 0) {

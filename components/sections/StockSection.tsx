@@ -1040,7 +1040,6 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const totalReturn = dividends.length > 0 ? buildTotalReturnSeries(prices, dividends) : prices;
   const cagrPrice = calculateCAGR(prices, timeframe);
   // IRR = annualized total-return CAGR (CAGR of the total-return series)
-  const cagrTR = calculateCAGR(totalReturn, timeframe);
   // Newton-Raphson IRR (only shown when dividends exist and period > 1 Y)
   const nrIRR = dividends.length > 0 ? computeAssetIRR(prices, dividends) : null;
   const currency = data?.meta?.currency ?? 'USD';
@@ -1389,13 +1388,10 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               {cagrPrice && (
                 <Stat label={`CAGR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrPrice.cagr)} color={colorForPercent(cagrPrice.cagr)} />
               )}
-              {/* Dividend-REINVESTED CAGR — a different metric from the cash-flow IRR
-                  below, so it must not share the "IRR" label. */}
-              {cagrTR && dividends.length > 0 && (
-                <Stat label={`CAGR w/ div (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrTR.cagr)} color={colorForPercent(cagrTR.cagr)} />
-              )}
+              {/* CAGR above is the PRICE growth rate; the IRR below adds the actual
+                  dividend cash flows. Shown only when the asset paid one in the window. */}
               {nrIRR != null && (
-                <Stat label="IRR (cash flow)" value={formatPercent(nrIRR * 100)} color={colorForPercent(nrIRR * 100)} />
+                <Stat label={`IRR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(nrIRR * 100)} color={colorForPercent(nrIRR * 100)} />
               )}
               {peTtm != null && peTtm > 0 && peTtm <= 1000 ? (
                 <Stat label="P/E (TTM)" value={`${peTtm.toFixed(1)}x`} color="text-sky-400" />
