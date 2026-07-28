@@ -31,6 +31,8 @@ interface SentimentData {
   outlook_note?: string;
   rotation_note?: string;
   risk_note?: string;
+  /** Upcoming catalysts: "asset — event (timing): impact", pipe-separated. */
+  catalysts?: string;
   confidence?: string;
   // Per-asset-class notes
   indexes_note?: string;
@@ -144,6 +146,19 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
           {classNotes.map(c => (
             <p key={c.key} className="text-xs text-gray-300 leading-relaxed">
               <span className="text-gray-400 font-medium">{c.label}: </span>{d[c.key]}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* Upcoming catalysts — events that have NOT happened yet, one per row so a
+          scheduled vote or meeting is scannable at a glance. */}
+      {d.catalysts && d.catalysts.trim().toLowerCase() !== 'n/a' && (
+        <div className="rounded-lg border border-violet-500/30 bg-violet-500/[0.06] p-2.5 space-y-1">
+          <p className="text-[9px] uppercase tracking-widest text-violet-300/70">🗓️ Potential catalysts ahead</p>
+          {d.catalysts.split('|').map(s => s.trim()).filter(Boolean).map((c, i) => (
+            <p key={i} className={clsx('text-gray-200 leading-relaxed', compact ? 'text-[11px]' : 'text-xs')}>
+              <span className="text-violet-300/60 mr-1">▸</span>{c}
             </p>
           ))}
         </div>

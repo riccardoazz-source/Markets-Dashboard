@@ -25,6 +25,7 @@ const CLASS_FIELDS = ['indexes_note', 'crypto_note', 'commodities_note', 'sector
 const FIELDS = [
   'headline', 'drivers', 'regime_now', 'regime_next', 'macro_note', 'macro_backdrop',
   'outlook_note', 'rotation_note', 'risk_note', 'confidence', 'fear_greed',
+  'catalysts',
   ...CLASS_FIELDS,
 ];
 
@@ -151,6 +152,7 @@ export async function POST(req: Request) {
     '  2. Search for the catalyst behind today\'s biggest daily movers shown in the data below (the names with the largest day % move).\n' +
     '  3. Search for today\'s key macro backdrop: Fed/ECB/BoJ stance, latest inflation print.\n' +
     '  4. Search for "CNN Fear and Greed Index today" and read the CURRENT numeric value (0-100) and its label (Extreme Fear / Fear / Neutral / Greed / Extreme Greed).\n' +
+    '  5. Search for UPCOMING CATALYSTS — scheduled or pending events that could move specific markets in the coming weeks/months: legislation and regulation making its way through (e.g. crypto market-structure bills such as the CLARITY Act, tariff decisions, antitrust rulings), central-bank meeting dates and expected decisions, major economic releases, elections, court rulings, ETF/listing approvals, big earnings dates, OPEC meetings, treaty or sanctions deadlines. For each, note WHAT it is, WHEN it is expected, WHICH asset/sector it hits, and WHICH WAY it would push it.\n' +
     'The searches feed different fields — drivers = the real news/events moving markets today, macro_note covers the specific table movers, macro_backdrop covers rates/inflation. Be punchy and specific, always name the actual event, date and source. Never be vague. ' +
     'Distinguish the regime RIGHT NOW from the next ~month. ' +
     'Use one of these exact labels: Risk-On, Risk-Off, Stagflation Risk, Soft Landing, Transition, Reflation, Goldilocks.\n\n' +
@@ -165,6 +167,10 @@ export async function POST(req: Request) {
     'rotation_note: <MAX 25 WORDS. Where capital is rotating — name the strongest and weakest asset classes today.>\n' +
     classInstr + '\n' +
     'risk_note: <MAX 20 WORDS. Single biggest risk combining market + macro.>\n' +
+    'catalysts: <MAX 70 WORDS. From search #5: the 2-4 most important UPCOMING catalysts — things that have not happened yet. ' +
+    'Write each as "Asset/sector — event (timing): expected impact", separated by " | ". ' +
+    'Example: "Crypto — CLARITY Act Senate vote (Sept): passage would legitimise token listings, bullish exchanges and alts | Gold — FOMC Sept 17 (cut priced 80%): a hold would knock gold" | ' +
+    'Prefer dated, verifiable events over vague themes; say if timing is uncertain. If you genuinely find none, write "n/a".>\n' +
     'fear_greed: <From search #3: the CURRENT CNN Fear & Greed Index as "NUMBER — LABEL", e.g. "63 — Greed". Number 0-100 only. If you cannot find it, write "n/a".>\n' +
     'confidence: <Low | Medium | High>';
 
@@ -183,7 +189,9 @@ export async function POST(req: Request) {
     systemInstruction: { parts: [{ text: systemInstruction }] },
     contents: [{ role: 'user', parts: [{ text: userMessage }] }],
     ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
-    generationConfig: { maxOutputTokens: 2500, temperature: 0.2 },
+    // Thinking tokens share this budget, and the brief now runs five grounded
+    // searches plus the catalysts field — too tight a cap truncates the output.
+    generationConfig: { maxOutputTokens: 3500, temperature: 0.2 },
   });
   const callGemini = (withSearch: boolean) => fetch(url, {
     signal: ctrl.signal,
