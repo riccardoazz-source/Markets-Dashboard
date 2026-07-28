@@ -26,6 +26,10 @@ interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number
 const phaseColor = (p: string | null | undefined): string =>
   p && PHASE_META[p as RotationPhase] ? PHASE_META[p as RotationPhase].dot : '#6b7280';
 
+// Module-level so flicking between timeframes (or reopening the panel) redraws
+// instantly instead of waiting on the network again.
+const viewCache = new Map<string, Payload>();
+
 export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   symbol: string;
   name: string;
@@ -43,15 +47,18 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
   useEffect(() => {
     let cancelled = false;
+    const st = stocks?.length ? `&stocks=${encodeURIComponent(stocks.join(','))}` : '';
+    const ck = `${symbol}|${timeframe}|${stocks?.slice().sort().join(',') ?? ''}`;
+    const cached = viewCache.get(ck);
+    if (cached) { setData(cached); setError(null); setLoading(false); return; }
     setLoading(true);
     setError(null);
-    const st = stocks?.length ? `&stocks=${encodeURIComponent(stocks.join(','))}` : '';
     fetch(`/api/asset-quadrant?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}${st}`)
       .then(r => r.json())
       .then((j: Payload & { error?: string }) => {
         if (cancelled) return;
         if (j.error || !j.price?.length) { setError('No history for this asset over this window.'); setData(null); }
-        else setData(j);
+        else { viewCache.set(ck, j); setData(j); }
       })
       .catch(() => { if (!cancelled) setError('Could not load the quadrant history.'); })
       .finally(() => { if (!cancelled) setLoading(false); });

@@ -27,6 +27,23 @@ interface CacheEntry { data: unknown; ts: number }
 const cache = new Map<string, CacheEntry>();
 const TTL = 30 * 60_000;
 
+// ── Caches that make switching timeframes cheap ──────────────────────────────
+// 1) History per symbol, remembering the WIDEST range already fetched, so moving
+//    3M → 1Y → MAX re-downloads nothing it already holds.
+const histCache = new Map<string, { hist: Hist; fromMs: number; ts: number }>();
+// 2) The universe ranking per DATE. Scoring a date produces a percentile for
+//    EVERY asset, but only one was being kept — so opening a second asset, or
+//    re-covering the same weeks under a different timeframe, paid the full cost
+//    again. Cached by date, the second view is nearly free.
+const rankCache = new Map<string, { ranks: Map<string, { score: number; r3m: number }>; ts: number }>();
+
+// Weekly grid anchored to a FIXED Monday rather than to the window start, so
+// every timeframe samples the SAME dates and they hit the rank cache. Without
+// this, 3M and 1Y would land on different days and share nothing.
+const WEEK_MS = 7 * 86_400_000;
+const GRID_ANCHOR = Date.UTC(2001, 0, 1);
+const snapToGrid = (t: number) => GRID_ANCHOR + Math.floor((t - GRID_ANCHOR) / WEEK_MS) * WEEK_MS;
+
 function windowStart(tf: string, now: Date): Date {
   switch (tf) {
     case 'Day': case '1D': return subDays(now, 5);
@@ -73,19 +90,37 @@ export async function GET(req: Request) {
   const spanDays = Math.max(1, Math.round((now.getTime() - start.getTime()) / 86_400_000));
   // WEEKLY resolution across the whole window, with no cap on the number of
   // samples: a coarser grid silently swallows short phases, and the longer the
-  // window the more it swallows. Affordable now only because buildInputsAsOf
-  // reads a fixed 400-bar tail, so a step costs the same on MAX as on 3M.
-  const idealSteps = Math.max(4, Math.round(spanDays / 7) + 1);
+  // window the more it swallows. Affordable because buildInputsAsOf reads a
+  // fixed 400-bar tail, so a step costs the same on MAX as on 3M. The dates
+  // themselves are built below, on a fixed weekly grid.
 
   // Window + a year of lookback: the oldest step still needs its own trailing
   // history to be scored.
   const from = subDays(start, 400);
+  const fromMs = from.getTime();
   const symbols = universe.map(m => m.symbol);
-  const results = await Promise.allSettled(
-    symbols.map(s => fetchYahooChart(s, from, now, '1d').catch(() => [] as Hist)),
-  );
+
+  // Only fetch what the cache does not already cover.
+  const stale = symbols.filter(s => {
+    const c = histCache.get(s);
+    return !c || c.fromMs > fromMs || Date.now() - c.ts > TTL;
+  });
+  if (stale.length) {
+    const fetched = await Promise.allSettled(
+      stale.map(s => fetchYahooChart(s, from, now, '1d').catch(() => [] as Hist)),
+    );
+    stale.forEach((s, i) => {
+      const hist = fetched[i].status === 'fulfilled' ? (fetched[i] as PromiseFulfilledResult<Hist>).value : [];
+      const prev = histCache.get(s);
+      // Keep whichever covers more history, so a later 3M request cannot shrink
+      // the range a previous MAX request already paid for.
+      if (!prev || prev.fromMs > fromMs || hist.length >= prev.hist.length) {
+        histCache.set(s, { hist, fromMs, ts: Date.now() });
+      }
+    });
+  }
   const histMap = new Map<string, Hist>();
-  symbols.forEach((s, i) => histMap.set(s, results[i].status === 'fulfilled' ? results[i].value : []));
+  symbols.forEach(s => histMap.set(s, histCache.get(s)?.hist ?? []));
 
   const ownHist = histMap.get(symbol) ?? [];
   const startStr = fmt(start);
@@ -93,29 +128,53 @@ export async function GET(req: Request) {
 
   type QPoint = { date: string; score: number; r3m: number; phase: string | null; close: number | null };
 
-  // Score the whole universe as of one date and read this asset's rank out of it.
-  const evalAt = (d: Date): QPoint | null => {
+  // Ranking depends on WHICH assets are being ranked, so the cache is keyed by
+  // the universe as well as the date.
+  const uniSig = symbols.slice().sort().join(',');
+
+  // Rank the whole universe as of one date. Identical maths to before — same
+  // buildInputsAsOf, same scoreRotation, same percentile — but every asset's
+  // result is kept instead of one, and reused on later requests.
+  const ranksAt = (d: Date): Map<string, { score: number; r3m: number }> | null => {
+    const dateStr = fmt(d);
+    const key = `${uniSig}|${dateStr}`;
+    const hit = rankCache.get(key);
+    if (hit && Date.now() - hit.ts < TTL) return hit.ranks;
+
     const inputs = buildInputsAsOf(universe, histMap, d);
     const scored = scoreRotation(inputs).filter(x => x.score > -1 && x.item.r3m != null);
     if (scored.length < 2) return null;
     const asc = [...scored].sort((a, b) => a.score - b.score);
-    const idx = asc.findIndex(x => x.item.symbol === symbol);
-    if (idx < 0) return null;
-    const row = asc[idx];
-    if (row.item.r3m == null) return null;
-    const pct = (idx / (asc.length - 1)) * 100;
+    const ranks = new Map<string, { score: number; r3m: number }>();
+    asc.forEach((x, i) => {
+      ranks.set(x.item.symbol, { score: (i / (asc.length - 1)) * 100, r3m: x.item.r3m as number });
+    });
+    rankCache.set(key, { ranks, ts: Date.now() });
+    return ranks;
+  };
+
+  const evalAt = (d: Date): QPoint | null => {
+    const ranks = ranksAt(d);
+    const r = ranks?.get(symbol);
+    if (!r) return null;
     const dateStr = fmt(d);
     return {
       date: dateStr,
-      score: Math.round(pct),
-      r3m: row.item.r3m,
-      phase: classifyPhase(pct, row.item.r3m),
+      score: Math.round(r.score),
+      r3m: r.r3m,
+      phase: classifyPhase(r.score, r.r3m),
       close: priceAsOf(ownHist, dateStr),
     };
   };
 
-  const idealDates = Array.from({ length: idealSteps }, (_, i) =>
-    new Date(start.getTime() + (i * spanDays / (idealSteps - 1)) * 86_400_000));
+  // Weekly, on the fixed grid, plus today. Same weeks for every timeframe, so a
+  // window already visited is served from the rank cache.
+  const idealDates: Date[] = [];
+  for (let t = snapToGrid(start.getTime()); t <= now.getTime(); t += WEEK_MS) {
+    if (t >= start.getTime()) idealDates.push(new Date(t));
+  }
+  if (!idealDates.length || fmt(idealDates[idealDates.length - 1]) !== fmt(now)) idealDates.push(now);
+  const idealSteps = idealDates.length;
 
   // Visit the grid by BISECTION — ends first, then midpoints, then quarters, and
   // so on. Every sample is computed; the order only decides what survives if the
