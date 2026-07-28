@@ -273,7 +273,11 @@ export function SentimentPanel({ buildSnapshot, getQuadrant, ready, onBeforeRun,
               ? 'Timed out — the web search took too long. Try again.'
               : json.error === 'upstream'
                 ? `Gemini error (${json.status ?? '?'})${json.message ? ': ' + json.message : ''}. Try again.`
-                : 'Could not read sentiment. Try again.'
+                : json.error === 'unparsed'
+                  // Name the actual cause: MAX_TOKENS means the model spent the
+                  // budget thinking and never wrote the brief.
+                  ? `Could not read sentiment${json.finishReason ? ` (${json.finishReason}` : ''}${json.thinkingTokens ? `, ${json.thinkingTokens} thinking tokens` : ''}${json.finishReason ? ')' : ''}. Try again.`
+                  : 'Could not read sentiment. Try again.'
         );
         return;
       }

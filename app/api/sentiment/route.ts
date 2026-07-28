@@ -189,9 +189,11 @@ export async function POST(req: Request) {
     systemInstruction: { parts: [{ text: systemInstruction }] },
     contents: [{ role: 'user', parts: [{ text: userMessage }] }],
     ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
-    // Thinking tokens share this budget, and the brief now runs five grounded
-    // searches plus the catalysts field — too tight a cap truncates the output.
-    generationConfig: { maxOutputTokens: 3500, temperature: 0.2 },
+    // Thinking tokens are drawn from THIS budget before a single word of the brief
+    // is written, and five grounded searches think a lot. 3500 left runs finishing
+    // at MAX_TOKENS with an empty answer ("Could not read sentiment"), so keep a
+    // wide margin — the brief itself is only a few hundred tokens.
+    generationConfig: { maxOutputTokens: 8000, temperature: 0.2 },
   });
   const callGemini = (withSearch: boolean) => fetch(url, {
     signal: ctrl.signal,
@@ -209,18 +211,40 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'upstream', status: r.status, message: body.slice(0, 600) }, { status: 200 });
     }
 
-    const json = await r.json() as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    type GeminiResp = {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+      usageMetadata?: { thoughtsTokenCount?: number; candidatesTokenCount?: number };
     };
-
-    const text = (json.candidates?.[0]?.content?.parts ?? [])
+    const readText = (j: GeminiResp) => (j.candidates?.[0]?.content?.parts ?? [])
       .filter(part => part.text)
       .map(part => part.text as string)
       .join('\n');
 
-    const parsed = parseKV(text);
+    let json = await r.json() as GeminiResp;
+    let text = readText(json);
+    let parsed = parseKV(text);
+
+    // Grounded runs spend output budget on thinking before writing, so a heavy
+    // search round can stop at MAX_TOKENS with nothing (or half a brief) emitted.
+    // Retry once WITHOUT the search tool: far less thinking, so the brief lands —
+    // it loses today's live news, but a brief from the table beats an error.
     if (!parsed.regime_now && !parsed.headline) {
-      return NextResponse.json({ error: 'unparsed', raw: text.slice(0, 500) }, { status: 200 });
+      const retry = await callGemini(false);
+      if (retry.ok) {
+        const j2 = await retry.json() as GeminiResp;
+        const t2 = readText(j2);
+        const p2 = parseKV(t2);
+        if (p2.regime_now || p2.headline) { json = j2; text = t2; parsed = p2; }
+      }
+    }
+
+    if (!parsed.regime_now && !parsed.headline) {
+      return NextResponse.json({
+        error: 'unparsed',
+        finishReason: json.candidates?.[0]?.finishReason ?? null,
+        thinkingTokens: json.usageMetadata?.thoughtsTokenCount ?? null,
+        raw: text.slice(0, 500),
+      }, { status: 200 });
     }
 
     // Fear & Greed: prefer the authoritative direct CNN fetch (exact number).
