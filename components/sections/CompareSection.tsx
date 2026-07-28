@@ -616,6 +616,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
           totalReturn: cagrPrice?.return,
           cagrWithDiv: cagrTR?.cagr,
           irr: irrTrim != null ? irrTrim * 100 : undefined,
+          divsOutsideWindow: (a.dividends?.length ?? 0) > 0 && divsFiltered.length === 0,
         };
       });
     } catch (e) {
@@ -1065,6 +1066,16 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
                       <div className="mt-1">
                         <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
                         <p className={clsx('text-sm font-semibold', colorForPercent(a.irr))}>{formatPercent(a.irr)}</p>
+                      </div>
+                    )}
+                    {/* Pays dividends, but the window on screen contains none — say so,
+                        so a missing IRR / total-return line never reads as a glitch. */}
+                    {a.irr == null && a.divsOutsideWindow && (
+                      <div className="mt-1">
+                        <p className="text-[10px] text-gray-500">IRR (w/ div.)</p>
+                        <p className="text-[10px] text-gray-600 leading-snug">
+                          no ex-date in this window{alignStart ? ' — turn off Aligned start' : ''}
+                        </p>
                       </div>
                     )}
                   </>

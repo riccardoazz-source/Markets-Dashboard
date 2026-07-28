@@ -132,6 +132,12 @@ export interface CompareAsset {
   /** IRR (annualized) treating dividends as cash distributions */
   irr?: number;
   dividends?: { date: string; amount: number }[];
+  /**
+   * The asset pays dividends, but none fall inside the window on screen (typically
+   * because "Aligned start" trimmed the window past its last ex-date). Lets the card
+   * say so instead of silently dropping the total-return line and the IRR.
+   */
+  divsOutsideWindow?: boolean;
   /** True for synthetic spread series (assetA − assetB) built in Compare. */
   isSpread?: boolean;
 }
