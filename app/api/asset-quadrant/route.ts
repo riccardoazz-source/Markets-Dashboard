@@ -218,6 +218,12 @@ export async function GET(req: Request) {
     price,
     points,
   };
-  cache.set(key, { data, ts: Date.now() });
+  // Only a COMPLETE result is worth remembering. A truncated one is cached as the
+  // final answer would freeze the view at partial resolution for half an hour;
+  // leaving it out lets the client ask again and, thanks to the per-date rank
+  // cache, the repeat request skips everything already computed and spends its
+  // whole budget pushing further — so the picture fills in over a few rounds
+  // instead of the user waiting on one very long request.
+  if (!truncated) cache.set(key, { data, ts: Date.now() });
   return NextResponse.json(data);
 }

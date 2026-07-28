@@ -122,6 +122,11 @@ function fullIndexForVisible(fullDates: string[], visDates: string[]): number[] 
   return out;
 }
 
+// Every chart in a sync group must reserve the same y-axis width, or their plot
+// areas begin at different x positions and the shared crosshair drifts between
+// panes even though it is pointing at the same date.
+export const SYNC_AXIS_WIDTH = 60;
+
 // ── Oscillator sub-charts ────────────────────────────────────────────────────
 
 function RSISubChart({ data, grain, syncId }: { data: { date: string; rsi: number | null }[]; grain?: string; syncId?: string }) {
@@ -143,7 +148,7 @@ function RSISubChart({ data, grain, syncId }: { data: { date: string; rsi: numbe
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis domain={[0, 100]} ticks={[30, 50, 70]}
-            tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={24} />
+            tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH} />
           <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.6} />
           <ReferenceLine y={50} stroke="#6b7280" strokeDasharray="1 4" strokeOpacity={0.35} />
           <ReferenceLine y={30} stroke="#10b981" strokeDasharray="3 3" strokeOpacity={0.6} />
@@ -182,7 +187,7 @@ function MACDSubChart({ data, grain, syncId }: {
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
-          <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={36}
+          <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => (v as number).toFixed(2)} />
           <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.4} />
           <Bar dataKey="hist" name="Histogram" barSize={3}>
@@ -225,7 +230,7 @@ function MomentumSubChart({
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
-          <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={36}
+          <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => `${(v as number).toFixed(1)}%`} />
           <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.5} />
           <Bar dataKey="value" barSize={2}>

@@ -9,7 +9,7 @@ import {
 } from 'recharts';
 import { DetailModal } from './DetailModal';
 import { TimeframeSelector } from './TimeframeSelector';
-import { PriceChart } from '@/components/charts/PriceChart';
+import { PriceChart, SYNC_AXIS_WIDTH } from '@/components/charts/PriceChart';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from './ChartTools';
 import { LoadingSpinner } from './LoadingSpinner';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
@@ -49,6 +49,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
   const [priceData, setPriceData] = useState<HistoricalPoint[] | null>(null);
   const [priceLoading, setPriceLoading] = useState(true);
+  const [refining, setRefining] = useState(false);
 
   // The price is ONE symbol and comes back in milliseconds; the model history has
   // to rank the whole universe week by week and takes seconds. Fetching them
@@ -66,23 +67,43 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     return () => { cancelled = true; };
   }, [symbol, timeframe]);
 
+  // A long window cannot be ranked end to end inside one request's budget, so the
+  // server returns what it managed and flags it. Rather than block on a single
+  // very long call, ask again: the server's per-date cache makes everything
+  // already computed free, so each round spends its whole budget going further
+  // and the chart refines in front of the user until it is complete.
   useEffect(() => {
     let cancelled = false;
     const st = stocks?.length ? `&stocks=${encodeURIComponent(stocks.join(','))}` : '';
     const ck = `${symbol}|${timeframe}|${stocks?.slice().sort().join(',') ?? ''}`;
     const cached = viewCache.get(ck);
-    if (cached) { setData(cached); setError(null); setLoading(false); return; }
-    setLoading(true);
-    setError(null);
-    fetch(`/api/asset-quadrant?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}${st}`)
-      .then(r => r.json())
-      .then((j: Payload & { error?: string }) => {
-        if (cancelled) return;
-        if (j.error || !j.points?.length) { setError('Could not build the model history for this window.'); setData(null); }
-        else { viewCache.set(ck, j); setData(j); }
-      })
-      .catch(() => { if (!cancelled) setError('Could not load the quadrant history.'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+    if (cached) { setData(cached); setError(null); setLoading(false); setRefining(false); return; }
+
+    const MAX_ROUNDS = 8;
+    const run = (round: number) => {
+      if (cancelled) return;
+      if (round === 0) setLoading(true);
+      setError(null);
+      fetch(`/api/asset-quadrant?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}${st}&r=${round}`)
+        .then(r => r.json())
+        .then((j: Payload & { error?: string }) => {
+          if (cancelled) return;
+          if (j.error || !j.points?.length) {
+            setError('Could not build the model history for this window.');
+            setData(null); setRefining(false); return;
+          }
+          setData(j);
+          setLoading(false);
+          if (j.coarse && round + 1 < MAX_ROUNDS) { setRefining(true); run(round + 1); }
+          else { setRefining(false); if (!j.coarse) viewCache.set(ck, j); }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setError('Could not load the quadrant history.');
+          setLoading(false); setRefining(false);
+        });
+    };
+    run(0);
     return () => { cancelled = true; };
   }, [symbol, timeframe, stocks]);
 
@@ -98,6 +119,27 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     if (!customRange) return all;
     return all.filter(p => p.date >= customRange.from && p.date <= customRange.to);
   }, [data, customRange]);
+
+  // The model is sampled WEEKLY but the price is daily, and the shared crosshair
+  // matches on the date value — so hovering a Tuesday found nothing in a
+  // Monday-only array and the panel simply did not react. Carry each sample
+  // forward across the price's own dates: the call holds until the model next
+  // changes it, which is also what the phase bands already assume.
+  const dailyPoints = useMemo(() => {
+    if (!points.length || !price.length) return points;
+    let i = 0;
+    let cur: QPoint | null = null;
+    return price.map(bar => {
+      while (i < points.length && points[i].date <= bar.date) cur = points[i++];
+      return {
+        date: bar.date,
+        score: cur?.score ?? null,
+        r3m: cur?.r3m ?? null,
+        phase: cur?.phase ?? null,
+        close: bar.close,
+      };
+    });
+  }, [points, price]);
 
   // Phase runs: consecutive steps sharing a phase become one shaded band, and the
   // start of each run is where the model CHANGED its mind — the line to read the
@@ -174,7 +216,10 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
             {/* QUADRANT POSITION — shares the price chart's time axis. */}
             <div className="space-y-1">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <p className="text-[11px] font-medium text-gray-400">Model quadrant over time</p>
+                <p className="text-[11px] font-medium text-gray-400">
+                  Model quadrant over time
+                  {refining && <span className="ml-2 text-[10px] text-accent animate-pulse">refining…</span>}
+                </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   {Object.entries(PHASE_META).map(([k, m]) => (
                     <span key={k} className="flex items-center gap-1 text-[9px] text-gray-400" title={m.hint}>
@@ -192,7 +237,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                 <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ {error}</p>
               ) : (
               <ResponsiveContainer width="100%" height={150}>
-                <ComposedChart data={points} syncId={SYNC_ID} syncMethod="value" margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <ComposedChart data={dailyPoints} syncId={SYNC_ID} syncMethod="value" margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                   {/* Each phase run twice: a faint full-height wash for context, and
                       a SOLID ribbon along the bottom that actually reads as a colour.
                       The wash alone was too pale to tell the four phases apart. */}
@@ -216,7 +261,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={40} />
                   <YAxis
                     domain={[0, 100]} ticks={[0, 25, 50, 75, 100]}
-                    tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={30}
+                    tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
                   />
                   {/* 50 = the quadrant's horizontal split. */}
                   <ReferenceLine y={50} stroke="#64748b" strokeDasharray="4 2" strokeWidth={1.2} />
