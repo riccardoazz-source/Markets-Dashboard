@@ -1058,7 +1058,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           )}
           {trailSymbols.length === 0 && (
             <p className="text-[10px] text-gray-600">
-              Pick one or more assets to draw the path they travelled across the quadrants — the model is re-run at each past date, so the trail follows the live formula. Faint end = oldest.
+              Pick one or more assets to draw the path they travelled across the quadrants — the model is re-run at each past date, so the trail follows the live formula. Everything else dims while a search is active; clear it to bring the whole universe back.
             </p>
           )}
         </div>
@@ -1067,6 +1067,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           assets={quadrantAssets}
           loading={rollingLoading}
           trails={trails}
+          focusSymbols={trailSymbols}
           onAssetClick={a => setQuickView({ symbol: a.symbol, name: a.name, group: a.group })}
         />
       </div>

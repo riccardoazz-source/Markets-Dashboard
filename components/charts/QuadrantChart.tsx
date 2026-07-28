@@ -57,6 +57,8 @@ export interface QuadrantAsset {
 // the rest against one edge), while r3m keeps the true value for the tooltip.
 interface PlotAsset extends QuadrantAsset {
   r3mPlot: number;
+  /** True when a search is active and this asset is not one of the traced ones. */
+  dimmed?: boolean;
 }
 
 function shortName(name: string): string {
@@ -70,7 +72,17 @@ function QuadrantDot(props: { cx?: number; cy?: number; payload?: PlotAsset; onC
   const { cx, cy, payload, onClick } = props;
   if (cx == null || cy == null || !payload) return null;
   const color = GROUP_COLORS[payload.group] ?? '#6b7280';
-  const { isAccel, isSelected } = payload;
+  const { isAccel, isSelected, dimmed } = payload;
+  // While assets are being traced, everything else fades right back so the paths
+  // are actually visible — the dots stay as faint context, not clutter.
+  if (dimmed) {
+    return (
+      <g onClick={onClick} style={onClick ? { cursor: 'pointer' } : undefined}>
+        <circle cx={cx} cy={cy} r={2} fill={color} fillOpacity={0.1} />
+        <circle cx={cx} cy={cy} r={8} fill="transparent" />
+      </g>
+    );
+  }
   const r = isSelected ? 7 : isAccel ? 5 : 3.5;
   const opacity = isAccel || isSelected ? 0.95 : 0.4;
   return (
@@ -353,9 +365,11 @@ interface Props {
   onAssetClick?: (asset: QuadrantAsset) => void;
   /** Historical paths to overlay — one per traced asset, oldest point first. */
   trails?: QuadrantTrail[];
+  /** When non-empty, only these assets stay lit; everything else fades back. */
+  focusSymbols?: string[];
 }
 
-export function QuadrantChart({ assets, loading, onAssetClick, trails }: Props) {
+export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymbols }: Props) {
   // Symmetric, outlier-clamped X domain so the X=0 divider sits in the centre and
   // a lone extreme mover can't squash everyone against one edge.
   const { plot, normal, accel, labeled, xDomain, clampEdge } = useMemo(() => {
@@ -374,15 +388,24 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails }: Props) 
     const M = Math.max(15, Math.min(Math.max(maxAbs, trailMax) + 6, Math.max(p90 * 1.3, trailMax * 1.05)));
     const clampEdge = M * 0.985;
 
+    // A search in Rotation focuses the chart: only the searched assets stay lit
+    // and labelled, everything else fades to faint context. Clearing the search
+    // brings the whole universe back.
+    const focus = new Set(focusSymbols ?? []);
+    const focusing = focus.size > 0;
+
     const plot: PlotAsset[] = assets.map(a => ({
       ...a,
       r3mPlot: Math.max(-clampEdge, Math.min(clampEdge, a.r3m)),
+      dimmed: focusing && !focus.has(a.symbol),
     }));
     const normal = plot.filter(a => !a.isAccel);
     const accel = plot.filter(a => a.isAccel);
-    const labeled = plot.filter(a => a.isAccel || a.isSelected);
+    const labeled = focusing
+      ? plot.filter(a => focus.has(a.symbol))
+      : plot.filter(a => a.isAccel || a.isSelected);
     return { plot, normal, accel, labeled, xDomain: [-M, M] as [number, number], clampEdge };
-  }, [assets, trails]);
+  }, [assets, trails, focusSymbols]);
 
   if (loading) {
     return (
