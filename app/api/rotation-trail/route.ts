@@ -1,0 +1,117 @@
+import { NextResponse } from 'next/server';
+import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
+import { fetchYahooChart } from '@/lib/yahoo';
+import { scoreRotation } from '@/lib/rotationModel';
+import { buildInputsAsOf, fmt, type Hist, type BtMeta } from '@/lib/backtestCore';
+import { subDays, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+// Rotation-quadrant TRAIL: where an asset has travelled across the quadrants over
+// time. Each step re-runs the LIVE model on inputs rebuilt as of that past date
+// (buildInputsAsOf — no look-ahead), then ranks it against the WHOLE universe on
+// that same date, because the Y axis is a cross-sectional percentile: a dot moves
+// up either by improving or by everything else deteriorating. That is why the
+// entire universe has to be scored at every step, not just the traced symbols.
+
+const BASE_UNIVERSE: BtMeta[] = [
+  ...INDEXES.map(i => ({ symbol: i.symbol, name: i.name, group: 'Indexes' })),
+  ...COMMODITIES.map(c => ({ symbol: c.symbol, name: c.name, group: 'Commodities' })),
+  ...CRYPTO_IDS.map(e => ({ symbol: CRYPTO_YAHOO_SYMBOLS[e.id] ?? `${e.symbol}-USD`, name: e.name, group: 'Crypto' })),
+  ...SECTORS.map(s => ({ symbol: s.symbol, name: s.name, group: 'Sectors' })),
+];
+
+interface CacheEntry { data: unknown; ts: number }
+const cache = new Map<string, CacheEntry>();
+const TTL = 30 * 60_000;
+
+// Same timeframe vocabulary as every other section, so the trail obeys the
+// selector the user already knows.
+function windowStart(tf: string, now: Date): Date {
+  switch (tf) {
+    case 'Day': case '1D': return subDays(now, 5);
+    case '1W':  return subDays(now, 7);
+    case 'MTD': return startOfMonth(now);
+    case '1M':  return subMonths(now, 1);
+    case '3M':  return subMonths(now, 3);
+    case '6M':  return subMonths(now, 6);
+    case 'YTD': return startOfYear(now);
+    case '1Y':  return subYears(now, 1);
+    case '3Y':  return subYears(now, 3);
+    case '5Y':  return subYears(now, 5);
+    default:    return subMonths(now, 6);
+  }
+}
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const wanted = [...new Set((searchParams.get('symbols') ?? '').split(',').map(s => s.trim()).filter(Boolean))].slice(0, 8);
+  const timeframe = searchParams.get('timeframe') ?? '6M';
+  if (wanted.length === 0) return NextResponse.json({ trails: [] });
+
+  const baseSymbols = new Set(BASE_UNIVERSE.map(m => m.symbol));
+  const extraStocks = [...new Set(
+    (searchParams.get('stocks') ?? '').split(',').map(s => s.trim()).filter(Boolean),
+  )].filter(s => !baseSymbols.has(s));
+  // Traced symbols outside the base universe (a searched stock) must be scored too.
+  const traced = wanted.filter(s => !baseSymbols.has(s) && !extraStocks.includes(s));
+  const universe: BtMeta[] = [
+    ...BASE_UNIVERSE,
+    ...[...extraStocks, ...traced].map(s => ({ symbol: s, name: s, group: 'Stocks' })),
+  ];
+
+  const key = `${timeframe}|${wanted.slice().sort().join(',')}|${extraStocks.slice().sort().join(',')}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.ts < TTL) return NextResponse.json(hit.data);
+
+  const now = new Date();
+  const start = windowStart(timeframe, now);
+  // Step dates across the window. Cap the count so a 5Y trail stays readable and
+  // the request stays inside the function's time budget.
+  const spanDays = Math.max(1, Math.round((now.getTime() - start.getTime()) / 86_400_000));
+  const steps = Math.min(24, Math.max(4, Math.round(spanDays / 7)));
+  const stepDays = spanDays / (steps - 1);
+  const dates = Array.from({ length: steps }, (_, i) => new Date(start.getTime() + i * stepDays * 86_400_000));
+
+  // One fetch per symbol covering the window PLUS a year of lookback, because the
+  // oldest step still needs its own trailing 1Y/200d history to score.
+  const from = subDays(start, 400);
+  const symbols = universe.map(m => m.symbol);
+  const results = await Promise.allSettled(
+    symbols.map(s => fetchYahooChart(s, from, now, '1d').catch(() => [] as Hist)),
+  );
+  const histMap = new Map<string, Hist>();
+  symbols.forEach((s, i) => histMap.set(s, results[i].status === 'fulfilled' ? results[i].value : []));
+
+  const meta = new Map(universe.map(m => [m.symbol, m]));
+  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; r3m: number; score: number }[] }>();
+  for (const s of wanted) {
+    const m = meta.get(s);
+    trails.set(s, { symbol: s, name: m?.name ?? s, group: m?.group ?? 'Stocks', points: [] });
+  }
+
+  for (const d of dates) {
+    const inputs = buildInputsAsOf(universe, histMap, d);
+    const scored = scoreRotation(inputs).filter(x => x.score > -1 && x.item.r3m != null);
+    if (scored.length < 2) continue;
+    const asc = [...scored].sort((a, b) => a.score - b.score);
+    const pct = new Map<string, number>();
+    asc.forEach((x, i) => pct.set(x.item.symbol, (i / (asc.length - 1)) * 100));
+    const dateStr = fmt(d);
+    for (const s of wanted) {
+      const row = scored.find(x => x.item.symbol === s);
+      const p = pct.get(s);
+      if (!row || p == null || row.item.r3m == null) continue;
+      trails.get(s)!.points.push({ date: dateStr, r3m: row.item.r3m, score: Math.round(p) });
+    }
+  }
+
+  const data = {
+    generatedAt: fmt(now),
+    timeframe,
+    trails: [...trails.values()].filter(t => t.points.length > 0),
+  };
+  cache.set(key, { data, ts: Date.now() });
+  return NextResponse.json(data);
+}

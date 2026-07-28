@@ -116,6 +116,76 @@ interface CustomizedProps {
   offset?: { top: number; left: number; width: number; height: number };
 }
 
+/** One asset's path across the quadrants, oldest point first. */
+export interface QuadrantTrail {
+  symbol: string;
+  name: string;
+  group: string;
+  points: { date: string; r3m: number; score: number }[];
+}
+
+// Trail layer: draws each traced asset's journey as a fading tail, oldest segment
+// faintest, so direction is readable at a glance (down-left → up-right = an asset
+// climbing out of Lagging). Drawn under the dots, inside the chart so it can use
+// recharts' live pixel scales.
+function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number) {
+  return function TrailLayer(props: CustomizedProps) {
+    const { xAxisMap, yAxisMap } = props;
+    if (!xAxisMap || !yAxisMap || trails.length === 0) return null;
+    const xScale = Object.values(xAxisMap)[0]?.scale;
+    const yScale = Object.values(yAxisMap)[0]?.scale;
+    if (!xScale || !yScale) return null;
+
+    const nodes: React.ReactNode[] = [];
+    for (const t of trails) {
+      const color = GROUP_COLORS[t.group] ?? '#6b7280';
+      const pts = t.points.map(p => ({
+        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.r3m))),
+        y: yScale(p.score),
+        date: p.date,
+      }));
+      if (pts.length < 2) continue;
+      for (let i = 1; i < pts.length; i++) {
+        const frac = i / (pts.length - 1);          // 0 = oldest, 1 = newest
+        nodes.push(
+          <line
+            key={`${t.symbol}-seg-${i}`}
+            x1={pts[i - 1].x} y1={pts[i - 1].y} x2={pts[i].x} y2={pts[i].y}
+            stroke={color}
+            strokeWidth={1 + frac * 1.8}
+            strokeOpacity={0.18 + frac * 0.62}
+            strokeLinecap="round"
+          />,
+        );
+      }
+      // A dot per step, so the pace of the move is visible (bunched = stalled).
+      pts.forEach((p, i) => {
+        const frac = pts.length > 1 ? i / (pts.length - 1) : 1;
+        nodes.push(
+          <circle
+            key={`${t.symbol}-pt-${i}`}
+            cx={p.x} cy={p.y} r={i === pts.length - 1 ? 3 : 1.8}
+            fill={color} fillOpacity={0.25 + frac * 0.65}
+          >
+            <title>{`${t.name} · ${p.date}`}</title>
+          </circle>,
+        );
+      });
+      // Mark where the journey started.
+      nodes.push(
+        <text
+          key={`${t.symbol}-start`}
+          x={pts[0].x + 5} y={pts[0].y - 4}
+          fill={color} fillOpacity={0.75} fontSize={8.5}
+        >
+          {t.points[0].date.slice(2, 7)}
+        </text>,
+      );
+    }
+    return <g>{nodes}</g>;
+  };
+}
+
 // Dedicated label layer with collision avoidance + leader lines. Runs inside the
 // chart so it can read the live pixel scales from recharts' axis maps.
 function makeLabelLayer(labeled: PlotAsset[]) {
@@ -239,20 +309,27 @@ interface Props {
   assets: QuadrantAsset[];
   loading?: boolean;
   onAssetClick?: (asset: QuadrantAsset) => void;
+  /** Historical paths to overlay — one per traced asset, oldest point first. */
+  trails?: QuadrantTrail[];
 }
 
-export function QuadrantChart({ assets, loading, onAssetClick }: Props) {
+export function QuadrantChart({ assets, loading, onAssetClick, trails }: Props) {
   // Symmetric, outlier-clamped X domain so the X=0 divider sits in the centre and
   // a lone extreme mover can't squash everyone against one edge.
-  const { plot, normal, accel, labeled, xDomain } = useMemo(() => {
+  const { plot, normal, accel, labeled, xDomain, clampEdge } = useMemo(() => {
     if (assets.length === 0) {
-      return { plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[], xDomain: [-20, 20] as [number, number] };
+      return { plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[], xDomain: [-20, 20] as [number, number], clampEdge: 19.7 };
     }
     const absVals = assets.map(a => Math.abs(a.r3m)).sort((x, y) => x - y);
     // 90th percentile of |r3m|, padded — the visible half-range.
     const p90 = absVals[Math.min(absVals.length - 1, Math.floor(absVals.length * 0.9))] ?? 20;
     const maxAbs = absVals[absVals.length - 1] ?? 20;
-    const M = Math.max(15, Math.min(maxAbs + 6, p90 * 1.3));
+    // A trail can wander outside today's dot spread (that is the point of it), so
+    // widen the domain enough to keep the whole path on screen.
+    const trailMax = trails?.length
+      ? Math.max(...trails.flatMap(t => t.points.map(p => Math.abs(p.r3m))))
+      : 0;
+    const M = Math.max(15, Math.min(Math.max(maxAbs, trailMax) + 6, Math.max(p90 * 1.3, trailMax * 1.05)));
     const clampEdge = M * 0.985;
 
     const plot: PlotAsset[] = assets.map(a => ({
@@ -262,8 +339,8 @@ export function QuadrantChart({ assets, loading, onAssetClick }: Props) {
     const normal = plot.filter(a => !a.isAccel);
     const accel = plot.filter(a => a.isAccel);
     const labeled = plot.filter(a => a.isAccel || a.isSelected);
-    return { plot, normal, accel, labeled, xDomain: [-M, M] as [number, number] };
-  }, [assets]);
+    return { plot, normal, accel, labeled, xDomain: [-M, M] as [number, number], clampEdge };
+  }, [assets, trails]);
 
   if (loading) {
     return (
@@ -283,6 +360,7 @@ export function QuadrantChart({ assets, loading, onAssetClick }: Props) {
 
   const [xMin, xMax] = xDomain;
   const LabelLayer = makeLabelLayer(labeled);
+  const TrailLayer = makeTrailLayer(trails ?? [], clampEdge);
 
   return (
     <div className="space-y-1">
@@ -334,6 +412,9 @@ export function QuadrantChart({ assets, loading, onAssetClick }: Props) {
           <ReferenceLine y={50} stroke="#334155" strokeWidth={1.5} />
 
           <Tooltip content={<QuadrantTooltip />} cursor={{ strokeDasharray: '3 3', stroke: '#475569' }} />
+
+          {/* Trails first, so today's dots stay on top of the path. */}
+          <Customized component={TrailLayer} />
 
           <Scatter
             data={normal}

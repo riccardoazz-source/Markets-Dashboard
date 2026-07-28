@@ -8,7 +8,7 @@ import { QuoteData, CryptoData } from '@/lib/types';
 import { useGistData, QuadrantPoint } from '@/lib/gist';
 import { scoreRotation, selectPicks, ScoredItem } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { QuadrantChart, QuadrantAsset } from '@/components/charts/QuadrantChart';
+import { QuadrantChart, QuadrantAsset, QuadrantTrail } from '@/components/charts/QuadrantChart';
 import { classifyPhase, PHASE_META, RotationPhase, ROTATION_PHASES } from '@/lib/rotationPhase';
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
@@ -211,6 +211,12 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
   const [accelOnly, setAccelOnly] = useState(false);
   const [phaseFilter, setPhaseFilter] = useState<RotationPhase | 'all'>('all');
+  // Quadrant trails: which assets to trace, over which window.
+  const [trailSymbols, setTrailSymbols] = useState<string[]>([]);
+  const [trailTf, setTrailTf] = useState('6M');
+  const [trails, setTrails] = useState<QuadrantTrail[]>([]);
+  const [trailLoading, setTrailLoading] = useState(false);
+  const [trailQuery, setTrailQuery] = useState('');
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
   const userHasToggled = useRef(false);
 
@@ -554,6 +560,31 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     return m;
   }, [rows, scoreMap]);
   const phaseOf = (symbol: string): RotationPhase | null => phaseMap.get(symbol) ?? null;
+
+  // Fetch the traced assets' journeys. The model is re-run as of each past date
+  // server-side, so the path reflects THIS formula applied historically.
+  useEffect(() => {
+    if (trailSymbols.length === 0) { setTrails([]); return; }
+    let cancelled = false;
+    setTrailLoading(true);
+    const stocks = stockListSymbols.length ? `&stocks=${encodeURIComponent(stockListSymbols.join(','))}` : '';
+    fetch(`/api/rotation-trail?symbols=${encodeURIComponent(trailSymbols.join(','))}&timeframe=${trailTf}${stocks}`)
+      .then(r => r.json())
+      .then((j: { trails?: QuadrantTrail[] }) => { if (!cancelled) setTrails(j.trails ?? []); })
+      .catch(() => { if (!cancelled) setTrails([]); })
+      .finally(() => { if (!cancelled) setTrailLoading(false); });
+    return () => { cancelled = true; };
+  }, [trailSymbols, trailTf, stockListSymbols]);
+
+  // Everything currently on the quadrant is traceable.
+  const trailCandidates = useMemo(
+    () => quadrantAssets.map(a => ({ symbol: a.symbol, name: a.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    [quadrantAssets],
+  );
+  const trailMatches = trailQuery.trim().length === 0 ? [] : trailCandidates
+    .filter(c => !trailSymbols.includes(c.symbol))
+    .filter(c => `${c.name} ${c.symbol}`.toLowerCase().includes(trailQuery.trim().toLowerCase()))
+    .slice(0, 8);
 
   // Final list after the phase filter (Recovering / Trending / Fading / Lagging).
   const displayItems = phaseFilter === 'all'
@@ -950,9 +981,76 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           )}
         </div>
         <p className="text-[10px] text-gray-600">Click a row to highlight its dot. Labeled = names that clear the Accelerating gate.</p>
+
+        {/* Trails: trace where an asset has travelled across the quadrants. The
+            model is re-run as of each past date, so the path uses THIS formula. */}
+        <div className="rounded-lg border border-border bg-bg-input/30 px-2.5 py-2 space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider">Trail</span>
+            <div className="relative">
+              <input
+                value={trailQuery}
+                onChange={e => setTrailQuery(e.target.value)}
+                placeholder="Search an asset to trace…"
+                className="w-52 bg-bg border border-border rounded-lg px-2.5 py-1 text-[11px] text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-accent"
+              />
+              {trailMatches.length > 0 && (
+                <div className="absolute z-20 mt-1 w-64 max-h-56 overflow-y-auto rounded-lg border border-border bg-bg-card shadow-xl">
+                  {trailMatches.map(m => (
+                    <button
+                      key={m.symbol}
+                      onClick={() => {
+                        setTrailSymbols(prev => prev.includes(m.symbol) || prev.length >= 8 ? prev : [...prev, m.symbol]);
+                        setTrailQuery('');
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 text-[11px] text-gray-300 hover:bg-bg-hover/40 hover:text-white"
+                    >
+                      {m.name} <span className="text-gray-600">{m.symbol}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Same timeframe vocabulary as every other section */}
+            <div className="flex gap-1 bg-bg-input rounded-lg p-1">
+              {['1M', '3M', '6M', 'MTD', 'YTD', '1Y', '5Y'].map(tf => (
+                <button
+                  key={tf}
+                  onClick={() => setTrailTf(tf)}
+                  className={clsx('px-2 py-0.5 text-[10px] font-semibold rounded-md transition-all',
+                    trailTf === tf ? 'bg-accent text-white' : 'text-gray-400 hover:text-gray-100')}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
+            {trailLoading && <span className="text-[10px] text-accent animate-pulse">tracing…</span>}
+          </div>
+          {trailSymbols.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {trailSymbols.map(s => {
+                const nm = trailCandidates.find(c => c.symbol === s)?.name ?? s;
+                return (
+                  <span key={s} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-accent/40 bg-accent/10 text-accent">
+                    {nm}
+                    <button onClick={() => setTrailSymbols(prev => prev.filter(x => x !== s))} className="text-gray-500 hover:text-red-400">✕</button>
+                  </span>
+                );
+              })}
+              <button onClick={() => setTrailSymbols([])} className="text-[10px] text-gray-600 hover:text-gray-400">clear</button>
+            </div>
+          )}
+          {trailSymbols.length === 0 && (
+            <p className="text-[10px] text-gray-600">
+              Pick one or more assets to draw the path they travelled across the quadrants — the model is re-run at each past date, so the trail follows the live formula. Faint end = oldest.
+            </p>
+          )}
+        </div>
+
         <QuadrantChart
           assets={quadrantAssets}
           loading={rollingLoading}
+          trails={trails}
           onAssetClick={a => setQuickView({ symbol: a.symbol, name: a.name, group: a.group })}
         />
       </div>
