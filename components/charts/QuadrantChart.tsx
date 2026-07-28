@@ -130,11 +130,12 @@ export interface QuadrantTrail {
 // recharts' live pixel scales.
 function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number) {
   return function TrailLayer(props: CustomizedProps) {
-    const { xAxisMap, yAxisMap } = props;
-    if (!xAxisMap || !yAxisMap || trails.length === 0) return null;
+    const { xAxisMap, yAxisMap, offset } = props;
+    if (!xAxisMap || !yAxisMap || !offset || trails.length === 0) return null;
     const xScale = Object.values(xAxisMap)[0]?.scale;
     const yScale = Object.values(yAxisMap)[0]?.scale;
     if (!xScale || !yScale) return null;
+    const midX = offset.left + offset.width / 2;
 
     const nodes: React.ReactNode[] = [];
     for (const t of trails) {
@@ -145,42 +146,83 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number) {
         date: p.date,
       }));
       if (pts.length < 2) continue;
+
+      // Include the year once the path spans more than a year, otherwise the
+      // month alone is unambiguous and far less cluttered.
+      const spanDays = (new Date(pts[pts.length - 1].date).getTime() - new Date(pts[0].date).getTime()) / 86_400_000;
+      const fmtDate = (iso: string) => {
+        const d = new Date(iso + 'T12:00:00Z');
+        return d.toLocaleDateString('en-US', spanDays > 400
+          ? { month: 'short', year: '2-digit', timeZone: 'UTC' }
+          : { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      };
+      // Label the ends plus a few waypoints — enough to read the timing without
+      // burying the chart in text.
+      const every = Math.max(2, Math.ceil((pts.length - 1) / 3));
+      const labelAt = (i: number) => i === 0 || i === pts.length - 1 || i % every === 0;
+
       for (let i = 1; i < pts.length; i++) {
         const frac = i / (pts.length - 1);          // 0 = oldest, 1 = newest
+        const a = pts[i - 1], b = pts[i];
         nodes.push(
           <line
             key={`${t.symbol}-seg-${i}`}
-            x1={pts[i - 1].x} y1={pts[i - 1].y} x2={pts[i].x} y2={pts[i].y}
+            x1={a.x} y1={a.y} x2={b.x} y2={b.y}
             stroke={color}
             strokeWidth={1 + frac * 1.8}
-            strokeOpacity={0.18 + frac * 0.62}
+            strokeOpacity={0.22 + frac * 0.6}
             strokeLinecap="round"
           />,
         );
+        // Arrowhead at the segment midpoint — this is what makes the direction of
+        // travel readable (a loop back on itself is otherwise indistinguishable).
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        if (len > 14) {
+          const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+          const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+          nodes.push(
+            <path
+              key={`${t.symbol}-arr-${i}`}
+              d="M -3.2 -2.6 L 3.2 0 L -3.2 2.6 Z"
+              transform={`translate(${mx} ${my}) rotate(${ang})`}
+              fill={color} fillOpacity={0.35 + frac * 0.5}
+            />,
+          );
+        }
       }
+
       // A dot per step, so the pace of the move is visible (bunched = stalled).
       pts.forEach((p, i) => {
         const frac = pts.length > 1 ? i / (pts.length - 1) : 1;
+        const isNow = i === pts.length - 1;
         nodes.push(
           <circle
             key={`${t.symbol}-pt-${i}`}
-            cx={p.x} cy={p.y} r={i === pts.length - 1 ? 3 : 1.8}
-            fill={color} fillOpacity={0.25 + frac * 0.65}
+            cx={p.x} cy={p.y} r={isNow ? 3.4 : 2}
+            fill={color} fillOpacity={0.3 + frac * 0.6}
+            stroke={isNow ? color : 'none'} strokeWidth={isNow ? 1.5 : 0} strokeOpacity={0.5}
           >
             <title>{`${t.name} · ${p.date}`}</title>
           </circle>,
         );
+        if (labelAt(i)) {
+          // Put the text on the inward side so it never runs off the plot edge.
+          const leftish = p.x < midX;
+          nodes.push(
+            <text
+              key={`${t.symbol}-lbl-${i}`}
+              x={p.x + (leftish ? 6 : -6)} y={p.y - 5}
+              textAnchor={leftish ? 'start' : 'end'}
+              fill={color} fillOpacity={isNow ? 0.95 : 0.55 + frac * 0.25}
+              fontSize={8.5} fontWeight={isNow ? 700 : 400}
+              style={{ paintOrder: 'stroke', stroke: '#0b1020', strokeWidth: 2.5, strokeLinejoin: 'round' }}
+            >
+              {isNow ? 'now' : fmtDate(p.date)}
+            </text>,
+          );
+        }
       });
-      // Mark where the journey started.
-      nodes.push(
-        <text
-          key={`${t.symbol}-start`}
-          x={pts[0].x + 5} y={pts[0].y - 4}
-          fill={color} fillOpacity={0.75} fontSize={8.5}
-        >
-          {t.points[0].date.slice(2, 7)}
-        </text>,
-      );
     }
     return <g>{nodes}</g>;
   };
@@ -375,6 +417,22 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails }: Props) 
           ))}
         </div>
       </div>
+      {trails && trails.length > 0 && (
+        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[10px] px-1 pb-0.5">
+          <span className="text-gray-600">Trail: faint → solid = past → now, arrows show direction</span>
+          {trails.map(t => {
+            const c = GROUP_COLORS[t.group] ?? '#6b7280';
+            const from = t.points[0]?.date, to = t.points[t.points.length - 1]?.date;
+            return (
+              <span key={t.symbol} className="flex items-center gap-1" style={{ color: c }}>
+                <span className="inline-block w-3 border-t-2" style={{ borderColor: c }} />
+                {t.name}
+                <span className="text-gray-600">{from?.slice(0, 7)} → {to?.slice(0, 7)} · {t.points.length} steps</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 16, right: 16, bottom: 24, left: 8 }}>
           {/* Quadrant background tints */}
