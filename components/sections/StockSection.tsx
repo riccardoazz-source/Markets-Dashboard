@@ -33,6 +33,7 @@ import { Search, X, BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
+import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
@@ -1248,7 +1249,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 )}
               </p>
             </div>
-            <div className="flex items-center gap-1.5 justify-end shrink-0">
+            <div className="flex items-center gap-1.5 justify-end shrink-0 flex-wrap">
               {onCompare && (
                 <button
                   onClick={() => onCompare(selected.symbol)}
@@ -1259,6 +1260,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 </button>
               )}
               <ReturnsTableButton name={selected.name} symbol={selected.symbol} />
+              <QuadrantButton name={selected.name} symbol={selected.symbol} group="Stocks" stocks={watchlistSymbols} />
               <GeminiCommentButton
                 key={selected.symbol}
                 name={selected.name}

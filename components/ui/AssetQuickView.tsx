@@ -6,6 +6,7 @@ import { DetailModal } from './DetailModal';
 import { TimeframeSelector } from './TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ReturnsTableButton } from './ReturnsTableButton';
+import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { GeminiCommentButton } from './GeminiCommentButton';
 import { ChartNotes } from './ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from './ChartTools';
@@ -82,6 +83,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
               </button>
             )}
             <ReturnsTableButton name={name} symbol={symbol} />
+              <QuadrantButton name={name} symbol={symbol} group={group} />
             <GeminiCommentButton key={symbol} name={name} symbol={symbol} assetClass={group}
               price={q?.price} dayPct={q?.changePercent} />
             <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>

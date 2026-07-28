@@ -16,6 +16,7 @@ import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react'
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
+import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
@@ -340,7 +341,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 </span>
               </p>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
               {onCompare && (
                 <button
                   onClick={() => onCompare(CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`)}
@@ -351,6 +352,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 </button>
               )}
               <ReturnsTableButton name={selectedCrypto.name} symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} />
+              <QuadrantButton name={selectedCrypto.name} symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} group="Crypto" />
               <GeminiCommentButton
                 key={selected}
                 name={selectedCrypto.name}

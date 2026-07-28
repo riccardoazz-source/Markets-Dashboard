@@ -19,6 +19,7 @@ import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react'
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
+import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
@@ -388,7 +389,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                 )}
               </p>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
               {onCompare && (
                 <button
                   onClick={() => onCompare(selected!)}
@@ -399,6 +400,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                 </button>
               )}
               <ReturnsTableButton name={selectedSector?.name ?? selected!} symbol={selected!} />
+              <QuadrantButton name={selectedSector?.name ?? selected!} symbol={selected!} group="Sectors" />
               <GeminiCommentButton
                 key={selected!}
                 name={selectedSector?.name ?? selected!}
