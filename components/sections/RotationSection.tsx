@@ -217,6 +217,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   const [trails, setTrails] = useState<QuadrantTrail[]>([]);
   const [trailLoading, setTrailLoading] = useState(false);
   const [trailQuery, setTrailQuery] = useState('');
+  const [trailError, setTrailError] = useState<string | null>(null);
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(new Set());
   const userHasToggled = useRef(false);
 
@@ -567,11 +568,23 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     if (trailSymbols.length === 0) { setTrails([]); return; }
     let cancelled = false;
     setTrailLoading(true);
+    setTrailError(null);
     const stocks = stockListSymbols.length ? `&stocks=${encodeURIComponent(stockListSymbols.join(','))}` : '';
     fetch(`/api/rotation-trail?symbols=${encodeURIComponent(trailSymbols.join(','))}&timeframe=${trailTf}${stocks}`)
       .then(r => r.json())
-      .then((j: { trails?: QuadrantTrail[] }) => { if (!cancelled) setTrails(j.trails ?? []); })
-      .catch(() => { if (!cancelled) setTrails([]); })
+      .then((j: { trails?: QuadrantTrail[]; withHistory?: number; universeSize?: number }) => {
+        if (cancelled) return;
+        const got = j.trails ?? [];
+        setTrails(got);
+        if (got.length === 0) {
+          setTrailError(
+            j.withHistory === 0
+              ? 'No price history came back — the data source is unreachable right now. Try again.'
+              : 'No path for this asset over this window — try a longer timeframe.',
+          );
+        }
+      })
+      .catch(() => { if (!cancelled) { setTrails([]); setTrailError('Trail request failed. Try again.'); } })
       .finally(() => { if (!cancelled) setTrailLoading(false); });
     return () => { cancelled = true; };
   }, [trailSymbols, trailTf, stockListSymbols]);
@@ -1026,6 +1039,9 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
             </div>
             {trailLoading && <span className="text-[10px] text-accent animate-pulse">tracing…</span>}
           </div>
+          {trailError && !trailLoading && (
+            <p className="text-[10px] text-amber-400">⚠ {trailError}</p>
+          )}
           {trailSymbols.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap">
               {trailSymbols.map(s => {

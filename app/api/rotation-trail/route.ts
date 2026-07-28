@@ -5,8 +5,11 @@ import { scoreRotation } from '@/lib/rotationModel';
 import { buildInputsAsOf, fmt, type Hist, type BtMeta } from '@/lib/backtestCore';
 import { subDays, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 
-export const runtime = 'nodejs';
-export const maxDuration = 60;
+// EDGE, like /api/rotation-returns and /api/rotation-backtest: Yahoo answers the
+// edge network but blocks the Node serverless IPs, so on 'nodejs' every history
+// fetch came back empty and the trail silently had no points to draw.
+export const runtime = 'edge';
+export const maxDuration = 25; // edge ceiling
 
 // Rotation-quadrant TRAIL: where an asset has travelled across the quadrants over
 // time. Each step re-runs the LIVE model on inputs rebuilt as of that past date
@@ -70,7 +73,9 @@ export async function GET(req: Request) {
   // Step dates across the window. Cap the count so a 5Y trail stays readable and
   // the request stays inside the function's time budget.
   const spanDays = Math.max(1, Math.round((now.getTime() - start.getTime()) / 86_400_000));
-  const steps = Math.min(24, Math.max(4, Math.round(spanDays / 7)));
+  // Every step rescoring the whole universe is the expensive part (ADX, R² over
+  // 252 bars, MACD… per asset), so cap the count to stay inside the edge budget.
+  const steps = Math.min(12, Math.max(4, Math.round(spanDays / 7)));
   const stepDays = spanDays / (steps - 1);
   const dates = Array.from({ length: steps }, (_, i) => new Date(start.getTime() + i * stepDays * 86_400_000));
 
@@ -107,9 +112,14 @@ export async function GET(req: Request) {
     }
   }
 
+  // Counts travel with the payload so an empty trail can explain itself rather
+  // than leaving the UI silently blank.
+  const withHistory = symbols.filter(s => (histMap.get(s) ?? []).length > 0).length;
   const data = {
     generatedAt: fmt(now),
     timeframe,
+    universeSize: universe.length,
+    withHistory,
     trails: [...trails.values()].filter(t => t.points.length > 0),
   };
   cache.set(key, { data, ts: Date.now() });
