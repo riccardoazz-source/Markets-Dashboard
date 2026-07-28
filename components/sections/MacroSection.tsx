@@ -242,7 +242,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
         hist = hist.filter(p => p.date >= override.from && p.date <= override.to);
       }
       setHistorical(hist);
-      setDataMsg(dataAvailabilityMessage(hist, tf));
+      setDataMsg(dataAvailabilityMessage(hist, tf, !!override));
     } catch { setHistorical([]); setDataMsg(null); }
     finally { setHistLoading(false); }
   }, [allIndicators]);

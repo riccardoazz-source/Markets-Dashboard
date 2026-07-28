@@ -85,7 +85,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
       const data = Array.isArray(raw) ? raw : [];
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
-      setDataMsg(dataAvailabilityMessage(data, tf));
+      setDataMsg(dataAvailabilityMessage(data, tf, !!override));
     } catch (e) { console.error(e); }
     finally { setHistLoading(false); }
   }, []);

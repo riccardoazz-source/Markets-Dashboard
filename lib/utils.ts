@@ -560,12 +560,18 @@ export function timeframeLabel(tf: Timeframe): string {
  * Returns a short notice when the data returned for a timeframe starts
  * significantly later than requested. Returns null for MAX or when the gap
  * is ≤30 days (weekends/holidays/data warmup are normal).
+ *
+ * `isCustomRange` must be set when the user picked explicit from/to dates: the
+ * expected start then comes from that range, not from the timeframe button, so
+ * measuring against getTimeframeStart() would compare against the wrong date and
+ * fire (or stay silent) for no reason.
  */
 export function dataAvailabilityMessage(
   data: HistoricalPoint[],
   timeframe: Timeframe,
+  isCustomRange = false,
 ): string | null {
-  if (timeframe === 'MAX' || data.length < 2) return null;
+  if (isCustomRange || timeframe === 'MAX' || data.length < 2) return null;
   const expectedStart = getTimeframeStart(timeframe);
   const actualStart = data[0].date;
   const gapDays = (new Date(actualStart).getTime() - new Date(expectedStart).getTime()) / 86_400_000;

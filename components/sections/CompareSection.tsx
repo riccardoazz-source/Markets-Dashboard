@@ -636,6 +636,38 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
     [displayAssets, spreadAssets],
   );
 
+  // Why the chart may cover LESS than the selected timeframe. Two distinct causes,
+  // and the notice names the one that applies — otherwise a card reading
+  // "Return (10Y)" over a five-month window looks like a broken number.
+  const windowNote = useMemo<string | null>(() => {
+    if (customRange || timeframe === 'MAX' || assets.length === 0) return null;
+    const OVERLAY = new Set([
+      ...RECESSION_SERIES, 'BTC_HALVING', 'FOMC_MEETINGS', 'FED_CHAIRS', 'MONTHLY_MARKERS', 'YEARLY_MARKERS',
+      ...Object.keys(EVENT_INDICATOR_CATEGORY),
+    ]);
+    const tfStart = getTimeframeStart(timeframe);
+    const firsts = assets
+      .filter(a => !OVERLAY.has(a.symbol))
+      .map(a => {
+        const src = a.rawData ?? a.data;
+        const first = src.find(d => d.date >= tfStart)?.date ?? src[0]?.date;
+        return first ? { name: a.name, first } : null;
+      })
+      .filter((x): x is { name: string; first: string } => x != null);
+    if (firsts.length === 0) return null;
+
+    // Aligned start uses the LATEST first date across assets; without it each asset
+    // simply begins where its own history begins.
+    const limiter = firsts.reduce((m, x) => (x.first > m.first ? x : m), firsts[0]);
+    const gapDays = (new Date(limiter.first).getTime() - new Date(tfStart).getTime()) / 86_400_000;
+    if (gapDays <= 30) return null;
+    const label = new Date(limiter.first + 'T12:00:00Z')
+      .toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+    return alignStart && firsts.length > 1
+      ? `Aligned start: comparison runs from ${label} — ${limiter.name} has no data before then`
+      : `Data available from ${label}`;
+  }, [assets, timeframe, customRange, alignStart]);
+
   const safeStackIdx = Math.min(stackAssetIdx, Math.max(0, displayAssets.length - 1));
   // Stack isolates the chosen asset in its own chart below. Tools draw on the
   // chosen asset WHEREVER it is: on the main overlay when not stacked, on the
@@ -1000,6 +1032,11 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
         </div>
       ) : displayAssets.length > 0 ? (
         <ChartErrorBoundary>
+          {windowNote && (
+            <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5 mb-3">
+              ⚠ {windowNote}
+            </p>
+          )}
           <div className="rounded-xl border border-border bg-bg-card p-4">
             <CompareChart assets={mainChartAssets} height={360} logScale={!normalized && logScale} percentMode={normalized}
               overlay={toolAsset ? { symbol: toolAsset.symbol, tools: stackTools } : undefined}

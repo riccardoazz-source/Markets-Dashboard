@@ -891,7 +891,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       const res = await fetch(url);
       const stockData = await res.json() as StockData;
       setData(stockData);
-      setDataMsg(dataAvailabilityMessage(stockData?.prices ?? [], tf));
+      setDataMsg(dataAvailabilityMessage(stockData?.prices ?? [], tf, !!override));
     } catch { setData(null); setDataMsg(null); }
     finally { setLoading(false); }
   }, []);

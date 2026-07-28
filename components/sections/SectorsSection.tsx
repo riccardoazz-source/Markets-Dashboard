@@ -135,7 +135,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
       const data = Array.isArray(raw) ? raw : [];
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
-      setDataMsg(dataAvailabilityMessage(data, tf));
+      setDataMsg(dataAvailabilityMessage(data, tf, !!override));
     } catch (e) {
       console.error(e);
     } finally {

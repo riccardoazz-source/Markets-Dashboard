@@ -177,7 +177,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
       }
       setHistorical(data);
       setCAGRData(calculateCAGR(data, tf));
-      setDataMsg(dataAvailabilityMessage(data, tf));
+      setDataMsg(dataAvailabilityMessage(data, tf, !!override));
     } catch (e) { console.error(e); }
     finally { setHistLoading(false); }
   }, []);

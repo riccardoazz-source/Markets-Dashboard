@@ -107,7 +107,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       const pts = data.points?.map(p => ({ date: p.date, close: p.rate })) ?? [];
       setHistorical(pts);
       setAverage(data.average ?? null);
-      setDataMsg(dataAvailabilityMessage(pts, tf));
+      setDataMsg(dataAvailabilityMessage(pts, tf, !!override));
     } catch (e) {
       console.error(e);
     } finally {
