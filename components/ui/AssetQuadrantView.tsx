@@ -21,9 +21,7 @@ import { PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 // the SAME pipeline as the live Rotation Quadrant; the formula lives in one place.
 
 interface QPoint { date: string; score: number; r3m: number; phase: string | null; close: number | null }
-interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number }
-
-const TF_OPTIONS: Timeframe[] = ['1D', '1M', '3M', '6M', 'MTD', 'YTD', '5Y'];
+interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number; coarse?: boolean }
 
 const phaseColor = (p: string | null | undefined): string =>
   p && PHASE_META[p as RotationPhase] ? PHASE_META[p as RotationPhase].dot : '#6b7280';
@@ -107,9 +105,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         </div>
 
         <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+          {/* Full standard ladder: 1D…MAX + Custom, same as every other chart. */}
           <TimeframeSelector
             value={timeframe}
-            options={TF_OPTIONS}
             onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
             isCustom={!!customRange}
             onCustomRange={(from, to) => setCustomRange({ from, to })}
@@ -138,8 +136,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                 <p className="text-[11px] font-medium text-gray-400">Model quadrant over time</p>
                 <div className="flex items-center gap-2 flex-wrap">
                   {Object.entries(PHASE_META).map(([k, m]) => (
-                    <span key={k} className="flex items-center gap-1 text-[9px] text-gray-500">
-                      <span className="inline-block w-2 h-2 rounded-full" style={{ background: m.dot }} />{m.label}
+                    <span key={k} className="flex items-center gap-1 text-[9px] text-gray-400" title={m.hint}>
+                      <span className="inline-block w-4 h-2.5 rounded-sm" style={{ background: m.dot }} />{m.label}
                     </span>
                   ))}
                 </div>
@@ -147,11 +145,19 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
               <ResponsiveContainer width="100%" height={150}>
                 <ComposedChart data={points} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                  {/* One shaded band per phase run — the model's regime, in colour. */}
+                  {/* Each phase run twice: a faint full-height wash for context, and
+                      a SOLID ribbon along the bottom that actually reads as a colour.
+                      The wash alone was too pale to tell the four phases apart. */}
                   {runs.map((r, i) => (
                     <ReferenceArea
-                      key={`run-${i}`} x1={r.from} x2={r.to}
-                      fill={phaseColor(r.phase)} fillOpacity={0.16} stroke="none"
+                      key={`wash-${i}`} x1={r.from} x2={r.to}
+                      fill={phaseColor(r.phase)} fillOpacity={0.1} stroke="none"
+                    />
+                  ))}
+                  {runs.map((r, i) => (
+                    <ReferenceArea
+                      key={`ribbon-${i}`} x1={r.from} x2={r.to} y1={0} y2={7}
+                      fill={phaseColor(r.phase)} fillOpacity={0.95} stroke="none"
                     />
                   ))}
                   {/* Dashed line at every phase change — read straight up to the price. */}
@@ -179,9 +185,13 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               </ResponsiveContainer>
 
               <p className="text-[9px] text-gray-600 leading-snug">
-                Score = the model&apos;s percentile against the whole universe on that date (above 50 = top half);
-                the band colours the resulting quadrant. Dashed lines mark where the call changed — look straight up
-                to see what the price did next. Rebuilt as of each date with no look-ahead, one step ≈ {data?.stepDays ?? '—'} days.
+                The <b className="text-gray-500">purple line</b> is the model&apos;s percentile against the whole
+                universe on that date — above the dashed 50 line means the top half. The{' '}
+                <b className="text-gray-500">colour strip along the bottom</b> (and the matching tint behind) is the
+                quadrant that follows from it. Vertical dashed lines mark where the call CHANGED: read straight up to
+                the price to see what happened next. Every date is rebuilt with no look-ahead, one sample ≈{' '}
+                {data?.stepDays ?? '—'} days
+                {data?.coarse ? ' — samples between those dates are not shown, so very short phases can be missed' : ''}.
               </p>
 
               {summary.length > 0 && (

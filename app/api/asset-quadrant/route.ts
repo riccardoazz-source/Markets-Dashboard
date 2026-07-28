@@ -40,6 +40,7 @@ function windowStart(tf: string, now: Date): Date {
     case '3Y':  return subYears(now, 3);
     case '5Y':  return subYears(now, 5);
     case '10Y': return subYears(now, 10);
+    case 'MAX': return subYears(now, 25);
     default:    return subYears(now, 1);
   }
 }
@@ -69,12 +70,12 @@ export async function GET(req: Request) {
   const now = new Date();
   const start = windowStart(timeframe, now);
   const spanDays = Math.max(1, Math.round((now.getTime() - start.getTime()) / 86_400_000));
-  // Each step rescores the WHOLE universe (the Y axis is a cross-sectional
-  // percentile), which is the expensive part — so the number of steps is capped
-  // and the resolution is reported back for the UI to state honestly.
-  const steps = Math.min(30, Math.max(4, Math.round(spanDays / 7)));
-  const stepDays = spanDays / (steps - 1);
-  const dates = Array.from({ length: steps }, (_, i) => new Date(start.getTime() + i * stepDays * 86_400_000));
+  // Ideal resolution is one step per WEEK — coarser than that and short-lived
+  // phases (the model flipping and flipping back inside a month) vanish entirely,
+  // which is exactly what makes a long window look like it has fewer regions than
+  // it should. How many we can actually afford is measured below, not guessed:
+  // each step rescores the whole universe, so the cost depends on the machine.
+  const idealSteps = Math.min(160, Math.max(4, Math.round(spanDays / 7) + 1));
 
   // Window + a year of lookback: the oldest step still needs its own trailing
   // history to be scored.
@@ -90,33 +91,68 @@ export async function GET(req: Request) {
   const startStr = fmt(start);
   const price = ownHist.filter(p => p.date >= startStr).map(p => ({ date: p.date, close: p.close }));
 
-  const points: { date: string; score: number; r3m: number; phase: string | null; close: number | null }[] = [];
-  for (const d of dates) {
+  type QPoint = { date: string; score: number; r3m: number; phase: string | null; close: number | null };
+
+  // Score the whole universe as of one date and read this asset's rank out of it.
+  const evalAt = (d: Date): QPoint | null => {
     const inputs = buildInputsAsOf(universe, histMap, d);
     const scored = scoreRotation(inputs).filter(x => x.score > -1 && x.item.r3m != null);
-    if (scored.length < 2) continue;
+    if (scored.length < 2) return null;
     const asc = [...scored].sort((a, b) => a.score - b.score);
     const idx = asc.findIndex(x => x.item.symbol === symbol);
-    if (idx < 0) continue;
+    if (idx < 0) return null;
     const row = asc[idx];
-    if (row.item.r3m == null) continue;
+    if (row.item.r3m == null) return null;
     const pct = (idx / (asc.length - 1)) * 100;
     const dateStr = fmt(d);
-    points.push({
+    return {
       date: dateStr,
       score: Math.round(pct),
       r3m: row.item.r3m,
       phase: classifyPhase(pct, row.item.r3m),
       close: priceAsOf(ownHist, dateStr),
-    });
+    };
+  };
+
+  const idealDates = Array.from({ length: idealSteps }, (_, i) =>
+    new Date(start.getTime() + (i * spanDays / (idealSteps - 1)) * 86_400_000));
+
+  // Price TODAY's step first: it is the one reading that must never be dropped
+  // (a phase entered days ago has only this sample), and timing it tells us how
+  // many more we can afford — measured, not guessed, so a fast run gets fine
+  // resolution and a slow one still returns instead of timing out.
+  const t0 = Date.now();
+  const lastPoint = evalAt(idealDates[idealDates.length - 1]);
+  const perStepMs = Math.max(1, Date.now() - t0);
+  const BUDGET_MS = 13_000;
+  const affordable = Math.max(4, Math.floor(BUDGET_MS / perStepMs));
+  const nSteps = Math.min(idealSteps, affordable);
+
+  // Evenly subsample the ideal grid; the final date is added separately below.
+  const chosen: Date[] = [];
+  for (let i = 0; i < nSteps - 1; i++) {
+    chosen.push(idealDates[Math.round((i * (idealDates.length - 1)) / (nSteps - 1))]);
   }
 
+  const points: QPoint[] = [];
+  const deadline = t0 + BUDGET_MS;
+  for (const d of chosen) {
+    if (Date.now() > deadline) break;   // hard stop; we still have today's point
+    const p = evalAt(d);
+    if (p) points.push(p);
+  }
+  if (lastPoint) points.push(lastPoint);
+
+  const stepDays = points.length > 1 ? spanDays / (points.length - 1) : spanDays;
   const data = {
     symbol,
     timeframe,
     generatedAt: fmt(now),
     universeSize: universe.length,
     stepDays: Math.round(stepDays),
+    // True when the budget forced fewer samples than the weekly ideal, so the UI
+    // can say the resolution is coarse rather than implying the phases are exact.
+    coarse: points.length < idealSteps,
     price,
     points,
   };
