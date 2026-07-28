@@ -140,7 +140,7 @@ export interface QuadrantTrail {
 // faintest, so direction is readable at a glance (down-left → up-right = an asset
 // climbing out of Lagging). Drawn under the dots, inside the chart so it can use
 // recharts' live pixel scales.
-function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number) {
+function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, live: Map<string, PlotAsset>) {
   return function TrailLayer(props: CustomizedProps) {
     const { xAxisMap, yAxisMap, offset } = props;
     if (!xAxisMap || !yAxisMap || !offset || trails.length === 0) return null;
@@ -157,11 +157,24 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number) {
         y: yScale(p.score),
         date: p.date,
       }));
+      // The path must END on the live dot. The trail's own "today" step is
+      // recomputed server-side from full history, while the dot comes from the
+      // rolling-returns endpoint — near-identical but not bit-identical, which
+      // left a visible gap. Replace that last step with the dot's real position
+      // so the two always meet by construction.
+      const dot = live.get(t.symbol);
+      if (dot) {
+        pts.pop();
+        pts.push({ x: xScale(dot.r3mPlot), y: yScale(dot.accScore), date: '' });
+      }
       if (pts.length < 2) continue;
 
       // Include the year once the path spans more than a year, otherwise the
       // month alone is unambiguous and far less cluttered.
-      const spanDays = (new Date(pts[pts.length - 1].date).getTime() - new Date(pts[0].date).getTime()) / 86_400_000;
+      // Measured on the SERVER's dates: the final plotted point is the live dot,
+      // which carries no date of its own.
+      const srv = t.points;
+      const spanDays = (new Date(srv[srv.length - 1].date).getTime() - new Date(srv[0].date).getTime()) / 86_400_000;
       const fmtDate = (iso: string) => {
         const d = new Date(iso + 'T12:00:00Z');
         return d.toLocaleDateString('en-US', spanDays > 400
@@ -205,15 +218,17 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number) {
       }
 
       // A dot per step, so the pace of the move is visible (bunched = stalled).
+      // The final position is skipped: that IS the asset's live dot, already drawn
+      // and already labelled with its name — a second marker and a "now" caption
+      // there would just duplicate what the chart is showing.
       pts.forEach((p, i) => {
+        if (i === pts.length - 1) return;
         const frac = pts.length > 1 ? i / (pts.length - 1) : 1;
-        const isNow = i === pts.length - 1;
         nodes.push(
           <circle
             key={`${t.symbol}-pt-${i}`}
-            cx={p.x} cy={p.y} r={isNow ? 3.4 : 2}
+            cx={p.x} cy={p.y} r={2}
             fill={color} fillOpacity={0.3 + frac * 0.6}
-            stroke={isNow ? color : 'none'} strokeWidth={isNow ? 1.5 : 0} strokeOpacity={0.5}
           >
             <title>{`${t.name} · ${p.date}`}</title>
           </circle>,
@@ -226,11 +241,11 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number) {
               key={`${t.symbol}-lbl-${i}`}
               x={p.x + (leftish ? 6 : -6)} y={p.y - 5}
               textAnchor={leftish ? 'start' : 'end'}
-              fill={color} fillOpacity={isNow ? 0.95 : 0.55 + frac * 0.25}
-              fontSize={8.5} fontWeight={isNow ? 700 : 400}
+              fill={color} fillOpacity={0.55 + frac * 0.25}
+              fontSize={8.5}
               style={{ paintOrder: 'stroke', stroke: '#0b1020', strokeWidth: 2.5, strokeLinejoin: 'round' }}
             >
-              {isNow ? 'now' : fmtDate(p.date)}
+              {fmtDate(p.date)}
             </text>,
           );
         }
@@ -425,7 +440,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
 
   const [xMin, xMax] = xDomain;
   const LabelLayer = makeLabelLayer(labeled);
-  const TrailLayer = makeTrailLayer(trails ?? [], clampEdge);
+  // Live dot positions, so each trail can terminate exactly on its asset's dot.
+  const TrailLayer = makeTrailLayer(trails ?? [], clampEdge, new Map(plot.map(a => [a.symbol, a])));
 
   return (
     <div className="space-y-1">
@@ -445,12 +461,17 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
           <span className="text-gray-600">Trail: faint → solid = past → now, arrows show direction</span>
           {trails.map(t => {
             const c = GROUP_COLORS[t.group] ?? '#6b7280';
-            const from = t.points[0]?.date, to = t.points[t.points.length - 1]?.date;
+            const from = t.points[0]?.date;
+            // Day-level start date — a "2026-07 → 2026-07" range said nothing on
+            // the shorter windows, where the whole path sits inside one month.
+            const fromLabel = from
+              ? new Date(from + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' })
+              : '';
             return (
               <span key={t.symbol} className="flex items-center gap-1" style={{ color: c }}>
                 <span className="inline-block w-3 border-t-2" style={{ borderColor: c }} />
                 {t.name}
-                <span className="text-gray-600">{from?.slice(0, 7)} → {to?.slice(0, 7)} · {t.points.length} steps</span>
+                <span className="text-gray-600">from {fromLabel} · {t.points.length} steps</span>
               </span>
             );
           })}
