@@ -33,6 +33,8 @@ interface SentimentData {
   risk_note?: string;
   /** Upcoming catalysts: "asset — event (timing): impact", pipe-separated. */
   catalysts?: string;
+  /** '1' when the brief was produced WITHOUT live web search (fallback run). */
+  no_live_search?: string;
   confidence?: string;
   // Per-asset-class notes
   indexes_note?: string;
@@ -96,6 +98,14 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
   const classNotes = CLASS_NOTES.filter(c => d[c.key]);
   return (
     <div className="space-y-3">
+      {/* The grounded run failed and this came from the fallback: no live web
+          access, so nothing here reflects today's news. Say so — an unmarked
+          ungrounded brief is what produced invented event dates. */}
+      {d.no_live_search === '1' && (
+        <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
+          ⚠ Written without live web search — treat as a read of the table only, not of today&apos;s news.
+        </p>
+      )}
       {d.headline && (
         <p className={clsx('font-semibold text-gray-100 leading-snug', compact ? 'text-xs' : 'text-sm')}>{d.headline}</p>
       )}

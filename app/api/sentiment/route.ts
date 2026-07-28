@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { FOMC_MEETING_DATES, FOMC_DOT_PLOT_SET } from '@/lib/config';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -25,7 +26,7 @@ const CLASS_FIELDS = ['indexes_note', 'crypto_note', 'commodities_note', 'sector
 const FIELDS = [
   'headline', 'drivers', 'regime_now', 'regime_next', 'macro_note', 'macro_backdrop',
   'outlook_note', 'rotation_note', 'risk_note', 'confidence', 'fear_greed',
-  'catalysts',
+  'catalysts', 'no_live_search',
   ...CLASS_FIELDS,
 ];
 
@@ -167,16 +168,36 @@ export async function POST(req: Request) {
     'rotation_note: <MAX 25 WORDS. Where capital is rotating — name the strongest and weakest asset classes today.>\n' +
     classInstr + '\n' +
     'risk_note: <MAX 20 WORDS. Single biggest risk combining market + macro.>\n' +
-    'catalysts: <MAX 70 WORDS. From search #5: the 2-4 most important UPCOMING catalysts — things that have not happened yet. ' +
-    'Write each as "Asset/sector — event (timing): expected impact", separated by " | ". ' +
-    'Example: "Crypto — CLARITY Act Senate vote (Sept): passage would legitimise token listings, bullish exchanges and alts | Gold — FOMC Sept 17 (cut priced 80%): a hold would knock gold" | ' +
-    'Prefer dated, verifiable events over vague themes; say if timing is uncertain. If you genuinely find none, write "n/a".>\n' +
+    'catalysts: <MAX 80 WORDS. From search #5: the 2-4 most important UPCOMING catalysts — things that have NOT happened yet. ' +
+    'Write each as "Asset/sector — event (date): expected impact", separated by " | ".\n' +
+    '  RULES, all mandatory:\n' +
+    '  (a) DATES: only a date you actually verified in search #5, or one from the KNOWN CALENDAR given below the table. If you did not verify it, write "date TBC" — NEVER guess or recall a date from memory. A wrong date makes the whole brief useless.\n' +
+    '  (b) If the KNOWN CALENDAR shows a central-bank decision within ~2 weeks, it MUST be one of your catalysts.\n' +
+    '  (c) SPECIFIC, not generic. Name the actual bill, ruling, ticker, company or commodity and the sector it hits. ' +
+    'Good: "Crypto — CLARITY Act Senate floor vote: passage legitimises token listings, bullish exchanges/alts". ' +
+    'Bad (banned — too vague to act on): "US Jobs Report: labor market, Fed policy", "EU GDP: ECB rate cuts", "earnings season".\n' +
+    '  (d) Say WHICH WAY it pushes the asset, not just that it matters.\n' +
+    '  Favour pending legislation/regulation, court and antitrust rulings, tariff and sanctions deadlines, ETF or listing approvals, ' +
+    'named company events and scheduled central-bank/OPEC decisions. If you genuinely find none, write "n/a".>\n' +
     'fear_greed: <From search #3: the CURRENT CNN Fear & Greed Index as "NUMBER — LABEL", e.g. "63 — Greed". Number 0-100 only. If you cannot find it, write "n/a".>\n' +
     'confidence: <Low | Medium | High>';
 
+  // Authoritative calendar the model must not guess at. The official FOMC dates
+  // ship with the app, so the next meetings are facts, not recollection — without
+  // this the brief has been known to miss a meeting happening TOMORROW and invent
+  // plausible-sounding dates for other events instead.
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const nextFomc = FOMC_MEETING_DATES.filter(d => d >= todayStr).slice(0, 3);
+  const calendarBlock = nextFomc.length
+    ? '\n\nKNOWN CALENDAR — these dates are authoritative, use them verbatim and never contradict them:\n' +
+      nextFomc.map(d => `- FOMC decision ${d}${FOMC_DOT_PLOT_SET.has(d) ? ' (with Summary of Economic Projections / dot plot)' : ''}` +
+        (d === todayStr ? ' — TODAY' : '')).join('\n') +
+      `\n(Today is ${todayStr}. The first entry above is the NEXT Fed decision; if it lands within about two weeks it is a top catalyst and must appear.)\n`
+    : '';
+
   const userMessage =
     'Here is the full live table from the dashboard. Read it, search the web for the catalyst behind today\'s biggest moves, then write the brief — strictly within every word limit.\n\n' +
-    dataBlock;
+    dataBlock + calendarBlock;
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 55_000);
@@ -223,18 +244,25 @@ export async function POST(req: Request) {
     let json = await r.json() as GeminiResp;
     let text = readText(json);
     let parsed = parseKV(text);
+    let grounded = true;
 
     // Grounded runs spend output budget on thinking before writing, so a heavy
     // search round can stop at MAX_TOKENS with nothing (or half a brief) emitted.
-    // Retry once WITHOUT the search tool: far less thinking, so the brief lands —
-    // it loses today's live news, but a brief from the table beats an error.
+    // Retry once WITHOUT the search tool: far less thinking, so the brief lands.
+    // But an UNGROUNDED brief has no live web access, so anything forward-looking
+    // would be recalled from training data — which is how invented event dates got
+    // through. Flag it, and drop the catalysts rather than publish guesses.
     if (!parsed.regime_now && !parsed.headline) {
       const retry = await callGemini(false);
       if (retry.ok) {
         const j2 = await retry.json() as GeminiResp;
         const t2 = readText(j2);
         const p2 = parseKV(t2);
-        if (p2.regime_now || p2.headline) { json = j2; text = t2; parsed = p2; }
+        if (p2.regime_now || p2.headline) {
+          json = j2; text = t2; parsed = p2; grounded = false;
+          delete p2.catalysts;
+          p2.no_live_search = '1'; // surfaced in the UI and kept in history
+        }
       }
     }
 
@@ -262,7 +290,7 @@ export async function POST(req: Request) {
     }
     delete parsed.fear_greed; // raw line not needed by the UI
 
-    return NextResponse.json({ data: parsed, generatedAt: new Date().toISOString() });
+    return NextResponse.json({ data: parsed, generatedAt: new Date().toISOString(), grounded });
   } catch (e) {
     const aborted = e instanceof Error && e.name === 'AbortError';
     return NextResponse.json({ error: aborted ? 'timeout' : 'fetch_failed' }, { status: 200 });
