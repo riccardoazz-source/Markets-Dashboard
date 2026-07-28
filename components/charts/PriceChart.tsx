@@ -63,6 +63,13 @@ interface Props {
   totalReturnData?: HistoricalPoint[];
   /** Called when the user clicks "Set as period" on the drag-select banner. */
   onSetRange?: (from: string, to: string) => void;
+  /**
+   * Shared recharts sync group. Every chart given the same id moves its crosshair
+   * and tooltip together, so hovering the price also reads the RSI/MACD panes
+   * below it — and any sibling chart outside this component (the Quadrant view's
+   * model panel) that passes the same id.
+   */
+  syncId?: string;
 }
 
 function formatDate(dateStr: string, data: HistoricalPoint[]) {
@@ -117,7 +124,7 @@ function fullIndexForVisible(fullDates: string[], visDates: string[]): number[] 
 
 // ── Oscillator sub-charts ────────────────────────────────────────────────────
 
-function RSISubChart({ data, grain }: { data: { date: string; rsi: number | null }[]; grain?: string }) {
+function RSISubChart({ data, grain, syncId }: { data: { date: string; rsi: number | null }[]; grain?: string; syncId?: string }) {
   const valid = data.filter(d => d.rsi != null);
   if (valid.length === 0) {
     return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
@@ -132,7 +139,7 @@ function RSISubChart({ data, grain }: { data: { date: string; rsi: number | null
         </span>
       </div>
       <ResponsiveContainer width="100%" height={80}>
-        <LineChart data={data} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+        <LineChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis domain={[0, 100]} ticks={[30, 50, 70]}
@@ -152,9 +159,10 @@ function RSISubChart({ data, grain }: { data: { date: string; rsi: number | null
   );
 }
 
-function MACDSubChart({ data, grain }: {
+function MACDSubChart({ data, grain, syncId }: {
   data: { date: string; macd: number | null; signal: number | null; hist: number | null }[];
   grain?: string;
+  syncId?: string;
 }) {
   const valid = data.filter(d => d.hist != null);
   if (valid.length === 0) {
@@ -171,7 +179,7 @@ function MACDSubChart({ data, grain }: {
         </span>
       </div>
       <ResponsiveContainer width="100%" height={80}>
-        <ComposedChart data={data} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+        <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={36}
@@ -196,11 +204,12 @@ function MACDSubChart({ data, grain }: {
 }
 
 function MomentumSubChart({
-  data, label, color,
+  data, label, color, syncId,
 }: {
   data: { date: string; value: number | null }[];
   label: string;
   color: string;
+  syncId?: string;
 }) {
   const valid = data.filter(d => d.value != null);
   if (valid.length === 0) {
@@ -213,7 +222,7 @@ function MomentumSubChart({
         <span className="text-[9px] text-gray-600">Rate of Change — % vs N periods ago</span>
       </div>
       <ResponsiveContainer width="100%" height={70}>
-        <ComposedChart data={data} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+        <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={36}
@@ -241,7 +250,7 @@ function MomentumSubChart({
 export function PriceChart({
   data, symbol, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
-  enableDragSelect = true, toolsOverlay, totalReturnData, onSetRange,
+  enableDragSelect = true, toolsOverlay, totalReturnData, onSetRange, syncId,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
@@ -612,6 +621,7 @@ export function PriceChart({
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart
           data={chartData}
+          syncId={syncId} syncMethod="value"
           margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
           {...(enableDragSelect ? handlers : {})}
           style={{ cursor: enableDragSelect ? 'crosshair' : 'default' }}
@@ -818,11 +828,11 @@ export function PriceChart({
       </ResponsiveContainer>
 
       {/* Oscillator sub-charts */}
-      {rsiData && <RSISubChart data={rsiData} grain={rsiGrain ?? 'daily'} />}
-      {macdData && <MACDSubChart data={macdData} grain={macdGrain ?? 'daily'} />}
-      {momDailyData   && <MomentumSubChart data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
-      {momWeeklyData  && <MomentumSubChart data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}
-      {momMonthlyData && <MomentumSubChart data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
+      {rsiData && <RSISubChart data={rsiData} grain={rsiGrain ?? 'daily'} syncId={syncId} />}
+      {macdData && <MACDSubChart data={macdData} grain={macdGrain ?? 'daily'} syncId={syncId} />}
+      {momDailyData   && <MomentumSubChart syncId={syncId} data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
+      {momWeeklyData  && <MomentumSubChart syncId={syncId} data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}
+      {momMonthlyData && <MomentumSubChart syncId={syncId} data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
 
       {enableDragSelect && data.length > 1 && !range && (
         <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to measure a period</p>

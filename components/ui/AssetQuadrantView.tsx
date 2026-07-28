@@ -30,6 +30,9 @@ const phaseColor = (p: string | null | undefined): string =>
 // instantly instead of waiting on the network again.
 const viewCache = new Map<string, Payload>();
 
+// Ties the price chart, its indicator panes and the quadrant panel to one crosshair.
+const SYNC_ID = 'asset-quadrant';
+
 export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   symbol: string;
   name: string;
@@ -44,6 +47,24 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
+  const [priceData, setPriceData] = useState<HistoricalPoint[] | null>(null);
+  const [priceLoading, setPriceLoading] = useState(true);
+
+  // The price is ONE symbol and comes back in milliseconds; the model history has
+  // to rank the whole universe week by week and takes seconds. Fetching them
+  // together meant staring at a spinner for the slow one before seeing either, so
+  // they run in parallel and the chart draws as soon as the price lands.
+  useEffect(() => {
+    let cancelled = false;
+    setPriceLoading(true);
+    setPriceData(null);
+    fetch(`/api/historical?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`)
+      .then(r => r.json())
+      .then((rows: HistoricalPoint[]) => { if (!cancelled) setPriceData(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setPriceData([]); })
+      .finally(() => { if (!cancelled) setPriceLoading(false); });
+    return () => { cancelled = true; };
+  }, [symbol, timeframe]);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +78,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
       .then(r => r.json())
       .then((j: Payload & { error?: string }) => {
         if (cancelled) return;
-        if (j.error || !j.price?.length) { setError('No history for this asset over this window.'); setData(null); }
+        if (j.error || !j.points?.length) { setError('Could not build the model history for this window.'); setData(null); }
         else { viewCache.set(ck, j); setData(j); }
       })
       .catch(() => { if (!cancelled) setError('Could not load the quadrant history.'); })
@@ -67,10 +88,10 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
   // Price series trimmed to a drag-selected range, so both charts stay in step.
   const price = useMemo(() => {
-    const all = data?.price ?? [];
+    const all = priceData ?? [];
     if (!customRange) return all;
     return all.filter(p => p.date >= customRange.from && p.date <= customRange.to);
-  }, [data, customRange]);
+  }, [priceData, customRange]);
 
   const points = useMemo(() => {
     const all = data?.points ?? [];
@@ -131,19 +152,22 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
           />
         </div>
 
-        {loading ? (
+        {priceLoading ? (
           <div className="flex items-center justify-center h-56"><LoadingSpinner size={28} /></div>
-        ) : error ? (
-          <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ {error}</p>
         ) : (
           <>
             {/* PRICE — same chart component (and tools) as everywhere else. */}
+            {/* One sync group for the price, every indicator pane the tools open,
+                and the quadrant panel below: hovering any of them moves the
+                crosshair on all, so the model's call can be read at the exact
+                point on the price you are pointing at. */}
             <PriceChart
               data={price}
               symbol={symbol}
               color="auto"
               height={210}
               toolsOverlay={activeTools}
+              syncId={SYNC_ID}
               onSetRange={(from, to) => setCustomRange({ from, to })}
             />
 
@@ -160,8 +184,15 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                 </div>
               </div>
 
+              {loading ? (
+                <div className="flex items-center justify-center h-[150px] gap-2 text-[11px] text-gray-500">
+                  <LoadingSpinner size={16} /> ranking the universe week by week…
+                </div>
+              ) : error ? (
+                <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ {error}</p>
+              ) : (
               <ResponsiveContainer width="100%" height={150}>
-                <ComposedChart data={points} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <ComposedChart data={points} syncId={SYNC_ID} syncMethod="value" margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                   {/* Each phase run twice: a faint full-height wash for context, and
                       a SOLID ribbon along the bottom that actually reads as a colour.
                       The wash alone was too pale to tell the four phases apart. */}
@@ -200,6 +231,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   />
                 </ComposedChart>
               </ResponsiveContainer>
+              )}
 
               <p className="text-[9px] text-gray-600 leading-snug">
                 The <b className="text-gray-500">purple line</b> is the model&apos;s percentile against the whole
