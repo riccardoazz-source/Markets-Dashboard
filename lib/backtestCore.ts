@@ -85,9 +85,21 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
   const d6m = fmt(subDays(asOfDate, 180));
   const d1y = fmt(subDays(asOfDate, 365));
 
+  // Longest lookback any indicator below actually reads is 252 bars (trendR2Long,
+  // medianClose); the rest are 63 or less, and the recursive ones (RSI/MACD/ADX)
+  // converge long before that — after 400 bars an EMA-26 seed carries a weight of
+  // ~e^-27, i.e. nothing. So only the tail is needed. This matters a lot: without
+  // it every step walked the WHOLE history (~6,000 bars per asset on a MAX
+  // window), the cost grew with the window, and long views collapsed to a handful
+  // of samples — which is what made phases disappear the further back you looked.
+  const HIST_TAIL = 400;
+
   return universe.map(m => {
     const h = histMap.get(m.symbol) ?? [];
-    const upToAsOf = h.filter(p => p.date <= asOf);           // daily OHLC, no look-ahead
+    // Binary-search the as-of cutoff instead of filtering the whole array.
+    let lo = 0, hi = h.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (h[mid].date <= asOf) lo = mid + 1; else hi = mid; }
+    const upToAsOf = h.slice(Math.max(0, lo - HIST_TAIL), lo);  // daily OHLC, no look-ahead
     const closesAsOf = upToAsOf.map(p => p.close);
     const adxState = computeWeeklyADX(upToAsOf);              // weekly ADX as of this date (M26)
     return {

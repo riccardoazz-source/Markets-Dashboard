@@ -46,6 +46,7 @@ function windowStart(tf: string, now: Date): Date {
 }
 
 export async function GET(req: Request) {
+  const reqStart = Date.now();
   const { searchParams } = new URL(req.url);
   const symbol = (searchParams.get('symbol') ?? '').trim();
   const timeframe = searchParams.get('timeframe') ?? '1Y';
@@ -124,7 +125,10 @@ export async function GET(req: Request) {
   const t0 = Date.now();
   const lastPoint = evalAt(idealDates[idealDates.length - 1]);
   const perStepMs = Math.max(1, Date.now() - t0);
-  const BUDGET_MS = 13_000;
+  // What is left of the edge budget AFTER the fetch, which on a long window is
+  // itself several seconds — budgeting a fixed slice regardless was how a slow
+  // fetch could still push the whole request to the ceiling.
+  const BUDGET_MS = Math.max(3_000, 19_000 - (Date.now() - reqStart));
   const affordable = Math.max(4, Math.floor(BUDGET_MS / perStepMs));
   const nSteps = Math.min(idealSteps, affordable);
 
@@ -135,7 +139,7 @@ export async function GET(req: Request) {
   }
 
   const points: QPoint[] = [];
-  const deadline = t0 + BUDGET_MS;
+  const deadline = Date.now() + BUDGET_MS;
   for (const d of chosen) {
     if (Date.now() > deadline) break;   // hard stop; we still have today's point
     const p = evalAt(d);
