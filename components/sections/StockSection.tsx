@@ -12,7 +12,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
-import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
+import { Sma200wLine, Ma200dLine, MaSpreadLine } from '@/components/ui/Sma200wLine';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { useGistData, usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
@@ -1202,6 +1202,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                         </div>
                         <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />
                         <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
+                        <MaSpreadLine sma200d={q.sma200d} sma200w={q.sma200w} />
                       </>
                     ) : (
                       <div className="mt-2 space-y-1.5">

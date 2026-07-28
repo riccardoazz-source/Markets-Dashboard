@@ -13,7 +13,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
-import { Sma200wLine, Ma200dLine } from '@/components/ui/Sma200wLine';
+import { Sma200wLine, Ma200dLine, MaSpreadLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, X, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
@@ -360,6 +360,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                   </div>
                   <Ma200dLine price={sector.price} sma200d={sector.sma200d} currency={sector.currency} />
                   <Sma200wLine price={sector.price} sma200w={sector.sma200w} currency={sector.currency} />
+                  <MaSpreadLine sma200d={sector.sma200d} sma200w={sector.sma200w} />
                 </>
               ) : (
                 <div className="mt-2 space-y-1.5">
