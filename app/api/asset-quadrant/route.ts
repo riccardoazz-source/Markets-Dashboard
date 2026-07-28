@@ -71,12 +71,11 @@ export async function GET(req: Request) {
   const now = new Date();
   const start = windowStart(timeframe, now);
   const spanDays = Math.max(1, Math.round((now.getTime() - start.getTime()) / 86_400_000));
-  // Ideal resolution is one step per WEEK — coarser than that and short-lived
-  // phases (the model flipping and flipping back inside a month) vanish entirely,
-  // which is exactly what makes a long window look like it has fewer regions than
-  // it should. How many we can actually afford is measured below, not guessed:
-  // each step rescores the whole universe, so the cost depends on the machine.
-  const idealSteps = Math.min(160, Math.max(4, Math.round(spanDays / 7) + 1));
+  // WEEKLY resolution across the whole window, with no cap on the number of
+  // samples: a coarser grid silently swallows short phases, and the longer the
+  // window the more it swallows. Affordable now only because buildInputsAsOf
+  // reads a fixed 400-bar tail, so a step costs the same on MAX as on 3M.
+  const idealSteps = Math.max(4, Math.round(spanDays / 7) + 1);
 
   // Window + a year of lookback: the oldest step still needs its own trailing
   // history to be scored.
@@ -118,34 +117,32 @@ export async function GET(req: Request) {
   const idealDates = Array.from({ length: idealSteps }, (_, i) =>
     new Date(start.getTime() + (i * spanDays / (idealSteps - 1)) * 86_400_000));
 
-  // Price TODAY's step first: it is the one reading that must never be dropped
-  // (a phase entered days ago has only this sample), and timing it tells us how
-  // many more we can afford — measured, not guessed, so a fast run gets fine
-  // resolution and a slow one still returns instead of timing out.
-  const t0 = Date.now();
-  const lastPoint = evalAt(idealDates[idealDates.length - 1]);
-  const perStepMs = Math.max(1, Date.now() - t0);
-  // What is left of the edge budget AFTER the fetch, which on a long window is
-  // itself several seconds — budgeting a fixed slice regardless was how a slow
-  // fetch could still push the whole request to the ceiling.
-  const BUDGET_MS = Math.max(3_000, 19_000 - (Date.now() - reqStart));
-  const affordable = Math.max(4, Math.floor(BUDGET_MS / perStepMs));
-  const nSteps = Math.min(idealSteps, affordable);
-
-  // Evenly subsample the ideal grid; the final date is added separately below.
-  const chosen: Date[] = [];
-  for (let i = 0; i < nSteps - 1; i++) {
-    chosen.push(idealDates[Math.round((i * (idealDates.length - 1)) / (nSteps - 1))]);
+  // Visit the grid by BISECTION — ends first, then midpoints, then quarters, and
+  // so on. Every sample is computed; the order only decides what survives if the
+  // platform's hard timeout ever intervenes, and in that case what is left is
+  // spread evenly across the whole window instead of a chunk of history going
+  // missing. Today's date is an endpoint, so it is always among the first done.
+  const order: number[] = [];
+  const seen = new Set<number>();
+  const push = (i: number) => { if (!seen.has(i)) { seen.add(i); order.push(i); } };
+  push(idealSteps - 1);                 // today
+  push(0);                              // window start
+  for (let gap = idealSteps - 1; gap > 1; gap = Math.ceil(gap / 2)) {
+    for (let i = 0; i < idealSteps; i += Math.max(1, Math.floor(gap / 2))) push(i);
   }
+  for (let i = 0; i < idealSteps; i++) push(i);   // sweep up any index missed
 
-  const points: QPoint[] = [];
-  const deadline = Date.now() + BUDGET_MS;
-  for (const d of chosen) {
-    if (Date.now() > deadline) break;   // hard stop; we still have today's point
-    const p = evalAt(d);
-    if (p) points.push(p);
+  // Only a last-resort guard against the platform killing the request outright,
+  // which would return nothing at all.
+  const deadline = reqStart + 21_000;
+  const collected: QPoint[] = [];
+  let truncated = false;
+  for (const i of order) {
+    if (Date.now() > deadline) { truncated = true; break; }
+    const p = evalAt(idealDates[i]);
+    if (p) collected.push(p);
   }
-  if (lastPoint) points.push(lastPoint);
+  const points = collected.sort((a, b) => a.date.localeCompare(b.date));
 
   const stepDays = points.length > 1 ? spanDays / (points.length - 1) : spanDays;
   const data = {
@@ -156,7 +153,9 @@ export async function GET(req: Request) {
     stepDays: Math.round(stepDays),
     // True when the budget forced fewer samples than the weekly ideal, so the UI
     // can say the resolution is coarse rather than implying the phases are exact.
-    coarse: points.length < idealSteps,
+    coarse: truncated,
+    steps: points.length,
+    idealSteps,
     price,
     points,
   };

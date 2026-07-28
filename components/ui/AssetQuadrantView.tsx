@@ -81,6 +81,16 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
       if (last && last.phase === p.phase) last.to = p.date;
       else out.push({ from: p.date, to: p.date, phase: p.phase });
     }
+    // A phase that lasted a SINGLE sample had from === to, i.e. a zero-width band
+    // that drew nothing — so a short Recovering spell counted in "time spent" but
+    // was nowhere on the strip. A phase holds until the next sample, so each run ends
+    // where the next one begins; the final run is widened back one sample so
+    // today's call is always visible.
+    for (let i = 0; i < out.length - 1; i++) out[i].to = out[i + 1].from;
+    const last = out[out.length - 1];
+    if (last && last.from === last.to && points.length >= 2) {
+      last.from = points[points.length - 2].date;
+    }
     return out;
   }, [points]);
   const transitions = runs.slice(1).map(r => r.from);
