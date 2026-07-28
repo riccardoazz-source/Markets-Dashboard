@@ -70,12 +70,12 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
   return (
     <DetailModal onClose={onClose}>
       <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
-        <div className="flex items-start justify-between gap-2">
-          <div>
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          <div className="min-w-0">
             <h3 className="text-base font-bold text-white">{name}</h3>
             <p className="text-xs text-gray-500 mt-0.5">{symbol} · {group}</p>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          <div className="flex items-center gap-1.5 flex-wrap justify-end min-w-0">
             {onCompare && (
               <button onClick={() => onCompare(symbol)}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium">

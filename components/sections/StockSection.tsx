@@ -1236,7 +1236,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       {selected && (
         <DetailModal onClose={() => setSelected(null)}>
         <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
               <h3 className="text-base font-bold text-white truncate">{selected.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
@@ -1249,7 +1249,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 )}
               </p>
             </div>
-            <div className="flex items-center gap-1.5 justify-end shrink-0 flex-wrap">
+            <div className="flex items-center gap-1.5 justify-end flex-wrap min-w-0">
               {onCompare && (
                 <button
                   onClick={() => onCompare(selected.symbol)}

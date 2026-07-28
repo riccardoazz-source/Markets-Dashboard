@@ -104,8 +104,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   return (
     <DetailModal onClose={onClose}>
       <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
-        <div className="flex items-start justify-between gap-2">
-          <div>
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          <div className="min-w-0">
             <h3 className="text-base font-bold text-white">{name}</h3>
             <p className="text-xs text-gray-500 mt-0.5">
               {symbol}{group ? ` · ${group}` : ''} · price vs the model&apos;s quadrant call
