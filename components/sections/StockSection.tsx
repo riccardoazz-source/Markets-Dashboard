@@ -34,6 +34,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { VolumeSubChart } from '@/components/charts/PriceChart';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
@@ -247,6 +248,7 @@ interface DualChartToolsOverlay {
 // the SAME y-axis width and right margin, or the plot areas start at different x
 // positions and the shared crosshair drifts between panes.
 const STOCK_SYNC_ID = 'stock-detail';
+const STOCK_PANE_HEIGHT = 80;
 const STOCK_AXIS_WIDTH = 64;
 
 function DualChart({
@@ -1469,6 +1471,23 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           ) : (
             <div className="flex items-center justify-center h-44 text-gray-500 text-sm">
               No data found. Try a different ticker.
+            </div>
+          )}
+
+          {/* Volume — the same pane the other tabs draw, so the tool means the same
+              thing everywhere. Stocks is where it matters most: this is the one
+              asset class that always reports volume. */}
+          {!loading && prices.length > 0 && activeTools.volume && (
+            <div className="rounded-lg border border-border p-3 bg-bg-input/40">
+              <VolumeSubChart
+                syncId={STOCK_SYNC_ID}
+                height={STOCK_PANE_HEIGHT}
+                data={prices.map((d, i) => ({
+                  date: d.date,
+                  volume: d.volume ?? null,
+                  up: i === 0 ? true : d.close >= prices[i - 1].close,
+                }))}
+              />
             </div>
           )}
 

@@ -32,6 +32,7 @@ export interface ActiveTools {
   momentumDaily: boolean;
   momentumWeekly: boolean;
   momentumMonthly: boolean;
+  volume: boolean;
   spyRatio: boolean;
   trend: boolean;      // linear-regression trend line
   trendFull: boolean;  // true = fit on FULL history (shown over the visible window); false = fit on the visible period only
@@ -44,6 +45,7 @@ export const DEFAULT_TOOLS: ActiveTools = {
   rsi: false, rsiWeekly: false, rsiMonthly: false,
   macd: false, macdWeekly: false, macdMonthly: false,
   momentumDaily: false, momentumWeekly: false, momentumMonthly: false,
+  volume: false,
   spyRatio: false,
   trend: false, trendFull: true,
 };
@@ -116,6 +118,11 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     [data],
   );
   const n = closes.length;
+
+  // Whether this ticker reports volume at all. Yahoo returns it for stocks, ETFs,
+  // crypto and futures, but most index symbols carry none — so the chip is offered
+  // only where there is something to draw, instead of opening an empty pane.
+  const hasVolume = useMemo(() => data.some(d => d.volume != null && d.volume > 0), [data]);
 
   // Full history so EVERY moving average can be enabled and computed regardless of the view
   // period (a MA is a fixed number today, independent of the window). Fetched as soon as the
@@ -287,6 +294,14 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                     {macdGrain}
                   </button>
                 )}
+                <Divider />
+                <ToolChip
+                  active={activeTools.volume} onToggle={() => toggle('volume')} label="Volume" color="slate"
+                  disabled={!hasVolume}
+                  title={hasVolume
+                    ? 'Traded volume per day, green when the close was up'
+                    : 'This ticker reports no volume (most index symbols do not)'}
+                />
                 <Divider />
                 <ToolChip active={momActive} onToggle={() => setMom(momActive ? null : 'daily')} label="Momentum" color="sky" disabled={n < 2} />
                 {momActive && (

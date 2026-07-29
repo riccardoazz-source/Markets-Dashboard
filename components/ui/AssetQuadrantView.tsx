@@ -222,6 +222,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     activeTools.rsi, activeTools.rsiWeekly, activeTools.rsiMonthly,
     activeTools.macd, activeTools.macdWeekly, activeTools.macdMonthly,
     activeTools.momentumDaily, activeTools.momentumWeekly, activeTools.momentumMonthly,
+    activeTools.volume,
   ].filter(Boolean).length;
 
   // A first estimate of the split. The constants below are only a starting point —

@@ -34,6 +34,9 @@ export interface QuoteData {
 export interface HistoricalPoint {
   date: string;
   close: number;
+  /** Daily traded volume. Present only when the source reports it — index tickers
+   *  usually do not, so anything reading it must handle its absence. */
+  volume?: number;
 }
 
 export interface CurrencyRate {

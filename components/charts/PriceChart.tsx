@@ -38,6 +38,7 @@ interface ToolsOverlay {
   momentumDaily?: boolean;
   momentumWeekly?: boolean;
   momentumMonthly?: boolean;
+  volume?: boolean;
   spyRatio?: boolean;
   sma200w?: boolean;
   trend?: boolean;
@@ -214,6 +215,54 @@ function MACDSubChart({ data, grain, syncId, height = 80 }: {
           <Tooltip
             contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
             formatter={(v: number, name: string) => [v != null ? v.toFixed(4) : '—', name]}
+            labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function VolumeSubChart({ data, syncId, height = 70 }: {
+  data: { date: string; volume: number | null; up: boolean }[];
+  syncId?: string;
+  height?: number;
+}) {
+  const valid = data.filter(d => d.volume != null);
+  if (valid.length === 0) {
+    // Not a failure to compute — this ticker simply publishes no volume. Most
+    // index symbols do not, so say which it is rather than showing an empty pane.
+    return <div className="text-[10px] text-gray-600 py-1">Volume: not reported for this ticker</div>;
+  }
+  const fmt = (v: number) => {
+    if (v >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+    if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+    if (v >= 1e3) return `${(v / 1e3).toFixed(0)}k`;
+    return `${v}`;
+  };
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-3 mb-0.5 px-1">
+        <span className="text-[10px] text-slate-300 font-semibold">Volume</span>
+        <span className="text-[9px] text-gray-600">
+          <span className="text-emerald-400">▮</span> close up &nbsp;
+          <span className="text-red-400">▮</span> close down
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+          <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+          <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
+            tickFormatter={v => fmt(v as number)} />
+          <Bar dataKey="volume" barSize={2} isAnimationActive={false}>
+            {data.map((entry, i) => (
+              <Cell key={i} fill={entry.up ? '#10b981' : '#ef4444'} fillOpacity={0.55} />
+            ))}
+          </Bar>
+          <Tooltip
+            contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+            formatter={(v: number) => [v != null ? fmt(v) : '—', 'Volume']}
             labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
           />
         </ComposedChart>
@@ -499,6 +548,16 @@ export function PriceChart({
   const momDailyData   = momDailyVals   ? data.map((d, i) => ({ date: d.date, value: momDailyVals[i]   })) : null;
   const momWeeklyData  = momWeeklyVals  ? data.map((d, i) => ({ date: d.date, value: momWeeklyVals[i]  })) : null;
   const momMonthlyData = momMonthlyVals ? data.map((d, i) => ({ date: d.date, value: momMonthlyVals[i] })) : null;
+
+  // Volume is a raw daily observation — nothing to compute, and nothing to project
+  // from full history the way a moving average needs. Coloured by the day's own
+  // direction, which is what makes a volume pane worth reading: whether the heavy
+  // days were buying or selling.
+  const volumeData = data.map((d, i) => ({
+    date: d.date,
+    volume: d.volume ?? null,
+    up: i === 0 ? true : d.close >= data[i - 1].close,
+  }));
 
   // Selection stats — period return, annualised CAGR, and (when the total-return
   // series carries dividends paid in the window) the dividend-inclusive IRR.
@@ -858,6 +917,9 @@ export function PriceChart({
       </ResponsiveContainer>
 
       {/* Oscillator sub-charts */}
+      {toolsOverlay?.volume && (
+        <VolumeSubChart syncId={syncId} height={subChartHeight} data={volumeData} />
+      )}
       {rsiData && <RSISubChart data={rsiData} grain={rsiGrain ?? 'daily'} syncId={syncId} height={subChartHeight} />}
       {macdData && <MACDSubChart data={macdData} grain={macdGrain ?? 'daily'} syncId={syncId} height={subChartHeight} />}
       {momDailyData   && <MomentumSubChart syncId={syncId} height={subChartHeight} data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
