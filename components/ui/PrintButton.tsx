@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Printer, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Printer, FileText, Image as ImageIcon, Loader2, Table2 } from 'lucide-react';
+import { getChartRows, rowsToCsv, downloadCsv } from '@/lib/chartExport';
 
 // Save the WHOLE panel — not just the part that fits on screen — as a PDF or a PNG.
 // A screenshot stops at the fold; both exports here take the panel's full height, so
@@ -169,6 +170,22 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
     }
   };
 
+  // The numbers behind the chart, exactly as the active tools computed them: price,
+  // MACD, RSI, momentum, volume, moving averages — one row per bar. A picture of a
+  // chart cannot be measured; this can.
+  const asCsv = () => {
+    setOpen(false);
+    const published = getChartRows();
+    if (!published) {
+      setError('No chart series to export here.');
+      setTimeout(() => setError(null), 4000);
+      return;
+    }
+    const root = rootOf();
+    const base = root ? fileName(root) : published.title;
+    downloadCsv(base, rowsToCsv(published.rows));
+  };
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -185,6 +202,7 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
         <div className="absolute right-0 top-full mt-1 z-[400] w-44 rounded-lg border border-border bg-bg-card shadow-2xl p-1">
           <MenuItem icon={<FileText size={13} />} title="PDF" hint="Paginated, print dialog" onClick={asPdf} />
           <MenuItem icon={<ImageIcon size={13} />} title="PNG" hint="One tall image" onClick={asImage} />
+          <MenuItem icon={<Table2 size={13} />} title="CSV" hint="The active tools' series" onClick={asCsv} />
         </div>
       )}
 

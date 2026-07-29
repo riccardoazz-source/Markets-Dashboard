@@ -7,6 +7,7 @@ import {
   LineChart, BarChart, Bar, Cell,
 } from 'recharts';
 import { HistoricalPoint } from '@/lib/types';
+import { publishChartRows, type ExportRow } from '@/lib/chartExport';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { spyBenchmarkSeries } from '@/lib/utils';
@@ -609,6 +610,44 @@ export function PriceChart({
   const volumeGrain: VolumeGrain =
     toolsOverlay?.volumeMonthly ? 'monthly' : toolsOverlay?.volumeWeekly ? 'weekly' : 'daily';
   const volumeData = aggregateVolume(data, volumeGrain);
+
+  // Publish exactly what the chart is showing, so "Export CSV" hands over the same
+  // numbers the eye is reading — price plus every series the active tools drew, one
+  // row per bar. Recomputing them in the export would be a second implementation of
+  // the indicators, and the two would drift.
+  useEffect(() => {
+    if (!data.length) return;
+    const rows: ExportRow[] = data.map((d, i) => {
+      const row: ExportRow = { date: d.date, close: d.close };
+      if (d.volume != null) row.volume = d.volume;
+      if (volumeGrain !== 'daily') {
+        const v = volumeData[i]?.volume;
+        if (v != null) row[`volume_${volumeGrain}`] = v;
+      }
+      if (totalReturnData?.[i]) row.total_return = totalReturnData[i].close;
+      if (sma20Vals)   row.sma20   = sma20Vals[i];
+      if (sma50Vals)   row.sma50   = sma50Vals[i];
+      if (sma200Vals)  row.sma200  = sma200Vals[i];
+      if (sma200wVals) row.sma200w = sma200wVals[i];
+      if (ema20Vals)   row.ema20   = ema20Vals[i];
+      if (ema100Vals)  row.ema100  = ema100Vals[i];
+      if (bands) { row.bb_lower = bands.lower[i] ?? null; row.bb_upper = bands.upper[i] ?? null; }
+      if (trendVals)   row.trend   = trendVals[i];
+      if (spyLine)     row.vs_spy  = spyLine[i];
+      if (rsiVals)     row[`rsi14_${rsiGrain ?? 'daily'}`] = rsiVals[i];
+      if (macdResult) {
+        const g = macdGrain ?? 'daily';
+        row[`macd_${g}`]        = macdResult.macd[i]   ?? null;
+        row[`macd_signal_${g}`] = macdResult.signal[i] ?? null;
+        row[`macd_hist_${g}`]   = macdResult.hist[i]   ?? null;
+      }
+      if (momDailyVals)   row.momentum_daily   = momDailyVals[i];
+      if (momWeeklyVals)  row.momentum_weekly  = momWeeklyVals[i];
+      if (momMonthlyVals) row.momentum_monthly = momMonthlyVals[i];
+      return row;
+    });
+    publishChartRows(symbol ?? 'chart', rows);
+  });
 
   // Selection stats — period return, annualised CAGR, and (when the total-return
   // series carries dividends paid in the window) the dividend-inclusive IRR.
