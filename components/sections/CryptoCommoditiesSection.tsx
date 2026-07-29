@@ -9,6 +9,7 @@ import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
+import { useChartFit, paneCountOf } from '@/lib/useChartFit';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { Sma200wLine, Ma200dLine, MaSpreadLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
@@ -218,6 +219,10 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
 
   const selectedCrypto = cryptoData.find(c => c.id === selected);
 
+  // Panes the active tools open push the panel taller; this keeps it inside the
+  // window by measuring it rather than guessing (see lib/useChartFit).
+  const { ref: fitRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools));
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -330,7 +335,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
 
       {selected && selectedCrypto && (
         <DetailModal onClose={() => setSelected(null)}>
-        <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+        <div ref={fitRef} className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
               <h3 className="text-base font-bold text-white">{selectedCrypto.name}</h3>
@@ -405,8 +410,8 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           {histLoading ? (
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : (
-            <PriceChart data={historical} symbol={coinYahooSym(selectedCrypto)} color="auto" height={200} toolsOverlay={activeTools}
-              syncId="crypto-detail"
+            <PriceChart data={historical} symbol={coinYahooSym(selectedCrypto)} color="auto" toolsOverlay={activeTools}
+              syncId="crypto-detail" height={chartH} subChartHeight={paneHeight}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
           {historical.length > 0 && (

@@ -34,7 +34,8 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
-import { VolumeSubChart } from '@/components/charts/PriceChart';
+import { VolumeSubChart, aggregateVolume, type VolumeGrain } from '@/components/charts/PriceChart';
+import { useChartFit, paneCountOf } from '@/lib/useChartFit';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
@@ -248,11 +249,11 @@ interface DualChartToolsOverlay {
 // the SAME y-axis width and right margin, or the plot areas start at different x
 // positions and the shared crosshair drifts between panes.
 const STOCK_SYNC_ID = 'stock-detail';
-const STOCK_PANE_HEIGHT = 80;
 const STOCK_AXIS_WIDTH = 64;
 
 function DualChart({
   prices, symbol, totalReturn, currency, eps, financials, toolsOverlay, spyPrices, onSetRange, syncId,
+  height = 260,
 }: {
   prices: HistoricalPoint[];
   symbol?: string;
@@ -265,6 +266,7 @@ function DualChart({
   onSetRange?: (from: string, to: string) => void;
   /** Shared crosshair group — the RSI/MACD panes below pass the same id. */
   syncId?: string;
+  height?: number;
 }) {
   const { handlers, range, area, clear } = useChartDragSelect();
   // Full daily history so every moving average + the full-history trend line render on short
@@ -598,7 +600,7 @@ function DualChart({
           )}
         </div>
       )}
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={height}>
         {/* key forces a fresh ComposedChart mount when the overlay changes — Recharts'
             internal layout doesn't always recompute when YAxis components are added/removed. */}
         <ComposedChart key={`chart-${showEps ? 'eps' : ''}${showFin ? 'fin' : ''}${showPe ? 'pe' : ''}`}
@@ -852,6 +854,10 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   // Full daily history for a weekly/monthly RSI / MACD on the stock's oscillator sub-charts.
   const rsiGrain = activeTools.rsiMonthly ? 'monthly' : activeTools.rsiWeekly ? 'weekly' : null;
   const macdGrain = activeTools.macdMonthly ? 'monthly' : activeTools.macdWeekly ? 'weekly' : null;
+  const volGrain: VolumeGrain = activeTools.volumeMonthly ? 'monthly' : activeTools.volumeWeekly ? 'weekly' : 'daily';
+  // Panes the active tools open push the panel taller; this keeps it inside the
+  // window by measuring it rather than guessing (see lib/useChartFit).
+  const { ref: fitRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools), { base: 260, minChart: 150 });
   const oscFullHist = useFullHistory(
     selected?.symbol,
     !!((activeTools.rsi && rsiGrain) || (activeTools.macd && macdGrain)),
@@ -1247,7 +1253,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
       {selected && (
         <DetailModal onClose={() => setSelected(null)}>
-        <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+        <div ref={fitRef} className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
               <h3 className="text-base font-bold text-white truncate">{selected.name}</h3>
@@ -1466,6 +1472,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               toolsOverlay={activeTools}
               spyPrices={spyPrices}
               syncId={STOCK_SYNC_ID}
+              height={chartH}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }}
             />
           ) : (
@@ -1481,12 +1488,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             <div className="rounded-lg border border-border p-3 bg-bg-input/40">
               <VolumeSubChart
                 syncId={STOCK_SYNC_ID}
-                height={STOCK_PANE_HEIGHT}
-                data={prices.map((d, i) => ({
-                  date: d.date,
-                  volume: d.volume ?? null,
-                  up: i === 0 ? true : d.close >= prices[i - 1].close,
-                }))}
+                height={paneHeight}
+                grain={volGrain}
+                data={aggregateVolume(prices, volGrain)}
               />
             </div>
           )}
@@ -1515,7 +1519,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             return (
               <div className="rounded-lg border border-border p-3 bg-bg-input/40">
                 <p className="text-[10px] text-indigo-400 font-semibold mb-1 capitalize">RSI 14 {rsiGrain ?? 'daily'}</p>
-                <ResponsiveContainer width="100%" height={80}>
+                <ResponsiveContainer width="100%" height={paneHeight}>
                   <LineChart data={rsiData} margin={{ top: 2, right: 16, left: 0, bottom: 0 }}
                     syncId={STOCK_SYNC_ID} syncMethod="value">
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -1565,7 +1569,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             return (
               <div className="rounded-lg border border-border p-3 bg-bg-input/40">
                 <p className="text-[10px] text-blue-400 font-semibold mb-1 capitalize">MACD (12, 26, 9) {macdGrain ?? 'daily'}</p>
-                <ResponsiveContainer width="100%" height={80}>
+                <ResponsiveContainer width="100%" height={paneHeight}>
                   <ComposedChart data={macdData} margin={{ top: 2, right: 16, left: 0, bottom: 0 }}
                     syncId={STOCK_SYNC_ID} syncMethod="value">
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />

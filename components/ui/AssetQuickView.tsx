@@ -10,6 +10,7 @@ import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { GeminiCommentButton } from './GeminiCommentButton';
 import { ChartNotes } from './ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from './ChartTools';
+import { useChartFit, paneCountOf } from '@/lib/useChartFit';
 import { LoadingSpinner } from './LoadingSpinner';
 import { HistoricalPoint, QuoteData, Timeframe } from '@/lib/types';
 import { formatPrice, formatPercent, colorForPercent, calculateCAGR, buildTotalReturnSeries, computeAssetIRR } from '@/lib/utils';
@@ -66,10 +67,13 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
   const cagr = historical.length > 1 ? calculateCAGR(historical, timeframe) : null;
   const irr = dividends.length > 0 ? computeAssetIRR(historical, dividends) : null;
   const tfLabel = customRange ? 'Custom' : timeframe;
+  // Panes the active tools open push the panel taller; this keeps it inside the
+  // window by measuring it rather than guessing (see lib/useChartFit).
+  const { ref: fitRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools));
 
   return (
     <DetailModal onClose={onClose}>
-      <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+      <div ref={fitRef} className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-white">{name}</h3>
@@ -133,7 +137,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
         {histLoading ? (
           <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
         ) : (
-          <PriceChart data={historical} symbol={symbol} color="auto" height={200}
+          <PriceChart data={historical} symbol={symbol} color="auto" height={chartH} subChartHeight={paneHeight}
             totalReturnData={totalReturn} toolsOverlay={activeTools} syncId="quickview-detail"
             onSetRange={(from, to) => setCustomRange({ from, to })} />
         )}

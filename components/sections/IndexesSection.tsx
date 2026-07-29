@@ -9,6 +9,7 @@ import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
+import { useChartFit, paneCountOf } from '@/lib/useChartFit';
 import { LoadingGrid, LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
@@ -195,6 +196,10 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   // Tools draw on the overlay-capable PriceChart, not the dividend dual-line chart.
   const anyToolActive = Object.values(activeTools).some(Boolean);
 
+  // Panes the active tools open push the panel taller; this keeps it inside the
+  // window by measuring it rather than guessing (see lib/useChartFit).
+  const { ref: fitRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools));
+
   return (
     <div className="space-y-3">
       {/* Count chip */}
@@ -323,7 +328,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
 
       {selected && selectedQuote && (
         <DetailModal onClose={() => setSelected(null)}>
-        <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+        <div ref={fitRef} className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
               <h3 className="text-base font-bold text-white leading-tight">{selectedConfig?.name}</h3>
@@ -405,8 +410,8 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           ) : divChartData && !anyToolActive ? (
             <DualLineDragChart data={divChartData} onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           ) : (
-            <PriceChart data={historical} symbol={selected ?? undefined} color="auto" height={200} toolsOverlay={activeTools}
-              totalReturnData={trSeries} syncId="indexes-detail"
+            <PriceChart data={historical} symbol={selected ?? undefined} color="auto" toolsOverlay={activeTools}
+              totalReturnData={trSeries} syncId="indexes-detail" height={chartH} subChartHeight={paneHeight}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
 

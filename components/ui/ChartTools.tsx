@@ -33,6 +33,8 @@ export interface ActiveTools {
   momentumWeekly: boolean;
   momentumMonthly: boolean;
   volume: boolean;
+  volumeWeekly: boolean;   // Volume grain: weekly / monthly / (neither = daily) — mutually exclusive
+  volumeMonthly: boolean;
   spyRatio: boolean;
   trend: boolean;      // linear-regression trend line
   trendFull: boolean;  // true = fit on FULL history (shown over the visible window); false = fit on the visible period only
@@ -45,7 +47,7 @@ export const DEFAULT_TOOLS: ActiveTools = {
   rsi: false, rsiWeekly: false, rsiMonthly: false,
   macd: false, macdWeekly: false, macdMonthly: false,
   momentumDaily: false, momentumWeekly: false, momentumMonthly: false,
-  volume: false,
+  volume: false, volumeWeekly: false, volumeMonthly: false,
   spyRatio: false,
   trend: false, trendFull: true,
 };
@@ -119,9 +121,9 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
   );
   const n = closes.length;
 
-  // Whether this ticker reports volume at all. Yahoo returns it for stocks, ETFs,
-  // crypto and futures, but most index symbols carry none — so the chip is offered
-  // only where there is something to draw, instead of opening an empty pane.
+  // Whether this ticker reports volume at all. Coverage varies and is not worth
+  // predicting by asset class — plenty of index symbols do publish it — so the chip
+  // is offered wherever the series is actually there, and only there.
   const hasVolume = useMemo(() => data.some(d => d.volume != null && d.volume > 0), [data]);
 
   // Full history so EVERY moving average can be enabled and computed regardless of the view
@@ -220,6 +222,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
   const cycleRsi = () => { const g = nextGrain(rsiGrain); onChange({ ...activeTools, rsiWeekly: g === 'weekly', rsiMonthly: g === 'monthly' }); };
   const macdGrain: Grain3 = activeTools.macdMonthly ? 'monthly' : activeTools.macdWeekly ? 'weekly' : 'daily';
   const cycleMacd = () => { const g = nextGrain(macdGrain); onChange({ ...activeTools, macdWeekly: g === 'weekly', macdMonthly: g === 'monthly' }); };
+  const volGrain: Grain3 = activeTools.volumeMonthly ? 'monthly' : activeTools.volumeWeekly ? 'weekly' : 'daily';
+  const cycleVol = () => { const g = nextGrain(volGrain); onChange({ ...activeTools, volumeWeekly: g === 'weekly', volumeMonthly: g === 'monthly' }); };
 
   return (
     <div className="border border-border rounded-xl overflow-hidden" data-print-hide>
@@ -299,9 +303,18 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                   active={activeTools.volume} onToggle={() => toggle('volume')} label="Volume" color="slate"
                   disabled={!hasVolume}
                   title={hasVolume
-                    ? 'Traded volume per day, green when the close was up'
-                    : 'This ticker reports no volume (most index symbols do not)'}
+                    ? 'Traded volume, green when the close was up over the period'
+                    : 'This ticker reports no volume'}
                 />
+                {activeTools.volume && (
+                  <button
+                    onClick={cycleVol}
+                    className="text-[10px] px-2 py-0.5 rounded-md border border-slate-500/40 text-slate-300 hover:bg-slate-500/10 transition-colors capitalize"
+                    title="Total volume per day / week / month"
+                  >
+                    {volGrain}
+                  </button>
+                )}
                 <Divider />
                 <ToolChip active={momActive} onToggle={() => setMom(momActive ? null : 'daily')} label="Momentum" color="sky" disabled={n < 2} />
                 {momActive && (

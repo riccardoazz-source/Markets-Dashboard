@@ -9,6 +9,7 @@ import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
+import { useChartFit, paneCountOf } from '@/lib/useChartFit';
 import { LoadingSpinner, LoadingGrid } from '@/components/ui/LoadingSpinner';
 import clsx from 'clsx';
 import { ArrowRight, RefreshCw, BarChart2, X } from 'lucide-react';
@@ -147,6 +148,10 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
     return g.region === selectedRegion;
   });
 
+  // Panes the active tools open push the panel taller; this keeps it inside the
+  // window by measuring it rather than guessing (see lib/useChartFit).
+  const { ref: fitRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools));
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -259,7 +264,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
 
       {selected && (
         <DetailModal onClose={() => setSelected(null)}>
-        <div className="rounded-xl border border-border bg-bg-card p-5 space-y-4">
+        <div ref={fitRef} className="rounded-xl border border-border bg-bg-card p-5 space-y-4">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 flex-wrap min-w-0">
               <h3 className="text-lg font-bold text-white flex items-center gap-1.5">
@@ -373,10 +378,9 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
               data={historical}
               symbol={`${selected.from}${selected.to}=X`}
               color="#6366f1"
-              height={240}
               isCurrency={true}
               toolsOverlay={activeTools}
-              syncId="currencies-detail"
+              syncId="currencies-detail" height={chartH} subChartHeight={paneHeight}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }}
             />
           )}

@@ -39,6 +39,8 @@ interface ToolsOverlay {
   momentumWeekly?: boolean;
   momentumMonthly?: boolean;
   volume?: boolean;
+  volumeWeekly?: boolean;
+  volumeMonthly?: boolean;
   spyRatio?: boolean;
   sma200w?: boolean;
   trend?: boolean;
@@ -223,15 +225,66 @@ function MACDSubChart({ data, grain, syncId, height = 80 }: {
   );
 }
 
-export function VolumeSubChart({ data, syncId, height = 70 }: {
+// Volume aggregated to the chosen grain. Weekly and monthly are SUMS — a week's
+// volume is the volume that traded that week, not an average of its days — and the
+// colour comes from the period's own close against the previous period's, so the
+// question the pane answers ("were the heavy periods buying or selling?") stays the
+// same at every grain. The total is placed on the period's LAST day so the bars
+// keep sharing the price chart's daily axis, and the crosshair still lines up.
+export type VolumeGrain = 'daily' | 'weekly' | 'monthly';
+
+function mondayOf(date: string): string {
+  const d = new Date(date + 'T00:00:00Z');
+  const day = (d.getUTCDay() + 6) % 7;            // Monday = 0
+  d.setUTCDate(d.getUTCDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+
+export function aggregateVolume(
+  data: { date: string; close: number; volume?: number | null }[],
+  grain: VolumeGrain,
+): { date: string; volume: number | null; up: boolean }[] {
+  if (grain === 'daily') {
+    return data.map((d, i) => ({
+      date: d.date,
+      volume: d.volume ?? null,
+      up: i === 0 ? true : d.close >= data[i - 1].close,
+    }));
+  }
+  const keyOf = (d: string) => (grain === 'monthly' ? d.slice(0, 7) : mondayOf(d));
+  // One entry per period: where it ends, how much traded, how it closed.
+  const periods: { endDate: string; total: number | null; close: number }[] = [];
+  let curKey: string | null = null;
+  for (const d of data) {
+    const k = keyOf(d.date);
+    if (k !== curKey) { periods.push({ endDate: d.date, total: null, close: d.close }); curKey = k; }
+    const p = periods[periods.length - 1];
+    p.endDate = d.date;
+    p.close = d.close;
+    if (d.volume != null) p.total = (p.total ?? 0) + d.volume;
+  }
+  const byEnd = new Map(periods.map((p, i) => [p.endDate, {
+    volume: p.total,
+    up: i === 0 ? true : p.close >= periods[i - 1].close,
+  }]));
+  // Every date is kept — a period's total sits on its last bar, the rest are blank —
+  // so the series still matches the price chart's categories one for one.
+  return data.map(d => {
+    const hit = byEnd.get(d.date);
+    return { date: d.date, volume: hit ? hit.volume : null, up: hit ? hit.up : true };
+  });
+}
+
+export function VolumeSubChart({ data, syncId, height = 70, grain = 'daily' }: {
   data: { date: string; volume: number | null; up: boolean }[];
   syncId?: string;
   height?: number;
+  grain?: VolumeGrain;
 }) {
   const valid = data.filter(d => d.volume != null);
   if (valid.length === 0) {
-    // Not a failure to compute — this ticker simply publishes no volume. Most
-    // index symbols do not, so say which it is rather than showing an empty pane.
+    // Not a failure to compute — this ticker simply publishes no volume. Say which
+    // it is rather than showing an empty pane.
     return <div className="text-[10px] text-gray-600 py-1">Volume: not reported for this ticker</div>;
   }
   const fmt = (v: number) => {
@@ -243,10 +296,10 @@ export function VolumeSubChart({ data, syncId, height = 70 }: {
   return (
     <div className="mt-2">
       <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] text-slate-300 font-semibold">Volume</span>
+        <span className="text-[10px] text-slate-300 font-semibold capitalize">Volume {grain}</span>
         <span className="text-[9px] text-gray-600">
-          <span className="text-emerald-400">▮</span> close up &nbsp;
-          <span className="text-red-400">▮</span> close down
+          <span className="text-emerald-400">▮</span> period closed up &nbsp;
+          <span className="text-red-400">▮</span> closed down
         </span>
       </div>
       <ResponsiveContainer width="100%" height={height}>
@@ -255,7 +308,7 @@ export function VolumeSubChart({ data, syncId, height = 70 }: {
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => fmt(v as number)} />
-          <Bar dataKey="volume" barSize={2} isAnimationActive={false}>
+          <Bar dataKey="volume" barSize={grain === 'daily' ? 2 : grain === 'weekly' ? 4 : 7} isAnimationActive={false}>
             {data.map((entry, i) => (
               <Cell key={i} fill={entry.up ? '#10b981' : '#ef4444'} fillOpacity={0.55} />
             ))}
@@ -553,11 +606,9 @@ export function PriceChart({
   // from full history the way a moving average needs. Coloured by the day's own
   // direction, which is what makes a volume pane worth reading: whether the heavy
   // days were buying or selling.
-  const volumeData = data.map((d, i) => ({
-    date: d.date,
-    volume: d.volume ?? null,
-    up: i === 0 ? true : d.close >= data[i - 1].close,
-  }));
+  const volumeGrain: VolumeGrain =
+    toolsOverlay?.volumeMonthly ? 'monthly' : toolsOverlay?.volumeWeekly ? 'weekly' : 'daily';
+  const volumeData = aggregateVolume(data, volumeGrain);
 
   // Selection stats — period return, annualised CAGR, and (when the total-return
   // series carries dividends paid in the window) the dividend-inclusive IRR.
@@ -918,7 +969,7 @@ export function PriceChart({
 
       {/* Oscillator sub-charts */}
       {toolsOverlay?.volume && (
-        <VolumeSubChart syncId={syncId} height={subChartHeight} data={volumeData} />
+        <VolumeSubChart syncId={syncId} height={subChartHeight} data={volumeData} grain={volumeGrain} />
       )}
       {rsiData && <RSISubChart data={rsiData} grain={rsiGrain ?? 'daily'} syncId={syncId} height={subChartHeight} />}
       {macdData && <MACDSubChart data={macdData} grain={macdGrain ?? 'daily'} syncId={syncId} height={subChartHeight} />}
