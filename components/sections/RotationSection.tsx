@@ -12,6 +12,7 @@ import { QuadrantChart, QuadrantAsset, QuadrantTrail } from '@/components/charts
 import { classifyPhase, PHASE_META, RotationPhase, ROTATION_PHASES } from '@/lib/rotationPhase';
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
 import { BacktestPanel } from '@/components/sections/BacktestPanel';
+import { PhaseLabPanel } from '@/components/sections/PhaseLabPanel';
 import { SentimentPanel, SentimentSnapshot } from '@/components/sections/SentimentPanel';
 import { StrategyPanel } from '@/components/sections/StrategyPanel';
 
@@ -1052,6 +1053,10 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
 
       {/* Backtest — time machine. Includes the active stock lists so the model
           is tested on exactly the universe shown above. */}
+      {/* The instrument for judging the model, next to the backtest that judges the
+          picks: does the quadrant's own labelling predict anything? */}
+      <PhaseLabPanel />
+
       <BacktestPanel stockSymbols={stockListSymbols} onNavigate={onNavigate} />
 
       {quickView && (
