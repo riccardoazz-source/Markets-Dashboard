@@ -209,7 +209,7 @@ const PANE_TOOLTIP = {
 } as const;
 
 
-function RSISubChart({ data, grain, syncId, height = 80 }: { data: { date: string; rsi: number | null }[]; grain?: string; syncId?: string; height?: number }) {
+export function RSISubChart({ data, grain, syncId, height = 80 }: { data: { date: string; rsi: number | null }[]; grain?: string; syncId?: string; height?: number }) {
   const valid = data.filter(d => d.rsi != null);
   if (valid.length === 0) {
     return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
@@ -261,7 +261,7 @@ export function MacdTooltip({ active, payload }: {
   );
 }
 
-function MACDSubChart({ data, grain, syncId, height = 80 }: {
+export function MACDSubChart({ data, grain, syncId, height = 80 }: {
   data: { date: string; macd: number | null; signal: number | null; hist: number | null }[];
   grain?: string;
   syncId?: string;

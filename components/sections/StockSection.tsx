@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { HistoricalPoint, Timeframe, QuoteData } from '@/lib/types';
+import { computeDivYield, computeDivCAGR } from '@/lib/dividends';
 import {
   calculateCAGR, formatPercent, formatPrice, colorForPercent,
   buildTotalReturnSeries, computeAssetIRR, DividendEvent, dataAvailabilityMessage,
@@ -38,7 +39,7 @@ import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { FundamentalsButton } from '@/components/ui/FundamentalsButton';
-import { VolumeSubChart, MacdTooltip, CyclePane } from '@/components/charts/PriceChart';
+import { VolumeSubChart, CyclePane, RSISubChart, MACDSubChart, SYNC_AXIS_WIDTH } from '@/components/charts/PriceChart';
 import { publishChartRows, clearChartRows, type ExportRow } from '@/lib/chartExport';
 import { aggregateVolume, type VolumeGrain } from '@/lib/indicators';
 import { useChartFit, paneCountOf } from '@/lib/useChartFit';
@@ -46,6 +47,7 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { DividendsBarChart } from '@/components/charts/DividendsBarChart';
 
+type Overlay = 'none' | 'eps' | 'financials';
 interface EarningsPoint { date: string; period: string; eps: number; estimate?: number }
 interface FinancialPoint {
   date: string;
@@ -128,35 +130,6 @@ function computeAvgPe(prices: HistoricalPoint[], eps: EarningsPoint[]): number |
     if (pe < 5000) { sum += pe; n++; }
   }
   return n > 0 ? sum / n : null;
-}
-
-// Annual dividend yield using the trailing-12-months sum / current price.
-function computeDivYield(divs: DividendEvent[], price: number): number | null {
-  if (!divs.length || !price) return null;
-  const cutoff = new Date();
-  cutoff.setFullYear(cutoff.getFullYear() - 1);
-  const ttm = divs.filter(d => new Date(d.date) >= cutoff).reduce((s, d) => s + d.amount, 0);
-  return ttm > 0 ? (ttm / price) * 100 : null;
-}
-
-// CAGR over full calendar years of dividend totals. Ignores the current (partial)
-// year so two partial-year halves don't skew the rate.
-function computeDivCAGR(divs: DividendEvent[]): { cagr: number; years: number } | null {
-  if (divs.length < 4) return null;
-  const byYear = new Map<number, number>();
-  for (const d of divs) {
-    const y = new Date(d.date).getFullYear();
-    byYear.set(y, (byYear.get(y) ?? 0) + d.amount);
-  }
-  const years = Array.from(byYear.keys()).sort();
-  const currentYear = new Date().getFullYear();
-  const full = years.filter(y => y < currentYear && (byYear.get(y) ?? 0) > 0);
-  if (full.length < 2) return null;
-  const first = byYear.get(full[0])!;
-  const last = byYear.get(full[full.length - 1])!;
-  const n = full[full.length - 1] - full[0];
-  if (first <= 0 || last <= 0 || n <= 0) return null;
-  return { cagr: (Math.pow(last / first, 1 / n) - 1) * 100, years: n };
 }
 
 // CAGR from earliest to latest annual EPS entry.
@@ -254,7 +227,7 @@ interface DualChartToolsOverlay {
 // the SAME y-axis width and right margin, or the plot areas start at different x
 // positions and the shared crosshair drifts between panes.
 const STOCK_SYNC_ID = 'stock-detail';
-const STOCK_AXIS_WIDTH = 64;
+const STOCK_AXIS_WIDTH = SYNC_AXIS_WIDTH;
 
 function DualChart({
   prices, symbol, totalReturn, currency, eps, financials, toolsOverlay, spyPrices, onSetRange, syncId,
@@ -609,7 +582,7 @@ function DualChart({
         {/* key forces a fresh ComposedChart mount when the overlay changes — Recharts'
             internal layout doesn't always recompute when YAxis components are added/removed. */}
         <ComposedChart key={`chart-${showEps ? 'eps' : ''}${showFin ? 'fin' : ''}${showPe ? 'pe' : ''}`}
-          data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+          data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
           syncId={syncId} syncMethod="value"
           {...handlers} style={{ cursor: 'crosshair' }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -782,11 +755,18 @@ function DualChart({
 // the three histories the panel used to stack under the chart. Lives behind the
 // Fundamentals button so the technical view is the same shape as every other asset.
 function StockFundamentals({
-  currency, timeframe, peTtm, avgPe, quote, divYield, divCagr, epsCagr, revCagr,
+  symbol, currency, timeframe, setTimeframe, customRange, setCustomRange,
+  prices, totalReturn, peTtm, avgPe, quote, divYield, divCagr, epsCagr, revCagr,
   epsCount, finCount, dividends, totalDivs, earnings, earningsLoading, reportFreq,
 }: {
+  symbol: string;
   currency: string;
   timeframe: Timeframe;
+  setTimeframe: (t: Timeframe) => void;
+  customRange: { from: string; to: string } | null;
+  setCustomRange: (r: { from: string; to: string } | null) => void;
+  prices: HistoricalPoint[];
+  totalReturn: HistoricalPoint[];
   peTtm: number | null;
   avgPe: number | null;
   quote: QuoteData | null;
@@ -802,8 +782,74 @@ function StockFundamentals({
   earningsLoading: boolean;
   reportFreq: string | null;
 }) {
+  // The overlays live HERE now. On the technical chart they were the reason that
+  // panel carried a toggle row no other asset has; over the fundamentals chart they
+  // are the whole point — earnings and revenue only mean something against price.
+  const [overlay, setOverlay] = useState<Overlay>('none');
+
   return (
     <div className="space-y-3">
+      {/* Same timeframe ladder as everywhere else, driving the same state as the
+          panel behind: one period per asset, not two that can disagree. */}
+      <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+        <TimeframeSelector
+          value={timeframe}
+          onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+          isCustom={!!customRange}
+          onCustomRange={(from, to) => setCustomRange({ from, to })}
+        />
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {earningsLoading ? (
+          <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border rounded-full animate-pulse">
+            Loading earnings…
+          </span>
+        ) : (
+          <>
+            {earnings && earnings.quarterly.length > 0 ? (
+              <button onClick={() => setOverlay(o => (o === 'eps' ? 'none' : 'eps'))}
+                className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
+                  overlay === 'eps'
+                    ? 'border-amber-400 text-amber-400 bg-amber-400/10'
+                    : 'border-border text-gray-400 hover:text-gray-200')}>
+                {overlay === 'eps' ? 'Hide EPS' : 'Show EPS'}
+              </button>
+            ) : (
+              <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">No EPS data</span>
+            )}
+            {earnings && earnings.financials.length > 0 ? (
+              <button onClick={() => setOverlay(o => (o === 'financials' ? 'none' : 'financials'))}
+                className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
+                  overlay === 'financials'
+                    ? 'border-blue-400 text-blue-400 bg-blue-400/10'
+                    : 'border-border text-gray-400 hover:text-gray-200')}>
+                {overlay === 'financials' ? 'Hide Revenue' : 'Show Revenue'}
+              </button>
+            ) : (
+              <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">No financials</span>
+            )}
+            {reportFreq && (
+              <span className="px-2 py-0.5 text-[10px] rounded-full bg-amber-400/10 border border-amber-400/50 text-amber-300 font-medium">
+                Reports {reportFreq}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {prices.length > 0 && (
+        <DualChart
+          prices={prices}
+          symbol={symbol}
+          totalReturn={totalReturn}
+          currency={currency}
+          eps={overlay === 'eps' ? earnings?.quarterly : undefined}
+          financials={overlay === 'financials' ? earnings?.financials : undefined}
+          height={240}
+        />
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
         {dividends.length > 0 && (
           <Stat label="Dividends (period)" value={`${dividends.length} (${formatPrice(totalDivs, currency)})`} />
@@ -842,12 +888,7 @@ function StockFundamentals({
         ) : finCount > 0 ? (
           <Stat label="Revenue CAGR" value="N/A" color="text-gray-600" />
         ) : null}
-        {reportFreq && <Stat label="Reports" value={reportFreq} color="text-amber-300" />}
       </div>
-
-      {earningsLoading && (
-        <p className="text-[11px] text-gray-500 animate-pulse">Loading earnings…</p>
-      )}
 
       {dividends.length > 0 && (
         <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
@@ -1517,6 +1558,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               <QuadrantButton name={selected.name} symbol={selected.symbol} group="Stocks" stocks={watchlistSymbols} />
               <FundamentalsButton name={selected.name} symbol={selected.symbol} subtitle="Stocks">
                 <StockFundamentals
+                  symbol={selected.symbol}
+                  prices={prices} totalReturn={totalReturn}
+                  setTimeframe={setTimeframe} customRange={customRange} setCustomRange={setCustomRange}
                   currency={currency} timeframe={timeframe}
                   peTtm={peTtm} avgPe={avgPe} quote={selQuote}
                   divYield={divYield} divCagr={divCagr} epsCagr={epsCagr} revCagr={revCagr}
@@ -1613,97 +1657,41 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               thing everywhere. Stocks is where it matters most: this is the one
               asset class that always reports volume. */}
           {!loading && prices.length > 0 && activeTools.volume && (
-            <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-              <VolumeSubChart
-                syncId={STOCK_SYNC_ID}
-                height={paneHeight}
-                grain={volGrain}
-                data={aggregateVolume(prices, volGrain)}
-              />
-            </div>
+            <VolumeSubChart
+              syncId={STOCK_SYNC_ID}
+              height={paneHeight}
+              grain={volGrain}
+              data={aggregateVolume(prices, volGrain)}
+            />
           )}
 
           {/* RSI / MACD oscillator sub-charts for stocks */}
-          {!loading && prices.length > 0 && rsiSeries && (() => {
-            const rsiData = rsiSeries;
-            const valid = rsiData.filter(d => d.rsi != null);
-            if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
-            return (
-              <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-                <p className="text-[10px] text-indigo-400 font-semibold mb-1 capitalize">RSI 14 {rsiGrain ?? 'daily'}</p>
-                <ResponsiveContainer width="100%" height={paneHeight}>
-                  <LineChart data={rsiData} margin={{ top: 2, right: 16, left: 0, bottom: 0 }}
-                    syncId={STOCK_SYNC_ID} syncMethod="value">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-                    <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
-                    <YAxis domain={[0, 100]} ticks={[30, 50, 70]}
-                      tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={STOCK_AXIS_WIDTH} />
-                    <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.6} />
-                    <ReferenceLine y={50} stroke="#6b7280" strokeDasharray="1 4" strokeOpacity={0.35} />
-                    <ReferenceLine y={30} stroke="#10b981" strokeDasharray="3 3" strokeOpacity={0.6} />
-                    <Line type="monotone" dataKey="rsi" stroke="#818cf8" strokeWidth={1.5} dot={false} connectNulls={false} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
-                      formatter={(v: number) => [`${(v ?? 0).toFixed(1)}`, 'RSI 14']}
-                      labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            );
-          })()}
+          {!loading && prices.length > 0 && rsiSeries && (
+            <RSISubChart data={rsiSeries} grain={rsiGrain ?? 'daily'} syncId={STOCK_SYNC_ID} height={paneHeight} />
+          )}
 
-          {!loading && prices.length > 0 && macdSeries && (() => {
-            const macdData = macdSeries;
-            const valid = macdData.filter(d => d.hist != null);
-            if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">MACD: not enough data</div>;
-            return (
-              <div className="rounded-lg border border-border p-3 bg-bg-input/40">
-                <p className="text-[10px] text-blue-400 font-semibold mb-1 capitalize">MACD (12, 26, 9) {macdGrain ?? 'daily'}</p>
-                <ResponsiveContainer width="100%" height={paneHeight}>
-                  <ComposedChart data={macdData} margin={{ top: 2, right: 16, left: 0, bottom: 0 }}
-                    syncId={STOCK_SYNC_ID} syncMethod="value">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-                    <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
-                    <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={STOCK_AXIS_WIDTH}
-                      tickFormatter={v => (v as number).toFixed(2)} />
-                    <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.4} />
-                    <Bar dataKey="hist" name="Histogram" barSize={3} fill="#94a3b8">
-                      {macdData.map((entry, i) => (
-                        <Cell key={i} fill={(entry.hist ?? 0) >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.7} />
-                      ))}
-                    </Bar>
-                    <Line type="monotone" dataKey="macd" stroke="#60a5fa" strokeWidth={1.5} dot={false} connectNulls={false} name="MACD" />
-                    <Line type="monotone" dataKey="signal" stroke="#f97316" strokeWidth={1} strokeDasharray="4 3" dot={false} connectNulls={false} name="Signal" />
-                    <Tooltip position={{ y: 0 }} content={MacdTooltip} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            );
-          })()}
+          {!loading && prices.length > 0 && macdSeries && (
+            <MACDSubChart data={macdSeries} grain={macdGrain ?? 'daily'} syncId={STOCK_SYNC_ID} height={paneHeight} />
+          )}
 
           {cycle?.stretch && (
-            <div className="rounded-lg border border-border p-3 bg-bg-input/40">
               <CyclePane syncId={STOCK_SYNC_ID} height={paneHeight} data={cycle.stretch}
                 label="Stretch σ (vs SMA 200)" note="distance from the trend, in months of the asset's own volatility"
                 unit="σ" color="#a78bfa" zeroLines={[-2, -1, 1, 2]} />
-            </div>
           )}
           {cycle?.slope && (
-            <div className="rounded-lg border border-border p-3 bg-bg-input/40">
               <CyclePane syncId={STOCK_SYNC_ID} height={paneHeight} data={cycle.slope}
                 label="SMA 200 slope" note="% per month — a trend measure that keeps its sign for quarters"
                 unit="%" color="#fb923c"
                 caption={cycle.regimeNow != null
                   ? `price ${cycle.regimeNow >= 0 ? 'above' : 'below'} the average for ${Math.abs(cycle.regimeNow).toFixed(1)} months`
                   : undefined} />
-            </div>
           )}
           {cycle?.drawdown && (
-            <div className="rounded-lg border border-border p-3 bg-bg-input/40">
               <CyclePane syncId={STOCK_SYNC_ID} height={paneHeight} data={cycle.drawdown}
                 label="Drawdown from 52W high" note="how deep the hole is" unit="%" color="#fb7185"
                 negativeOnly zeroLines={[-10, -20, -40]}
                 caption={cycle.sinceHighNow != null ? `high was ${cycle.sinceHighNow.toFixed(1)} months ago` : undefined} />
-            </div>
           )}
 
           {/* Everything above has to be on screen at once: the stats, the chart and

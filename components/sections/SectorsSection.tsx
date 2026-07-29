@@ -16,6 +16,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, ReferenceArea } from 'recharts';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { DividendsPanel } from '@/components/charts/DividendsBarChart';
+import { computeDivYield, computeDivCAGR } from '@/lib/dividends';
 import { Sma200wLine, Ma200dLine, MaSpreadLine } from '@/components/ui/Sma200wLine';
 import clsx from 'clsx';
 import { TrendingUp, TrendingDown, RefreshCw, BarChart2 } from 'lucide-react';
@@ -416,10 +417,12 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                 <FundamentalsButton
                   name={selectedSector?.name ?? selected!} symbol={selected!} subtitle="Sectors"
                 >
-                  <DividendsPanel
+                  <SectorFundamentals
+                    timeframe={timeframe} setTimeframe={setTimeframe}
+                    customRange={customRange} setCustomRange={setCustomRange}
+                    symbol={selected!} historical={historical} trSeries={trSeries}
                     dividends={divData.dividends}
-                    currency="USD"
-                    periodStartDate={historical[0]?.date}
+                    price={selectedSector?.price ?? null}
                   />
                 </FundamentalsButton>
               )}
@@ -583,6 +586,60 @@ function DualLineDragChart({ data, onSetRange }: { data: DualLinePoint[]; onSetR
           )}
         </LineChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+
+// The same drawer the stocks tab has, with what a sector ETF actually carries:
+// the price over the selected period, the dividend record, and the two rates that
+// describe it. The timeframe selector drives the panel's own state, so the period
+// here and the period behind can never disagree.
+function SectorFundamentals({
+  timeframe, setTimeframe, customRange, setCustomRange,
+  symbol, historical, trSeries, dividends, price,
+}: {
+  timeframe: Timeframe;
+  setTimeframe: (t: Timeframe) => void;
+  customRange: { from: string; to: string } | null;
+  setCustomRange: (r: { from: string; to: string } | null) => void;
+  symbol: string;
+  historical: HistoricalPoint[];
+  trSeries?: HistoricalPoint[];
+  dividends: DividendEvent[];
+  price: number | null;
+}) {
+  const divYield = computeDivYield(dividends, price ?? 0);
+  const divCagr = computeDivCAGR(dividends);
+  const totalDivs = dividends.reduce((s, d) => s + d.amount, 0);
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">
+        <TimeframeSelector
+          value={timeframe}
+          onChange={tf => { setCustomRange(null); setTimeframe(tf); }}
+          isCustom={!!customRange}
+          onCustomRange={(from, to) => setCustomRange({ from, to })}
+        />
+      </div>
+
+      {historical.length > 1 && (
+        <PriceChart data={historical} symbol={symbol} color="auto" height={220}
+          totalReturnData={trSeries} enableDragSelect={false} />
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
+        <Stat label="Dividends (period)" value={`${dividends.length} (${formatPrice(totalDivs)})`} />
+        <Stat label="Div. yield (TTM)" value={divYield != null ? formatPercent(divYield) : '—'}
+          color={divYield != null ? colorForPercent(divYield) : 'text-gray-600'} />
+        {divCagr ? (
+          <Stat label={`Div. CAGR (${divCagr.years}y)`} value={formatPercent(divCagr.cagr)} color={colorForPercent(divCagr.cagr)} />
+        ) : (
+          <Stat label="Div. CAGR" value="—" color="text-gray-600" />
+        )}
+      </div>
+
+      <DividendsPanel dividends={dividends} currency="USD" periodStartDate={historical[0]?.date} />
     </div>
   );
 }
