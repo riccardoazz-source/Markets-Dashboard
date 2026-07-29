@@ -38,11 +38,18 @@ function isolate(el: HTMLElement): () => void {
 }
 
 // Name the file after whatever the panel calls itself, so a folder of exports is
-// readable: "NASDAQ 100 2026-07-29.jpg" rather than "download (3).jpg".
+// readable: "NASDAQ 100 2026-07-29.jpg" rather than "download (3).jpg". Windows
+// refuses a name ending in a dot or a space, and refusing to open the file is how
+// it says so — hence the trim at the end.
 function fileName(root: HTMLElement): string {
   const heading = root.querySelector('h1, h2, h3')?.textContent?.trim();
   const date = new Date().toISOString().slice(0, 10);
-  const base = (heading || 'MarketPulse').replace(/[\\/:*?"<>|]+/g, '').slice(0, 60);
+  const base = (heading || 'MarketPulse')
+    .replace(/[\\/:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.\s]+$/, '')
+    .slice(0, 60) || 'MarketPulse';
   return `${base} ${date}`;
 }
 
@@ -83,7 +90,10 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
     });
   };
 
-  const asJpg = async () => {
+  // JPG and PNG differ only in the encoder. PNG exists because it is the format
+  // nothing refuses: if a JPEG ever lands on a machine that will not open it, this
+  // is the way out that needs no debugging.
+  const asImage = async (type: 'image/jpeg' | 'image/png') => {
     setOpen(false);
     const root = rootOf();
     if (!root) return;
@@ -119,19 +129,39 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
       // runs to several megabytes, and at that size the browser's own download
       // path truncates it — which is how a "normal looking" file ends up refusing
       // to open. A blob URL carries the bytes directly, at any size.
-      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', 0.95));
-      if (!blob) throw new Error('encode failed');
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, type, 0.95));
+      if (!blob || blob.size < 1024) throw new Error('encoder returned nothing');
+
+      // Decode what was just encoded before handing it over. A file that cannot be
+      // read back here is a file that will not open anywhere, and saving it anyway
+      // only moves the discovery to the moment the user double-clicks it. Better a
+      // message now than a broken download.
+      const bitmap = await createImageBitmap(blob).catch(() => null);
+      if (!bitmap) throw new Error('image did not decode');
+      bitmap.close?.();
+
+      // The extension has to match what the encoder ACTUALLY produced: toBlob is
+      // allowed to ignore the requested type and fall back to PNG, and a PNG named
+      // .jpg is exactly the kind of file some viewers reject.
+      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
       objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objectUrl;
-      a.download = `${fileName(root)}.jpg`;
+      a.download = `${fileName(root)}.${ext}`;
       a.rel = 'noopener';
       document.body.appendChild(a);
       a.click();
       a.remove();
+
+      // Where `download` is ignored (older iOS, standalone/PWA windows) nothing is
+      // saved and there is no event to detect it — so offer the image directly:
+      // opened in a tab it can be long-pressed and saved the usual way.
+      if (!('download' in HTMLAnchorElement.prototype)) window.open(objectUrl, '_blank');
     } catch {
-      setError('Image export failed — use PDF.');
-      setTimeout(() => setError(null), 4000);
+      setError(type === 'image/png'
+        ? 'Image export failed — use PDF.'
+        : 'JPG failed on this browser — try PNG, or PDF.');
+      setTimeout(() => setError(null), 6000);
     } finally {
       // Only after the download has been handed off; revoking immediately can cut
       // it short on Safari.
@@ -156,7 +186,8 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
       {open && (
         <div className="absolute right-0 top-full mt-1 z-[400] w-44 rounded-lg border border-border bg-bg-card shadow-2xl p-1">
           <MenuItem icon={<FileText size={13} />} title="PDF" hint="Paginated, print dialog" onClick={asPdf} />
-          <MenuItem icon={<ImageIcon size={13} />} title="JPG" hint="One tall image" onClick={asJpg} />
+          <MenuItem icon={<ImageIcon size={13} />} title="JPG" hint="One tall image, smaller file" onClick={() => asImage('image/jpeg')} />
+          <MenuItem icon={<ImageIcon size={13} />} title="PNG" hint="Same, opens anywhere" onClick={() => asImage('image/png')} />
         </div>
       )}
 
