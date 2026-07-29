@@ -175,7 +175,7 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
         onClick={() => setOpen(v => !v)}
         disabled={busy}
         title="Save this whole panel — the full chart and every row, not just what fits on screen"
-        className={className ?? 'flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium disabled:opacity-50'}
+        className={className ?? 'flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] sm:text-xs font-medium disabled:opacity-50'}
       >
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
         {busy ? 'Saving…' : label}

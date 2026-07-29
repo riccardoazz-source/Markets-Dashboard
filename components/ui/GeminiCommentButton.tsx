@@ -97,7 +97,7 @@ export function GeminiCommentButton(props: Props) {
       <button
         onClick={handleOpen}
         title="Chat with Gemini about this asset"
-        className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-purple-300 hover:border-purple-500/50 transition-colors text-xs font-medium"
+        className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-purple-300 hover:border-purple-500/50 transition-colors text-[11px] sm:text-xs font-medium"
       >
         <Sparkles size={13} />
         AI

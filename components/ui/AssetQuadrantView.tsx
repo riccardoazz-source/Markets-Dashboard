@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { X } from 'lucide-react';
+import { PanelClose } from '@/components/ui/PanelClose';
 import clsx from 'clsx';
 import {
   ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis,
@@ -281,7 +281,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
   return (
     <DetailModal onClose={onClose}>
-      <div ref={panelRef} className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+      <div ref={panelRef} className="relative rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+        <PanelClose onClose={onClose} />
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-white">{name}</h3>
@@ -289,7 +290,6 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               {symbol}{group ? ` · ${group}` : ''} · price vs the model&apos;s quadrant call
             </p>
           </div>
-          <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
         </div>
 
         <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">

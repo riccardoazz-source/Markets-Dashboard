@@ -229,7 +229,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     <div className="border border-border rounded-xl overflow-hidden" data-print-hide>
       <button
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-3 py-2.5 bg-bg-input text-xs text-gray-400 hover:text-gray-200 transition-colors"
+        className="w-full flex items-center justify-between px-2.5 py-1.5 bg-bg-input text-[11px] text-gray-400 hover:text-gray-200 transition-colors"
       >
         <span className="flex items-center gap-1.5 font-medium">
           <Calculator size={13} />

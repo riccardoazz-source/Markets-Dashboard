@@ -224,7 +224,7 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
         className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-emerald-300 hover:border-emerald-500/50 transition-colors text-xs font-medium"
       >
         <Table2 size={13} />
-        Returns
+        <span className="hidden sm:inline">Returns</span>
       </button>
 
       {open && (

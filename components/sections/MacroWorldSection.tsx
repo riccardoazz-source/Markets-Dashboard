@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
+import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { PriceChart } from '@/components/charts/PriceChart';
@@ -19,7 +20,7 @@ import {
   IMF_SUMMARY_GROUPS,
 } from '@/lib/imfConfig';
 import { colorForPercent, formatPercent, calculateCAGR, getTimeframeStart, extendToToday } from '@/lib/utils';
-import { X, RefreshCw, Globe, BarChart2 } from 'lucide-react';
+import { RefreshCw, Globe, BarChart2 } from 'lucide-react';
 import clsx from 'clsx';
 
 // Same timeframe scale used everywhere else in the app. Data is annual, so the
@@ -296,7 +297,8 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
       {/* Detail modal — same structure ("mascherina") as the Macro section */}
       {selected && sel && (
         <DetailModal onClose={() => setSelected(null)}>
-          <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+          <div className="relative rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+            <PanelClose onClose={() => setSelected(null)} />
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <h3 className="text-base font-bold text-white truncate">{countryName} — {sel.name}</h3>
@@ -310,13 +312,13 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                   }
                 </p>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex items-center gap-1.5 flex-wrap justify-end pr-7 min-w-0">
                 {onCompare && (
                   <button
                     onClick={() => onCompare(extraSel ? `WBX:${country}:${extraSel.seriesKey}` : `WB:${country}:${sel.code}`)}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+                    className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] sm:text-xs font-medium"
                   >
-                    <BarChart2 size={13} /> Compare
+                    <BarChart2 size={13} /> <span className="hidden sm:inline">Compare</span>
                   </button>
                 )}
                 <ReturnsTableButton name={`${countryName} — ${sel.name}`} symbol={`${country}:${sel.code}`} externalData={fullSeries} defaultGran="Yearly" />
@@ -328,8 +330,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                   timeframe={customRange ? 'Custom' : timeframe}
                   tools={series.length ? summarizeTools(activeTools, series) : undefined}
                 />
-                <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
-              </div>
+                </div>
             </div>
 
             <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">

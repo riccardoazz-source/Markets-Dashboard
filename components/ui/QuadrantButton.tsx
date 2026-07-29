@@ -31,10 +31,10 @@ export function QuadrantButton({ name, symbol, group, stocks }: {
       <button
         onClick={() => setOpen(true)}
         title="See this asset's price against the quadrant the model put it in over time"
-        className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+        className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] sm:text-xs font-medium"
       >
         <Grid2x2 size={13} />
-        Quadrant
+        <span className="hidden sm:inline">Quadrant</span>
       </button>
       {open && (
         <AssetQuadrantView

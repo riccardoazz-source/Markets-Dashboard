@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { HistoricalPoint, Timeframe, QuoteData } from '@/lib/types';
 import {
@@ -1254,7 +1255,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
       {selected && (
         <DetailModal onClose={() => setSelected(null)}>
-        <div ref={fitRef} className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+        <div ref={fitRef} className="relative rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+          <PanelClose onClose={() => setSelected(null)} />
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
               <h3 className="text-base font-bold text-white truncate">{selected.name}</h3>
@@ -1268,14 +1270,14 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 )}
               </p>
             </div>
-            <div className="flex items-center gap-1.5 justify-end flex-wrap min-w-0">
+            <div className="pr-7 flex-wrap justify-end flex items-center gap-1.5 justify-end flex-wrap min-w-0">
               {onCompare && (
                 <button
                   onClick={() => onCompare(selected.symbol)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-xs font-medium"
+                  className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] sm:text-xs font-medium"
                 >
                   <BarChart2 size={13} />
-                  Compare
+                  <span className="hidden sm:inline">Compare</span>
                 </button>
               )}
               <ReturnsTableButton name={selected.name} symbol={selected.symbol} />
@@ -1288,7 +1290,6 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 timeframe={timeframe}
                 tools={prices.length > 0 ? summarizeTools(activeTools, prices) : undefined}
               />
-              <button onClick={() => setSelected(null)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close"><X size={16} /></button>
             </div>
           </div>
 
