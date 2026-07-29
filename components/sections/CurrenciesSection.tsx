@@ -283,7 +283,7 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                 </span>
               )}
             </div>
-            <div className="pr-7 flex-wrap justify-end flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-1.5 flex-wrap justify-end pr-7 min-w-0">
               {onCompare && (
                 <button
                   onClick={() => onCompare(`${selected.from}${selected.to}=X`)}
