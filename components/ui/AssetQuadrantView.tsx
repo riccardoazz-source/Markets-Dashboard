@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { X } from 'lucide-react';
 import clsx from 'clsx';
 import {
@@ -224,28 +224,63 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     activeTools.momentumDaily, activeTools.momentumWeekly, activeTools.momentumMonthly,
   ].filter(Boolean).length;
 
+  // A first estimate of the split. The constants below are only a starting point —
+  // what actually decides the size is the measurement further down, because the
+  // non-chart part of this panel is not a fixed number: a caption wraps, a legend
+  // row appears when a moving average is on, a phase filter adds a line.
+  const [fit, setFit] = useState(1);
   const heights = useMemo(() => {
     const clamp = (v: number, lo: number, hi: number) => Math.round(Math.max(lo, Math.min(hi, v)));
-    // Everything that is NOT plot area has to come off the budget first, or the
-    // stack overflows by exactly the amount that was forgotten: the modal header,
-    // the timeframe row, the Print row, the quadrant's own title + legend, the
-    // footnote, the "time spent" chips, the collapsed Tools bar and the padding.
     const CHROME = 320;
-    // Each indicator pane also carries a caption and a top margin above its plot.
     const PANE_CHROME = 26, QUAD_CHROME = 20;
     const budget = Math.max(300, viewportH - CHROME - paneCount * PANE_CHROME - QUAD_CHROME);
     const PANE_SHARE = 0.55, QUAD_SHARE = 0.85;
     const unit = budget / (1 + QUAD_SHARE + paneCount * PANE_SHARE);
     return {
-      price: clamp(unit, 120, 210),
-      quadrant: clamp(unit * QUAD_SHARE, 95, 150),
-      pane: clamp(unit * PANE_SHARE, 46, 80),
+      price: clamp(unit * fit, 100, 210),
+      quadrant: clamp(unit * QUAD_SHARE * fit, 80, 150),
+      pane: clamp(unit * PANE_SHARE * fit, 40, 80),
     };
-  }, [viewportH, paneCount]);
+  }, [viewportH, paneCount, fit]);
+
+  // Then MEASURE, instead of predicting. Every attempt to guess the non-chart
+  // height was wrong by whatever had been forgotten, and the stack landed just
+  // past the bottom of the window — near enough to look deliberate, far enough to
+  // hide the quadrant strip. So the panel reads its own height after laying out
+  // and corrects the charts by the exact overflow.
+  //
+  // It lands in ONE step rather than creeping: the chart heights are known, so
+  // subtracting them from the measured height gives the true chrome, and the
+  // charts can be scaled to exactly the room that is left. Naively scaling by the
+  // overflow ratio would shrink the chrome too — which it cannot do — and take a
+  // dozen re-renders of every chart to converge.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    // Measure the whole thing the window has to hold — the panel plus the Print
+    // row above it plus the modal's outer padding — not just the card.
+    const wrapper = (el.closest('[data-print-root]') as HTMLElement | null) ?? el;
+    const outerPad = window.innerWidth >= 640 ? 48 : 16;   // p-2 / sm:p-6
+    const total = wrapper.offsetHeight + outerPad;
+    if (total <= 0) return;
+
+    const charts = heights.price + heights.quadrant + heights.pane * paneCount;
+    const chrome = total - charts;
+    // A few pixels of slack: the heights are rounded, so aiming at the exact
+    // bottom edge lands a hair past it as often as on it.
+    const room = window.innerHeight - chrome - 8;
+    if (charts <= 0 || room <= 0) return;
+
+    const next = Math.max(0.45, Math.min(1, fit * (room / charts)));
+    // Only when it makes a visible difference, so a rounding wobble cannot start
+    // an endless shrink/grow cycle.
+    if (Math.abs(next - fit) > 0.01) setFit(next);
+  });
 
   return (
     <DetailModal onClose={onClose}>
-      <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
+      <div ref={panelRef} className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-white">{name}</h3>
