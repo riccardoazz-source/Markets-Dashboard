@@ -92,24 +92,50 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
     // Loaded on demand: the rasteriser is only needed the moment someone asks for
     // an image, and it has no business in the bundle everyone downloads.
     document.documentElement.classList.add('print-capture');
+    let objectUrl: string | null = null;
     try {
-      const { toJpeg } = await import('html-to-image');
-      const url = await toJpeg(root, {
-        quality: 0.95,
+      const { toCanvas } = await import('html-to-image');
+
+      // 2× keeps the text sharp when the image is zoomed, but a tall panel (price
+      // + three indicator panes + the quadrant strip) doubled is a canvas of tens
+      // of megapixels — past what a phone will allocate, and it comes back blank
+      // or fails outright. Scale back so neither side nor the total area exceeds
+      // what every browser handles.
+      const { width, height } = root.getBoundingClientRect();
+      const MAX_SIDE = 8000, MAX_AREA = 16e6;
+      const ratio = Math.max(1, Math.min(
+        2,
+        MAX_SIDE / Math.max(width, height),
+        Math.sqrt(MAX_AREA / Math.max(1, width * height)),
+      ));
+
+      const canvas = await toCanvas(root, {
         backgroundColor: '#0d0e16',
-        // 2× so the text stays sharp when the image is zoomed; 3× (a phone's own
-        // ratio) would make a 20 MB file out of a long panel.
-        pixelRatio: 2,
+        pixelRatio: ratio,
         cacheBust: true,
       });
+
+      // Downloaded as a BLOB, not a data: URL. A base64 data URL of a full panel
+      // runs to several megabytes, and at that size the browser's own download
+      // path truncates it — which is how a "normal looking" file ends up refusing
+      // to open. A blob URL carries the bytes directly, at any size.
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', 0.95));
+      if (!blob) throw new Error('encode failed');
+      objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
+      a.href = objectUrl;
       a.download = `${fileName(root)}.jpg`;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
       a.click();
+      a.remove();
     } catch {
       setError('Image export failed — use PDF.');
       setTimeout(() => setError(null), 4000);
     } finally {
+      // Only after the download has been handed off; revoking immediately can cut
+      // it short on Safari.
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl as string), 60_000);
       document.documentElement.classList.remove('print-capture');
       setBusy(false);
     }

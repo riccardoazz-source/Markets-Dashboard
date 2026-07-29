@@ -226,15 +226,20 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
   const heights = useMemo(() => {
     const clamp = (v: number, lo: number, hi: number) => Math.round(Math.max(lo, Math.min(hi, v)));
-    // Everything that is not a chart: header, timeframe row, legends, footnote,
-    // the tools panel and the modal's own padding.
-    const budget = Math.max(320, viewportH - 300);
+    // Everything that is NOT plot area has to come off the budget first, or the
+    // stack overflows by exactly the amount that was forgotten: the modal header,
+    // the timeframe row, the Print row, the quadrant's own title + legend, the
+    // footnote, the "time spent" chips, the collapsed Tools bar and the padding.
+    const CHROME = 320;
+    // Each indicator pane also carries a caption and a top margin above its plot.
+    const PANE_CHROME = 26, QUAD_CHROME = 20;
+    const budget = Math.max(300, viewportH - CHROME - paneCount * PANE_CHROME - QUAD_CHROME);
     const PANE_SHARE = 0.55, QUAD_SHARE = 0.85;
     const unit = budget / (1 + QUAD_SHARE + paneCount * PANE_SHARE);
     return {
-      price: clamp(unit, 130, 210),
-      quadrant: clamp(unit * QUAD_SHARE, 105, 150),
-      pane: clamp(unit * PANE_SHARE, 52, 80),
+      price: clamp(unit, 120, 210),
+      quadrant: clamp(unit * QUAD_SHARE, 95, 150),
+      pane: clamp(unit * PANE_SHARE, 46, 80),
     };
   }, [viewportH, paneCount]);
 
