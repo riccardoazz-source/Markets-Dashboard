@@ -22,7 +22,7 @@ import { useRotationPhases } from '@/lib/useRotationPhases';
 import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
-  avgCalendarDaysPerBar, computeIndicatorPeriods,
+  avgCalendarDaysPerBar, computeIndicatorPeriods, computeMomentum,
   computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily, computeRsiResampledDaily, computeMacdResampledDaily,
   barsForCalDays, computeStretchSigma, computeMaSlope, computeRegimeMonths, computeDrawdown, computeMonthsSinceHigh,
 } from '@/lib/indicators';
@@ -39,7 +39,7 @@ import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { FundamentalsButton } from '@/components/ui/FundamentalsButton';
-import { VolumeSubChart, CyclePane, RSISubChart, MACDSubChart, SYNC_AXIS_WIDTH } from '@/components/charts/PriceChart';
+import { VolumeSubChart, CyclePane, RSISubChart, MACDSubChart, MomentumSubChart, SYNC_AXIS_WIDTH } from '@/components/charts/PriceChart';
 import { publishChartRows, clearChartRows, type ExportRow } from '@/lib/chartExport';
 import { aggregateVolume, type VolumeGrain } from '@/lib/indicators';
 import { useChartFit, paneCountOf } from '@/lib/useChartFit';
@@ -214,6 +214,7 @@ interface DualChartToolsOverlay {
   sma50?: boolean;
   sma200?: boolean;
   ema20?: boolean;
+  ema100?: boolean;
   bollinger?: boolean;
   fib?: boolean;
   spyRatio?: boolean;
@@ -250,7 +251,7 @@ function DualChart({
   // Full daily history so every moving average + the full-history trend line render on short
   // windows (a MA is a fixed number today, independent of the view period).
   const wantsFullMA = !!(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
-    toolsOverlay?.sma200w || toolsOverlay?.ema20);
+    toolsOverlay?.sma200w || toolsOverlay?.ema20 || toolsOverlay?.ema100);
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
   const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend);
   if (!prices.length) return null;
@@ -370,6 +371,9 @@ function DualChart({
   const ema20Vals  = toolsOverlay?.ema20
     ? (useFull && PFull.ema20.ok    ? projectFull(computeEMA(fullCloses, PFull.ema20.period))   : (P.ema20.ok   ? computeEMA(toolCloses, P.ema20.period)   : null))
     : null;
+  const ema100Vals = toolsOverlay?.ema100
+    ? (useFull && PFull.ema100.ok   ? projectFull(computeEMA(fullCloses, PFull.ema100.period))  : (P.ema100.ok  ? computeEMA(toolCloses, P.ema100.period)  : null))
+    : null;
   const bands      = toolsOverlay?.bollinger && P.boll.ok ? computeBollingerBands(toolCloses, P.boll.period, 2) : null;
   const fibLevels  = toolsOverlay?.fib ? computeFibLevels(toolCloses) : null;
 
@@ -398,9 +402,9 @@ function DualChart({
   const trendColor = trendUp ? '#10b981' : '#ef4444';
   const overlayByDate = new Map<string, {
     sma20: number | null; sma50: number | null; sma200: number | null; sma200w: number | null;
-    ema20: number | null; bbRange: [number, number] | null;
+    ema20: number | null; ema100: number | null; bbRange: [number, number] | null;
   }>();
-  if (sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema20Vals || bands) {
+  if (sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema20Vals || ema100Vals || bands) {
     prices.forEach((p, i) => {
       overlayByDate.set(p.date, {
         sma20:   sma20Vals?.[i]   ?? null,
@@ -408,6 +412,7 @@ function DualChart({
         sma200:  sma200Vals?.[i]  ?? null,
         sma200w: sma200wVals?.[i] ?? null,
         ema20:   ema20Vals?.[i]   ?? null,
+        ema100:  ema100Vals?.[i]  ?? null,
         bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
           ? [bands.lower[i] as number, bands.upper[i] as number]
           : null,
@@ -441,6 +446,7 @@ function DualChart({
     sma200:  overlayByDate.get(date)?.sma200  ?? null,
     sma200w: overlayByDate.get(date)?.sma200w ?? null,
     ema20:  overlayByDate.get(date)?.ema20  ?? null,
+    ema100: overlayByDate.get(date)?.ema100 ?? null,
     bbRange: overlayByDate.get(date)?.bbRange ?? null,
     spy: showSpy ? (spyByDate.get(date) ?? null) : null,
     trend: showTrend ? (trendByDate.get(date) ?? null) : null,
@@ -525,7 +531,7 @@ function DualChart({
         </div>
       )}
       {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w ||
-        toolsOverlay?.ema20 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy || showTrend) && (
+        toolsOverlay?.ema20 || toolsOverlay?.ema100 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy || showTrend) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
           {showTrend && (
             <span className="flex items-center gap-1 text-[10px]" style={{ color: trendColor }}>
@@ -561,6 +567,11 @@ function DualChart({
           {toolsOverlay?.ema20 && (
             <span className="flex items-center gap-1 text-[10px] text-rose-400">
               <span className="inline-block w-5 border-t-2 border-rose-400" />EMA 20
+            </span>
+          )}
+          {toolsOverlay?.ema100 && (
+            <span className="flex items-center gap-1 text-[10px] text-pink-400">
+              <span className="inline-block w-5 border-t-2 border-pink-400" />EMA 100
             </span>
           )}
           {toolsOverlay?.bollinger && (
@@ -627,6 +638,7 @@ function DualChart({
             if (name === 'sma200')  return [value != null ? formatPrice(value, currency) : '—', 'SMA 200'];
             if (name === 'sma200w') return [value != null ? formatPrice(value, currency) : '—', 'SMA 200W'];
             if (name === 'ema20')  return [value != null ? formatPrice(value, currency) : '—', 'EMA 20'];
+            if (name === 'ema100') return [value != null ? formatPrice(value, currency) : '—', 'EMA 100'];
             if (name === 'spy')    return [value != null ? formatPrice(value, currency) : '—', 'vs SPY (benchmark)'];
             if (name === 'trend')  return [value != null ? formatPrice(value, currency) : '—', 'Trend'];
             if (name === 'bbRange') {
@@ -693,6 +705,10 @@ function DualChart({
         {toolsOverlay?.ema20 && (
           <Line yAxisId="price" type="monotone" dataKey="ema20" stroke="#f472b6"
             strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="ema20" />
+        )}
+        {toolsOverlay?.ema100 && (
+          <Line yAxisId="price" type="monotone" dataKey="ema100" stroke="#ec4899"
+            strokeWidth={1.5} dot={false} activeDot={false} connectNulls={false} name="ema100" />
         )}
         {showSpy && (
           <Line yAxisId="price" type="monotone" dataKey="spy" stroke="#cbd5e1"
@@ -1275,6 +1291,25 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
     return prices.map((p, i) => ({ date: p.date, macd: m.macd[i] ?? null, signal: m.signal[i] ?? null, hist: m.hist[i] ?? null }));
   }, [activeTools.macd, macdGrain, prices, oscFullHist]);
 
+  // Momentum was reachable from the tools but drawn nowhere on this tab: the chips
+  // toggled, the fit reserved the space, and no pane appeared. Same shared component
+  // as everywhere else, on periods scaled to this data's granularity.
+  const momentumSeries = useMemo(() => {
+    if (prices.length === 0) return null;
+    const closes = prices.map(p => p.close);
+    const avgDPB = avgCalendarDaysPerBar(prices.map(p => p.date));
+    const per = computeIndicatorPeriods(avgDPB);
+    const build = (period: number) => {
+      const vals = computeMomentum(closes, period);
+      return prices.map((p, i) => ({ date: p.date, value: vals[i] ?? null }));
+    };
+    return {
+      daily: activeTools.momentumDaily ? build(1) : null,
+      weekly: activeTools.momentumWeekly ? build(per.momWeek.period) : null,
+      monthly: activeTools.momentumMonthly ? build(per.momMonth.period) : null,
+    };
+  }, [activeTools.momentumDaily, activeTools.momentumWeekly, activeTools.momentumMonthly, prices]);
+
   // The stocks tab publishes its own CSV rows: it draws its own chart, so nothing
   // else would, and the export would hand over the last panel's numbers under this
   // stock's filename.
@@ -1331,6 +1366,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
         const g = macdGrain ?? 'daily';
         row[`macd_${g}`] = m.macd; row[`macd_signal_${g}`] = m.signal; row[`macd_hist_${g}`] = m.hist;
       }
+      const md = at(momentumSeries?.daily, i);   if (md) row.momentum_daily = md.value;
+      const mw = at(momentumSeries?.weekly, i);  if (mw) row.momentum_weekly = mw.value;
+      const mm = at(momentumSeries?.monthly, i); if (mm) row.momentum_monthly = mm.value;
       const st = at(cycle?.stretch, i);  if (st) row.stretch_sigma = st.value;
       const sl = at(cycle?.slope, i);    if (sl) row.ma200_slope_pct_mo = sl.value;
       const dd = at(cycle?.drawdown, i); if (dd) row.drawdown_52w_pct = dd.value;
@@ -1672,6 +1710,19 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
           {!loading && prices.length > 0 && macdSeries && (
             <MACDSubChart data={macdSeries} grain={macdGrain ?? 'daily'} syncId={STOCK_SYNC_ID} height={paneHeight} />
+          )}
+
+          {momentumSeries?.daily && (
+            <MomentumSubChart syncId={STOCK_SYNC_ID} height={paneHeight} data={momentumSeries.daily}
+              label="Momentum Daily (ROC 1)" color="#38bdf8" />
+          )}
+          {momentumSeries?.weekly && (
+            <MomentumSubChart syncId={STOCK_SYNC_ID} height={paneHeight} data={momentumSeries.weekly}
+              label="Momentum Weekly (ROC 5)" color="#38bdf8" />
+          )}
+          {momentumSeries?.monthly && (
+            <MomentumSubChart syncId={STOCK_SYNC_ID} height={paneHeight} data={momentumSeries.monthly}
+              label="Momentum Monthly (ROC 21)" color="#38bdf8" />
           )}
 
           {cycle?.stretch && (

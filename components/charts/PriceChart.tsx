@@ -338,7 +338,7 @@ export function VolumeSubChart({ data, syncId, height = 70, grain = 'daily' }: {
   );
 }
 
-function MomentumSubChart({
+export function MomentumSubChart({
   data, label, color, syncId, height = 70,
 }: {
   data: { date: string; value: number | null }[];
