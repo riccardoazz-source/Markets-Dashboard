@@ -371,3 +371,53 @@ export function computeMACD(
 
   return { macd, signal: sig, hist };
 }
+
+// Volume aggregated to the chosen grain. Weekly and monthly are SUMS — a week's
+// volume is the volume that traded that week, not an average of its days — and the
+// colour comes from the period's own close against the previous period's, so the
+// question the pane answers ("were the heavy periods buying or selling?") stays the
+// same at every grain. The total is placed on the period's LAST day so the bars
+// keep sharing the price chart's daily axis, and the crosshair still lines up.
+export type VolumeGrain = 'daily' | 'weekly' | 'monthly';
+
+function mondayOf(date: string): string {
+  const d = new Date(date + 'T00:00:00Z');
+  const day = (d.getUTCDay() + 6) % 7;            // Monday = 0
+  d.setUTCDate(d.getUTCDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+
+export function aggregateVolume(
+  data: { date: string; close: number; volume?: number | null }[],
+  grain: VolumeGrain,
+): { date: string; volume: number | null; up: boolean }[] {
+  if (grain === 'daily') {
+    return data.map((d, i) => ({
+      date: d.date,
+      volume: d.volume ?? null,
+      up: i === 0 ? true : d.close >= data[i - 1].close,
+    }));
+  }
+  const keyOf = (d: string) => (grain === 'monthly' ? d.slice(0, 7) : mondayOf(d));
+  // One entry per period: where it ends, how much traded, how it closed.
+  const periods: { endDate: string; total: number | null; close: number }[] = [];
+  let curKey: string | null = null;
+  for (const d of data) {
+    const k = keyOf(d.date);
+    if (k !== curKey) { periods.push({ endDate: d.date, total: null, close: d.close }); curKey = k; }
+    const p = periods[periods.length - 1];
+    p.endDate = d.date;
+    p.close = d.close;
+    if (d.volume != null) p.total = (p.total ?? 0) + d.volume;
+  }
+  const byEnd = new Map(periods.map((p, i) => [p.endDate, {
+    volume: p.total,
+    up: i === 0 ? true : p.close >= periods[i - 1].close,
+  }]));
+  // Every date is kept — a period's total sits on its last bar, the rest are blank —
+  // so the series still matches the price chart's categories one for one.
+  return data.map(d => {
+    const hit = byEnd.get(d.date);
+    return { date: d.date, volume: hit ? hit.volume : null, up: hit ? hit.up : true };
+  });
+}
