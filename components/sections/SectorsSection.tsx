@@ -23,6 +23,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { FundamentalsButton } from '@/components/ui/FundamentalsButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
@@ -409,6 +410,19 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               )}
               <ReturnsTableButton name={selectedSector?.name ?? selected!} symbol={selected!} />
               <QuadrantButton name={selectedSector?.name ?? selected!} symbol={selected!} group="Sectors" />
+              {/* Sector ETFs distribute, so this is where the drawer earns its place.
+                  Offered only when there are dividends behind it. */}
+              {divData && divData.dividends.length > 0 && (
+                <FundamentalsButton
+                  name={selectedSector?.name ?? selected!} symbol={selected!} subtitle="Sectors"
+                >
+                  <DividendsPanel
+                    dividends={divData.dividends}
+                    currency="USD"
+                    periodStartDate={historical[0]?.date}
+                  />
+                </FundamentalsButton>
+              )}
               <GeminiCommentButton
                 key={selected!}
                 name={selectedSector?.name ?? selected!}
@@ -459,15 +473,6 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             <PriceChart data={historical} symbol={selected ?? undefined} color="auto" toolsOverlay={activeTools}
               totalReturnData={trSeries} syncId="sectors-detail" height={chartH} subChartHeight={paneHeight}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
-          )}
-
-          {/* Dividends — same bar chart + collapsible list as StockSection */}
-          {divData && divData.dividends.length > 0 && (
-            <DividendsPanel
-              dividends={divData.dividends}
-              currency="USD"
-              periodStartDate={historical[0]?.date}
-            />
           )}
 
           {historical.length > 0 && (

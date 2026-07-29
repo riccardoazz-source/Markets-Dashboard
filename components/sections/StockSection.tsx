@@ -37,6 +37,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { FundamentalsButton } from '@/components/ui/FundamentalsButton';
 import { VolumeSubChart, MacdTooltip, CyclePane } from '@/components/charts/PriceChart';
 import { publishChartRows, clearChartRows, type ExportRow } from '@/lib/chartExport';
 import { aggregateVolume, type VolumeGrain } from '@/lib/indicators';
@@ -61,7 +62,6 @@ interface EarningsData {
   currency: string;
 }
 
-type Overlay = 'none' | 'eps' | 'financials';
 
 function formatBig(n: number): string {
   const abs = Math.abs(n);
@@ -778,6 +778,123 @@ function DualChart({
   );
 }
 
+// Everything a company has that is not its price: the multiples, the cadence, and
+// the three histories the panel used to stack under the chart. Lives behind the
+// Fundamentals button so the technical view is the same shape as every other asset.
+function StockFundamentals({
+  currency, timeframe, peTtm, avgPe, quote, divYield, divCagr, epsCagr, revCagr,
+  epsCount, finCount, dividends, totalDivs, earnings, earningsLoading, reportFreq,
+}: {
+  currency: string;
+  timeframe: Timeframe;
+  peTtm: number | null;
+  avgPe: number | null;
+  quote: QuoteData | null;
+  divYield: number | null;
+  divCagr: { cagr: number; years: number } | null;
+  epsCagr: { cagr: number; years: number } | null;
+  revCagr: { cagr: number; years: number } | null;
+  epsCount: number;
+  finCount: number;
+  dividends: { date: string; amount: number }[];
+  totalDivs: number;
+  earnings: EarningsData | null;
+  earningsLoading: boolean;
+  reportFreq: string | null;
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
+        {dividends.length > 0 && (
+          <Stat label="Dividends (period)" value={`${dividends.length} (${formatPrice(totalDivs, currency)})`} />
+        )}
+        {peTtm != null && peTtm > 0 && peTtm <= 1000 ? (
+          <Stat label="P/E (TTM)" value={`${peTtm.toFixed(1)}x`} color="text-sky-400" />
+        ) : epsCount > 0 ? (
+          <Stat label="P/E (TTM)" value="N/A" color="text-gray-600" />
+        ) : null}
+        {/* ETFs / funds carry no EPS → show Yahoo's trailing P/E instead. */}
+        {peTtm == null && epsCount === 0 && quote?.trailingPE != null && quote.trailingPE > 0 && quote.trailingPE <= 1000 && (
+          <Stat label="P/E" value={`${quote.trailingPE.toFixed(1)}x`} color="text-sky-400" />
+        )}
+        {quote?.forwardPE != null && quote.forwardPE > 0 && quote.forwardPE <= 1000 && (
+          <Stat label="Fwd P/E" value={`${quote.forwardPE.toFixed(1)}x`} color="text-sky-400" />
+        )}
+        {avgPe != null && avgPe > 0 && avgPe <= 1000 ? (
+          <Stat label={`Avg P/E (${timeframe})`} value={`${avgPe.toFixed(1)}x`} color="text-sky-400" />
+        ) : epsCount > 0 ? (
+          <Stat label={`Avg P/E (${timeframe})`} value="N/A" color="text-gray-600" />
+        ) : null}
+        <Stat label="Div. yield (TTM)" value={divYield != null ? formatPercent(divYield) : '—'}
+          color={divYield != null ? colorForPercent(divYield) : 'text-gray-600'} />
+        {divCagr ? (
+          <Stat label={`Div. CAGR (${divCagr.years}y)`} value={formatPercent(divCagr.cagr)} color={colorForPercent(divCagr.cagr)} />
+        ) : (
+          <Stat label="Div. CAGR" value="—" color="text-gray-600" />
+        )}
+        {epsCagr ? (
+          <Stat label={`EPS CAGR (${epsCagr.years}y)`} value={formatPercent(epsCagr.cagr)} color={colorForPercent(epsCagr.cagr)} />
+        ) : epsCount > 0 ? (
+          <Stat label="EPS CAGR" value="N/A" color="text-gray-600" />
+        ) : null}
+        {revCagr ? (
+          <Stat label={`Revenue CAGR (${revCagr.years}y)`} value={formatPercent(revCagr.cagr)} color={colorForPercent(revCagr.cagr)} />
+        ) : finCount > 0 ? (
+          <Stat label="Revenue CAGR" value="N/A" color="text-gray-600" />
+        ) : null}
+        {reportFreq && <Stat label="Reports" value={reportFreq} color="text-amber-300" />}
+      </div>
+
+      {earningsLoading && (
+        <p className="text-[11px] text-gray-500 animate-pulse">Loading earnings…</p>
+      )}
+
+      {dividends.length > 0 && (
+        <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
+          <p className="text-xs text-gray-300 font-semibold">Dividends over time</p>
+          <DividendsBarChart dividends={dividends} currency={currency} />
+        </div>
+      )}
+
+      {earnings && earnings.quarterly.length > 0 && (
+        <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
+          <p className="text-xs text-gray-300 font-semibold">
+            Earnings per share (quarterly)
+            <span className="text-gray-500 font-normal ml-1">· {earnings.quarterly.length} reported quarters</span>
+          </p>
+          <EarningsBarChart quarterly={earnings.quarterly} currency={earnings.currency || currency} />
+        </div>
+      )}
+
+      {earnings && earnings.financials.length > 0 && (
+        <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
+          <p className="text-xs text-gray-300 font-semibold">
+            Revenue · Costs · Profit (quarterly)
+            <span className="text-gray-500 font-normal ml-1">· {earnings.financials.length} reported quarters</span>
+          </p>
+          <FinancialsBarChart data={earnings.financials} currency={earnings.currency || currency} />
+        </div>
+      )}
+
+      {dividends.length > 0 && (
+        <details className="bg-bg-input rounded-lg px-3 py-2">
+          <summary className="text-xs text-gray-300 cursor-pointer">
+            {dividends.length} dividends in period — total {formatPrice(totalDivs, currency)}
+          </summary>
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-[11px] font-mono text-gray-400 max-h-40 overflow-y-auto">
+            {dividends.slice().reverse().map(d => (
+              <div key={d.date + d.amount} className="flex justify-between">
+                <span>{d.date}</span>
+                <span className="text-gray-200">{d.amount.toFixed(4)}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function FinancialsBarChart({ data, currency }: { data: FinancialPoint[]; currency: string }) {
   if (!data.length) return null;
   const rows = data.map(d => ({
@@ -851,7 +968,6 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [data, setData] = useState<StockData | null>(null);
   const [earnings, setEarnings] = useState<EarningsData | null>(null);
   const [earningsLoading, setEarningsLoading] = useState(false);
-  const [overlay, setOverlay] = useState<Overlay>('none');
   const [loading, setLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('5Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
@@ -940,10 +1056,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
   // Earnings — fetched once per symbol (cheap; doesn't depend on timeframe)
   useEffect(() => {
-    if (!selected) { setEarnings(null); setOverlay('none'); setEarningsLoading(false); return; }
+    if (!selected) { setEarnings(null); setEarningsLoading(false); return; }
     let cancelled = false;
     setEarnings(null);
-    setOverlay('none');
     setEarningsLoading(true);
     fetch(`/api/stock?mode=earnings&symbol=${encodeURIComponent(selected.symbol)}`)
       .then(r => r.json())
@@ -1400,6 +1515,16 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               )}
               <ReturnsTableButton name={selected.name} symbol={selected.symbol} />
               <QuadrantButton name={selected.name} symbol={selected.symbol} group="Stocks" stocks={watchlistSymbols} />
+              <FundamentalsButton name={selected.name} symbol={selected.symbol} subtitle="Stocks">
+                <StockFundamentals
+                  currency={currency} timeframe={timeframe}
+                  peTtm={peTtm} avgPe={avgPe} quote={selQuote}
+                  divYield={divYield} divCagr={divCagr} epsCagr={epsCagr} revCagr={revCagr}
+                  epsCount={epsList.length} finCount={finList.length}
+                  dividends={dividends} totalDivs={totalDivs}
+                  earnings={earnings} earningsLoading={earningsLoading} reportFreq={reportFreq}
+                />
+              </FundamentalsButton>
               <GeminiCommentButton
                 key={selected.symbol}
                 name={selected.name}
@@ -1428,93 +1553,18 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             </p>
           )}
 
-          {/* Legend for dual lines + overlay toggles (EPS / Financials) */}
-          {!loading && prices.length > 0 && (
-            <div className="flex items-center justify-between gap-2 flex-wrap text-[11px]">
-              <div className="flex items-center gap-4 flex-wrap">
-                {dividends.length > 0 && (
-                  <>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-6 h-0.5 bg-emerald-400 inline-block" />
-                      <span className="text-gray-400">Price</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-6 border-t-2 border-dashed border-emerald-300 inline-block" />
-                      <span className="text-gray-400">Total Return (reinvested div.)</span>
-                    </div>
-                  </>
-                )}
-                {overlay === 'eps' && earnings && earnings.quarterly.length > 0 && (
-                  <>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 inline-block rounded-sm" style={{ backgroundColor: '#f59e0b' }} />
-                      <span className="text-gray-400">EPS quarterly</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 inline-block rounded-sm" style={{ backgroundColor: '#dc2626' }} />
-                      <span className="text-gray-400">EPS annual</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-6 border-t-2 border-dashed inline-block" style={{ borderColor: '#a3e635' }} />
-                      <span className="text-gray-400">P/E (TTM)</span>
-                    </div>
-                  </>
-                )}
-                {overlay === 'financials' && earnings && earnings.financials.length > 0 && (
-                  <>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 inline-block rounded-sm" style={{ backgroundColor: '#60a5fa' }} />
-                      <span className="text-gray-400">Revenue quarterly</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 inline-block rounded-sm" style={{ backgroundColor: '#8b5cf6' }} />
-                      <span className="text-gray-400">Revenue annual</span>
-                    </div>
-                  </>
-                )}
+          {/* Price / total-return legend only. The EPS and Revenue overlays moved to
+              Fundamentals: they gave this panel a different shape from every other
+              asset's, which is exactly what stops two charts being comparable. */}
+          {!loading && prices.length > 0 && dividends.length > 0 && (
+            <div className="flex items-center gap-4 flex-wrap text-[11px]">
+              <div className="flex items-center gap-1.5">
+                <span className="w-6 h-0.5 bg-emerald-400 inline-block" />
+                <span className="text-gray-400">Price</span>
               </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {earningsLoading ? (
-                  <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border rounded-full animate-pulse">
-                    Loading earnings…
-                  </span>
-                ) : (
-                  <>
-                    {earnings && earnings.quarterly.length > 0 ? (
-                      <button onClick={() => setOverlay(o => o === 'eps' ? 'none' : 'eps')}
-                        className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
-                          overlay === 'eps'
-                            ? 'border-amber-400 text-amber-400 bg-amber-400/10'
-                            : 'border-border text-gray-400 hover:text-gray-200')}>
-                        {overlay === 'eps' ? 'Hide EPS' : 'Show EPS'}
-                      </button>
-                    ) : (
-                      <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">
-                        No EPS data
-                      </span>
-                    )}
-                    {earnings && earnings.financials.length > 0 ? (
-                      <button onClick={() => setOverlay(o => o === 'financials' ? 'none' : 'financials')}
-                        className={clsx('px-2.5 py-0.5 text-[10px] font-medium rounded-full border transition-all',
-                          overlay === 'financials'
-                            ? 'border-blue-400 text-blue-400 bg-blue-400/10'
-                            : 'border-border text-gray-400 hover:text-gray-200')}>
-                        {overlay === 'financials' ? 'Hide Revenue' : 'Show Revenue'}
-                      </button>
-                    ) : (
-                      <span className="px-2.5 py-0.5 text-[10px] text-gray-600 border border-border/40 rounded-full">
-                        No financials
-                      </span>
-                    )}
-                    {/* Reporting cadence badge — colored to match EPS bars so the user
-                        can tell at a glance how often the company reports. */}
-                    {reportFreq && (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-amber-400/10 border border-amber-400/50 text-amber-300 font-medium">
-                        Reports {reportFreq}
-                      </span>
-                    )}
-                  </>
-                )}
+              <div className="flex items-center gap-1.5">
+                <span className="w-6 border-t-2 border-dashed border-emerald-300 inline-block" />
+                <span className="text-gray-400">Total Return (reinvested div.)</span>
               </div>
             </div>
           )}
@@ -1534,48 +1584,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               {nrIRR != null && (
                 <Stat label={`IRR (${customRange ? 'Custom' : timeframe})`} value={formatPercent(nrIRR * 100)} color={colorForPercent(nrIRR * 100)} />
               )}
-              {peTtm != null && peTtm > 0 && peTtm <= 1000 ? (
-                <Stat label="P/E (TTM)" value={`${peTtm.toFixed(1)}x`} color="text-sky-400" />
-              ) : epsList.length > 0 && peTtm == null ? (
-                <Stat label="P/E (TTM)" value="N/A" color="text-gray-600" />
-              ) : null}
-              {/* ETFs / funds carry no EPS → show Yahoo's trailing P/E instead. */}
-              {peTtm == null && epsList.length === 0 && selQuote?.trailingPE != null && selQuote.trailingPE > 0 && selQuote.trailingPE <= 1000 && (
-                <Stat label="P/E" value={`${selQuote.trailingPE.toFixed(1)}x`} color="text-sky-400" />
-              )}
-              {selQuote?.forwardPE != null && selQuote.forwardPE > 0 && selQuote.forwardPE <= 1000 && (
-                <Stat label="Fwd P/E" value={`${selQuote.forwardPE.toFixed(1)}x`} color="text-sky-400" />
-              )}
-              {avgPe != null && avgPe > 0 && avgPe <= 1000 ? (
-                <Stat label={`Avg P/E (${timeframe})`} value={`${avgPe.toFixed(1)}x`} color="text-sky-400" />
-              ) : epsList.length > 0 ? (
-                <Stat label={`Avg P/E (${timeframe})`} value="N/A" color="text-gray-600" />
-              ) : null}
-              {divYield != null ? (
-                <Stat label="Div. yield (TTM)" value={formatPercent(divYield)} color={colorForPercent(divYield)} />
-              ) : (
-                <Stat label="Div. yield (TTM)" value="—" color="text-gray-600" />
-              )}
-              {divCagr ? (
-                <Stat label={`Div. CAGR (${divCagr.years}y)`} value={formatPercent(divCagr.cagr)} color={colorForPercent(divCagr.cagr)} />
-              ) : (
-                <Stat label="Div. CAGR" value="—" color="text-gray-600" />
-              )}
-              {epsCagr ? (
-                <Stat label={`EPS CAGR (${epsCagr.years}y)`} value={formatPercent(epsCagr.cagr)} color={colorForPercent(epsCagr.cagr)} />
-              ) : epsList.length > 0 ? (
-                <Stat label="EPS CAGR" value="N/A" color="text-gray-600" />
-              ) : null}
-              {revCagr ? (
-                <Stat label={`Revenue CAGR (${revCagr.years}y)`} value={formatPercent(revCagr.cagr)} color={colorForPercent(revCagr.cagr)} />
-              ) : finList.length > 0 ? (
-                <Stat label="Revenue CAGR" value="N/A" color="text-gray-600" />
-              ) : null}
               {data.meta.high52w != null && data.meta.high52w > 0 && <Stat label="52W High" value={formatPrice(data.meta.high52w, currency)} />}
               {data.meta.low52w != null && data.meta.low52w > 0 && <Stat label="52W Low" value={formatPrice(data.meta.low52w, currency)} />}
-              {dividends.length > 0 && (
-                <Stat label="Dividends (period)" value={`${dividends.length} (${formatPrice(totalDivs, currency)})`} />
-              )}
             </div>
           )}
 
@@ -1587,8 +1597,6 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               symbol={selected?.symbol}
               totalReturn={totalReturn}
               currency={currency}
-              eps={overlay === 'eps' ? earnings?.quarterly : undefined}
-              financials={overlay === 'financials' ? earnings?.financials : undefined}
               toolsOverlay={activeTools}
               spyPrices={spyPrices}
               syncId={STOCK_SYNC_ID}
@@ -1722,56 +1730,10 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             />
           )}
 
-          {/* Dividends chart (bar) */}
-          {!loading && dividends.length > 0 && (
-            <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
-              <p className="text-xs text-gray-300 font-semibold">Dividends over time</p>
-              <DividendsBarChart dividends={dividends} currency={currency} />
-            </div>
-          )}
-
-          {/* Earnings chart (bar) */}
-          {!loading && earnings && earnings.quarterly.length > 0 && (
-            <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
-              <p className="text-xs text-gray-300 font-semibold">
-                Earnings per share (quarterly)
-                <span className="text-gray-500 font-normal ml-1">· {earnings.quarterly.length} reported quarters</span>
-              </p>
-              <EarningsBarChart quarterly={earnings.quarterly} currency={earnings.currency || currency} />
-            </div>
-          )}
-
-          {/* Financials chart (revenue / costs / net income) */}
-          {!loading && earnings && earnings.financials.length > 0 && (
-            <div className="rounded-lg border border-border p-3 bg-bg-input/40 space-y-1">
-              <p className="text-xs text-gray-300 font-semibold">
-                Revenue · Costs · Profit (quarterly)
-                <span className="text-gray-500 font-normal ml-1">· {earnings.financials.length} reported quarters</span>
-              </p>
-              <FinancialsBarChart data={earnings.financials} currency={earnings.currency || currency} />
-            </div>
-          )}
-
-          {dividends.length > 0 && (
-            <details className="bg-bg-input rounded-lg px-3 py-2">
-              <summary className="text-xs text-gray-300 cursor-pointer">
-                {dividends.length} dividends in period — total {formatPrice(totalDivs, currency)}
-              </summary>
-              <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-[11px] font-mono text-gray-400 max-h-32 overflow-y-auto">
-                {dividends.slice().reverse().map(d => (
-                  <div key={d.date + d.amount} className="flex justify-between">
-                    <span>{d.date}</span>
-                    <span className="text-gray-200">{d.amount.toFixed(4)}</span>
-                  </div>
-                ))}
-              </div>
-            </details>
-          )}
-
           <p className="text-[10px] text-gray-700">
-            Solid line = price · Dashed line = total return (dividends reinvested at ex-date) · Orange bars = quarterly EPS · Blue/violet bars = quarterly revenue/net income (right axis when overlay enabled).
-            IRR ({timeframe}) = CAGR of the total-return series · IRR (cash flow) = rate that zeros the NPV of discrete cashflows.
-            Source: Yahoo Finance · Not financial advice.
+            Solid line = price · Dashed line = total return (dividends reinvested at ex-date).
+            IRR ({timeframe}) = CAGR of the total-return series. Earnings, revenue, dividends and
+            multiples are under Fundamentals. Source: Yahoo Finance · Not financial advice.
           </p>
         </div>
         </DetailModal>
