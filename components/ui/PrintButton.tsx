@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { Printer, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
 
-// Save the WHOLE panel — not just the part that fits on screen — as a PDF or a JPG.
+// Save the WHOLE panel — not just the part that fits on screen — as a PDF or a PNG.
 // A screenshot stops at the fold; both exports here take the panel's full height, so
 // a 40-row returns table or a chart with three indicator panes comes out complete.
 //
 //   PDF — through the browser's print engine, which paginates. The dialog's
 //         "Save as PDF" writes the file (iPhone: Share → Print → Save to Files).
-//   JPG — the same panel rasterised to one tall image, downloaded directly.
+//   PNG — the same panel rasterised to one tall image, downloaded directly. PNG
+//         rather than JPEG: a JPEG came back as a file some viewers refused to
+//         open, and there is no reason to fight an encoder over a screenful of
+//         flat colour and thin lines, which is what PNG is good at anyway.
 //
 // Both need the same preparation (drop the controls, un-clip whatever scrolls);
 // see the export block in globals.css, where the rules exist once for print media
@@ -38,7 +41,7 @@ function isolate(el: HTMLElement): () => void {
 }
 
 // Name the file after whatever the panel calls itself, so a folder of exports is
-// readable: "NASDAQ 100 2026-07-29.jpg" rather than "download (3).jpg". Windows
+// readable: "NASDAQ 100 2026-07-29.png" rather than "download (3).png". Windows
 // refuses a name ending in a dot or a space, and refusing to open the file is how
 // it says so — hence the trim at the end.
 function fileName(root: HTMLElement): string {
@@ -90,10 +93,7 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
     });
   };
 
-  // JPG and PNG differ only in the encoder. PNG exists because it is the format
-  // nothing refuses: if a JPEG ever lands on a machine that will not open it, this
-  // is the way out that needs no debugging.
-  const asImage = async (type: 'image/jpeg' | 'image/png') => {
+  const asImage = async () => {
     setOpen(false);
     const root = rootOf();
     if (!root) return;
@@ -129,7 +129,7 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
       // runs to several megabytes, and at that size the browser's own download
       // path truncates it — which is how a "normal looking" file ends up refusing
       // to open. A blob URL carries the bytes directly, at any size.
-      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, type, 0.95));
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'));
       if (!blob || blob.size < 1024) throw new Error('encoder returned nothing');
 
       // Decode what was just encoded before handing it over. A file that cannot be
@@ -140,10 +140,10 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
       if (!bitmap) throw new Error('image did not decode');
       bitmap.close?.();
 
-      // The extension has to match what the encoder ACTUALLY produced: toBlob is
-      // allowed to ignore the requested type and fall back to PNG, and a PNG named
-      // .jpg is exactly the kind of file some viewers reject.
-      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+      // The extension follows what the encoder ACTUALLY produced — toBlob may
+      // ignore the requested type, and a file whose extension lies about its
+      // contents is exactly what some viewers reject.
+      const ext = blob.type === 'image/jpeg' ? 'jpg' : 'png';
       objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objectUrl;
@@ -158,9 +158,7 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
       // opened in a tab it can be long-pressed and saved the usual way.
       if (!('download' in HTMLAnchorElement.prototype)) window.open(objectUrl, '_blank');
     } catch {
-      setError(type === 'image/png'
-        ? 'Image export failed — use PDF.'
-        : 'JPG failed on this browser — try PNG, or PDF.');
+      setError('Image export failed — use PDF.');
       setTimeout(() => setError(null), 6000);
     } finally {
       // Only after the download has been handed off; revoking immediately can cut
@@ -186,8 +184,7 @@ export function PrintButton({ label = 'Print', className }: { label?: string; cl
       {open && (
         <div className="absolute right-0 top-full mt-1 z-[400] w-44 rounded-lg border border-border bg-bg-card shadow-2xl p-1">
           <MenuItem icon={<FileText size={13} />} title="PDF" hint="Paginated, print dialog" onClick={asPdf} />
-          <MenuItem icon={<ImageIcon size={13} />} title="JPG" hint="One tall image, smaller file" onClick={() => asImage('image/jpeg')} />
-          <MenuItem icon={<ImageIcon size={13} />} title="PNG" hint="Same, opens anywhere" onClick={() => asImage('image/png')} />
+          <MenuItem icon={<ImageIcon size={13} />} title="PNG" hint="One tall image" onClick={asImage} />
         </div>
       )}
 
