@@ -347,6 +347,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : (
             <PriceChart data={historical} symbol={selected ?? undefined} color="auto" height={200} toolsOverlay={activeTools}
+              syncId="commodities-detail"
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
           {historical.length > 0 && (

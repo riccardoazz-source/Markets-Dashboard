@@ -70,6 +70,12 @@ interface Props {
    * model panel) that passes the same id.
    */
   syncId?: string;
+  /**
+   * Shaded date ranges drawn BEHIND the price — used by the Quadrant view to light
+   * up the stretches the model called one particular phase, so those periods can be
+   * read on the price itself and not only on the strip below.
+   */
+  highlightBands?: { from: string; to: string; color: string; opacity?: number }[];
 }
 
 function formatDate(dateStr: string, data: HistoricalPoint[]) {
@@ -256,6 +262,7 @@ export function PriceChart({
   data, symbol, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
   enableDragSelect = true, toolsOverlay, totalReturnData, onSetRange, syncId,
+  highlightBands,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
@@ -689,6 +696,15 @@ export function PriceChart({
               catch { return label as string; }
             }}
           />
+
+          {/* Caller-supplied period highlights — first child inside the plot area so
+              they sit BEHIND every series. */}
+          {highlightBands?.map((b, i) => (
+            <ReferenceArea
+              key={`hl-${i}-${b.from}`} x1={b.from} x2={b.to}
+              fill={b.color} fillOpacity={b.opacity ?? 0.16} stroke="none"
+            />
+          ))}
 
           {/* Bollinger band (drawn under the price line) */}
           {toolsOverlay?.bollinger && (

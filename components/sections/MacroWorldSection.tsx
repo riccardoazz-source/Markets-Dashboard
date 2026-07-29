@@ -379,6 +379,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
               // so the line reaches "now" instead of stopping at the last data year —
               // except on a custom range, where the end date must be respected exactly.
               <PriceChart data={customRange ? series : extendToToday(series)} color="auto" height={220} toolsOverlay={activeTools}
+                syncId="macroworld-detail"
                 onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
             ) : (
               <div className="flex items-center justify-center h-40 text-gray-500 text-sm">No series for this window.</div>

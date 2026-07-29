@@ -134,7 +134,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
           <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
         ) : (
           <PriceChart data={historical} symbol={symbol} color="auto" height={200}
-            totalReturnData={totalReturn} toolsOverlay={activeTools}
+            totalReturnData={totalReturn} toolsOverlay={activeTools} syncId="quickview-detail"
             onSetRange={(from, to) => setCustomRange({ from, to })} />
         )}
         {historical.length > 1 && (

@@ -406,7 +406,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             <DualLineDragChart data={divChartData} onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           ) : (
             <PriceChart data={historical} symbol={selected ?? undefined} color="auto" height={200} toolsOverlay={activeTools}
-              totalReturnData={trSeries}
+              totalReturnData={trSeries} syncId="indexes-detail"
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
 

@@ -406,6 +406,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
             <div className="flex items-center justify-center h-40"><LoadingSpinner size={28} /></div>
           ) : (
             <PriceChart data={historical} symbol={coinYahooSym(selectedCrypto)} color="auto" height={200} toolsOverlay={activeTools}
+              syncId="crypto-detail"
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
           )}
           {historical.length > 0 && (

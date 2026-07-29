@@ -242,8 +242,15 @@ interface DualChartToolsOverlay {
   trendFull?: boolean;
 }
 
+// The stocks tab draws its own chart (dual price/total-return axis) rather than
+// using PriceChart, so it needs its own sync group. Every chart in it must reserve
+// the SAME y-axis width and right margin, or the plot areas start at different x
+// positions and the shared crosshair drifts between panes.
+const STOCK_SYNC_ID = 'stock-detail';
+const STOCK_AXIS_WIDTH = 64;
+
 function DualChart({
-  prices, symbol, totalReturn, currency, eps, financials, toolsOverlay, spyPrices, onSetRange,
+  prices, symbol, totalReturn, currency, eps, financials, toolsOverlay, spyPrices, onSetRange, syncId,
 }: {
   prices: HistoricalPoint[];
   symbol?: string;
@@ -254,6 +261,8 @@ function DualChart({
   toolsOverlay?: DualChartToolsOverlay;
   spyPrices?: HistoricalPoint[];
   onSetRange?: (from: string, to: string) => void;
+  /** Shared crosshair group — the RSI/MACD panes below pass the same id. */
+  syncId?: string;
 }) {
   const { handlers, range, area, clear } = useChartDragSelect();
   // Full daily history so every moving average + the full-history trend line render on short
@@ -592,12 +601,13 @@ function DualChart({
             internal layout doesn't always recompute when YAxis components are added/removed. */}
         <ComposedChart key={`chart-${showEps ? 'eps' : ''}${showFin ? 'fin' : ''}${showPe ? 'pe' : ''}`}
           data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+          syncId={syncId} syncMethod="value"
           {...handlers} style={{ cursor: 'crosshair' }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
         <XAxis dataKey="date" tickFormatter={d => formatXDate(d as string, prices)}
           tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={50} />
         <YAxis yAxisId="price" tick={{ fill: '#6b7280', fontSize: 11 }}
-          axisLine={false} tickLine={false} width={64}
+          axisLine={false} tickLine={false} width={STOCK_AXIS_WIDTH}
           tickFormatter={v => {
             const n = v as number;
             if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -1453,6 +1463,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               financials={overlay === 'financials' ? earnings?.financials : undefined}
               toolsOverlay={activeTools}
               spyPrices={spyPrices}
+              syncId={STOCK_SYNC_ID}
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }}
             />
           ) : (
@@ -1486,11 +1497,12 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               <div className="rounded-lg border border-border p-3 bg-bg-input/40">
                 <p className="text-[10px] text-indigo-400 font-semibold mb-1 capitalize">RSI 14 {rsiGrain ?? 'daily'}</p>
                 <ResponsiveContainer width="100%" height={80}>
-                  <LineChart data={rsiData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+                  <LineChart data={rsiData} margin={{ top: 2, right: 16, left: 0, bottom: 0 }}
+                    syncId={STOCK_SYNC_ID} syncMethod="value">
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
                     <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
                     <YAxis domain={[0, 100]} ticks={[30, 50, 70]}
-                      tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={24} />
+                      tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={STOCK_AXIS_WIDTH} />
                     <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.6} />
                     <ReferenceLine y={50} stroke="#6b7280" strokeDasharray="1 4" strokeOpacity={0.35} />
                     <ReferenceLine y={30} stroke="#10b981" strokeDasharray="3 3" strokeOpacity={0.6} />
@@ -1535,10 +1547,11 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               <div className="rounded-lg border border-border p-3 bg-bg-input/40">
                 <p className="text-[10px] text-blue-400 font-semibold mb-1 capitalize">MACD (12, 26, 9) {macdGrain ?? 'daily'}</p>
                 <ResponsiveContainer width="100%" height={80}>
-                  <ComposedChart data={macdData} margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+                  <ComposedChart data={macdData} margin={{ top: 2, right: 16, left: 0, bottom: 0 }}
+                    syncId={STOCK_SYNC_ID} syncMethod="value">
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
                     <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
-                    <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={36}
+                    <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={STOCK_AXIS_WIDTH}
                       tickFormatter={v => (v as number).toFixed(2)} />
                     <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.4} />
                     <Bar dataKey="hist" barSize={3}>

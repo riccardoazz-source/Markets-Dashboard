@@ -651,6 +651,7 @@ export function MacroSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               isCurrency={false}
               interpolationType={selectedIndicator?.unit === '%' ? 'stepAfter' : 'monotone'}
               toolsOverlay={activeTools}
+              syncId="macro-detail"
               onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }}
             />
           ) : (

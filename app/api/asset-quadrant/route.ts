@@ -169,9 +169,13 @@ export async function GET(req: Request) {
 
   // Weekly, on the fixed grid, plus today. Same weeks for every timeframe, so a
   // window already visited is served from the rank cache.
+  // The first sample is the grid point AT OR BEFORE the window start, never after
+  // it: a phase holds until the model next changes it, so without that earlier
+  // sample the opening days of the window have no call at all and were drawn as a
+  // colourless gap.
   const idealDates: Date[] = [];
   for (let t = snapToGrid(start.getTime()); t <= now.getTime(); t += WEEK_MS) {
-    if (t >= start.getTime()) idealDates.push(new Date(t));
+    idealDates.push(new Date(t));
   }
   if (!idealDates.length || fmt(idealDates[idealDates.length - 1]) !== fmt(now)) idealDates.push(now);
   const idealSteps = idealDates.length;

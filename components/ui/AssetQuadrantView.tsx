@@ -21,6 +21,8 @@ import { PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 // the SAME pipeline as the live Rotation Quadrant; the formula lives in one place.
 
 interface QPoint { date: string; score: number; r3m: number; phase: string | null; close: number | null }
+/** A weekly sample carried forward onto every daily bar. */
+interface DPoint { date: string; score: number | null; r3m: number | null; phase: string | null; close: number | null }
 interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number; coarse?: boolean }
 
 const phaseColor = (p: string | null | undefined): string =>
@@ -50,6 +52,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   const [priceData, setPriceData] = useState<HistoricalPoint[] | null>(null);
   const [priceLoading, setPriceLoading] = useState(true);
   const [refining, setRefining] = useState(false);
+  const [focusPhases, setFocusPhases] = useState<Set<string>>(new Set());
 
   // The price is ONE symbol and comes back in milliseconds; the model history has
   // to rank the whole universe week by week and takes seconds. Fetching them
@@ -117,7 +120,11 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   const points = useMemo(() => {
     const all = data?.points ?? [];
     if (!customRange) return all;
-    return all.filter(p => p.date >= customRange.from && p.date <= customRange.to);
+    const inside = all.filter(p => p.date >= customRange.from && p.date <= customRange.to);
+    // Keep the last sample BEFORE the range as well: the call it carries is the one
+    // in force on the range's opening days, and without it they have no colour.
+    const before = all.filter(p => p.date < customRange.from).pop();
+    return before ? [before, ...inside] : inside;
   }, [data, customRange]);
 
   // The model is sampled WEEKLY but the price is daily, and the shared crosshair
@@ -125,8 +132,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   // Monday-only array and the panel simply did not react. Carry each sample
   // forward across the price's own dates: the call holds until the model next
   // changes it, which is also what the phase bands already assume.
-  const dailyPoints = useMemo(() => {
-    if (!points.length || !price.length) return points;
+  const dailyPoints = useMemo<DPoint[]>(() => {
+    if (!points.length) return [];
+    if (!price.length) return points.map(p => ({ ...p }));
     let i = 0;
     let cur: QPoint | null = null;
     return price.map(bar => {
@@ -141,35 +149,56 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     });
   }, [points, price]);
 
-  // Phase runs: consecutive steps sharing a phase become one shaded band, and the
+  // Phase runs: consecutive DAYS sharing a phase become one shaded band, and the
   // start of each run is where the model CHANGED its mind — the line to read the
   // price against.
+  //
+  // Built from the DAILY series, not from the weekly samples: a band's edges have
+  // to be dates the chart actually plots. A weekly grid date that fell on a
+  // holiday, or before the first bar, is not among the plotted categories, and
+  // Recharts silently drops a reference area whose edge it cannot place — which is
+  // why some stretches came out uncoloured.
   const runs = useMemo(() => {
     const out: { from: string; to: string; phase: string | null }[] = [];
-    for (const p of points) {
+    for (const p of dailyPoints) {
       const last = out[out.length - 1];
       if (last && last.phase === p.phase) last.to = p.date;
       else out.push({ from: p.date, to: p.date, phase: p.phase });
     }
-    // A phase that lasted a SINGLE sample had from === to, i.e. a zero-width band
-    // that drew nothing — so a short Recovering spell counted in "time spent" but
-    // was nowhere on the strip. A phase holds until the next sample, so each run ends
-    // where the next one begins; the final run is widened back one sample so
-    // today's call is always visible.
+    // A phase holds until the next one starts, so each run ends where the next
+    // begins — otherwise a one-bar phase is a zero-width band that draws nothing.
     for (let i = 0; i < out.length - 1; i++) out[i].to = out[i + 1].from;
     const last = out[out.length - 1];
-    if (last && last.from === last.to && points.length >= 2) {
-      last.from = points[points.length - 2].date;
+    if (last && last.from === last.to && dailyPoints.length >= 2) {
+      last.from = dailyPoints[dailyPoints.length - 2].date;
     }
     return out;
-  }, [points]);
-  const transitions = runs.slice(1).map(r => r.from);
+  }, [dailyPoints]);
+  const transitions = runs.slice(1).filter(r => r.phase).map(r => r.from);
 
+  // Time spent, measured in DAYS on the chart rather than in samples, so it says
+  // what the strip shows. Days with no call are left out of the denominator.
   const summary = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const p of points) if (p.phase) counts.set(p.phase, (counts.get(p.phase) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [points]);
+    let total = 0;
+    for (const p of dailyPoints) if (p.phase) { counts.set(p.phase, (counts.get(p.phase) ?? 0) + 1); total++; }
+    return { rows: [...counts.entries()].sort((a, b) => b[1] - a[1]), total };
+  }, [dailyPoints]);
+
+  // Clicking a phase in "time spent" isolates it: everything else fades on the
+  // strip and the matching stretches light up on the PRICE chart above, which is
+  // the whole point — seeing what price did while the model held that call.
+  const focused = (p: string | null | undefined) => focusPhases.size === 0 || (!!p && focusPhases.has(p));
+  const togglePhase = (p: string) => setFocusPhases(prev => {
+    const next = new Set(prev);
+    if (next.has(p)) next.delete(p); else next.add(p);
+    return next;
+  });
+  const priceBands = useMemo(() => (
+    focusPhases.size === 0 ? undefined
+      : runs.filter(r => r.phase && focusPhases.has(r.phase))
+          .map(r => ({ from: r.from, to: r.to, color: phaseColor(r.phase), opacity: 0.22 }))
+  ), [runs, focusPhases]);
 
   return (
     <DetailModal onClose={onClose}>
@@ -210,6 +239,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               height={210}
               toolsOverlay={activeTools}
               syncId={SYNC_ID}
+              highlightBands={priceBands}
               onSetRange={(from, to) => setCustomRange({ from, to })}
             />
 
@@ -241,21 +271,22 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   {/* Each phase run twice: a faint full-height wash for context, and
                       a SOLID ribbon along the bottom that actually reads as a colour.
                       The wash alone was too pale to tell the four phases apart. */}
-                  {runs.map((r, i) => (
+                  {runs.filter(r => r.phase).map((r, i) => (
                     <ReferenceArea
-                      key={`wash-${i}`} x1={r.from} x2={r.to}
-                      fill={phaseColor(r.phase)} fillOpacity={0.1} stroke="none"
+                      key={`wash-${i}-${r.from}`} x1={r.from} x2={r.to}
+                      fill={phaseColor(r.phase)} fillOpacity={focused(r.phase) ? 0.1 : 0.02} stroke="none"
                     />
                   ))}
-                  {runs.map((r, i) => (
+                  {runs.filter(r => r.phase).map((r, i) => (
                     <ReferenceArea
-                      key={`ribbon-${i}`} x1={r.from} x2={r.to} y1={0} y2={7}
-                      fill={phaseColor(r.phase)} fillOpacity={0.95} stroke="none"
+                      key={`ribbon-${i}-${r.from}`} x1={r.from} x2={r.to} y1={0} y2={7}
+                      fill={phaseColor(r.phase)} fillOpacity={focused(r.phase) ? 0.95 : 0.12} stroke="none"
                     />
                   ))}
                   {/* Dashed line at every phase change — read straight up to the price. */}
                   {transitions.map(d => (
-                    <ReferenceLine key={`tr-${d}`} x={d} stroke="#94a3b8" strokeDasharray="3 3" strokeOpacity={0.55} />
+                    <ReferenceLine key={`tr-${d}`} x={d} stroke="#94a3b8" strokeDasharray="3 3"
+                      strokeOpacity={focusPhases.size > 0 ? 0.18 : 0.55} />
                   ))}
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
                   <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={40} />
@@ -288,15 +319,37 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                 {data?.coarse ? ' — samples between those dates are not shown, so very short phases can be missed' : ''}.
               </p>
 
-              {summary.length > 0 && (
+              {summary.rows.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap pt-0.5">
                   <span className="text-[9px] text-gray-600 uppercase tracking-wider">Time spent</span>
-                  {summary.map(([ph, n]) => (
-                    <span key={ph} className={clsx('text-[9px] px-1.5 py-0.5 rounded', PHASE_META[ph as RotationPhase]?.cls)}>
-                      {ph} {Math.round((n / points.length) * 100)}%
-                    </span>
+                  {summary.rows.map(([ph, n]) => (
+                    <button
+                      key={ph}
+                      onClick={() => togglePhase(ph)}
+                      title={focusPhases.has(ph) ? 'Click to stop isolating this phase' : 'Click to show only this phase'}
+                      className={clsx(
+                        'text-[9px] px-1.5 py-0.5 rounded transition-opacity cursor-pointer',
+                        PHASE_META[ph as RotationPhase]?.cls,
+                        focusPhases.size > 0 && !focusPhases.has(ph) && 'opacity-35',
+                        focusPhases.has(ph) && 'ring-1 ring-white/60',
+                      )}
+                    >
+                      {ph} {Math.round((n / Math.max(1, summary.total)) * 100)}%
+                    </button>
                   ))}
+                  {focusPhases.size > 0 && (
+                    <button onClick={() => setFocusPhases(new Set())}
+                      className="text-[9px] px-1.5 py-0.5 rounded border border-border text-gray-400 hover:text-gray-200">
+                      show all
+                    </button>
+                  )}
                 </div>
+              )}
+              {focusPhases.size > 0 && (
+                <p className="text-[9px] text-gray-600">
+                  Showing only <b className="text-gray-400">{[...focusPhases].join(' + ')}</b> — those stretches are
+                  shaded on the price chart above too.
+                </p>
               )}
             </div>
 
