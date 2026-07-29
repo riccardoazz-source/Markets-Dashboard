@@ -48,3 +48,71 @@ body {
 @media (max-width: 640px) {
   button { touch-action: manipulation; }
 }
+
+/* ── Printing / save-as-PDF ──────────────────────────────────────────────────
+   A screenshot only captures what fits on the screen. "Print" instead hands the
+   WHOLE panel to the browser's print engine — every row of a table, the part of
+   a chart below the fold — and the print dialog's "Save as PDF" turns it into a
+   file. Works the same on iPhone (Share → Print → Save to Files).
+
+   Everything below only applies while printing; the screen is untouched.
+   `.print-hidden` is added by PrintButton to every ancestor SIBLING of the panel
+   being printed, so the rest of the app disappears without moving any node. */
+@media print {
+  .print-hidden { display: none !important; }
+
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #0d0e16 !important;
+  }
+
+  /* Keep the dark theme: the charts are drawn for it, and a chart printed
+     without its background loses every axis and label. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* The modal wrappers are `fixed inset-0` with their own scrollbar. Left alone
+     they clip the panel to one viewport — exactly the screenshot problem. */
+  .print-flow {
+    position: static !important;
+    inset: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    display: block !important;
+    max-height: none !important;
+  }
+
+  /* Nothing inside the printed panel may scroll or be height-capped: whatever
+     scrolls on screen has to FLOW onto the page instead. */
+  [data-print-root],
+  [data-print-root] * {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  [data-print-root] {
+    max-width: none !important;
+    width: 100% !important;
+    box-shadow: none !important;
+  }
+
+  /* Controls carry no information on paper. One rule covers every panel:
+     Compare/Returns/Quadrant/AI, the ✕, timeframe pills, tool toggles.
+     A button that DOES say something (the quadrant's "time spent" chips) opts
+     back in with data-print-keep. */
+  [data-print-root] button:not([data-print-keep]) { display: none !important; }
+
+  /* Don't split a chart or a card across two pages. */
+  .recharts-wrapper, [data-print-block] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Landscape fits a dashboard chart far better than portrait; the dialog can
+     still override it. */
+  @page { size: landscape; margin: 8mm; }
+}

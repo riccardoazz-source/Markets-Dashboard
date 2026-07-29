@@ -16,6 +16,7 @@ import clsx from 'clsx';
 import { X, Search, ChevronDown, ChevronUp, Layers, Minus, Plus } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { ChartNotes } from '@/components/ui/ChartNotes';
+import { PrintButton } from '@/components/ui/PrintButton';
 import { StackAnalysisPanel, DEFAULT_TOOLS } from '@/components/ui/StackAnalysisPanel';
 import { ChartTools, type ActiveTools } from '@/components/ui/ChartTools';
 import { IMF_INDICATOR_BY_CODE, MACRO_WORLD_ENABLED, imfCompareAssets, imfCompareClass } from '@/lib/imfConfig';
@@ -812,7 +813,10 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
   }, [allAssets]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-print-root>
+      <div className="flex justify-end print:hidden">
+        <PrintButton />
+      </div>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex flex-col gap-2 w-full sm:w-auto">
           {/* Asset class buttons */}

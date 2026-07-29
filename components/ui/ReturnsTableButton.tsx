@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { Table2, X } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { PrintButton } from '@/components/ui/PrintButton';
 import { HistoricalPoint } from '@/lib/types';
 
 // ── Seasonal returns table (Coinglass-style) ─────────────────────────────────
@@ -227,9 +228,10 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm print-flow" onClick={() => setOpen(false)}>
           <div
             className="w-full max-w-[1400px] max-h-[88vh] flex flex-col rounded-xl border border-emerald-500/25 bg-[#12172a] shadow-2xl overflow-hidden"
+            data-print-root
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}
@@ -238,7 +240,10 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
                 <div className="text-sm font-bold text-white truncate">{name} <span className="text-emerald-300 font-semibold">— {gran} Returns (%)</span></div>
                 <div className="text-[10px] text-gray-500">{symbol} · period-over-period, full history · green = gain, red = loss</div>
               </div>
-              <button onClick={() => setOpen(false)} className="p-1 text-gray-500 hover:text-gray-200 shrink-0" aria-label="Close"><X size={16} /></button>
+              <div className="flex items-center gap-1.5 shrink-0 print:hidden">
+                <PrintButton />
+                <button onClick={() => setOpen(false)} className="p-1 text-gray-500 hover:text-gray-200" aria-label="Close"><X size={16} /></button>
+              </div>
             </div>
 
             {/* Granularity selector */}

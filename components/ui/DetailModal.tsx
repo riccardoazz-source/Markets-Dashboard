@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { PrintButton } from './PrintButton';
 
 // Shared centered-popup wrapper for asset detail panels. Sections used to render the
 // detail inline at the bottom of the page; wrapping the SAME panel in this modal makes
@@ -21,13 +22,20 @@ export function DetailModal({ onClose, children }: { onClose: () => void; childr
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[150] overflow-y-auto bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[150] overflow-y-auto bg-black/60 backdrop-blur-sm print-flow" onClick={onClose}>
       {/* min-h-full + items-center: short panels are vertically centred, tall panels
           grow and the overlay scrolls (standard robust modal pattern). */}
-      <div className="flex min-h-full items-start sm:items-center justify-center p-2 sm:p-6">
+      <div className="flex min-h-full items-start sm:items-center justify-center p-2 sm:p-6 print-flow">
         {/* Cap at 6xl (~1152px): on desktop the viewport fills up to that; on mobile the
             viewport is smaller than the cap so the panel still fills the screen. */}
-        <div className="w-full max-w-6xl" onClick={e => e.stopPropagation()}>
+        {/* data-print-root: everything inside is what "Print" saves — one place, so
+            every panel opened as a modal gets it without touching its own header. */}
+        <div className="w-full max-w-6xl" data-print-root onClick={e => e.stopPropagation()}>
+          {/* Its own row rather than squeezed into the panel's header, which on a
+              phone is already wrapping onto three lines. */}
+          <div className="flex justify-end mb-1 print:hidden">
+            <PrintButton />
+          </div>
           {children}
         </div>
       </div>

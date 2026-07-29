@@ -300,8 +300,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   />
                   {/* 50 = the quadrant's horizontal split. */}
                   <ReferenceLine y={50} stroke="#64748b" strokeDasharray="4 2" strokeWidth={1.2} />
-                  <Area type="monotone" dataKey="score" stroke="none" fill="#6366f1" fillOpacity={0.12} />
-                  <Line type="monotone" dataKey="score" stroke="#818cf8" strokeWidth={1.8} dot={{ r: 2 }} connectNulls />
+                  <Area type="monotone" dataKey="score" stroke="none" fill="#6366f1" fillOpacity={0.08} />
+                  {/* A dot on every daily bar turned the line into a caterpillar and
+                      buried the phase colours underneath it. Thin line, no markers —
+                      the score is a level to read, not a set of points to count. */}
+                  <Line type="monotone" dataKey="score" stroke="#a5b4fc" strokeWidth={1.1}
+                    strokeOpacity={0.9} dot={false} activeDot={{ r: 3 }} connectNulls isAnimationActive={false} />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: 8, color: '#e2e8f0', fontSize: 11 }}
                     formatter={(v: number, _n: string, p: { payload?: QPoint }) => {
@@ -329,6 +333,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   {summary.rows.map(([ph, n]) => (
                     <button
                       key={ph}
+                      data-print-keep
                       onClick={() => togglePhase(ph)}
                       title={focusPhases.has(ph) ? 'Click to stop isolating this phase' : 'Click to show only this phase'}
                       className={clsx(

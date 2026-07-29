@@ -856,7 +856,7 @@ export function PriceChart({
       {momMonthlyData && <MomentumSubChart syncId={syncId} data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
 
       {enableDragSelect && data.length > 1 && !range && (
-        <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to measure a period</p>
+        <p className="text-[10px] text-gray-700 text-right mt-0.5 print:hidden">Click &amp; drag to measure a period</p>
       )}
     </div>
   );
