@@ -215,7 +215,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
   const cycleMacd = () => { const g = nextGrain(macdGrain); onChange({ ...activeTools, macdWeekly: g === 'weekly', macdMonthly: g === 'monthly' }); };
 
   return (
-    <div className="border border-border rounded-xl overflow-hidden print:hidden">
+    <div className="border border-border rounded-xl overflow-hidden" data-print-hide>
       <button
         onClick={() => setOpen(v => !v)}
         className="w-full flex items-center justify-between px-3 py-2.5 bg-bg-input text-xs text-gray-400 hover:text-gray-200 transition-colors"

@@ -204,6 +204,40 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
           .map(r => ({ from: r.from, to: r.to, color: phaseColor(r.phase), opacity: 0.22 }))
   ), [runs, focusPhases]);
 
+  // The whole point of this panel is reading the price AGAINST the model's call, so
+  // both have to be on screen at once. Turning on RSI and MACD pushed the quadrant
+  // strip below the fold and the comparison became impossible — and since Print
+  // saves the view, the export inherited the problem. The stack is therefore fitted
+  // to the window: the more panes are open, the shorter each one gets, down to a
+  // floor where it is still legible.
+  const [viewportH, setViewportH] = useState(900);
+  useEffect(() => {
+    const measure = () => setViewportH(window.innerHeight);
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  const paneCount = [
+    activeTools.rsi, activeTools.rsiWeekly, activeTools.rsiMonthly,
+    activeTools.macd, activeTools.macdWeekly, activeTools.macdMonthly,
+    activeTools.momentumDaily, activeTools.momentumWeekly, activeTools.momentumMonthly,
+  ].filter(Boolean).length;
+
+  const heights = useMemo(() => {
+    const clamp = (v: number, lo: number, hi: number) => Math.round(Math.max(lo, Math.min(hi, v)));
+    // Everything that is not a chart: header, timeframe row, legends, footnote,
+    // the tools panel and the modal's own padding.
+    const budget = Math.max(320, viewportH - 300);
+    const PANE_SHARE = 0.55, QUAD_SHARE = 0.85;
+    const unit = budget / (1 + QUAD_SHARE + paneCount * PANE_SHARE);
+    return {
+      price: clamp(unit, 130, 210),
+      quadrant: clamp(unit * QUAD_SHARE, 105, 150),
+      pane: clamp(unit * PANE_SHARE, 52, 80),
+    };
+  }, [viewportH, paneCount]);
+
   return (
     <DetailModal onClose={onClose}>
       <div className="rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3">
@@ -240,7 +274,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               data={price}
               symbol={symbol}
               color="auto"
-              height={210}
+              height={heights.price}
+              subChartHeight={heights.pane}
               toolsOverlay={activeTools}
               syncId={SYNC_ID}
               highlightBands={priceBands}
@@ -264,13 +299,13 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               </div>
 
               {loading ? (
-                <div className="flex items-center justify-center h-[150px] gap-2 text-[11px] text-gray-500">
+                <div className="flex items-center justify-center gap-2 text-[11px] text-gray-500" style={{ height: heights.quadrant }}>
                   <LoadingSpinner size={16} /> ranking the universe week by week…
                 </div>
               ) : error ? (
                 <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ {error}</p>
               ) : (
-              <ResponsiveContainer width="100%" height={150}>
+              <ResponsiveContainer width="100%" height={heights.quadrant}>
                 <ComposedChart data={dailyPoints} syncId={SYNC_ID} syncMethod="value" margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                   {/* Each phase run twice: a faint full-height wash for context, and
                       a SOLID ribbon along the bottom that actually reads as a colour.

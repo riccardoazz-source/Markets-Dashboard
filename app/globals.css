@@ -49,17 +49,29 @@ body {
   button { touch-action: manipulation; }
 }
 
-/* ── Printing / save-as-PDF ──────────────────────────────────────────────────
-   A screenshot only captures what fits on the screen. "Print" instead hands the
-   WHOLE panel to the browser's print engine — every row of a table, the part of
-   a chart below the fold — and the print dialog's "Save as PDF" turns it into a
-   file. Works the same on iPhone (Share → Print → Save to Files).
+/* ── Export: save a whole panel as PDF or JPG ────────────────────────────────
+   A screenshot only captures what fits on the screen. Both exports instead take
+   the WHOLE panel — every row of a table, the part of a chart below the fold.
+   PDF goes through the browser's print engine (dialog → "Save as PDF"; on iPhone
+   Share → Print → Save to Files); JPG rasterises the same panel to an image.
 
-   Everything below only applies while printing; the screen is untouched.
+   The two paths need the SAME preparation — hide the controls, un-clip whatever
+   scrolls — but a print stylesheet is invisible to the rasteriser, so the rules
+   exist twice: once inside `@media print`, once under `html.print-capture`,
+   which PrintButton sets for the duration of a JPG capture. They must stay in
+   step; anything added to one belongs in the other.
+
    `.print-hidden` is added by PrintButton to every ancestor SIBLING of the panel
-   being printed, so the rest of the app disappears without moving any node. */
+   being exported, so the rest of the app disappears without moving any node —
+   nothing unmounts, so no chart has to re-render on the way out. */
+
+/* Print-only captions (e.g. the selected period, which is a set of buttons on
+   screen and has to become words on paper). */
+[data-print-only] { display: none; }
+
 @media print {
-  .print-hidden { display: none !important; }
+  .print-hidden, [data-print-hide] { display: none !important; }
+  [data-print-only] { display: inline !important; }
 
   html, body {
     height: auto !important;
@@ -98,6 +110,10 @@ body {
     max-width: none !important;
     width: 100% !important;
     box-shadow: none !important;
+    /* A panel laid out for a 1150px screen runs past the edge of a page and
+       breaks cards in half. Backing the scale off a notch fits a chart plus its
+       stats on one page; the dialog's own scale control still overrides it. */
+    zoom: 0.82;
   }
 
   /* Controls carry no information on paper. One rule covers every panel:
@@ -116,3 +132,14 @@ body {
      still override it. */
   @page { size: landscape; margin: 8mm; }
 }
+
+/* The JPG path: same preparation, applied for the length of the capture only.
+   No zoom here — an image has no page to fit. */
+html.print-capture [data-print-hide] { display: none !important; }
+html.print-capture [data-print-only] { display: inline !important; }
+html.print-capture [data-print-root],
+html.print-capture [data-print-root] * {
+  overflow: visible !important;
+  max-height: none !important;
+}
+html.print-capture [data-print-root] button:not([data-print-keep]) { display: none !important; }

@@ -763,7 +763,7 @@ function DualChart({
         </ComposedChart>
       </ResponsiveContainer>
       {!range && (
-        <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to measure a period</p>
+        <p className="text-[10px] text-gray-700 text-right mt-0.5" data-print-hide>Click &amp; drag to measure a period</p>
       )}
     </div>
   );

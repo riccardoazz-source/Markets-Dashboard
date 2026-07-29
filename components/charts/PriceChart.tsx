@@ -76,6 +76,13 @@ interface Props {
    * read on the price itself and not only on the strip below.
    */
   highlightBands?: { from: string; to: string; color: string; opacity?: number }[];
+  /**
+   * Height of each indicator pane the tools open. A panel that stacks several of
+   * them under the price (the Quadrant view) shrinks them so the whole stack still
+   * fits on one screen — with five panes at the default 80px nothing is visible
+   * without scrolling, and what you cannot see you cannot compare.
+   */
+  subChartHeight?: number;
 }
 
 function formatDate(dateStr: string, data: HistoricalPoint[]) {
@@ -135,7 +142,7 @@ export const SYNC_AXIS_WIDTH = 60;
 
 // ── Oscillator sub-charts ────────────────────────────────────────────────────
 
-function RSISubChart({ data, grain, syncId }: { data: { date: string; rsi: number | null }[]; grain?: string; syncId?: string }) {
+function RSISubChart({ data, grain, syncId, height = 80 }: { data: { date: string; rsi: number | null }[]; grain?: string; syncId?: string; height?: number }) {
   const valid = data.filter(d => d.rsi != null);
   if (valid.length === 0) {
     return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
@@ -149,7 +156,7 @@ function RSISubChart({ data, grain, syncId }: { data: { date: string; rsi: numbe
           <span className="text-emerald-400">▬</span> Oversold (30)
         </span>
       </div>
-      <ResponsiveContainer width="100%" height={80}>
+      <ResponsiveContainer width="100%" height={height}>
         <LineChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
@@ -170,10 +177,11 @@ function RSISubChart({ data, grain, syncId }: { data: { date: string; rsi: numbe
   );
 }
 
-function MACDSubChart({ data, grain, syncId }: {
+function MACDSubChart({ data, grain, syncId, height = 80 }: {
   data: { date: string; macd: number | null; signal: number | null; hist: number | null }[];
   grain?: string;
   syncId?: string;
+  height?: number;
 }) {
   const valid = data.filter(d => d.hist != null);
   if (valid.length === 0) {
@@ -189,7 +197,7 @@ function MACDSubChart({ data, grain, syncId }: {
           <span className="text-emerald-400">▮</span>/<span className="text-red-400">▮</span> Histogram
         </span>
       </div>
-      <ResponsiveContainer width="100%" height={80}>
+      <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
@@ -215,12 +223,13 @@ function MACDSubChart({ data, grain, syncId }: {
 }
 
 function MomentumSubChart({
-  data, label, color, syncId,
+  data, label, color, syncId, height = 70,
 }: {
   data: { date: string; value: number | null }[];
   label: string;
   color: string;
   syncId?: string;
+  height?: number;
 }) {
   const valid = data.filter(d => d.value != null);
   if (valid.length === 0) {
@@ -232,7 +241,7 @@ function MomentumSubChart({
         <span className="text-[10px] font-semibold" style={{ color }}>{label}</span>
         <span className="text-[9px] text-gray-600">Rate of Change — % vs N periods ago</span>
       </div>
-      <ResponsiveContainer width="100%" height={70}>
+      <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
@@ -262,7 +271,7 @@ export function PriceChart({
   data, symbol, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
   enableDragSelect = true, toolsOverlay, totalReturnData, onSetRange, syncId,
-  highlightBands,
+  highlightBands, subChartHeight = 80,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
 
@@ -849,14 +858,14 @@ export function PriceChart({
       </ResponsiveContainer>
 
       {/* Oscillator sub-charts */}
-      {rsiData && <RSISubChart data={rsiData} grain={rsiGrain ?? 'daily'} syncId={syncId} />}
-      {macdData && <MACDSubChart data={macdData} grain={macdGrain ?? 'daily'} syncId={syncId} />}
-      {momDailyData   && <MomentumSubChart syncId={syncId} data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
-      {momWeeklyData  && <MomentumSubChart syncId={syncId} data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}
-      {momMonthlyData && <MomentumSubChart syncId={syncId} data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
+      {rsiData && <RSISubChart data={rsiData} grain={rsiGrain ?? 'daily'} syncId={syncId} height={subChartHeight} />}
+      {macdData && <MACDSubChart data={macdData} grain={macdGrain ?? 'daily'} syncId={syncId} height={subChartHeight} />}
+      {momDailyData   && <MomentumSubChart syncId={syncId} height={subChartHeight} data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
+      {momWeeklyData  && <MomentumSubChart syncId={syncId} height={subChartHeight} data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}
+      {momMonthlyData && <MomentumSubChart syncId={syncId} height={subChartHeight} data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
 
       {enableDragSelect && data.length > 1 && !range && (
-        <p className="text-[10px] text-gray-700 text-right mt-0.5 print:hidden">Click &amp; drag to measure a period</p>
+        <p className="text-[10px] text-gray-700 text-right mt-0.5" data-print-hide>Click &amp; drag to measure a period</p>
       )}
     </div>
   );

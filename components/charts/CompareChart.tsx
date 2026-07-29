@@ -956,7 +956,7 @@ export function CompareChart({ assets, height = 340, logScale = false, percentMo
         </LineChart>
       </ResponsiveContainer>
       {!range && (
-        <p className="text-[10px] text-gray-700 text-right mt-0.5">Click &amp; drag to compare a period</p>
+        <p className="text-[10px] text-gray-700 text-right mt-0.5" data-print-hide>Click &amp; drag to compare a period</p>
       )}
     </div>
   );

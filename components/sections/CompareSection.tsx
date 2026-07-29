@@ -814,7 +814,7 @@ export function CompareSection({ jumpTo }: { jumpTo?: string | null }) {
 
   return (
     <div className="space-y-4" data-print-root>
-      <div className="flex justify-end print:hidden">
+      <div className="flex justify-end" data-print-hide>
         <PrintButton />
       </div>
       <div className="flex items-center justify-between flex-wrap gap-3">

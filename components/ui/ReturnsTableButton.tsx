@@ -240,7 +240,7 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
                 <div className="text-sm font-bold text-white truncate">{name} <span className="text-emerald-300 font-semibold">— {gran} Returns (%)</span></div>
                 <div className="text-[10px] text-gray-500">{symbol} · period-over-period, full history · green = gain, red = loss</div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0 print:hidden">
+              <div className="flex items-center gap-1.5 shrink-0" data-print-hide>
                 <PrintButton />
                 <button onClick={() => setOpen(false)} className="p-1 text-gray-500 hover:text-gray-200" aria-label="Close"><X size={16} /></button>
               </div>

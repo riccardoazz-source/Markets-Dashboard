@@ -33,7 +33,7 @@ export function DetailModal({ onClose, children }: { onClose: () => void; childr
         <div className="w-full max-w-6xl" data-print-root onClick={e => e.stopPropagation()}>
           {/* Its own row rather than squeezed into the panel's header, which on a
               phone is already wrapping onto three lines. */}
-          <div className="flex justify-end mb-1 print:hidden">
+          <div className="flex justify-end mb-1" data-print-hide>
             <PrintButton />
           </div>
           {children}

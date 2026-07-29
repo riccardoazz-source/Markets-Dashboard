@@ -32,10 +32,10 @@ export function TimeframeSelector({
     <div className="flex flex-wrap items-center gap-1">
       {/* On paper the pills are gone (they do nothing there), so the selected
           period has to be stated in words or the print loses its context. */}
-      <span className="hidden print:inline text-[11px] text-gray-400 font-semibold">
+      <span className="text-[11px] text-gray-400 font-semibold" data-print-only>
         Period: {isCustom ? 'Custom range' : value}
       </span>
-      <div className="flex gap-1 bg-bg-input rounded-lg p-1 flex-wrap print:hidden">
+      <div className="flex gap-1 bg-bg-input rounded-lg p-1 flex-wrap" data-print-hide>
         {options.map(tf => (
           <button
             key={tf}
