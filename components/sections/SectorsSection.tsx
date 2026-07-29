@@ -625,7 +625,8 @@ function SectorFundamentals({
 
       {historical.length > 1 && (
         <PriceChart data={historical} symbol={symbol} color="auto" height={220}
-          totalReturnData={trSeries} enableDragSelect={false} />
+          totalReturnData={trSeries}
+          onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }} />
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">

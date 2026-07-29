@@ -863,6 +863,7 @@ function StockFundamentals({
           eps={overlay === 'eps' ? earnings?.quarterly : undefined}
           financials={overlay === 'financials' ? earnings?.financials : undefined}
           height={240}
+          onSetRange={(from, to) => { setCustomRange(null); setCustomRange({ from, to }); }}
         />
       )}
 
