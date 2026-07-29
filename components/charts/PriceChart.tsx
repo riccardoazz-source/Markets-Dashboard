@@ -151,20 +151,66 @@ export const SYNC_AXIS_WIDTH = 60;
 
 // ── Oscillator sub-charts ────────────────────────────────────────────────────
 
+// Frame shared by every indicator pane.
+//
+// Each pane used to cost a caption ROW above its plot — about 26px of header for
+// 46px of chart. With seven panes open that is 180px of text, which is why the
+// stack would not compress far enough to be seen at once. Below a threshold the
+// caption moves ON TOP of the plot instead (the way trading terminals label their
+// panes), so a pane costs only its plot height.
+function PaneFrame({ label, note, caption, color, height, children }: {
+  label: string;
+  note?: string;
+  caption?: string;
+  color: string;
+  height: number;
+  children: React.ReactNode;
+}) {
+  const compact = height <= 62;
+  if (compact) {
+    return (
+      <div className="relative mt-1">
+        <div className="absolute top-0 left-1 z-10 pointer-events-none flex items-center gap-2 leading-none">
+          <span className="text-[9px] font-semibold" style={{ color }}>{label}</span>
+          {caption && <span className="text-[9px] text-gray-500">{caption}</span>}
+        </div>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-3 mb-0.5 px-1 flex-wrap">
+        <span className="text-[10px] font-semibold" style={{ color }}>{label}</span>
+        {note && <span className="text-[9px] text-gray-600">{note}</span>}
+        {caption && <span className="text-[9px] text-gray-400 font-medium">{caption}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// A pane's tooltip must not fight its neighbours'. Every pane in a sync group shows
+// its own box at the cursor, so seven of them stacked into an unreadable pile — and
+// each repeated the date the price chart had already given. Pinned to the top of its
+// own pane, one line, no date.
+const PANE_TOOLTIP = {
+  contentStyle: {
+    backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: 6,
+    color: '#e2e8f0', fontSize: 10, padding: '2px 6px', lineHeight: 1.35,
+  },
+  labelFormatter: () => '',
+  position: { y: 0 },
+} as const;
+
+
 function RSISubChart({ data, grain, syncId, height = 80 }: { data: { date: string; rsi: number | null }[]; grain?: string; syncId?: string; height?: number }) {
   const valid = data.filter(d => d.rsi != null);
   if (valid.length === 0) {
     return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
   }
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] text-indigo-400 font-semibold capitalize">RSI 14 {grain ?? 'daily'}</span>
-        <span className="text-[9px] text-gray-600">
-          <span className="text-red-400">▬</span> Overbought (70) &nbsp;
-          <span className="text-emerald-400">▬</span> Oversold (30)
-        </span>
-      </div>
+    <PaneFrame label={`RSI 14 ${grain ?? 'daily'}`} note="70 overbought · 30 oversold" color="#818cf8" height={height}>
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -176,13 +222,12 @@ function RSISubChart({ data, grain, syncId, height = 80 }: { data: { date: strin
           <ReferenceLine y={30} stroke="#10b981" strokeDasharray="3 3" strokeOpacity={0.6} />
           <Line type="monotone" dataKey="rsi" stroke="#818cf8" strokeWidth={1.5} dot={false} connectNulls={false} />
           <Tooltip
-            contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+            {...PANE_TOOLTIP}
             formatter={(v: number) => [v != null ? `${v.toFixed(1)}` : '—', 'RSI 14']}
-            labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
           />
         </LineChart>
       </ResponsiveContainer>
-    </div>
+    </PaneFrame>
   );
 }
 
@@ -197,15 +242,7 @@ function MACDSubChart({ data, grain, syncId, height = 80 }: {
     return <div className="text-[10px] text-gray-600 py-1">MACD: not enough data (need ≥34 pts)</div>;
   }
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] text-blue-400 font-semibold capitalize">MACD (12, 26, 9) {grain ?? 'daily'}</span>
-        <span className="text-[9px] text-gray-600">
-          <span className="text-blue-400">▬</span> MACD &nbsp;
-          <span className="text-orange-400">╌</span> Signal &nbsp;
-          <span className="text-emerald-400">▮</span>/<span className="text-red-400">▮</span> Histogram
-        </span>
-      </div>
+    <PaneFrame label={`MACD (12, 26, 9) ${grain ?? 'daily'}`} note="MACD · Signal · Histogram" color="#60a5fa" height={height}>
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -221,13 +258,12 @@ function MACDSubChart({ data, grain, syncId, height = 80 }: {
           <Line type="monotone" dataKey="macd" stroke="#60a5fa" strokeWidth={1.5} dot={false} connectNulls={false} name="MACD" />
           <Line type="monotone" dataKey="signal" stroke="#f97316" strokeWidth={1} strokeDasharray="4 3" dot={false} connectNulls={false} name="Signal" />
           <Tooltip
-            contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+            {...PANE_TOOLTIP}
             formatter={(v: number, name: string) => [v != null ? v.toFixed(4) : '—', name]}
-            labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
           />
         </ComposedChart>
       </ResponsiveContainer>
-    </div>
+    </PaneFrame>
   );
 }
 
@@ -250,14 +286,7 @@ export function VolumeSubChart({ data, syncId, height = 70, grain = 'daily' }: {
     return `${v}`;
   };
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] text-slate-300 font-semibold capitalize">Volume {grain}</span>
-        <span className="text-[9px] text-gray-600">
-          <span className="text-emerald-400">▮</span> period closed up &nbsp;
-          <span className="text-red-400">▮</span> closed down
-        </span>
-      </div>
+    <PaneFrame label={`Volume ${grain}`} note="green = the period closed up" color="#cbd5e1" height={height}>
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -271,13 +300,12 @@ export function VolumeSubChart({ data, syncId, height = 70, grain = 'daily' }: {
             ))}
           </Bar>
           <Tooltip
-            contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+            {...PANE_TOOLTIP}
             formatter={(v: number) => [v != null ? fmt(v) : '—', 'Volume']}
-            labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
           />
         </ComposedChart>
       </ResponsiveContainer>
-    </div>
+    </PaneFrame>
   );
 }
 
@@ -295,11 +323,7 @@ function MomentumSubChart({
     return <div className="text-[10px] text-gray-600 py-1">{label}: not enough data</div>;
   }
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-3 mb-0.5 px-1">
-        <span className="text-[10px] font-semibold" style={{ color }}>{label}</span>
-        <span className="text-[9px] text-gray-600">Rate of Change — % vs N periods ago</span>
-      </div>
+    <PaneFrame label={label} note="Rate of Change — % vs N periods ago" color={color} height={height}>
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -316,13 +340,12 @@ function MomentumSubChart({
           </Bar>
           <Line type="monotone" dataKey="value" stroke={color} strokeWidth={1.5} dot={false} connectNulls={false} />
           <Tooltip
-            contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+            {...PANE_TOOLTIP}
             formatter={(v: number) => [v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—', label]}
-            labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
           />
         </ComposedChart>
       </ResponsiveContainer>
-    </div>
+    </PaneFrame>
   );
 }
 
@@ -354,12 +377,7 @@ function CyclePane({
     ? [-Math.ceil(maxAbs * 1.1), 0]
     : [-Math.ceil(maxAbs * 1.1), Math.ceil(maxAbs * 1.1)];
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-3 mb-0.5 px-1 flex-wrap">
-        <span className="text-[10px] font-semibold" style={{ color }}>{label}</span>
-        <span className="text-[9px] text-gray-600">{note}</span>
-        {caption && <span className="text-[9px] text-gray-400 font-medium">{caption}</span>}
-      </div>
+    <PaneFrame label={label} note={note} caption={caption} color={color} height={height}>
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
@@ -370,16 +388,18 @@ function CyclePane({
             <ReferenceLine key={y} y={y} stroke="#6b7280" strokeDasharray="2 4" strokeOpacity={0.4} />
           ))}
           <ReferenceLine y={0} stroke="#94a3b8" strokeOpacity={0.55} strokeWidth={1.2} />
-          <Area type="monotone" dataKey="value" stroke="none" fill={color} fillOpacity={0.12} connectNulls={false} />
+          {/* Same dataKey as the line below, so it must stay out of the tooltip or
+              every reading appears twice. */}
+          <Area type="monotone" dataKey="value" stroke="none" fill={color} fillOpacity={0.12}
+            connectNulls={false} tooltipType="none" />
           <Line type="monotone" dataKey="value" stroke={color} strokeWidth={1.4} dot={false} connectNulls={false} />
           <Tooltip
-            contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+            {...PANE_TOOLTIP}
             formatter={(v: number) => [v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}${unit}` : '—', label]}
-            labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
           />
         </ComposedChart>
       </ResponsiveContainer>
-    </div>
+    </PaneFrame>
   );
 }
 

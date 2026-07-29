@@ -241,14 +241,17 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   const heights = useMemo(() => {
     const clamp = (v: number, lo: number, hi: number) => Math.round(Math.max(lo, Math.min(hi, v)));
     const CHROME = 320;
-    const PANE_CHROME = 26, QUAD_CHROME = 20;
+    // A pane's caption sits ON TOP of its plot once compressed (see PaneFrame), so
+    // past that point a pane costs only its height plus a small margin. Charging 26px
+    // of header per pane is what stopped the stack fitting with seven tools open.
+    const PANE_CHROME = 6, QUAD_CHROME = 20;
     const budget = Math.max(300, viewportH - CHROME - paneCount * PANE_CHROME - QUAD_CHROME);
     const PANE_SHARE = 0.55, QUAD_SHARE = 0.85;
     const unit = budget / (1 + QUAD_SHARE + paneCount * PANE_SHARE);
     return {
       price: clamp(unit * fit, 100, 210),
-      quadrant: clamp(unit * QUAD_SHARE * fit, 80, 150),
-      pane: clamp(unit * PANE_SHARE * fit, 40, 80),
+      quadrant: clamp(unit * QUAD_SHARE * fit, 70, 150),
+      pane: clamp(unit * PANE_SHARE * fit, 32, 80),
     };
   }, [viewportH, paneCount, fit]);
 
@@ -385,14 +388,19 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   />
                   {/* Zero = steady. Above it the move is speeding up, below it slowing. */}
                   <ReferenceLine y={0} stroke="#64748b" strokeDasharray="4 2" strokeWidth={1.2} />
-                  <Area type="monotone" dataKey="accel" stroke="none" fill="#6366f1" fillOpacity={0.08} />
+                  {/* Shares the line's dataKey — kept out of the tooltip so the
+                      reading is not listed twice. */}
+                  <Area type="monotone" dataKey="accel" stroke="none" fill="#6366f1" fillOpacity={0.08}
+                    tooltipType="none" />
                   {/* A dot on every daily bar turned the line into a caterpillar and
                       buried the phase colours underneath it. Thin line, no markers —
                       this is a level to read, not a set of points to count. */}
                   <Line type="monotone" dataKey="accel" stroke="#a5b4fc" strokeWidth={1.1}
                     strokeOpacity={0.9} dot={false} activeDot={{ r: 3 }} connectNulls isAnimationActive={false} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: 8, color: '#e2e8f0', fontSize: 11 }}
+                    position={{ y: 0 }}
+                    labelFormatter={() => ''}
+                    contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: 6, color: '#e2e8f0', fontSize: 10, padding: '2px 6px', lineHeight: 1.35 }}
                     formatter={(v: number, _n: string, p: { payload?: DPoint }) => {
                       const pt = p?.payload;
                       const acc = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(1)} pp/mo` : '—';

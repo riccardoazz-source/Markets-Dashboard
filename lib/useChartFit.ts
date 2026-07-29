@@ -31,12 +31,18 @@ export interface ChartFitOptions {
   base?: number;
   /** Never shrink the main chart below this — past it the chart says nothing. */
   minChart?: number;
+  /**
+   * Panes floor lower than you would guess (32px). With seven tools open there is
+   * no height at which everything is comfortable, and a 32px strip still shows the
+   * SHAPE of a line and where it crosses zero — which is what these panes are read
+   * for. The alternative is not seeing the pane at all.
+   */
   basePane?: number;
   minPane?: number;
 }
 
 export function useChartFit(paneCount: number, opts: ChartFitOptions = {}) {
-  const { base = 200, minChart = 110, basePane = 80, minPane = 44 } = opts;
+  const { base = 200, minChart = 110, basePane = 80, minPane = 32 } = opts;
   const ref = useRef<HTMLDivElement>(null);
   // Optional end marker. Some panels continue well past the chart — the stocks tab
   // adds dividends, earnings and financials underneath — and those sections are
