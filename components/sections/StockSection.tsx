@@ -23,6 +23,7 @@ import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
   computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily, computeRsiResampledDaily, computeMacdResampledDaily,
+  barsForCalDays, computeStretchSigma, computeMaSlope, computeRegimeMonths, computeDrawdown, computeMonthsSinceHigh,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
 import {
@@ -36,7 +37,8 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
-import { VolumeSubChart } from '@/components/charts/PriceChart';
+import { VolumeSubChart, MacdTooltip, CyclePane } from '@/components/charts/PriceChart';
+import { publishChartRows, clearChartRows, type ExportRow } from '@/lib/chartExport';
 import { aggregateVolume, type VolumeGrain } from '@/lib/indicators';
 import { useChartFit, paneCountOf } from '@/lib/useChartFit';
 import { DetailModal } from '@/components/ui/DetailModal';
@@ -863,7 +865,10 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const { ref: fitRef, endRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools), { base: 260, minChart: 150 });
   const oscFullHist = useFullHistory(
     selected?.symbol,
-    !!((activeTools.rsi && rsiGrain) || (activeTools.macd && macdGrain)),
+    !!((activeTools.rsi && rsiGrain) || (activeTools.macd && macdGrain)
+      // The cycle tools rest on a 200-bar average, so on a short window they are
+      // only computable from the full history.
+      || activeTools.stretchSigma || activeTools.maSlope || activeTools.drawdown),
   );
   const [dataMsg, setDataMsg] = useState<string | null>(null);
   const [spyPrices, setSpyPrices] = useState<HistoricalPoint[]>([]);
@@ -1066,6 +1071,118 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const nrIRR = dividends.length > 0 ? computeAssetIRR(prices, dividends) : null;
   const currency = data?.meta?.currency ?? 'USD';
   const totalDivs = dividends.reduce((s, d) => d.date >= (prices[0]?.date ?? '') ? s + d.amount : s, 0);
+
+  // ── Cycle-shape panes ──────────────────────────────────────────────────────
+  // The stocks tab draws its own chart rather than PriceChart, so these have to be
+  // computed and rendered here too — otherwise the tools appear in the panel and do
+  // nothing, which is exactly what happened to Volume before it.
+  //
+  // All three rest on a 200-bar average, so they are computed on the FULL history
+  // and held forward onto the visible bars: on a 3-month view there is no other way
+  // for them to exist at all.
+  // RSI / MACD lifted out of the JSX: the panes and the CSV must read the same
+  // numbers, and a series computed inside a render callback cannot be exported.
+  const rsiSeries = useMemo(() => {
+    if (!activeTools.rsi || prices.length === 0) return null;
+    if (rsiGrain) {
+      const full = oscFullHist && oscFullHist.length > 2 ? oscFullHist : prices;
+      const fullDates = full.map(p => p.date);
+      const fSeries = computeRsiResampledDaily(fullDates, full.map(p => p.close), rsiGrain, 14);
+      let j = 0, last: number | null = null;
+      return prices.map(p => {
+        while (j < fullDates.length && fullDates[j] <= p.date) { if (fSeries[j] != null) last = fSeries[j]; j++; }
+        return { date: p.date, rsi: last };
+      });
+    }
+    const vals = computeRSI(prices.map(p => p.close).filter((c): c is number => isFinite(c)));
+    return prices.map((p, i) => ({ date: p.date, rsi: vals[i] ?? null }));
+  }, [activeTools.rsi, rsiGrain, prices, oscFullHist]);
+
+  const macdSeries = useMemo(() => {
+    if (!activeTools.macd || prices.length === 0) return null;
+    if (macdGrain) {
+      const full = oscFullHist && oscFullHist.length > 2 ? oscFullHist : prices;
+      const fullDates = full.map(p => p.date);
+      const w = computeMacdResampledDaily(fullDates, full.map(p => p.close), macdGrain);
+      const onto = (vals: (number | null)[]) => {
+        let j = 0, last: number | null = null;
+        return prices.map(p => {
+          while (j < fullDates.length && fullDates[j] <= p.date) { if (vals[j] != null) last = vals[j]; j++; }
+          return last;
+        });
+      };
+      const macd = onto(w.macd), signal = onto(w.signal), hist = onto(w.hist);
+      return prices.map((p, i) => ({ date: p.date, macd: macd[i], signal: signal[i], hist: hist[i] }));
+    }
+    const closes = prices.map(p => p.close).filter((c): c is number => isFinite(c));
+    const m = computeMACD(closes);
+    return prices.map((p, i) => ({ date: p.date, macd: m.macd[i] ?? null, signal: m.signal[i] ?? null, hist: m.hist[i] ?? null }));
+  }, [activeTools.macd, macdGrain, prices, oscFullHist]);
+
+  // The stocks tab publishes its own CSV rows: it draws its own chart, so nothing
+  // else would, and the export would hand over the last panel's numbers under this
+  // stock's filename.
+  const exportTokenRef = useRef<symbol>();
+  if (!exportTokenRef.current) exportTokenRef.current = Symbol('stock-export');
+
+  const cycle = useMemo(() => {
+    const wantsAny = activeTools.stretchSigma || activeTools.maSlope || activeTools.drawdown;
+    if (!wantsAny || prices.length === 0) return null;
+    const full = oscFullHist && oscFullHist.length > prices.length ? oscFullHist : prices;
+    const fullDates = full.map(p => p.date);
+    const fullCloses = full.map(p => p.close);
+    const avgDPB = avgCalendarDaysPerBar(fullDates);
+    const yearBars = barsForCalDays(365, avgDPB);
+    const monthBars = Math.max(1, Math.round(30 / avgDPB));
+
+    // Hold a full-history series forward onto the visible dates.
+    const onto = (vals: (number | null)[]) => {
+      let j = 0, last: number | null = null;
+      return prices.map(p => {
+        while (j < fullDates.length && fullDates[j] <= p.date) { if (vals[j] != null) last = vals[j]; j++; }
+        return { date: p.date, value: last };
+      });
+    };
+    const lastOf = (rows: { value: number | null }[]) => {
+      for (let i = rows.length - 1; i >= 0; i--) if (rows[i].value != null) return rows[i].value as number;
+      return null;
+    };
+    const stretch = activeTools.stretchSigma ? onto(computeStretchSigma(fullCloses, 200, 63)) : null;
+    const slope = activeTools.maSlope ? onto(computeMaSlope(fullCloses, 200, monthBars)) : null;
+    const regime = activeTools.maSlope ? onto(computeRegimeMonths(fullCloses, 200, avgDPB)) : null;
+    const drawdown = activeTools.drawdown ? onto(computeDrawdown(fullCloses, yearBars)) : null;
+    const sinceHigh = activeTools.drawdown ? onto(computeMonthsSinceHigh(fullDates, fullCloses, yearBars)) : null;
+    return {
+      stretch, slope, drawdown,
+      regimeNow: regime ? lastOf(regime) : null,
+      sinceHighNow: sinceHigh ? lastOf(sinceHigh) : null,
+    };
+  }, [activeTools.stretchSigma, activeTools.maSlope, activeTools.drawdown, prices, oscFullHist]);
+
+  useEffect(() => {
+    const token = exportTokenRef.current!;
+    if (!prices.length) { clearChartRows(token); return; }
+    const at = <T,>(arr: T[] | null | undefined, i: number) => (arr ? arr[i] : undefined);
+    const vol = aggregateVolume(prices, volGrain);
+    const rows: ExportRow[] = prices.map((p, i) => {
+      const row: ExportRow = { date: p.date, close: p.close };
+      if (p.volume != null) row.volume = p.volume;
+      if (activeTools.volume && volGrain !== 'daily' && vol[i]?.volume != null) row[`volume_${volGrain}`] = vol[i].volume;
+      if (dividends.length > 0 && totalReturn[i]) row.total_return = totalReturn[i].close;
+      const r = at(rsiSeries, i); if (r) row[`rsi14_${rsiGrain ?? 'daily'}`] = r.rsi;
+      const m = at(macdSeries, i);
+      if (m) {
+        const g = macdGrain ?? 'daily';
+        row[`macd_${g}`] = m.macd; row[`macd_signal_${g}`] = m.signal; row[`macd_hist_${g}`] = m.hist;
+      }
+      const st = at(cycle?.stretch, i);  if (st) row.stretch_sigma = st.value;
+      const sl = at(cycle?.slope, i);    if (sl) row.ma200_slope_pct_mo = sl.value;
+      const dd = at(cycle?.drawdown, i); if (dd) row.drawdown_52w_pct = dd.value;
+      return row;
+    });
+    publishChartRows(selected?.symbol ?? 'stock', rows, token);
+    return () => clearChartRows(token);
+  });
 
   const epsList = earnings?.quarterly ?? [];
   const finList = earnings?.financials ?? [];
@@ -1499,24 +1616,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           )}
 
           {/* RSI / MACD oscillator sub-charts for stocks */}
-          {!loading && prices.length > 0 && activeTools.rsi && (() => {
-            let rsiData: { date: string; rsi: number | null }[];
-            if (rsiGrain) {
-              // Weekly/monthly RSI on the full daily history, held forward onto each visible day.
-              const full = oscFullHist && oscFullHist.length > 2 ? oscFullHist : prices;
-              const fullDates = full.map(p => p.date);
-              const fSeries = computeRsiResampledDaily(fullDates, full.map(p => p.close), rsiGrain, 14);
-              let j = 0;
-              let lastVal: number | null = null;
-              rsiData = prices.map(p => {
-                while (j < fullDates.length && fullDates[j] <= p.date) { if (fSeries[j] != null) lastVal = fSeries[j]; j++; }
-                return { date: p.date, rsi: lastVal };
-              });
-            } else {
-              const stockCloses = prices.map(p => p.close).filter((c): c is number => isFinite(c));
-              const rsiVals = computeRSI(stockCloses);
-              rsiData = prices.map((p, i) => ({ date: p.date, rsi: rsiVals[i] }));
-            }
+          {!loading && prices.length > 0 && rsiSeries && (() => {
+            const rsiData = rsiSeries;
             const valid = rsiData.filter(d => d.rsi != null);
             if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">RSI: not enough data</div>;
             return (
@@ -1542,31 +1643,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             );
           })()}
 
-          {!loading && prices.length > 0 && activeTools.macd && (() => {
-            let macdData: { date: string; macd: number | null; signal: number | null; hist: number | null }[];
-            if (macdGrain) {
-              const full = oscFullHist && oscFullHist.length > 2 ? oscFullHist : prices;
-              const fullDates = full.map(p => p.date);
-              const w = computeMacdResampledDaily(fullDates, full.map(p => p.close), macdGrain);
-              let j = 0;
-              let lm: number | null = null, ls: number | null = null, lh: number | null = null;
-              macdData = prices.map(p => {
-                while (j < fullDates.length && fullDates[j] <= p.date) {
-                  if (w.macd[j] != null) lm = w.macd[j];
-                  if (w.signal[j] != null) ls = w.signal[j];
-                  if (w.hist[j] != null) lh = w.hist[j];
-                  j++;
-                }
-                return { date: p.date, macd: lm, signal: ls, hist: lh };
-              });
-            } else {
-              const stockCloses = prices.map(p => p.close).filter((c): c is number => isFinite(c));
-              const macdResult = computeMACD(stockCloses);
-              macdData = prices.map((p, i) => ({
-                date: p.date,
-                macd: macdResult.macd[i], signal: macdResult.signal[i], hist: macdResult.hist[i],
-              }));
-            }
+          {!loading && prices.length > 0 && macdSeries && (() => {
+            const macdData = macdSeries;
             const valid = macdData.filter(d => d.hist != null);
             if (!valid.length) return <div className="text-[10px] text-gray-600 py-1">MACD: not enough data</div>;
             return (
@@ -1587,14 +1665,38 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                     </Bar>
                     <Line type="monotone" dataKey="macd" stroke="#60a5fa" strokeWidth={1.5} dot={false} connectNulls={false} name="MACD" />
                     <Line type="monotone" dataKey="signal" stroke="#f97316" strokeWidth={1} strokeDasharray="4 3" dot={false} connectNulls={false} name="Signal" />
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
-                      formatter={(v: number, name: string) => [v != null ? v.toFixed(4) : '—', name]}
-                      labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }} />
+                    <Tooltip position={{ y: 0 }} content={MacdTooltip} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
             );
           })()}
+
+          {cycle?.stretch && (
+            <div className="rounded-lg border border-border p-3 bg-bg-input/40">
+              <CyclePane syncId={STOCK_SYNC_ID} height={paneHeight} data={cycle.stretch}
+                label="Stretch σ (vs SMA 200)" note="distance from the trend, in months of the asset's own volatility"
+                unit="σ" color="#a78bfa" zeroLines={[-2, -1, 1, 2]} />
+            </div>
+          )}
+          {cycle?.slope && (
+            <div className="rounded-lg border border-border p-3 bg-bg-input/40">
+              <CyclePane syncId={STOCK_SYNC_ID} height={paneHeight} data={cycle.slope}
+                label="SMA 200 slope" note="% per month — a trend measure that keeps its sign for quarters"
+                unit="%" color="#fb923c"
+                caption={cycle.regimeNow != null
+                  ? `price ${cycle.regimeNow >= 0 ? 'above' : 'below'} the average for ${Math.abs(cycle.regimeNow).toFixed(1)} months`
+                  : undefined} />
+            </div>
+          )}
+          {cycle?.drawdown && (
+            <div className="rounded-lg border border-border p-3 bg-bg-input/40">
+              <CyclePane syncId={STOCK_SYNC_ID} height={paneHeight} data={cycle.drawdown}
+                label="Drawdown from 52W high" note="how deep the hole is" unit="%" color="#fb7185"
+                negativeOnly zeroLines={[-10, -20, -40]}
+                caption={cycle.sinceHighNow != null ? `high was ${cycle.sinceHighNow.toFixed(1)} months ago` : undefined} />
+            </div>
+          )}
 
           {/* Everything above has to be on screen at once: the stats, the chart and
               the panes the tools opened. What follows — dividends, earnings,

@@ -16,14 +16,22 @@
 
 export type ExportRow = Record<string, string | number | null>;
 
-interface Published { title: string; rows: ExportRow[]; ts: number }
+interface Published { title: string; rows: ExportRow[]; owner: symbol; ts: number }
 let current: Published | null = null;
 
-export function publishChartRows(title: string, rows: ExportRow[]) {
-  current = { title, rows, ts: Date.now() };
+/**
+ * `owner` is a token unique to the chart instance. Without it, a panel that
+ * publishes nothing would happily export whatever the PREVIOUS panel left behind —
+ * a file full of the wrong asset's numbers, with the right filename on it. A chart
+ * clears the slot on unmount, but only if it still owns it.
+ */
+export function publishChartRows(title: string, rows: ExportRow[], owner: symbol) {
+  current = { title, rows, owner, ts: Date.now() };
 }
 
-export function clearChartRows() { current = null; }
+export function clearChartRows(owner?: symbol) {
+  if (!owner || current?.owner === owner) current = null;
+}
 
 export function getChartRows(): Published | null {
   return current && current.rows.length ? current : null;

@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ReferenceLine, ReferenceArea,
   LineChart, BarChart, Bar, Cell,
 } from 'recharts';
 import { HistoricalPoint } from '@/lib/types';
-import { publishChartRows, type ExportRow } from '@/lib/chartExport';
+import { publishChartRows, clearChartRows, type ExportRow } from '@/lib/chartExport';
 import { aggregateVolume, type VolumeGrain } from '@/lib/indicators';
 import { format, parseISO } from 'date-fns';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
@@ -170,7 +170,12 @@ function PaneFrame({ label, note, caption, color, height, children }: {
   if (compact) {
     return (
       <div className="relative mt-1">
-        <div className="absolute top-0 left-1 z-10 pointer-events-none flex items-center gap-2 leading-none">
+        <div
+          className="absolute top-0 z-10 pointer-events-none flex items-center gap-2 leading-none"
+          // Clear of the y-axis: at left-1 the caption printed on top of the axis
+          // numbers, which is how "MACD (12, 26, 9)" ended up sitting across −120.00.
+          style={{ left: SYNC_AXIS_WIDTH + 6 }}
+        >
           <span className="text-[9px] font-semibold" style={{ color }}>{label}</span>
           {caption && <span className="text-[9px] text-gray-500">{caption}</span>}
         </div>
@@ -231,6 +236,31 @@ function RSISubChart({ data, grain, syncId, height = 80 }: { data: { date: strin
   );
 }
 
+// MACD reports three numbers; as three tooltip rows they are taller than the pane
+// they belong to. Folded onto one line, coloured the way the series are drawn.
+export function MacdTooltip({ active, payload }: {
+  active?: boolean;
+  payload?: { dataKey?: string | number; value?: number }[];
+}) {
+  if (!active || !payload?.length) return null;
+  const get = (k: string) => payload.find(p => p.dataKey === k)?.value;
+  const macd = get('macd'), sig = get('signal'), hist = get('hist');
+  if (macd == null && sig == null && hist == null) return null;
+  const n = (v: number | undefined) => (v == null ? '—' : v.toFixed(2));
+  return (
+    <div style={{
+      background: '#1a1d2e', border: '1px solid #252840', borderRadius: 6,
+      padding: '2px 6px', fontSize: 10, lineHeight: 1.35, whiteSpace: 'nowrap',
+    }}>
+      <span style={{ color: '#60a5fa' }}>MACD {n(macd)}</span>
+      <span style={{ color: '#64748b' }}> · </span>
+      <span style={{ color: '#fb923c' }}>sig {n(sig)}</span>
+      <span style={{ color: '#64748b' }}> · </span>
+      <span style={{ color: (hist ?? 0) >= 0 ? '#10b981' : '#ef4444' }}>hist {n(hist)}</span>
+    </div>
+  );
+}
+
 function MACDSubChart({ data, grain, syncId, height = 80 }: {
   data: { date: string; macd: number | null; signal: number | null; hist: number | null }[];
   grain?: string;
@@ -257,10 +287,9 @@ function MACDSubChart({ data, grain, syncId, height = 80 }: {
           </Bar>
           <Line type="monotone" dataKey="macd" stroke="#60a5fa" strokeWidth={1.5} dot={false} connectNulls={false} name="MACD" />
           <Line type="monotone" dataKey="signal" stroke="#f97316" strokeWidth={1} strokeDasharray="4 3" dot={false} connectNulls={false} name="Signal" />
-          <Tooltip
-            {...PANE_TOOLTIP}
-            formatter={(v: number, name: string) => [v != null ? v.toFixed(4) : '—', name]}
-          />
+          {/* Three named series would be three rows, and the pane is 46px tall when
+              several tools are open. One line carries the same reading. */}
+          <Tooltip {...PANE_TOOLTIP} content={MacdTooltip} />
         </ComposedChart>
       </ResponsiveContainer>
     </PaneFrame>
@@ -353,7 +382,7 @@ function MomentumSubChart({
 // for a drawdown), reference lines where the level starts to mean something, and a
 // caption carrying the reading that is a NUMBER rather than a curve — how many
 // months the regime has lasted, how old the high is.
-function CyclePane({
+export function CyclePane({
   data, label, note, unit, color, syncId, height = 70, zeroLines = [], negativeOnly = false, caption,
 }: {
   data: { date: string; value: number | null }[];
@@ -412,6 +441,10 @@ export function PriceChart({
   highlightBands, subChartHeight = 80,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
+  // Identity for the CSV slot, so this chart can only ever clear its own entry.
+  const exportTokenRef = useRef<symbol>();
+  if (!exportTokenRef.current) exportTokenRef.current = Symbol('chart-export');
+  const exportToken = exportTokenRef.current;
 
   // Full daily history — so every moving average and the trend line can be computed on the
   // WHOLE series and drawn even when the selected window is short (a MA is a fixed number
@@ -723,7 +756,8 @@ export function PriceChart({
       if (momMonthlyVals) row.momentum_monthly = momMonthlyVals[i];
       return row;
     });
-    publishChartRows(symbol ?? 'chart', rows);
+    publishChartRows(symbol ?? 'chart', rows, exportToken);
+    return () => clearChartRows(exportToken);
   });
 
   // Selection stats — period return, annualised CAGR, and (when the total-return
