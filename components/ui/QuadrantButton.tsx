@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Grid2x2 } from 'lucide-react';
 import { AssetQuadrantView } from './AssetQuadrantView';
+import { useGistData, rotationStockSymbols } from '@/lib/gist';
 
 /**
  * "Quadrant" — opens the asset's price with the model's quadrant call underneath,
@@ -13,10 +14,18 @@ export function QuadrantButton({ name, symbol, group, stocks }: {
   name: string;
   symbol: string;
   group?: string;
-  /** Watchlist symbols, so a searched stock is ranked inside the same universe. */
+  /** Extra symbols to rank alongside (the Stocks tab passes its watchlist). */
   stocks?: string[];
 }) {
   const [open, setOpen] = useState(false);
+  // The quadrant Y is a percentile against the universe, so this view has to rank
+  // over the SAME set as the Rotation Quadrant or the two could disagree. The stock
+  // lists switched on in Rotation are part of that set, wherever the button is used.
+  const { data: gistData } = useGistData();
+  const universeStocks = useMemo(() => {
+    const fromRotation = rotationStockSymbols(gistData);
+    return [...new Set([...fromRotation, ...(stocks ?? [])])];
+  }, [gistData, stocks]);
   return (
     <>
       <button
@@ -32,7 +41,7 @@ export function QuadrantButton({ name, symbol, group, stocks }: {
           symbol={symbol}
           name={name}
           group={group}
-          stocks={stocks}
+          stocks={universeStocks}
           onClose={() => setOpen(false)}
         />
       )}

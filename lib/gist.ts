@@ -75,6 +75,30 @@ export interface GistData {
 }
 
 /**
+ * The stock symbols that join the rotation universe: every `stock:SYM` note filed
+ * under one of the watchlist categories switched on in Rotation.
+ *
+ * An asset's quadrant Y is its percentile against the universe, so WHO is in the
+ * universe changes the answer. Rotation and the per-asset Quadrant view therefore
+ * have to rank over the same set — this one function is that set, so they cannot
+ * drift apart.
+ */
+export function rotationStockSymbols(data: GistData): string[] {
+  const active = (data.rotationStockLists ?? []).map(l => l.toLowerCase());
+  if (active.length === 0) return [];
+  const notes = data.notes ?? {};
+  const syms: string[] = [];
+  for (const [chartId, list] of Object.entries(notes)) {
+    if (!chartId.startsWith('stock:')) continue;
+    if (list.some(n => n.category && active.includes(n.category.toLowerCase()))) {
+      const sym = chartId.slice('stock:'.length);
+      if (!syms.includes(sym)) syms.push(sym);
+    }
+  }
+  return syms;
+}
+
+/**
  * idle       — before the first load completes
  * syncing    — a write is in flight to cloud storage
  * synced     — cloud storage is configured and up to date

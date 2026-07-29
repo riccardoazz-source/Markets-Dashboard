@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { Star } from 'lucide-react';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, SECTORS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { QuoteData, CryptoData } from '@/lib/types';
-import { useGistData, QuadrantPoint } from '@/lib/gist';
+import { useGistData, rotationStockSymbols, QuadrantPoint } from '@/lib/gist';
 import { scoreRotation, selectPicks, ScoredItem } from '@/lib/rotationModel';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QuadrantChart, QuadrantAsset, QuadrantTrail } from '@/components/charts/QuadrantChart';
@@ -266,20 +266,8 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     return Array.from(cats).sort();
   }, [gistData]);
 
-  const stockListSymbols = useMemo(() => {
-    if (activeStockLists.length === 0) return [];
-    const notes = gistData.notes ?? {};
-    const activeLower = activeStockLists.map(l => l.toLowerCase());
-    const syms: string[] = [];
-    for (const [chartId, list] of Object.entries(notes)) {
-      if (!chartId.startsWith('stock:')) continue;
-      if (list.some(n => n.category && activeLower.includes(n.category.toLowerCase()))) {
-        const sym = chartId.slice('stock:'.length);
-        if (!syms.includes(sym)) syms.push(sym);
-      }
-    }
-    return syms;
-  }, [gistData, activeStockLists]);
+  // Shared with the per-asset Quadrant view, so both rank over the same universe.
+  const stockListSymbols = useMemo(() => rotationStockSymbols(gistData), [gistData]);
 
   // Fetch quotes + rolling returns for the selected stock lists and build items.
   useEffect(() => {

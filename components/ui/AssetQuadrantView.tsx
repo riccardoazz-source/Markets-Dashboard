@@ -75,10 +75,14 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   // very long call, ask again: the server's per-date cache makes everything
   // already computed free, so each round spends its whole budget going further
   // and the chart refines in front of the user until it is complete.
+  // Depend on the CONTENT of the stock list, not the array identity: a caller that
+  // rebuilds the array each render would otherwise re-fire the fetch forever.
+  const stocksKey = useMemo(() => stocks?.slice().sort().join(',') ?? '', [stocks]);
+
   useEffect(() => {
     let cancelled = false;
-    const st = stocks?.length ? `&stocks=${encodeURIComponent(stocks.join(','))}` : '';
-    const ck = `${symbol}|${timeframe}|${stocks?.slice().sort().join(',') ?? ''}`;
+    const st = stocksKey ? `&stocks=${encodeURIComponent(stocksKey)}` : '';
+    const ck = `${symbol}|${timeframe}|${stocksKey}`;
     const cached = viewCache.get(ck);
     if (cached) { setData(cached); setError(null); setLoading(false); setRefining(false); return; }
 
@@ -108,7 +112,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     };
     run(0);
     return () => { cancelled = true; };
-  }, [symbol, timeframe, stocks]);
+  }, [symbol, timeframe, stocksKey]);
 
   // Price series trimmed to a drag-selected range, so both charts stay in step.
   const price = useMemo(() => {
@@ -311,7 +315,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
               <p className="text-[9px] text-gray-600 leading-snug">
                 The <b className="text-gray-500">purple line</b> is the model&apos;s percentile against the whole
-                universe on that date — above the dashed 50 line means the top half. The{' '}
+                universe on that date ({data?.universeSize ?? '—'} assets, the same set the Rotation Quadrant ranks) — above the dashed 50 line means the top half. The{' '}
                 <b className="text-gray-500">colour strip along the bottom</b> (and the matching tint behind) is the
                 quadrant that follows from it. Vertical dashed lines mark where the call CHANGED: read straight up to
                 the price to see what happened next. Every date is rebuilt with no look-ahead, one sample ≈{' '}
