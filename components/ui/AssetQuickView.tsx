@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { X, BarChart2 } from 'lucide-react';
 import { DetailModal } from './DetailModal';
 import { TimeframeSelector } from './TimeframeSelector';
@@ -104,7 +105,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
         </div>
 
         {q && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
             {q.price != null && <Stat label="Price" value={formatPrice(q.price)} />}
             {q.changePercent != null && <Stat label="Day" value={formatPercent(q.changePercent)} color={colorForPercent(q.changePercent)} />}
             {q.mtdChangePercent != null && <Stat label="MTD" value={formatPercent(q.mtdChangePercent)} color={colorForPercent(q.mtdChangePercent)} />}
@@ -119,7 +120,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
 
         {/* Return / CAGR / IRR — computed over the selected window, dividend-aware. */}
         {historical.length > 1 && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
             {cagr && <Stat label={`Return (${tfLabel})`} value={formatPercent(cagr.return)} color={colorForPercent(cagr.return)} />}
             {cagr && <Stat label="CAGR" value={formatPercent(cagr.cagr)} color={colorForPercent(cagr.cagr)} />}
             {irr != null && <Stat label="IRR (w/ div.)" value={formatPercent(irr * 100)} color={colorForPercent(irr * 100)} />}
@@ -150,11 +151,3 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
-      <p className={`text-[13px] font-bold tabular-nums truncate ${color ?? 'text-gray-200'}`}>{value}</p>
-    </div>
-  );
-}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { INDEXES } from '@/lib/config';
 import { QuoteData, HistoricalPoint, Timeframe, CAGRData } from '@/lib/types';
 import { formatPrice, formatPercent, formatCagr, colorForPercent, calculateCAGR, dataAvailabilityMessage, computeAssetIRR, buildTotalReturnSeries, type DividendEvent } from '@/lib/utils';
@@ -383,7 +384,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
             </p>
           )}
 
-          <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
             <Stat label="Price" value={selectedQuote.price.toLocaleString('en-US', { minimumFractionDigits: 2 })} />
             <Stat label="Day Change" value={formatPercent(selectedQuote.changePercent)} color={colorForPercent(selectedQuote.changePercent)} />
             {selectedQuote.ytdChangePercent != null && (
@@ -451,14 +452,6 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
-      <p className={clsx('text-[13px] font-bold tabular-nums truncate', color ?? 'text-gray-100')}>{value}</p>
-    </div>
-  );
-}
 
 interface DualLinePoint { date: string; price: number; totalReturn?: number }
 

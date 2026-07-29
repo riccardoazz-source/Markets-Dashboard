@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
+import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
@@ -80,14 +81,6 @@ function debtColor(v: number): string {
   return 'text-up-text';
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
-      <p className={clsx('text-[13px] font-bold tabular-nums truncate', color ?? 'text-gray-100')}>{value}</p>
-    </div>
-  );
-}
 
 export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | null; onCompare?: (symbol: string) => void }) {
   const [countries, setCountries] = useState<Place[]>([]);
@@ -351,7 +344,7 @@ export function MacroWorldSection({ jumpTo, onCompare }: { jumpTo?: string | nul
 
             {/* Stats row */}
             {latest && (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
                 <Stat label="Latest" value={`${fmtImf(latest.close, sel.unit)}${latest.date ? ` (${latest.date.slice(0, 4)})` : ''}`} />
                 {prev && <Stat label="Previous" value={fmtImf(prev.close, sel.unit)} />}
                 {prev && (

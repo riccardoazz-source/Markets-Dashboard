@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { HistoricalPoint, Timeframe, QuoteData } from '@/lib/types';
 import {
   calculateCAGR, formatPercent, formatPrice, colorForPercent,
@@ -857,7 +858,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const volGrain: VolumeGrain = activeTools.volumeMonthly ? 'monthly' : activeTools.volumeWeekly ? 'weekly' : 'daily';
   // Panes the active tools open push the panel taller; this keeps it inside the
   // window by measuring it rather than guessing (see lib/useChartFit).
-  const { ref: fitRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools), { base: 260, minChart: 150 });
+  const { ref: fitRef, endRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools), { base: 260, minChart: 150 });
   const oscFullHist = useFullHistory(
     selected?.symbol,
     !!((activeTools.rsi && rsiGrain) || (activeTools.macd && macdGrain)),
@@ -1401,7 +1402,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
           {/* Stats */}
           {data?.meta && (
-            <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
               <Stat label="Price" value={formatPrice(data.meta.price, currency)} />
               {cagrPrice && (
                 <Stat label={`Return (${customRange ? 'Custom' : timeframe})`} value={formatPercent(cagrPrice.return)} color={colorForPercent(cagrPrice.return)} />
@@ -1593,6 +1594,11 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
             );
           })()}
 
+          {/* Everything above has to be on screen at once: the stats, the chart and
+              the panes the tools opened. What follows — dividends, earnings,
+              financials — is meant to be scrolled to, so it is left out of the fit. */}
+          <div ref={endRef} />
+
           {!loading && prices.length > 0 && (
             <ChartTools data={prices} symbol={selected?.symbol} activeTools={activeTools} onChange={setActiveTools} />
           )}
@@ -1670,12 +1676,4 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
-      <p className={clsx('text-[13px] font-bold tabular-nums truncate', color ?? 'text-gray-100')}>{value}</p>
-    </div>
-  );
-}
 

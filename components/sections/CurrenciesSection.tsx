@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { CURRENCY_GROUPS, CURRENCY_META } from '@/lib/config';
 import { Timeframe } from '@/lib/types';
 import { dataAvailabilityMessage } from '@/lib/utils';
@@ -321,53 +322,32 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
             </p>
           )}
 
-          <div className="flex gap-2 flex-wrap">
+          {/* Same compact card as every other panel — see components/ui/StatCard. */}
+          <StatGrid>
             {selectedRate?.change1d != null && (
-              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-                <p className="text-[9px] text-gray-500 mb-0.5">Daily Change</p>
-                <p className={clsx('text-sm font-bold', pctClass(selectedRate.change1d))}>
-                  {pctText(selectedRate.change1d)}
-                </p>
-              </div>
+              <Stat label="Daily Change" value={pctText(selectedRate.change1d)} color={pctClass(selectedRate.change1d)} />
             )}
             {selectedRate?.ytd != null && (
-              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-                <p className="text-[9px] text-gray-500 mb-0.5">YTD</p>
-                <p className={clsx('text-sm font-bold', pctClass(selectedRate.ytd))}>
-                  {pctText(selectedRate.ytd)}
-                </p>
-              </div>
+              <Stat label="YTD" value={pctText(selectedRate.ytd)} color={pctClass(selectedRate.ytd)} />
             )}
             {average != null && (
-              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-                <p className="text-[9px] text-gray-500 mb-0.5">Period Average</p>
-                <p className="text-sm font-bold text-gold">{average.toFixed(dec)}</p>
-              </div>
+              <Stat label="Period Average" value={average.toFixed(dec)} color="text-gold" />
             )}
             {average != null && selectedRate?.rate != null && (
-              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-                <p className="text-[9px] text-gray-500 mb-0.5">vs Average</p>
-                <p className={clsx(
-                  'text-sm font-bold',
-                  selectedRate.rate > average ? 'text-up-text' : 'text-down-text'
-                )}>
-                  {selectedRate.rate > average ? '+' : ''}
-                  {((selectedRate.rate - average) / average * 100).toFixed(2)}%
-                </p>
-              </div>
+              <Stat
+                label="vs Average"
+                value={`${selectedRate.rate > average ? '+' : ''}${((selectedRate.rate - average) / average * 100).toFixed(2)}%`}
+                color={selectedRate.rate > average ? 'text-up-text' : 'text-down-text'}
+              />
             )}
             {historical.length > 0 && (
-              <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-                <p className="text-[9px] text-gray-500 mb-0.5">Period Change</p>
-                <p className={clsx(
-                  'text-sm font-bold',
-                  historical[historical.length - 1].close >= historical[0].close ? 'text-up-text' : 'text-down-text'
-                )}>
-                  {((historical[historical.length - 1].close - historical[0].close) / historical[0].close * 100).toFixed(2)}%
-                </p>
-              </div>
+              <Stat
+                label="Period Change"
+                value={`${((historical[historical.length - 1].close - historical[0].close) / historical[0].close * 100).toFixed(2)}%`}
+                color={historical[historical.length - 1].close >= historical[0].close ? 'text-up-text' : 'text-down-text'}
+              />
             )}
-          </div>
+          </StatGrid>
 
           {histLoading ? (
             <div className="flex items-center justify-center h-48">

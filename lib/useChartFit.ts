@@ -37,6 +37,13 @@ export interface ChartFitOptions {
 export function useChartFit(paneCount: number, opts: ChartFitOptions = {}) {
   const { base = 200, minChart = 110, basePane = 80, minPane = 44 } = opts;
   const ref = useRef<HTMLDivElement>(null);
+  // Optional end marker. Some panels continue well past the chart — the stocks tab
+  // adds dividends, earnings and financials underneath — and those sections are
+  // MEANT to be scrolled to. Measuring them too would shrink the price chart to
+  // nothing in order to fit content nobody expects to see at once. Attach this to
+  // the last element that has to be visible without scrolling, and everything
+  // below it is left out of the sum.
+  const endRef = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState(1);
 
   const chartAt = (f: number) => Math.max(minChart, Math.round(base * f));
@@ -49,7 +56,10 @@ export function useChartFit(paneCount: number, opts: ChartFitOptions = {}) {
     // above it and the modal's outer padding.
     const wrapper = (el.closest('[data-print-root]') as HTMLElement | null) ?? el;
     const outerPad = window.innerWidth >= 640 ? 48 : 16;   // p-2 / sm:p-6
-    const total = wrapper.offsetHeight + outerPad;
+    const end = endRef.current;
+    const total = end
+      ? end.getBoundingClientRect().bottom - wrapper.getBoundingClientRect().top + outerPad
+      : wrapper.offsetHeight + outerPad;
     if (total <= 0) return;
 
     const charts = chartAt(fit) + paneAt(fit) * paneCount;
@@ -65,5 +75,5 @@ export function useChartFit(paneCount: number, opts: ChartFitOptions = {}) {
     if (Math.abs(next - fit) > 0.01) setFit(next);
   });
 
-  return { ref, fit, height: chartAt(fit), paneHeight: paneAt(fit) };
+  return { ref, endRef, fit, height: chartAt(fit), paneHeight: paneAt(fit) };
 }

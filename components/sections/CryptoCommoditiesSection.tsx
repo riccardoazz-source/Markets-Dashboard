@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
 import { HistoricalPoint, Timeframe, CAGRData, CryptoData } from '@/lib/types';
 import { formatPrice, formatPercent, formatCagr, formatMarketCap, colorForPercent, calculateCAGR, dataAvailabilityMessage, getTimeframeStart } from '@/lib/utils';
@@ -388,7 +389,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
             </p>
           )}
 
-          <div className="grid grid-cols-3 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
             <Stat label="Price" value={formatPrice(selectedCrypto.price)} />
             <Stat label="Day Change" value={formatPercent(selectedCrypto.change24hPercent)} color={colorForPercent(selectedCrypto.change24hPercent)} />
             {selectedCrypto.mtdChangePercent != null && (
@@ -436,11 +437,3 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="bg-bg-input rounded-lg px-2.5 py-1.5">
-      <p className="text-[9px] text-gray-500 mb-0.5 truncate">{label}</p>
-      <p className={clsx('text-[13px] font-bold tabular-nums truncate', color ?? 'text-gray-100')}>{value}</p>
-    </div>
-  );
-}
