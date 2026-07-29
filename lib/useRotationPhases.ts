@@ -49,13 +49,11 @@ async function load(extra: string[]): Promise<Map<string, RotationPhase>> {
     moneyFlow: r.moneyFlow as number | null, downVolDry: r.downVolDry as number | null,
   }));
   const scored = scoreRotation(inputs).filter(s => s.score > -1);
-  const byScore = [...scored].sort((a, b) => a.score - b.score);
-  const n = byScore.length;
-  const pct = new Map<string, number>();
-  byScore.forEach((s, i) => pct.set(s.item.symbol, n > 1 ? (i / (n - 1)) * 100 : 50));
+  // No ranking: both quadrant coordinates are the asset's own, so the badge an
+  // asset carries here is identical to the one Rotation shows, by construction.
   const map = new Map<string, RotationPhase>();
   for (const s of scored) {
-    const p = classifyPhase(pct.get(s.item.symbol) ?? 50, s.item.r3m ?? null);
+    const p = classifyPhase(s.accel, s.item.r3m ?? null);
     if (p) map.set(s.item.symbol, p);
   }
   return map;

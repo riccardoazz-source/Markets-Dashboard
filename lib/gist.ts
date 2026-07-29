@@ -47,8 +47,10 @@ export interface QuadrantPoint {
   name: string;
   group: string;
   r3m: number;        // x-axis: 3M return %
-  accScore: number;   // y-axis: acceleration percentile (0–100)
-  accel?: number;     // raw acceleration in pp (for the tooltip)
+  accel?: number;     // y-axis: acceleration, points/month (absolute, 0 = steady)
+  /** @deprecated Y used to be a cross-sectional percentile. Kept so snapshots
+   *  saved before the axis became absolute still load; new ones do not write it. */
+  accScore?: number;
   r1m: number | null;
   r1y: number | null;
   isAccel: boolean;   // was it on the Accelerating shortlist that day

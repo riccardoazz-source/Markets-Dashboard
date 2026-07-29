@@ -197,7 +197,7 @@ function SavedQuadrant({ points, modelId, onAssetClick }: {
 }) {
   const [open, setOpen] = useState(false);
   const assets = useMemo<QuadrantAsset[]>(
-    () => points.map(p => ({ ...p, isSelected: p.isPinned ?? false })),
+    () => points.map(p => ({ ...p, accel: p.accel ?? null, isSelected: p.isPinned ?? false })),
     [points],
   );
   const currentModelId = MODEL_VERSIONS.find(v => v.current)?.id;

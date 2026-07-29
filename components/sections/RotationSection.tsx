@@ -167,7 +167,7 @@ function RotationLegend() {
         Model formula (Dalio EMS)
       </summary>
       <div className="px-3 pb-3 pt-1 space-y-2 text-gray-400">
-        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. One score ranks the Accelerating list, sets the Quadrant Y-axis and drives the Backtest.</p>
+        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. The score RANKS the Accelerating list and drives the Backtest. The <span className="text-gray-200">Quadrant</span> uses two absolute coordinates instead — 3M return and acceleration (pp/month) — so every asset orbits the centre with its own radius and nothing depends on who else is on screen.</p>
         <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
 {`FinalScore = ( core + 0.10·AccelBoost + 0.30·DrawdownQuality ) · ClassWeight
 
@@ -499,28 +499,25 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   };
 
   // Build quadrant chart data from the currently filtered view.
-  // Y-axis = the FULL model score as a cross-sectional percentile (0–100), NOT just
-  // acceleration. This is the same number selectPicks ranks on, so the quadrant, the
-  // Accelerating list and the backtest all read ONE formula: change a weight and the
-  // dots move vertically, the highlighted picks change, and the backtest changes —
-  // together. (X stays 3M return: where the asset has BEEN; Y: what the model says now.)
+  // Y = the model's OWN acceleration term (computeAccel, points/month), X = 3M
+  // return. Both absolute, both centred on zero, so the quadrant is a projection of
+  // the same formula rather than a second model — and distance from the centre is
+  // the size of the swing, which a percentile could never express.
   const quadrantAssets = useMemo<QuadrantAsset[]>(() => {
     const accelSet = new Set(accelItems.map(i => i.symbol));
     const candidates = groupFiltered
       .map(item => ({ item, s: scoreMap.get(item.symbol) }))
       .filter((c): c is { item: RotationItem; s: ScoredItem<RotationItem> } =>
         c.s != null && c.s.score > -1 && c.item.r3m != null);
-    // Rank scores ascending → percentile, so Y reflects the whole formula.
-    const byScoreAsc = [...candidates].sort((a, b) => a.s.score - b.s.score);
-    const scorePct = new Map<string, number>();
-    const m = byScoreAsc.length;
-    byScoreAsc.forEach((c, i) => scorePct.set(c.item.symbol, m > 1 ? (i / (m - 1)) * 100 : 50));
+    // Y is the asset's OWN acceleration in points/month — no ranking. That is what
+    // makes the distance from the centre mean the size of the move, so a broad
+    // index orbits in a small circle and a high-beta stock in a wide one, and both
+    // travel through all four quadrants.
     return candidates.map(({ item, s }) => ({
       symbol: item.symbol,
       name: item.name,
       group: item.group as string,
       r3m: item.r3m as number,
-      accScore: Math.round(scorePct.get(item.symbol) ?? 50),
       accel: s.accel,
       r1m: item.r1m,
       r1y: item.r1y,
@@ -529,23 +526,17 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     }));
   }, [groupFiltered, scoreMap, accelItems, selectedSymbols, pins]);
 
-  // Rotation phase per symbol. Ranked over the FULL universe (all rows), NOT the
-  // group-filtered view: the label an asset carries must not change because the
-  // user clicked a class filter, and must match the badge the other sections show
-  // (useRotationPhases also ranks universe-wide).
+  // Rotation phase per symbol. Both coordinates belong to the asset alone, so the
+  // label no longer depends on who else is on screen — clicking a class filter, or
+  // adding a watchlist, cannot move an asset from one quadrant to another.
   const phaseMap = useMemo(() => {
-    const scored = rows
-      .map(item => ({ item, s: scoreMap.get(item.symbol) }))
-      .filter((c): c is { item: RotationItem; s: ScoredItem<RotationItem> } =>
-        c.s != null && c.s.score > -1 && c.item.r3m != null);
-    const byScoreAsc = [...scored].sort((a, b) => a.s.score - b.s.score);
-    const n = byScoreAsc.length;
     const m = new Map<string, RotationPhase>();
-    byScoreAsc.forEach((c, i) => {
-      const pctile = n > 1 ? (i / (n - 1)) * 100 : 50;
-      const p = classifyPhase(pctile, c.item.r3m as number);
-      if (p) m.set(c.item.symbol, p);
-    });
+    for (const item of rows) {
+      const s = scoreMap.get(item.symbol);
+      if (!s || s.score <= -1 || item.r3m == null) continue;
+      const p = classifyPhase(s.accel, item.r3m);
+      if (p) m.set(item.symbol, p);
+    }
     return m;
   }, [rows, scoreMap]);
   const phaseOf = (symbol: string): RotationPhase | null => phaseMap.get(symbol) ?? null;
@@ -616,7 +607,6 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
       name: a.name,
       group: a.group,
       r3m: r1(a.r3m)!,
-      accScore: a.accScore,
       accel: a.accel != null ? r1(a.accel) ?? undefined : undefined,
       r1m: r1(a.r1m),
       r1y: r1(a.r1y),

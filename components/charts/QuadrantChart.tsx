@@ -44,9 +44,13 @@ export interface QuadrantAsset {
   symbol: string;
   name: string;
   group: string;
-  r3m: number;       // x-axis: 3M return %
-  accScore: number;  // y-axis: full model-score percentile × 100 (0–100)
-  accel?: number;    // raw acceleration in percentage points (last month vs prior two)
+  r3m: number;       // x-axis: 3M return %, absolute
+  /** y-axis: acceleration in points/month (computeAccel). Absolute and centred on
+   *  zero, so distance from the centre is the SIZE of the move — an index orbits
+   *  small, a high-beta name orbits wide, and both cross all four quadrants. */
+  accel?: number | null;
+  /** @deprecated the old percentile Y. Only saved snapshots still carry it. */
+  accScore?: number;
   r1m: number | null;
   r1y: number | null;
   isAccel: boolean;
@@ -57,6 +61,9 @@ export interface QuadrantAsset {
 // the rest against one edge), while r3m keeps the true value for the tooltip.
 interface PlotAsset extends QuadrantAsset {
   r3mPlot: number;
+  /** accel clamped into the visible domain, so one runaway asset cannot squash
+   *  everyone else onto the centre line. */
+  accelPlot: number;
   /** True when a search is active and this asset is not one of the traced ones. */
   dimmed?: boolean;
 }
@@ -109,7 +116,11 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
       <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">Score: <span className="text-gray-100">{p.accScore.toFixed(0)}/100</span>{p.accel != null && <span className={p.accel >= 0 ? 'text-green-400' : 'text-red-400'}> (accel {p.accel >= 0 ? '+' : ''}{p.accel.toFixed(1)}pp)</span>}</p>
+      <p className="text-gray-300">Acceleration:{' '}
+        <span className={(p.accel ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
+          {(p.accel ?? 0) >= 0 ? '+' : ''}{(p.accel ?? 0).toFixed(1)} pp/month
+        </span>
+      </p>
       {p.isAccel && <p className="text-green-400 font-semibold">🌱 Accelerating</p>}
     </div>
   );
@@ -133,14 +144,15 @@ export interface QuadrantTrail {
   symbol: string;
   name: string;
   group: string;
-  points: { date: string; r3m: number; score: number }[];
+  /** accel: the same points/month coordinate the live dots use. */
+  points: { date: string; r3m: number; accel: number }[];
 }
 
 // Trail layer: draws each traced asset's journey as a fading tail, oldest segment
 // faintest, so direction is readable at a glance (down-left → up-right = an asset
 // climbing out of Lagging). Drawn under the dots, inside the chart so it can use
 // recharts' live pixel scales.
-function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, live: Map<string, PlotAsset>) {
+function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, clampEdgeY: number, live: Map<string, PlotAsset>) {
   return function TrailLayer(props: CustomizedProps) {
     const { xAxisMap, yAxisMap, offset } = props;
     if (!xAxisMap || !yAxisMap || !offset || trails.length === 0) return null;
@@ -154,7 +166,7 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, live: Map<st
       const color = GROUP_COLORS[t.group] ?? '#6b7280';
       const pts = t.points.map(p => ({
         x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.r3m))),
-        y: yScale(p.score),
+        y: yScale(Math.max(-clampEdgeY, Math.min(clampEdgeY, p.accel))),
         date: p.date,
       }));
       // The path must END on the live dot. The trail's own "today" step is
@@ -165,7 +177,7 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, live: Map<st
       const dot = live.get(t.symbol);
       if (dot) {
         pts.pop();
-        pts.push({ x: xScale(dot.r3mPlot), y: yScale(dot.accScore), date: '' });
+        pts.push({ x: xScale(dot.r3mPlot), y: yScale(dot.accelPlot), date: '' });
       }
       if (pts.length < 2) continue;
 
@@ -277,7 +289,7 @@ function makeLabelLayer(labeled: PlotAsset[]) {
     // Selected first, then by vertical position so nudging is stable.
     const order = [...labeled].sort((a, b) => {
       if (a.isSelected !== b.isSelected) return a.isSelected ? -1 : 1;
-      return yScale(b.accScore) - yScale(a.accScore);
+      return yScale(b.accelPlot) - yScale(a.accelPlot);
     });
 
     const placed: Box[] = [];
@@ -286,7 +298,7 @@ function makeLabelLayer(labeled: PlotAsset[]) {
     for (const a of order) {
       const color = GROUP_COLORS[a.group] ?? '#6b7280';
       const cx = xScale(a.r3mPlot);
-      const cy = yScale(a.accScore);
+      const cy = yScale(a.accelPlot);
       const r = a.isSelected ? 7 : 5;
       const text = shortName(a.name);
       const w = text.length * CHAR + 4;
@@ -385,23 +397,37 @@ interface Props {
 }
 
 export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymbols }: Props) {
-  // Symmetric, outlier-clamped X domain so the X=0 divider sits in the centre and
-  // a lone extreme mover can't squash everyone against one edge.
-  const { plot, normal, accel, labeled, xDomain, clampEdge } = useMemo(() => {
+  // BOTH domains are symmetric around zero and outlier-clamped, so the crosshair
+  // of the quadrant sits in the middle and a lone extreme mover cannot squash
+  // everyone else onto the axes. Symmetry is what makes "distance from the centre"
+  // readable as the size of an asset's swing.
+  const { plot, normal, accel, labeled, xDomain, yDomain, clampEdge, clampEdgeY } = useMemo(() => {
     if (assets.length === 0) {
-      return { plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[], xDomain: [-20, 20] as [number, number], clampEdge: 19.7 };
+      return {
+        plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[],
+        xDomain: [-20, 20] as [number, number], yDomain: [-6, 6] as [number, number],
+        clampEdge: 19.7, clampEdgeY: 5.9,
+      };
     }
-    const absVals = assets.map(a => Math.abs(a.r3m)).sort((x, y) => x - y);
-    // 90th percentile of |r3m|, padded — the visible half-range.
-    const p90 = absVals[Math.min(absVals.length - 1, Math.floor(absVals.length * 0.9))] ?? 20;
-    const maxAbs = absVals[absVals.length - 1] ?? 20;
-    // A trail can wander outside today's dot spread (that is the point of it), so
-    // widen the domain enough to keep the whole path on screen.
-    const trailMax = trails?.length
-      ? Math.max(...trails.flatMap(t => t.points.map(p => Math.abs(p.r3m))))
-      : 0;
-    const M = Math.max(15, Math.min(Math.max(maxAbs, trailMax) + 6, Math.max(p90 * 1.3, trailMax * 1.05)));
+    // Half-range for one axis: the 90th percentile of |value| padded out, but never
+    // smaller than `floor` and never cutting a trail off screen.
+    const halfRange = (vals: number[], floor: number, pad: number, trailVals: number[]) => {
+      const abs = vals.filter(v => isFinite(v)).map(Math.abs).sort((a, b) => a - b);
+      const p90 = abs[Math.min(abs.length - 1, Math.floor(abs.length * 0.9))] ?? floor;
+      const maxAbs = abs[abs.length - 1] ?? floor;
+      const trailMax = trailVals.length ? Math.max(...trailVals.map(Math.abs)) : 0;
+      return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
+    };
+    const M = halfRange(
+      assets.map(a => a.r3m), 15, 6,
+      trails?.flatMap(t => t.points.map(p => p.r3m)) ?? [],
+    );
+    const MY = halfRange(
+      assets.map(a => a.accel ?? 0), 3, 1.5,
+      trails?.flatMap(t => t.points.map(p => p.accel)) ?? [],
+    );
     const clampEdge = M * 0.985;
+    const clampEdgeY = MY * 0.985;
 
     // A search in Rotation focuses the chart: only the searched assets stay lit
     // and labelled, everything else fades to faint context. Clearing the search
@@ -412,6 +438,7 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
     const plot: PlotAsset[] = assets.map(a => ({
       ...a,
       r3mPlot: Math.max(-clampEdge, Math.min(clampEdge, a.r3m)),
+      accelPlot: Math.max(-clampEdgeY, Math.min(clampEdgeY, a.accel ?? 0)),
       dimmed: focusing && !focus.has(a.symbol),
     }));
     const normal = plot.filter(a => !a.isAccel);
@@ -419,7 +446,11 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
     const labeled = focusing
       ? plot.filter(a => focus.has(a.symbol))
       : plot.filter(a => a.isAccel || a.isSelected);
-    return { plot, normal, accel, labeled, xDomain: [-M, M] as [number, number], clampEdge };
+    return {
+      plot, normal, accel, labeled,
+      xDomain: [-M, M] as [number, number], yDomain: [-MY, MY] as [number, number],
+      clampEdge, clampEdgeY,
+    };
   }, [assets, trails, focusSymbols]);
 
   if (loading) {
@@ -439,9 +470,10 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
   }
 
   const [xMin, xMax] = xDomain;
+  const [yMin, yMax] = yDomain;
   const LabelLayer = makeLabelLayer(labeled);
   // Live dot positions, so each trail can terminate exactly on its asset's dot.
-  const TrailLayer = makeTrailLayer(trails ?? [], clampEdge, new Map(plot.map(a => [a.symbol, a])));
+  const TrailLayer = makeTrailLayer(trails ?? [], clampEdge, clampEdgeY, new Map(plot.map(a => [a.symbol, a])));
 
   return (
     <div className="space-y-1">
@@ -479,11 +511,11 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       )}
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 16, right: 16, bottom: 24, left: 8 }}>
-          {/* Quadrant background tints */}
-          <ReferenceArea x1={0} x2={xMax} y1={50} y2={100} fill="#16a34a" fillOpacity={0.05} />
-          <ReferenceArea x1={xMin} x2={0} y1={50} y2={100} fill="#3b82f6" fillOpacity={0.05} />
-          <ReferenceArea x1={0} x2={xMax} y1={0} y2={50} fill="#f59e0b" fillOpacity={0.035} />
-          <ReferenceArea x1={xMin} x2={0} y1={0} y2={50} fill="#ef4444" fillOpacity={0.035} />
+          {/* Quadrant background tints — both splits now sit at zero. */}
+          <ReferenceArea x1={0} x2={xMax} y1={0} y2={yMax} fill="#16a34a" fillOpacity={0.05} />
+          <ReferenceArea x1={xMin} x2={0} y1={0} y2={yMax} fill="#3b82f6" fillOpacity={0.05} />
+          <ReferenceArea x1={0} x2={xMax} y1={yMin} y2={0} fill="#f59e0b" fillOpacity={0.035} />
+          <ReferenceArea x1={xMin} x2={0} y1={yMin} y2={0} fill="#ef4444" fillOpacity={0.035} />
 
           <CartesianGrid stroke="#1e293b" strokeDasharray="0" />
           <XAxis
@@ -498,20 +530,20 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
             label={{ value: '3M Return', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
-            dataKey="accScore"
+            dataKey="accelPlot"
             type="number"
-            name="Model score"
-            domain={[0, 100]}
+            name="Acceleration"
+            domain={[yMin, yMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={v => `${v}`}
-            label={{ value: 'Score', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
+            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}`}
+            label={{ value: 'Acceleration (pp/month)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
             width={36}
           />
 
           <ReferenceLine x={0}  stroke="#334155" strokeWidth={1.5} />
-          <ReferenceLine y={50} stroke="#334155" strokeWidth={1.5} />
+          <ReferenceLine y={0} stroke="#334155" strokeWidth={1.5} />
 
           <Tooltip content={<QuadrantTooltip />} cursor={{ strokeDasharray: '3 3', stroke: '#475569' }} />
 

@@ -90,25 +90,27 @@ export async function GET(req: Request) {
   symbols.forEach((s, i) => histMap.set(s, results[i].status === 'fulfilled' ? results[i].value : []));
 
   const meta = new Map(universe.map(m => [m.symbol, m]));
-  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; r3m: number; score: number }[] }>();
+  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; r3m: number; accel: number }[] }>();
   for (const s of wanted) {
     const m = meta.get(s);
     trails.set(s, { symbol: s, name: m?.name ?? s, group: m?.group ?? 'Stocks', points: [] });
   }
 
+  // Both coordinates belong to the asset alone, so a trail only needs THAT asset
+  // scored — no ranking of the universe at any date. The whole cross-sectional pass
+  // that used to dominate this endpoint is gone.
   for (const d of dates) {
     const inputs = buildInputsAsOf(universe, histMap, d);
-    const scored = scoreRotation(inputs).filter(x => x.score > -1 && x.item.r3m != null);
-    if (scored.length < 2) continue;
-    const asc = [...scored].sort((a, b) => a.score - b.score);
-    const pct = new Map<string, number>();
-    asc.forEach((x, i) => pct.set(x.item.symbol, (i / (asc.length - 1)) * 100));
+    const scored = scoreRotation(inputs);
     const dateStr = fmt(d);
     for (const s of wanted) {
       const row = scored.find(x => x.item.symbol === s);
-      const p = pct.get(s);
-      if (!row || p == null || row.item.r3m == null) continue;
-      trails.get(s)!.points.push({ date: dateStr, r3m: row.item.r3m, score: Math.round(p) });
+      if (!row || row.score <= -1 || row.item.r3m == null) continue;
+      trails.get(s)!.points.push({
+        date: dateStr,
+        r3m: row.item.r3m,
+        accel: Math.round(row.accel * 100) / 100,
+      });
     }
   }
 

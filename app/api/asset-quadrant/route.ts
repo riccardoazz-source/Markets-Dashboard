@@ -31,11 +31,9 @@ const TTL = 30 * 60_000;
 // 1) History per symbol, remembering the WIDEST range already fetched, so moving
 //    3M → 1Y → MAX re-downloads nothing it already holds.
 const histCache = new Map<string, { hist: Hist; fromMs: number; ts: number }>();
-// 2) The universe ranking per DATE. Scoring a date produces a percentile for
-//    EVERY asset, but only one was being kept — so opening a second asset, or
-//    re-covering the same weeks under a different timeframe, paid the full cost
-//    again. Cached by date, the second view is nearly free.
-const rankCache = new Map<string, { ranks: Map<string, { score: number; r3m: number }>; ts: number }>();
+// 2) One evaluated point per (symbol, date), so re-covering the same weeks under a
+//    different timeframe costs nothing the second time.
+const pointCache = new Map<string, { pt: { date: string; accel: number; r3m: number; phase: string | null; close: number | null }; ts: number }>();
 
 // Weekly grid anchored to a FIXED Monday rather than to the window start, so
 // every timeframe samples the SAME dates and they hit the rank cache. Without
@@ -69,19 +67,16 @@ export async function GET(req: Request) {
   const timeframe = searchParams.get('timeframe') ?? '1Y';
   if (!symbol) return NextResponse.json({ error: 'No symbol' }, { status: 400 });
 
-  const baseSymbols = new Set(BASE_UNIVERSE.map(m => m.symbol));
-  const extraStocks = [...new Set(
-    (searchParams.get('stocks') ?? '').split(',').map(s => s.trim()).filter(Boolean),
-  )].filter(s => !baseSymbols.has(s));
-  const universe: BtMeta[] = [
-    ...BASE_UNIVERSE,
-    ...extraStocks.map(s => ({ symbol: s, name: s, group: 'Stocks' })),
-    ...(baseSymbols.has(symbol) || extraStocks.includes(symbol)
-      ? []
-      : [{ symbol, name: symbol, group: 'Stocks' }]),
-  ];
+  // Both quadrant coordinates are measured on the asset itself, so this endpoint
+  // no longer needs a universe at all: one symbol's own history is the whole input.
+  // What used to be ~130 downloads and a full cross-sectional ranking at every
+  // weekly step is now one download and one evaluation — which is also why the
+  // long windows stopped being slow.
+  const meta = BASE_UNIVERSE.find(m => m.symbol === symbol)
+    ?? { symbol, name: symbol, group: 'Stocks' };
+  const universe: BtMeta[] = [meta];
 
-  const key = `${symbol}|${timeframe}|${extraStocks.slice().sort().join(',')}`;
+  const key = `${symbol}|${timeframe}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.ts < TTL) return NextResponse.json(hit.data);
 
@@ -126,45 +121,28 @@ export async function GET(req: Request) {
   const startStr = fmt(start);
   const price = ownHist.filter(p => p.date >= startStr).map(p => ({ date: p.date, close: p.close }));
 
-  type QPoint = { date: string; score: number; r3m: number; phase: string | null; close: number | null };
+  type QPoint = { date: string; accel: number; r3m: number; phase: string | null; close: number | null };
 
-  // Ranking depends on WHICH assets are being ranked, so the cache is keyed by
-  // the universe as well as the date.
-  const uniSig = symbols.slice().sort().join(',');
-
-  // Rank the whole universe as of one date. Identical maths to before — same
-  // buildInputsAsOf, same scoreRotation, same percentile — but every asset's
-  // result is kept instead of one, and reused on later requests.
-  const ranksAt = (d: Date): Map<string, { score: number; r3m: number }> | null => {
+  // Same chain as everywhere else — buildInputsAsOf → scoreRotation → classifyPhase
+  // — just run on one asset, because acceleration is a property of that asset and
+  // does not change with who else is in the list.
+  const evalAt = (d: Date): QPoint | null => {
     const dateStr = fmt(d);
-    const key = `${uniSig}|${dateStr}`;
-    const hit = rankCache.get(key);
-    if (hit && Date.now() - hit.ts < TTL) return hit.ranks;
+    const cached = pointCache.get(`${symbol}|${dateStr}`);
+    if (cached && Date.now() - cached.ts < TTL) return cached.pt;
 
     const inputs = buildInputsAsOf(universe, histMap, d);
-    const scored = scoreRotation(inputs).filter(x => x.score > -1 && x.item.r3m != null);
-    if (scored.length < 2) return null;
-    const asc = [...scored].sort((a, b) => a.score - b.score);
-    const ranks = new Map<string, { score: number; r3m: number }>();
-    asc.forEach((x, i) => {
-      ranks.set(x.item.symbol, { score: (i / (asc.length - 1)) * 100, r3m: x.item.r3m as number });
-    });
-    rankCache.set(key, { ranks, ts: Date.now() });
-    return ranks;
-  };
-
-  const evalAt = (d: Date): QPoint | null => {
-    const ranks = ranksAt(d);
-    const r = ranks?.get(symbol);
-    if (!r) return null;
-    const dateStr = fmt(d);
-    return {
+    const row = scoreRotation(inputs)[0];
+    if (!row || row.score <= -1 || row.item.r3m == null) return null;
+    const pt: QPoint = {
       date: dateStr,
-      score: Math.round(r.score),
-      r3m: r.r3m,
-      phase: classifyPhase(r.score, r.r3m),
+      accel: Math.round(row.accel * 100) / 100,
+      r3m: row.item.r3m,
+      phase: classifyPhase(row.accel, row.item.r3m),
       close: priceAsOf(ownHist, dateStr),
     };
+    pointCache.set(`${symbol}|${dateStr}`, { pt, ts: Date.now() });
+    return pt;
   };
 
   // Weekly, on the fixed grid, plus today. Same weeks for every timeframe, so a
