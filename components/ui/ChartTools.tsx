@@ -35,6 +35,11 @@ export interface ActiveTools {
   volume: boolean;
   volumeWeekly: boolean;   // Volume grain: weekly / monthly / (neither = daily) — mutually exclusive
   volumeMonthly: boolean;
+  // Cycle-shape tools: where price sits relative to its own trend, whether that
+  // trend is turning, and how deep/how old the drawdown is.
+  stretchSigma: boolean;
+  maSlope: boolean;
+  drawdown: boolean;
   spyRatio: boolean;
   trend: boolean;      // linear-regression trend line
   trendFull: boolean;  // true = fit on FULL history (shown over the visible window); false = fit on the visible period only
@@ -48,6 +53,7 @@ export const DEFAULT_TOOLS: ActiveTools = {
   macd: false, macdWeekly: false, macdMonthly: false,
   momentumDaily: false, momentumWeekly: false, momentumMonthly: false,
   volume: false, volumeWeekly: false, volumeMonthly: false,
+  stretchSigma: false, maSlope: false, drawdown: false,
   spyRatio: false,
   trend: false, trendFull: true,
 };
@@ -61,7 +67,10 @@ export function needsFullHistory(t: ActiveTools): boolean {
   return t.sma20 || t.sma50 || t.sma200 || t.sma200w || t.ema20 || t.ema100 ||
     (t.trend && t.trendFull) ||
     (t.rsi && (t.rsiWeekly || t.rsiMonthly)) ||
-    (t.macd && (t.macdWeekly || t.macdMonthly));
+    (t.macd && (t.macdWeekly || t.macdMonthly)) ||
+    // All three cycle tools rest on a 200-bar average, so on a short window they
+    // are only computable from the full history.
+    t.stretchSigma || t.maSlope || t.drawdown;
 }
 
 interface Props {
@@ -315,6 +324,17 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                     {volGrain}
                   </button>
                 )}
+                <Divider />
+                {/* Cycle shape — each needs 200 bars of history to mean anything. */}
+                <ToolChip active={activeTools.stretchSigma} onToggle={() => toggle('stretchSigma')}
+                  label="Stretch σ" color="violet" disabled={nL < 200}
+                  title="Distance from the SMA 200 in months of the asset's own volatility — comparable across an index and a crypto, where a raw % is not" />
+                <ToolChip active={activeTools.maSlope} onToggle={() => toggle('maSlope')}
+                  label="MA Slope" color="orange" disabled={nL < 220}
+                  title="Slope of the SMA 200 in % per month, with how long price has held one side of it" />
+                <ToolChip active={activeTools.drawdown} onToggle={() => toggle('drawdown')}
+                  label="Drawdown" color="rose" disabled={nL < 60}
+                  title="Fall from the 52-week high, and how many months ago that high was" />
                 <Divider />
                 <ToolChip active={momActive} onToggle={() => setMom(momActive ? null : 'daily')} label="Momentum" color="sky" disabled={n < 2} />
                 {momActive && (

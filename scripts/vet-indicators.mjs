@@ -100,6 +100,39 @@ ok('a day with no volume is skipped, not counted as zero',
    I.aggregateVolume(gappy,'weekly').filter(d=>d.volume!=null)[0].volume === 7);
 ok('and stays null on the daily grain', I.aggregateVolume(gappy,'daily')[1].volume === null);
 
+console.log('\nCycle-shape indicators');
+// A flat series has zero volatility, so stretch is undefined rather than infinite.
+ok('stretch is null when volatility is zero', I.computeStretchSigma(Array(300).fill(100))[299] === null);
+// Ramp + noise: price above a rising 200-SMA must give positive stretch, and the
+// slope of that average must be positive too.
+const ramp = Array.from({length: 400}, (_, i) => 100 + i * 0.5 + (i % 7) * 0.4);
+const st = I.computeStretchSigma(ramp);
+ok('stretch positive on an uptrend above its average', st[399] > 0, `${st[399].toFixed(2)}σ`);
+ok('stretch null before 200 bars exist', I.computeStretchSigma(ramp)[198] === null);
+const sl = I.computeMaSlope(ramp, 200, 21);
+ok('MA slope positive on a rising average', sl[399] > 0, `${sl[399].toFixed(2)}%/mo`);
+ok('MA slope null before the average plus the span', sl[210] === null && sl[221] !== null);
+// A series that falls for its whole second half must end below its average.
+const hump = [...Array.from({length: 250}, (_, i) => 100 + i), ...Array.from({length: 250}, (_, i) => 350 - i * 1.2)];
+ok('stretch negative after a sustained fall', I.computeStretchSigma(hump)[499] < 0, `${I.computeStretchSigma(hump)[499].toFixed(2)}σ`);
+ok('MA slope turns negative after a sustained fall', I.computeMaSlope(hump, 200, 21)[499] < 0);
+// Regime months: sign says which side, magnitude how long.
+const reg = I.computeRegimeMonths(ramp, 200, 1.4);
+ok('regime months positive while above the average', reg[399] > 0, `${reg[399].toFixed(1)} months`);
+ok('regime months negative while below', I.computeRegimeMonths(hump, 200, 1.4)[499] < 0);
+// Drawdown: 0 at a new high, exactly −20% twenty per cent below it. (Both of these
+// caught errors in the TEST first — the ramp above ends on a sawtooth trough, and
+// 20% below 359 is 287.2, not 288. Which is the point of writing them down.)
+const strict = Array.from({length: 300}, (_, i) => 100 + i);
+ok('drawdown is 0 at a new high', Math.abs(I.computeDrawdown(strict, 252)[299]) < 1e-9);
+const dd = I.computeDrawdown([...strict, 399 * 0.8], 252);
+ok('drawdown is −20% at 20% below the high', near(dd[dd.length - 1], -20, 1e-9), `${dd[dd.length-1]?.toFixed(6)}%`);
+// Months since high: a high 3 months back reads ~3.
+const d400 = Array.from({length: 400}, (_, i) => new Date(Date.UTC(2020,0,1+i)).toISOString().slice(0,10));
+const peaked = Array.from({length: 400}, (_, i) => (i <= 299 ? 100 + i : 399 - (i - 299)));
+const msh = I.computeMonthsSinceHigh(d400, peaked, 252);
+ok('months since the high ≈ elapsed months', near(msh[399], (400 - 300) / 30.44, 0.05), `${msh[399].toFixed(2)}`);
+
 rmSync(out, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

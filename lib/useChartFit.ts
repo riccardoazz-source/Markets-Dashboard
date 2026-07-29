@@ -22,6 +22,7 @@ export function paneCountOf(t: Partial<ActiveTools> | undefined): number {
   return [
     t.volume, t.rsi, t.macd,
     t.momentumDaily, t.momentumWeekly, t.momentumMonthly,
+    t.stretchSigma, t.maSlope, t.drawdown,
   ].filter(Boolean).length;
 }
 

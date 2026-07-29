@@ -421,3 +421,133 @@ export function aggregateVolume(
     return { date: d.date, volume: hit ? hit.volume : null, up: hit ? hit.up : true };
   });
 }
+
+// ── Cycle-shape indicators ───────────────────────────────────────────────────
+// Three quantities the model needs but nothing could see: how far price sits from
+// its own trend, whether that trend is turning, and how deep and how old the
+// drawdown is. All three are self-referential — nothing about any other asset —
+// which is what makes them candidates for the quadrant's vertical axis.
+
+/**
+ * Rolling realised monthly volatility (%): the standard deviation of daily returns
+ * scaled by √21. The same definition the rotation model uses, so "one σ" means the
+ * same thing on a chart and inside the score.
+ */
+export function computeMonthlyVol(closes: number[], lookback = 63): (number | null)[] {
+  const out: (number | null)[] = new Array(closes.length).fill(null);
+  const rets: (number | null)[] = new Array(closes.length).fill(null);
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) rets[i] = closes[i] / closes[i - 1] - 1;
+  }
+  for (let i = 0; i < closes.length; i++) {
+    const from = Math.max(1, i - lookback + 1);
+    const w: number[] = [];
+    for (let j = from; j <= i; j++) if (rets[j] != null) w.push(rets[j] as number);
+    if (w.length < 15) continue;   // below this the estimate is noise, not a measure
+    const mean = w.reduce((s, r) => s + r, 0) / w.length;
+    const varc = w.reduce((s, r) => s + (r - mean) ** 2, 0) / (w.length - 1);
+    out[i] = Math.sqrt(varc) * Math.sqrt(21) * 100;
+  }
+  return out;
+}
+
+/**
+ * Distance from the long moving average measured in months of the asset's own
+ * volatility: (price/MA − 1) ÷ monthly σ.
+ *
+ * SIGNED, unlike the model's internal stretch, which clips the downside away
+ * because it exists only to brake a blow-off. Here the negative half is the
+ * interesting one — it is where an asset trading well below its trend lives — and
+ * dividing by σ is what makes −2 mean the same thing on an index as on a crypto,
+ * where a raw percentage would not.
+ */
+export function computeStretchSigma(closes: number[], maPeriod = 200, volLookback = 63): (number | null)[] {
+  const ma = computeSMA(closes, maPeriod);
+  const vol = computeMonthlyVol(closes, volLookback);
+  return closes.map((c, i) => {
+    const m = ma[i], v = vol[i];
+    if (m == null || m <= 0 || v == null || v <= 0) return null;
+    return ((c / m - 1) * 100) / v;
+  });
+}
+
+/**
+ * Slope of the long moving average, in % per `spanBars` (pass ~a month of bars).
+ * The point of it: acceleration flips sign every few weeks, so it cannot describe a
+ * cycle — the slope of a 200-bar average changes slowly and keeps its sign for
+ * quarters, which is the behaviour a phase needs.
+ */
+export function computeMaSlope(closes: number[], maPeriod = 200, spanBars = 21): (number | null)[] {
+  const ma = computeSMA(closes, maPeriod);
+  return ma.map((v, i) => {
+    const prev = i >= spanBars ? ma[i - spanBars] : null;
+    if (v == null || prev == null || prev <= 0) return null;
+    return (v / prev - 1) * 100;
+  });
+}
+
+/**
+ * How long price has been on one side of the long average, in months, signed:
+ * positive = months above, negative = months below. One series carries both the
+ * regime and its age, and the zero crossing is the regime change itself.
+ */
+export function computeRegimeMonths(closes: number[], maPeriod = 200, avgDPB = 1.4): (number | null)[] {
+  const ma = computeSMA(closes, maPeriod);
+  const out: (number | null)[] = new Array(closes.length).fill(null);
+  let run = 0;
+  let side = 0;   // +1 above, −1 below
+  for (let i = 0; i < closes.length; i++) {
+    const m = ma[i];
+    if (m == null || m <= 0) { run = 0; side = 0; continue; }
+    const s = closes[i] >= m ? 1 : -1;
+    run = s === side ? run + 1 : 1;
+    side = s;
+    out[i] = (s * run * avgDPB) / 30.44;   // bars → calendar months
+  }
+  return out;
+}
+
+/** Rolling maximum over the trailing `window` bars, and the index it occurred at. */
+function rollingMaxWithIndex(closes: number[], window: number): { max: (number | null)[]; at: (number | null)[] } {
+  const max: (number | null)[] = new Array(closes.length).fill(null);
+  const at: (number | null)[] = new Array(closes.length).fill(null);
+  // Monotonic deque of candidate indices, largest first — O(n) rather than O(n·w).
+  const dq: number[] = [];
+  for (let i = 0; i < closes.length; i++) {
+    while (dq.length && dq[0] <= i - window) dq.shift();
+    while (dq.length && closes[dq[dq.length - 1]] <= closes[i]) dq.pop();
+    dq.push(i);
+    max[i] = closes[dq[0]];
+    at[i] = dq[0];
+  }
+  return { max, at };
+}
+
+/**
+ * Drawdown from the trailing 52-week high, in % (always ≤ 0). "How far it has
+ * fallen" — the depth of the hole, which the phase study suggests is where the
+ * useful signal lives.
+ */
+export function computeDrawdown(closes: number[], window = 252): (number | null)[] {
+  const { max } = rollingMaxWithIndex(closes, window);
+  return closes.map((c, i) => {
+    const m = max[i];
+    if (m == null || m <= 0) return null;
+    return (c / m - 1) * 100;
+  });
+}
+
+/**
+ * Months since that 52-week high. Depth and age are different questions — a −30%
+ * drawdown one month old is a crash, the same drawdown eighteen months old is a
+ * base — and only the second one is an entry.
+ */
+export function computeMonthsSinceHigh(dates: string[], closes: number[], window = 252): (number | null)[] {
+  const { at } = rollingMaxWithIndex(closes, window);
+  return closes.map((_, i) => {
+    const j = at[i];
+    if (j == null) return null;
+    const days = (new Date(dates[i]).getTime() - new Date(dates[j]).getTime()) / 86_400_000;
+    return days >= 0 ? days / 30.44 : null;
+  });
+}

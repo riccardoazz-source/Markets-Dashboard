@@ -1580,7 +1580,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                     <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={STOCK_AXIS_WIDTH}
                       tickFormatter={v => (v as number).toFixed(2)} />
                     <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.4} />
-                    <Bar dataKey="hist" barSize={3}>
+                    <Bar dataKey="hist" name="Histogram" barSize={3} fill="#94a3b8">
                       {macdData.map((entry, i) => (
                         <Cell key={i} fill={(entry.hist ?? 0) >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.7} />
                       ))}

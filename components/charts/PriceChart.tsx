@@ -17,7 +17,8 @@ import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
   computeTrendLine, computeSma200wDaily, computeRsiResampledDaily, computeMacdResampledDaily,
-  avgCalendarDaysPerBar, computeIndicatorPeriods,
+  avgCalendarDaysPerBar, computeIndicatorPeriods, barsForCalDays,
+  computeStretchSigma, computeMaSlope, computeRegimeMonths, computeDrawdown, computeMonthsSinceHigh,
 } from '@/lib/indicators';
 
 interface ToolsOverlay {
@@ -43,6 +44,9 @@ interface ToolsOverlay {
   volume?: boolean;
   volumeWeekly?: boolean;
   volumeMonthly?: boolean;
+  stretchSigma?: boolean;
+  maSlope?: boolean;
+  drawdown?: boolean;
   spyRatio?: boolean;
   sma200w?: boolean;
   trend?: boolean;
@@ -209,7 +213,7 @@ function MACDSubChart({ data, grain, syncId, height = 80 }: {
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => (v as number).toFixed(2)} />
           <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.4} />
-          <Bar dataKey="hist" name="Histogram" barSize={3}>
+          <Bar dataKey="hist" name="Histogram" barSize={3} fill="#94a3b8">
             {data.map((entry, i) => (
               <Cell key={i} fill={(entry.hist ?? 0) >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.7} />
             ))}
@@ -260,7 +264,8 @@ export function VolumeSubChart({ data, syncId, height = 70, grain = 'daily' }: {
           <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => fmt(v as number)} />
-          <Bar dataKey="volume" barSize={grain === 'daily' ? 2 : grain === 'weekly' ? 4 : 7} isAnimationActive={false}>
+          <Bar dataKey="volume" name="Volume" fill="#94a3b8"
+            barSize={grain === 'daily' ? 2 : grain === 'weekly' ? 4 : 7} isAnimationActive={false}>
             {data.map((entry, i) => (
               <Cell key={i} fill={entry.up ? '#10b981' : '#ef4444'} fillOpacity={0.55} />
             ))}
@@ -302,7 +307,9 @@ function MomentumSubChart({
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => `${(v as number).toFixed(1)}%`} />
           <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.5} />
-          <Bar dataKey="value" barSize={2}>
+          {/* The line already reports this value in the tooltip; without
+              tooltipType="none" the bar repeats it, in a second colour. */}
+          <Bar dataKey="value" barSize={2} fill="#38bdf8" tooltipType="none">
             {data.map((entry, i) => (
               <Cell key={i} fill={(entry.value ?? 0) >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.6} />
             ))}
@@ -311,6 +318,63 @@ function MomentumSubChart({
           <Tooltip
             contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
             formatter={(v: number) => [v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—', label]}
+            labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// One shape for all three cycle panes: a value centred on zero (or capped at zero,
+// for a drawdown), reference lines where the level starts to mean something, and a
+// caption carrying the reading that is a NUMBER rather than a curve — how many
+// months the regime has lasted, how old the high is.
+function CyclePane({
+  data, label, note, unit, color, syncId, height = 70, zeroLines = [], negativeOnly = false, caption,
+}: {
+  data: { date: string; value: number | null }[];
+  label: string;
+  note: string;
+  unit: string;
+  color: string;
+  syncId?: string;
+  height?: number;
+  /** Extra dashed levels either side of zero (e.g. ±1σ, ±2σ). */
+  zeroLines?: number[];
+  negativeOnly?: boolean;
+  caption?: string;
+}) {
+  const valid = data.filter(d => d.value != null);
+  if (valid.length === 0) {
+    return <div className="text-[10px] text-gray-600 py-1">{label}: needs more history</div>;
+  }
+  const maxAbs = Math.max(...valid.map(d => Math.abs(d.value as number)), 0.5);
+  const domain: [number, number] = negativeOnly
+    ? [-Math.ceil(maxAbs * 1.1), 0]
+    : [-Math.ceil(maxAbs * 1.1), Math.ceil(maxAbs * 1.1)];
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-3 mb-0.5 px-1 flex-wrap">
+        <span className="text-[10px] font-semibold" style={{ color }}>{label}</span>
+        <span className="text-[9px] text-gray-600">{note}</span>
+        {caption && <span className="text-[9px] text-gray-400 font-medium">{caption}</span>}
+      </div>
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
+          <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+          <YAxis domain={domain} tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false}
+            width={SYNC_AXIS_WIDTH} tickFormatter={v => `${(v as number).toFixed(1)}`} />
+          {zeroLines.map(y => (
+            <ReferenceLine key={y} y={y} stroke="#6b7280" strokeDasharray="2 4" strokeOpacity={0.4} />
+          ))}
+          <ReferenceLine y={0} stroke="#94a3b8" strokeOpacity={0.55} strokeWidth={1.2} />
+          <Area type="monotone" dataKey="value" stroke="none" fill={color} fillOpacity={0.12} connectNulls={false} />
+          <Line type="monotone" dataKey="value" stroke={color} strokeWidth={1.4} dot={false} connectNulls={false} />
+          <Tooltip
+            contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: '8px', color: '#e2e8f0', fontSize: 11 }}
+            formatter={(v: number) => [v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}${unit}` : '—', label]}
             labelFormatter={l => { try { return format(parseISO(l as string), 'MMM d, yyyy'); } catch { return String(l); } }}
           />
         </ComposedChart>
@@ -402,7 +466,8 @@ export function PriceChart({
   const toolStdDev = toolVariance != null ? Math.sqrt(toolVariance) : null;
 
   // Scale all indicator periods to the visible data's real-world time granularity
-  const P = computeIndicatorPeriods(avgCalendarDaysPerBar(data.map(d => d.date)));
+  const avgDPB = avgCalendarDaysPerBar(data.map(d => d.date));
+  const P = computeIndicatorPeriods(avgDPB);
 
   // Full-history context: closes/dates/periods for the WHOLE series (daily). Long MAs and the
   // full-history trend are computed here, then projected onto the visible bars.
@@ -554,6 +619,42 @@ export function PriceChart({
   const momWeeklyData  = momWeeklyVals  ? data.map((d, i) => ({ date: d.date, value: momWeeklyVals[i]  })) : null;
   const momMonthlyData = momMonthlyVals ? data.map((d, i) => ({ date: d.date, value: momMonthlyVals[i] })) : null;
 
+  // ── Cycle shape ───────────────────────────────────────────────────────────
+  // All three rest on a 200-bar average, so on a short window they are computed on
+  // the full history and projected onto the visible bars — otherwise a 3-month view
+  // would simply show nothing.
+  const cycleSrc = useFull ? { dates: fullDates, closes: fullCloses } : { dates: visDates, closes };
+  const projectCycle = (vals: (number | null)[]) =>
+    useFull ? projectToVisible(fullDates, vals, visDates) : vals;
+
+  const stretchVals = toolsOverlay?.stretchSigma
+    ? projectCycle(computeStretchSigma(cycleSrc.closes, 200, 63)) : null;
+  const maSlopeVals = toolsOverlay?.maSlope
+    ? projectCycle(computeMaSlope(cycleSrc.closes, 200, P.momMonth.period)) : null;
+  const regimeVals = toolsOverlay?.maSlope
+    ? projectCycle(computeRegimeMonths(cycleSrc.closes, 200, avgDPB)) : null;
+  const drawdownVals = toolsOverlay?.drawdown
+    ? projectCycle(computeDrawdown(cycleSrc.closes, barsForCalDays(365, avgDPB))) : null;
+  const monthsSinceHighVals = toolsOverlay?.drawdown
+    ? projectCycle(computeMonthsSinceHigh(cycleSrc.dates, cycleSrc.closes, barsForCalDays(365, avgDPB))) : null;
+
+  const asSeries = (vals: (number | null)[] | null) =>
+    vals ? data.map((d, i) => ({ date: d.date, value: vals[i] ?? null })) : null;
+  const stretchData = asSeries(stretchVals);
+  const maSlopeData = asSeries(maSlopeVals);
+  const drawdownData = asSeries(drawdownVals);
+
+  // The reading that is a number rather than a curve: how long the regime has run,
+  // how old the high is. Drawing them would be a sawtooth; as a caption they answer
+  // the question directly.
+  const lastOf = (vals: (number | null)[] | null) => {
+    if (!vals) return null;
+    for (let i = vals.length - 1; i >= 0; i--) if (vals[i] != null) return vals[i] as number;
+    return null;
+  };
+  const regimeNow = lastOf(regimeVals);
+  const monthsSinceHighNow = lastOf(monthsSinceHighVals);
+
   // Volume is a raw daily observation — nothing to compute, and nothing to project
   // from full history the way a moving average needs. Coloured by the day's own
   // direction, which is what makes a volume pane worth reading: whether the heavy
@@ -592,6 +693,11 @@ export function PriceChart({
         row[`macd_signal_${g}`] = macdResult.signal[i] ?? null;
         row[`macd_hist_${g}`]   = macdResult.hist[i]   ?? null;
       }
+      if (stretchVals)          row.stretch_sigma      = stretchVals[i];
+      if (maSlopeVals)          row.ma200_slope_pct_mo = maSlopeVals[i];
+      if (regimeVals)           row.regime_months      = regimeVals[i];
+      if (drawdownVals)         row.drawdown_52w_pct   = drawdownVals[i];
+      if (monthsSinceHighVals)  row.months_since_high  = monthsSinceHighVals[i];
       if (momDailyVals)   row.momentum_daily   = momDailyVals[i];
       if (momWeeklyVals)  row.momentum_weekly  = momWeeklyVals[i];
       if (momMonthlyVals) row.momentum_monthly = momMonthlyVals[i];
@@ -966,6 +1072,31 @@ export function PriceChart({
       {momDailyData   && <MomentumSubChart syncId={syncId} height={subChartHeight} data={momDailyData}   label="Momentum Daily (ROC 1)"   color="#38bdf8" />}
       {momWeeklyData  && <MomentumSubChart syncId={syncId} height={subChartHeight} data={momWeeklyData}  label="Momentum Weekly (ROC 5)"  color="#38bdf8" />}
       {momMonthlyData && <MomentumSubChart syncId={syncId} height={subChartHeight} data={momMonthlyData} label="Momentum Monthly (ROC 21)" color="#38bdf8" />}
+      {stretchData && (
+        <CyclePane
+          syncId={syncId} height={subChartHeight} data={stretchData}
+          label="Stretch σ (vs SMA 200)" note="distance from the trend, in months of the asset's own volatility"
+          unit="σ" color="#a78bfa" zeroLines={[-2, -1, 1, 2]}
+        />
+      )}
+      {maSlopeData && (
+        <CyclePane
+          syncId={syncId} height={subChartHeight} data={maSlopeData}
+          label="SMA 200 slope" note="% per month — a trend measure that keeps its sign for quarters"
+          unit="%" color="#fb923c"
+          caption={regimeNow != null
+            ? `price ${regimeNow >= 0 ? 'above' : 'below'} the average for ${Math.abs(regimeNow).toFixed(1)} months`
+            : undefined}
+        />
+      )}
+      {drawdownData && (
+        <CyclePane
+          syncId={syncId} height={subChartHeight} data={drawdownData}
+          label="Drawdown from 52W high" note="how deep the hole is" unit="%" color="#fb7185"
+          negativeOnly zeroLines={[-10, -20, -40]}
+          caption={monthsSinceHighNow != null ? `high was ${monthsSinceHighNow.toFixed(1)} months ago` : undefined}
+        />
+      )}
 
       {enableDragSelect && data.length > 1 && !range && (
         <p className="text-[10px] text-gray-700 text-right mt-0.5" data-print-hide>Click &amp; drag to measure a period</p>
