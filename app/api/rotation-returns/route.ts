@@ -41,8 +41,8 @@ interface RollingReturn {
   moneyFlow: number | null;// net buying pressure −1..1 (M31 v5 quiet-accumulation sleeve)
   downVolDry: number | null;// down-day volume dry-up 0..1 (M31 v8 recovery precision)
   // ── Rotation-quadrant coordinates (lib/rotationPhase.ts) ──
-  trendPace: number | null;    // X: smoothed 12-month monthly pace, %/month
-  trendImpulse: number | null; // Y: change in that pace over the last month, pp/month
+  trendGap: number | null; // X: % above/below its own 100-day trend, month-averaged
+  momentum: number | null; // Y: MACD(16,35,12) histogram as % of price
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -157,8 +157,8 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     r5: ret5Trading(history.map(p => p.close)),
     moneyFlow: moneyFlow20(history.map(p => p.close), history.map(p => p.volume)),
     downVolDry: downVolDryUp(history.map(p => p.close), history.map(p => p.volume)),
-    trendPace: axes?.trendPace ?? null,
-    trendImpulse: axes?.trendImpulse ?? null,
+    trendGap: axes?.trendGap ?? null,
+    momentum: axes?.momentum ?? null,
   };
 }
 

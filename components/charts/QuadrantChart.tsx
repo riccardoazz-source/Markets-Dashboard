@@ -19,15 +19,14 @@ import {
 //
 // Every asset is plotted as a dot (see lib/rotationPhase.ts for the definition and
 // the evidence behind it):
-//   X = TREND   — monthly pace of the trailing 12-month move (%/month), smoothed
-//   Y = IMPULSE — how much that pace changed over the last month (pp/month)
+//   X = TREND GAP — how far the price is from its own 100-day trend (%), month-averaged
+//   Y = MOMENTUM  — the MACD(16,35,12) histogram as % of price
 //
-// Y is the derivative of X, so a dot can only travel clockwise, and both splits sit
-// at zero:
-//   Top-right   → Trending:   rising and still gaining pace
-//   Top-left    → Recovering: still down over 12M but the pace is improving — entry
-//   Bottom-right→ Fading:     still up over 12M but losing pace — exit
-//   Bottom-left → Lagging:    falling and still losing pace — wait
+// Both splits sit at zero:
+//   Top-right   → Trending:   above its trend and still gaining ground
+//   Top-left    → Recovering: below its trend but momentum has turned up — entry
+//   Bottom-right→ Fading:     above its trend but momentum has turned down — exit
+//   Bottom-left → Lagging:    below its trend and still losing ground — wait
 //
 // Accelerating names (top-8 by score) and any clicked rows are drawn bigger and
 // labelled. Labels are placed by a dedicated layer that spaces them apart and
@@ -45,13 +44,13 @@ export interface QuadrantAsset {
   symbol: string;
   name: string;
   group: string;
-  /** x-axis: smoothed 12-month monthly pace, %/month. */
-  trendPace: number;
-  /** y-axis: change in that pace over the last month, pp/month. Both axes are the
+  /** x-axis: % above/below its own 100-day trend, month-averaged. */
+  trendGap: number;
+  /** y-axis: the MACD histogram as % of price. Both axes are the
    *  asset's own absolute numbers and centred on zero, so distance from the centre
    *  is the SIZE of the swing — an index orbits small, a high-beta name wide — and
    *  every asset crosses all four quadrants. */
-  trendImpulse: number;
+  momentum: number;
   /** 3M return %, tooltip only — not a coordinate any more. */
   r3m: number | null;
   /** @deprecated the old percentile Y. Only saved snapshots still carry it. */
@@ -114,7 +113,7 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
   const p = payload[0].payload;
   const color = GROUP_COLORS[p.group] ?? '#6b7280';
   // Where the dot actually is, not just which box it fell in.
-  const pos = quadrantPosition(p.trendPace, p.trendImpulse);
+  const pos = quadrantPosition(p.trendGap, p.momentum);
   return (
     <div className="rounded-lg border border-white/10 bg-[#1e293b] px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
       <p className="font-semibold" style={{ color }}>{p.name}</p>
@@ -122,14 +121,14 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
       {p.r3m != null && <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>}
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">12M pace:{' '}
-        <span className={p.trendPace >= 0 ? 'text-green-400' : 'text-red-400'}>
-          {p.trendPace >= 0 ? '+' : ''}{p.trendPace.toFixed(2)} %/month
+      <p className="text-gray-300">From its 100-day trend:{' '}
+        <span className={p.trendGap >= 0 ? 'text-green-400' : 'text-red-400'}>
+          {p.trendGap >= 0 ? '+' : ''}{p.trendGap.toFixed(2)}%
         </span>
       </p>
-      <p className="text-gray-300">Change in pace:{' '}
-        <span className={p.trendImpulse >= 0 ? 'text-green-400' : 'text-red-400'}>
-          {p.trendImpulse >= 0 ? '+' : ''}{p.trendImpulse.toFixed(2)} pp/month
+      <p className="text-gray-300">Momentum:{' '}
+        <span className={p.momentum >= 0 ? 'text-green-400' : 'text-red-400'}>
+          {p.momentum >= 0 ? '+' : ''}{p.momentum.toFixed(2)}% {p.momentum >= 0 ? '(gaining)' : '(losing)'}
         </span>
       </p>
       {pos && (
@@ -161,7 +160,7 @@ export interface QuadrantTrail {
   name: string;
   group: string;
   /** The same two coordinates the live dots use, as of each past date. */
-  points: { date: string; trendPace: number; trendImpulse: number }[];
+  points: { date: string; trendGap: number; momentum: number }[];
 }
 
 // Trail layer: draws each traced asset's journey as a fading tail, oldest segment
@@ -181,8 +180,8 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, clampEdgeY: 
     for (const t of trails) {
       const color = GROUP_COLORS[t.group] ?? '#6b7280';
       const pts = t.points.map(p => ({
-        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.trendPace))),
-        y: yScale(Math.max(-clampEdgeY, Math.min(clampEdgeY, p.trendImpulse))),
+        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.trendGap))),
+        y: yScale(Math.max(-clampEdgeY, Math.min(clampEdgeY, p.momentum))),
         date: p.date,
       }));
       // The path must END on the live dot. The trail's own "today" step is
@@ -421,8 +420,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
     if (assets.length === 0) {
       return {
         plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[],
-        xDomain: [-4, 4] as [number, number], yDomain: [-2, 2] as [number, number],
-        clampEdge: 3.94, clampEdgeY: 1.97,
+        xDomain: [-8, 8] as [number, number], yDomain: [-1.5, 1.5] as [number, number],
+        clampEdge: 7.88, clampEdgeY: 1.48,
       };
     }
     // Half-range for one axis: the 90th percentile of |value| padded out, but never
@@ -434,15 +433,15 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       const trailMax = trailVals.length ? Math.max(...trailVals.map(Math.abs)) : 0;
       return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
     };
-    // Floors are in %/month now, not cumulative %: a 3 %/month pace is a 43% year,
-    // so the box only has to be a few points wide before it holds the whole market.
+    // Both axes are in % of price, and they live on very different scales: the gap to
+    // the 100-day trend runs to ±10% or more, the MACD histogram rarely past ±2%.
     const M = halfRange(
-      assets.map(a => a.trendPace), 3, 1,
-      trails?.flatMap(t => t.points.map(p => p.trendPace)) ?? [],
+      assets.map(a => a.trendGap), 6, 2,
+      trails?.flatMap(t => t.points.map(p => p.trendGap)) ?? [],
     );
     const MY = halfRange(
-      assets.map(a => a.trendImpulse), 1.2, 0.5,
-      trails?.flatMap(t => t.points.map(p => p.trendImpulse)) ?? [],
+      assets.map(a => a.momentum), 1, 0.4,
+      trails?.flatMap(t => t.points.map(p => p.momentum)) ?? [],
     );
     const clampEdge = M * 0.985;
     const clampEdgeY = MY * 0.985;
@@ -455,8 +454,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
 
     const plot: PlotAsset[] = assets.map(a => ({
       ...a,
-      xPlot: Math.max(-clampEdge, Math.min(clampEdge, a.trendPace)),
-      yPlot: Math.max(-clampEdgeY, Math.min(clampEdgeY, a.trendImpulse)),
+      xPlot: Math.max(-clampEdge, Math.min(clampEdge, a.trendGap)),
+      yPlot: Math.max(-clampEdgeY, Math.min(clampEdgeY, a.momentum)),
       dimmed: focusing && !focus.has(a.symbol),
     }));
     const normal = plot.filter(a => !a.isAccel);
@@ -539,24 +538,24 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
           <XAxis
             dataKey="xPlot"
             type="number"
-            name="12M pace"
+            name="Trend gap"
             domain={[xMin, xMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}%`}
-            label={{ value: '12M pace (%/month)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
+            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`}
+            label={{ value: 'Distance from its 100-day trend (%)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
             dataKey="yPlot"
             type="number"
-            name="Change in pace"
+            name="Momentum"
             domain={[yMin, yMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}`}
-            label={{ value: 'Change in pace (pp/month)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
+            label={{ value: 'Momentum — MACD histogram (%)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
             width={36}
           />
 

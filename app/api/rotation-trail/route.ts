@@ -80,8 +80,8 @@ export async function GET(req: Request) {
 
   // One fetch per symbol covering the window PLUS a year of lookback, because the
   // oldest step still needs its own trailing 1Y/200d history to score.
-  // 12 months for the pace + the smoothing and impulse windows on top (see
-  // AXES_LOOKBACK_DAYS), plus room for holidays.
+  // The trend EMA's warm-up plus the smoothing window (AXES_LOOKBACK_DAYS), plus
+  // room for holidays.
   const from = subDays(start, Math.max(400, AXES_LOOKBACK_DAYS + 60));
   const symbols = universe.map(m => m.symbol);
   const results = await Promise.allSettled(
@@ -91,7 +91,7 @@ export async function GET(req: Request) {
   symbols.forEach((s, i) => histMap.set(s, results[i].status === 'fulfilled' ? results[i].value : []));
 
   const meta = new Map(universe.map(m => [m.symbol, m]));
-  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; trendPace: number; trendImpulse: number }[] }>();
+  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; trendGap: number; momentum: number }[] }>();
   for (const s of wanted) {
     const m = meta.get(s);
     trails.set(s, { symbol: s, name: m?.name ?? s, group: m?.group ?? 'Stocks', points: [] });
@@ -105,13 +105,13 @@ export async function GET(req: Request) {
     const inputs = buildInputsAsOf(tracedMeta, histMap, d);
     const dateStr = fmt(d);
     for (const input of inputs) {
-      const pos = quadrantPosition(input.trendPace, input.trendImpulse);
+      const pos = quadrantPosition(input.trendGap, input.momentum);
       if (!pos) continue;
       const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
       trails.get(input.symbol)!.points.push({
         date: dateStr,
-        trendPace: r4(pos.x),
-        trendImpulse: r4(pos.y),
+        trendGap: r4(pos.x),
+        momentum: r4(pos.y),
       });
     }
   }

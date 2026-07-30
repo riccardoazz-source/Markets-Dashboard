@@ -46,11 +46,11 @@ export interface QuadrantPoint {
   symbol: string;
   name: string;
   group: string;
-  trendPace?: number;    // x-axis: smoothed 12-month monthly pace, %/month
-  trendImpulse?: number; // y-axis: 1-month change in that pace, pp/month
+  trendGap?: number; // x-axis: % from its own 100-day trend, month-averaged
+  momentum?: number; // y-axis: MACD histogram as % of price
   r3m: number | null; // 3M return %, kept for the tooltip
   /** @deprecated X was the 3M return and Y the acceleration before the axes became
-   *  the 12-month pace and its change. Kept so older snapshots still load. */
+   *  the trend gap and momentum. Kept so older snapshots still load. */
   accel?: number;
   /** @deprecated Y used to be a cross-sectional percentile. Kept so snapshots
    *  saved before the axis became absolute still load; new ones do not write it. */

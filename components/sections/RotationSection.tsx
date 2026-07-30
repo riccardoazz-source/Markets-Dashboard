@@ -57,8 +57,8 @@ interface RotationItem {
   r5?: number | null;       // 5 trading-day return % (Dalio EMS v5 acceleration overlay)
   moneyFlow?: number | null;// net buying pressure −1..1 (Dalio EMS v5 quiet-accumulation)
   downVolDry?: number | null;// down-day volume dry-up 0..1 (Dalio EMS v8 recovery precision)
-  trendPace?: number | null;    // quadrant X: smoothed 12-month pace %/month
-  trendImpulse?: number | null; // quadrant Y: 1-month change in that pace, pp/month
+  trendGap?: number | null; // quadrant X: % from its own 100-day trend
+  momentum?: number | null; // quadrant Y: MACD histogram as % of price
 }
 
 interface RollingReturn {
@@ -91,8 +91,8 @@ interface RollingReturn {
   r5: number | null;
   moneyFlow: number | null;
   downVolDry: number | null;
-  trendPace: number | null;
-  trendImpulse: number | null;
+  trendGap: number | null;
+  momentum: number | null;
 }
 
 type SortKey = 'day' | '1m' | '3m' | '6m' | '1y' | '5y' | '200d' | '200w' | '52w';
@@ -172,7 +172,7 @@ function RotationLegend() {
         Model formula (Dalio EMS)
       </summary>
       <div className="px-3 pb-3 pt-1 space-y-2 text-gray-400">
-        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. The score RANKS the Accelerating list and drives the Backtest. The <span className="text-gray-200">Quadrant</span> uses two absolute coordinates instead — the 12-month monthly pace and how much that pace changed over the last month — so every asset orbits the centre with its own radius and nothing depends on who else is on screen.</p>
+        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. The score RANKS the Accelerating list and drives the Backtest. The <span className="text-gray-200">Quadrant</span> uses two absolute coordinates instead — how far the price sits from its own 100-day trend, and whether momentum is gaining or losing ground (the MACD histogram) — so every asset orbits the centre with its own radius and nothing depends on who else is on screen.</p>
         <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
 {`FinalScore = ( core + 0.10·AccelBoost + 0.30·DrawdownQuality ) · ClassWeight
 
@@ -301,7 +301,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           trendR2: r?.trendR2 ?? null, trendR2Long: r?.trendR2Long ?? null, rsi: r?.rsi ?? null, macdHist: r?.macdHist ?? null,
           adx: r?.adx ?? null, adxSlope: r?.adxSlope ?? null, plusDI: r?.plusDI ?? null, minusDI: r?.minusDI ?? null,
           rvol5: r?.rvol5 ?? null, rvol20: r?.rvol20 ?? null, r20: r?.r20 ?? null, rangeExp: r?.rangeExp ?? null, median12m: r?.median12m ?? null, r5: r?.r5 ?? null, moneyFlow: r?.moneyFlow ?? null, downVolDry: r?.downVolDry ?? null,
-          trendPace: r?.trendPace ?? null, trendImpulse: r?.trendImpulse ?? null,
+          trendGap: r?.trendGap ?? null, momentum: r?.momentum ?? null,
         };
       });
       setStockItems(built);
@@ -433,7 +433,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
             trendR2: r.trendR2 ?? null, trendR2Long: r.trendR2Long ?? null, rsi: r.rsi ?? null, macdHist: r.macdHist ?? null,
             adx: r.adx ?? null, adxSlope: r.adxSlope ?? null, plusDI: r.plusDI ?? null, minusDI: r.minusDI ?? null,
             rvol5: r.rvol5 ?? null, rvol20: r.rvol20 ?? null, r20: r.r20 ?? null, rangeExp: r.rangeExp ?? null, median12m: r.median12m ?? null, r5: r.r5 ?? null, moneyFlow: r.moneyFlow ?? null, downVolDry: r.downVolDry ?? null,
-            trendPace: r.trendPace ?? null, trendImpulse: r.trendImpulse ?? null,
+            trendGap: r.trendGap ?? null, momentum: r.momentum ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -506,22 +506,22 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   };
 
   // Build quadrant chart data from the currently filtered view.
-  // X = the 12-month monthly pace (smoothed), Y = how much that pace changed over
-  // the last month. Both are the asset's own numbers and both are centred on zero,
-  // so the quadrant is a cycle every asset travels, distance from the centre is the
-  // size of the swing, and nothing depends on who else is on screen.
+  // X = how far the price is from its own 100-day trend, Y = whether momentum is
+  // gaining or losing ground. Both are the asset's own numbers and both are centred on
+  // zero, so the quadrant is a cycle every asset travels, distance from the centre is
+  // the size of the swing, and nothing depends on who else is on screen.
   const quadrantAssets = useMemo<QuadrantAsset[]>(() => {
     const accelSet = new Set(accelItems.map(i => i.symbol));
     const candidates = groupFiltered
       .map(item => ({ item, s: scoreMap.get(item.symbol) }))
       .filter((c): c is { item: RotationItem; s: ScoredItem<RotationItem> } =>
-        c.s != null && c.s.score > -1 && c.item.trendPace != null && c.item.trendImpulse != null);
+        c.s != null && c.s.score > -1 && c.item.trendGap != null && c.item.momentum != null);
     return candidates.map(({ item }) => ({
       symbol: item.symbol,
       name: item.name,
       group: item.group as string,
-      trendPace: item.trendPace as number,
-      trendImpulse: item.trendImpulse as number,
+      trendGap: item.trendGap as number,
+      momentum: item.momentum as number,
       r3m: item.r3m,
       r1m: item.r1m,
       r1y: item.r1y,
@@ -538,7 +538,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     for (const item of rows) {
       const s = scoreMap.get(item.symbol);
       if (!s || s.score <= -1) continue;
-      const p = classifyPhase(item.trendPace, item.trendImpulse);
+      const p = classifyPhase(item.trendGap, item.momentum);
       if (p) m.set(item.symbol, p);
     }
     return m;
@@ -610,8 +610,8 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
       symbol: a.symbol,
       name: a.name,
       group: a.group,
-      trendPace: r1(a.trendPace)!,
-      trendImpulse: r1(a.trendImpulse)!,
+      trendGap: r1(a.trendGap)!,
+      momentum: r1(a.momentum)!,
       r3m: r1(a.r3m),
       r1m: r1(a.r1m),
       r1y: r1(a.r1y),

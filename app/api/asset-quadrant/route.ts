@@ -33,7 +33,7 @@ const histCache = new Map<string, { hist: Hist; fromMs: number; ts: number }>();
 // 2) One evaluated point per (symbol, date), so re-covering the same weeks under a
 //    different timeframe costs nothing the second time.
 const pointCache = new Map<string, {
-  pt: { date: string; trendPace: number; trendImpulse: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number };
+  pt: { date: string; trendGap: number; momentum: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number };
   ts: number;
 }>();
 
@@ -93,9 +93,9 @@ export async function GET(req: Request) {
 
   // Window + the axes' own lookback: the oldest step still needs its own trailing
   // history to be placed.
-  // The window plus everything the axes reach back for: 12 months of pace, the
-  // smoothing window and the impulse lag on top (AXES_LOOKBACK_DAYS), and a margin
-  // for holidays. One day short and the oldest steps have no position at all.
+  // The window plus everything the axes reach back for: the trend EMA's warm-up and
+  // the smoothing window (AXES_LOOKBACK_DAYS), and a margin for holidays. One day
+  // short and the oldest steps have no position at all.
   const from = subDays(start, AXES_LOOKBACK_DAYS + 60);
   const fromMs = from.getTime();
   const symbols = universe.map(m => m.symbol);
@@ -127,7 +127,7 @@ export async function GET(req: Request) {
   const price = ownHist.filter(p => p.date >= startStr).map(p => ({ date: p.date, close: p.close }));
 
   type QPoint = {
-    date: string; trendPace: number; trendImpulse: number; r3m: number | null;
+    date: string; trendGap: number; momentum: number; r3m: number | null;
     phase: string | null; close: number | null;
     /** Where the dot actually sits: distance from the centre and angle round it. */
     radius: number; angle: number;
@@ -143,7 +143,7 @@ export async function GET(req: Request) {
 
     const input = buildInputsAsOf(universe, histMap, d)[0];
     if (!input) return null;
-    const pos = quadrantPosition(input.trendPace, input.trendImpulse);
+    const pos = quadrantPosition(input.trendGap, input.momentum);
     if (!pos) return null;
     // Four decimals on the coordinates, not two. The phase is decided by their
     // SIGN, and a value like +0.0031 rounds to 0.00 — so at two decimals a reader
@@ -153,8 +153,8 @@ export async function GET(req: Request) {
     const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
     const pt: QPoint = {
       date: dateStr,
-      trendPace: r4(pos.x),
-      trendImpulse: r4(pos.y),
+      trendGap: r4(pos.x),
+      momentum: r4(pos.y),
       r3m: input.r3m,
       phase: pos.phase,
       radius: r4(pos.radius),

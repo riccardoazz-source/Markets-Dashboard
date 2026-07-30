@@ -197,16 +197,16 @@ function SavedQuadrant({ points, modelId, onAssetClick }: {
   onAssetClick?: (asset: QuadrantAsset) => void;
 }) {
   const [open, setOpen] = useState(false);
-  // Snapshots saved before the axes became "12-month pace vs its change" stored the
-  // old pair (3M return, acceleration). They are redrawn from exactly what they
-  // stored — the 3M return converted to a monthly pace so it sits on the same scale
-  // — rather than being silently dropped or recomputed from today's history, which
+  // Snapshots saved before the axes became "trend gap vs momentum" stored the old
+  // pair (3M return, acceleration). They are redrawn from exactly what they stored —
+  // the 3M return converted to a monthly pace so it sits on a comparable scale —
+  // rather than being silently dropped or recomputed from today's history, which
   // would no longer be the picture that was saved.
   const assets = useMemo<QuadrantAsset[]>(
     () => points.map(p => ({
       ...p,
-      trendPace: p.trendPace ?? (p.r3m != null ? paceMonthly(p.r3m, 3) : 0),
-      trendImpulse: p.trendImpulse ?? p.accel ?? 0,
+      trendGap: p.trendGap ?? (p.r3m != null ? paceMonthly(p.r3m, 3) : 0),
+      momentum: p.momentum ?? p.accel ?? 0,
       isSelected: p.isPinned ?? false,
     })),
     [points],
