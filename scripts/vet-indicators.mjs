@@ -135,28 +135,68 @@ const msh = I.computeMonthsSinceHigh(d400, peaked, 252);
 ok('months since the high ≈ elapsed months', near(msh[399], (400 - 300) / 30.44, 0.05), `${msh[399].toFixed(2)}`);
 
 console.log('\nQuadrant position — the point, not just the name');
-// The four quadrants, by construction.
-ok('up and accelerating is Trending',   Q.quadrantPosition(2, 10).phase === 'Trending');
-ok('down but accelerating is Recovering', Q.quadrantPosition(2, -10).phase === 'Recovering');
-ok('up but decelerating is Fading',     Q.quadrantPosition(-2, 10).phase === 'Fading');
-ok('down and decelerating is Lagging',  Q.quadrantPosition(-2, -10).phase === 'Lagging');
-// X is the monthly pace, not the 3-month number: +33.1% over 3 months is +10%/month.
-ok('X is the compounded monthly pace', near(Q.quadrantPosition(0, 33.1).x, 10, 0.01),
-   `${Q.quadrantPosition(0, 33.1).x.toFixed(3)}%/mo`);
+// Argument order is (X = 12-month pace, Y = change in that pace).
+ok('up and strengthening is Trending',    Q.quadrantPosition(2, 0.5).phase === 'Trending');
+ok('down but strengthening is Recovering', Q.quadrantPosition(-2, 0.5).phase === 'Recovering');
+ok('up but weakening is Fading',          Q.quadrantPosition(2, -0.5).phase === 'Fading');
+ok('down and weakening is Lagging',       Q.quadrantPosition(-2, -0.5).phase === 'Lagging');
 // Radius is a real distance in one unit, so a 3-4-5 triangle comes out at 5.
-ok('radius is hypot(x, y) in %/month', near(Q.quadrantPosition(4, 33.1).radius, Math.hypot(10, 4), 0.01),
-   `${Q.quadrantPosition(4, 33.1).radius.toFixed(3)}`);
+ok('radius is hypot(x, y)', near(Q.quadrantPosition(4, 3).radius, 5, 1e-9),
+   `${Q.quadrantPosition(4, 3).radius.toFixed(6)}`);
 // Amplitude survives: the same phase, ten times the swing, ten times the radius.
-const small = Q.quadrantPosition(0.4, 3.3), big = Q.quadrantPosition(4, 36.5);
-ok('a bigger swing sits further out', big.radius > small.radius * 5,
+const small = Q.quadrantPosition(0.4, 0.3), big = Q.quadrantPosition(4, 3);
+ok('a bigger swing sits further out', near(big.radius, small.radius * 10, 1e-9),
    `${small.radius.toFixed(2)} vs ${big.radius.toFixed(2)} %/mo`);
 // The cycle runs clockwise, so its angles fall in that order.
-const ang = p => Q.quadrantPosition(p[0], p[1]).angle;
-ok('Recovering ~135°', near(ang([10, -25.7]), 135, 3), `${ang([10, -25.7]).toFixed(1)}°`);
-ok('Trending ~45°',    near(ang([10,  33.1]), 45, 3),  `${ang([10, 33.1]).toFixed(1)}°`);
-ok('Fading ~315°',     near(ang([-10, 33.1]), 315, 3), `${ang([-10, 33.1]).toFixed(1)}°`);
-ok('Lagging ~225°',    near(ang([-10, -25.7]), 225, 3), `${ang([-10, -25.7]).toFixed(1)}°`);
+const ang = (x, y) => Q.quadrantPosition(x, y).angle;
+ok('Recovering ~135°', near(ang(-1,  1), 135, 1e-9), `${ang(-1, 1).toFixed(1)}°`);
+ok('Trending ~45°',    near(ang( 1,  1), 45, 1e-9),  `${ang(1, 1).toFixed(1)}°`);
+ok('Fading ~315°',     near(ang( 1, -1), 315, 1e-9), `${ang(1, -1).toFixed(1)}°`);
+ok('Lagging ~225°',    near(ang(-1, -1), 225, 1e-9), `${ang(-1, -1).toFixed(1)}°`);
 ok('null when either coordinate is unknown', Q.quadrantPosition(null, 5) === null && Q.quadrantPosition(1, null) === null);
+
+console.log('\nQuadrant axes from a price history — answers fixed by arithmetic');
+// A daily series compounding at exactly 1%/month for four years. The 12-month pace
+// is 1.00 %/month everywhere, so the smoothed pace is 1.00 and its change is 0.
+const mkSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
+  date: new Date(Date.UTC(2020, 0, 1) + i * 86400000).toISOString().slice(0, 10),
+  close: f(i),
+}));
+const steady = mkSeries(1500, i => 100 * Math.pow(1.01, i / 30.4375));
+const axSteady = Q.trendAxes(steady);
+ok('a constant 1%/month pace reads 1.00 %/mo', near(axSteady.trendPace, 1, 0.02), `${axSteady.trendPace.toFixed(4)}`);
+ok('a constant pace has zero impulse', near(axSteady.trendImpulse, 0, 0.01), `${axSteady.trendImpulse.toFixed(5)}`);
+ok('a constant riser is Trending', Q.classifyPhase(axSteady.trendPace, axSteady.trendImpulse) === 'Trending');
+
+// Flat for three years, then +1%/month for the last three months: the 12-month pace
+// is still small but rising, which is the definition of Recovering's neighbour —
+// here it is positive, so Trending; what matters is the SIGN of the impulse.
+const turning = mkSeries(1200, i => (i < 1110 ? 100 : 100 * Math.pow(1.01, (i - 1110) / 30.4375)));
+const axTurn = Q.trendAxes(turning);
+ok('a fresh upturn has a positive impulse', axTurn.trendImpulse > 0, `${axTurn.trendImpulse.toFixed(4)}`);
+// The mirror image: rising for years, then flat for three months → pace still
+// positive, impulse negative. That is Fading, the exit.
+const stalling = mkSeries(1200, i => 100 * Math.pow(1.01, Math.min(i, 1110) / 30.4375));
+const axStall = Q.trendAxes(stalling);
+ok('a stalled riser is Fading', Q.classifyPhase(axStall.trendPace, axStall.trendImpulse) === 'Fading',
+   `pace ${axStall.trendPace.toFixed(2)}, impulse ${axStall.trendImpulse.toFixed(3)}`);
+// A falling series that is falling less hard is Recovering, not Lagging.
+const bouncing = mkSeries(1200, i => (i < 1110 ? 100 * Math.pow(0.97, i / 30.4375) : 100 * Math.pow(0.97, 1110 / 30.4375)));
+const axBounce = Q.trendAxes(bouncing);
+ok('a fall that stops is Recovering', Q.classifyPhase(axBounce.trendPace, axBounce.trendImpulse) === 'Recovering',
+   `pace ${axBounce.trendPace.toFixed(2)}, impulse ${axBounce.trendImpulse.toFixed(3)}`);
+
+// Too little history is null, not a number computed from whatever is there: an
+// asset listed six months ago has no position in a 12-month cycle.
+ok('null below the required history', Q.trendAxes(mkSeries(300, i => 100 + i)) === null);
+ok('null on an empty history', Q.trendAxes([]) === null && Q.trendAxes(undefined) === null);
+// As-of dates never read forward: asking for a date in the middle gives the same
+// answer as truncating the file there.
+const cut = steady[900].date;
+const asOf = Q.trendAxes(steady, cut);
+const truncated = Q.trendAxes(steady.slice(0, 901));
+ok('as-of reads no forward data',
+   near(asOf.trendPace, truncated.trendPace, 1e-12) && near(asOf.trendImpulse, truncated.trendImpulse, 1e-12));
 
 rmSync(out, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed\n`);

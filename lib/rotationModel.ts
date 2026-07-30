@@ -465,6 +465,13 @@ export interface ModelInput {
   r5?: number | null;       // 5 trading-day return % (EMS v5 acceleration overlay)
   moneyFlow?: number | null;// net buying pressure −1..1 (EMS v5 quiet-accumulation sleeve)
   downVolDry?: number | null;// down-day volume dry-up 0..1 (EMS v8 recovery precision)
+  // ── Rotation-quadrant coordinates (lib/rotationPhase.ts) ───────────────────
+  // Carried alongside the score, not used by it: the SCORE ranks candidates, the
+  // QUADRANT says where in the cycle an asset is. They answer different questions,
+  // so tuning one never silently moves the other. Both come from trendAxes() on the
+  // asset's own history, so every producer of ModelInput fills them the same way.
+  trendPace?: number | null;    // X: smoothed 12-month monthly pace, %/month
+  trendImpulse?: number | null; // Y: change in that pace over the last month, pp/month
 }
 
 export interface ScoredItem<T extends ModelInput> {

@@ -9,6 +9,7 @@ import {
   ModelInput, realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram,
 } from './rotationModel';
 import { computeWeeklyADX } from './adx';
+import { trendAxes } from './rotationPhase';
 import { dalioVolumeRatios, rangeExpansion, medianClose, moneyFlow20, ret5Trading, downVolDryUp } from './dalioModel';
 
 // Yahoo daily bars include volume when the ticker reports it — carried through so
@@ -102,6 +103,11 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
     const upToAsOf = h.slice(Math.max(0, lo - HIST_TAIL), lo);  // daily OHLC, no look-ahead
     const closesAsOf = upToAsOf.map(p => p.close);
     const adxState = computeWeeklyADX(upToAsOf);              // weekly ADX as of this date (M26)
+    // Quadrant coordinates: the 12-month pace and its 1-month change. Computed on
+    // the FULL history `h` (not the 400-bar tail) because the oldest sample of the
+    // smoothed pace reaches 15 months back, and cut off it would silently reuse the
+    // first available bar and report a flat trend.
+    const axes = trendAxes(h, asOf);
     return {
       symbol: m.symbol, name: m.name, group: m.group,
       r1m: retBetween(h, d1m, asOf),
@@ -132,6 +138,8 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
       adxSlope: adxState?.adxSlope ?? null,
       plusDI: adxState?.plusDI ?? null,
       minusDI: adxState?.minusDI ?? null,
+      trendPace: axes?.trendPace ?? null,
+      trendImpulse: axes?.trendImpulse ?? null,
     };
   });
 }

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { fetchYahooChart } from '@/lib/yahoo';
-import { scoreRotation } from '@/lib/rotationModel';
 import { buildInputsAsOf, fmt, type Hist, type BtMeta } from '@/lib/backtestCore';
+import { quadrantPosition, AXES_LOOKBACK_DAYS } from '@/lib/rotationPhase';
 import { subDays, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 
 // EDGE, like /api/rotation-returns and /api/rotation-backtest: Yahoo answers the
@@ -12,11 +12,10 @@ export const runtime = 'edge';
 export const maxDuration = 25; // edge ceiling
 
 // Rotation-quadrant TRAIL: where an asset has travelled across the quadrants over
-// time. Each step re-runs the LIVE model on inputs rebuilt as of that past date
-// (buildInputsAsOf — no look-ahead), then ranks it against the WHOLE universe on
-// that same date, because the Y axis is a cross-sectional percentile: a dot moves
-// up either by improving or by everything else deteriorating. That is why the
-// entire universe has to be scored at every step, not just the traced symbols.
+// time. Each step rebuilds the coordinates as of that past date (buildInputsAsOf —
+// no look-ahead). Both axes are measured on the asset itself, so only the TRACED
+// symbols are evaluated: there is no ranking, and a trail costs the same whether
+// the universe holds thirty tickers or three thousand.
 
 const BASE_UNIVERSE: BtMeta[] = [
   ...INDEXES.map(i => ({ symbol: i.symbol, name: i.name, group: 'Indexes' })),
@@ -81,7 +80,9 @@ export async function GET(req: Request) {
 
   // One fetch per symbol covering the window PLUS a year of lookback, because the
   // oldest step still needs its own trailing 1Y/200d history to score.
-  const from = subDays(start, 400);
+  // 12 months for the pace + the smoothing and impulse windows on top (see
+  // AXES_LOOKBACK_DAYS), plus room for holidays.
+  const from = subDays(start, Math.max(400, AXES_LOOKBACK_DAYS + 60));
   const symbols = universe.map(m => m.symbol);
   const results = await Promise.allSettled(
     symbols.map(s => fetchYahooChart(s, from, now, '1d').catch(() => [] as Hist)),
@@ -90,26 +91,27 @@ export async function GET(req: Request) {
   symbols.forEach((s, i) => histMap.set(s, results[i].status === 'fulfilled' ? results[i].value : []));
 
   const meta = new Map(universe.map(m => [m.symbol, m]));
-  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; r3m: number; accel: number }[] }>();
+  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; trendPace: number; trendImpulse: number }[] }>();
   for (const s of wanted) {
     const m = meta.get(s);
     trails.set(s, { symbol: s, name: m?.name ?? s, group: m?.group ?? 'Stocks', points: [] });
   }
 
   // Both coordinates belong to the asset alone, so a trail only needs THAT asset
-  // scored — no ranking of the universe at any date. The whole cross-sectional pass
-  // that used to dominate this endpoint is gone.
+  // evaluated — no ranking of the universe at any date. The whole cross-sectional
+  // pass that used to dominate this endpoint is gone.
+  const tracedMeta = universe.filter(m => wanted.includes(m.symbol));
   for (const d of dates) {
-    const inputs = buildInputsAsOf(universe, histMap, d);
-    const scored = scoreRotation(inputs);
+    const inputs = buildInputsAsOf(tracedMeta, histMap, d);
     const dateStr = fmt(d);
-    for (const s of wanted) {
-      const row = scored.find(x => x.item.symbol === s);
-      if (!row || row.score <= -1 || row.item.r3m == null) continue;
-      trails.get(s)!.points.push({
+    for (const input of inputs) {
+      const pos = quadrantPosition(input.trendPace, input.trendImpulse);
+      if (!pos) continue;
+      const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+      trails.get(input.symbol)!.points.push({
         date: dateStr,
-        r3m: row.item.r3m,
-        accel: Math.round(row.accel * 100) / 100,
+        trendPace: r4(pos.x),
+        trendImpulse: r4(pos.y),
       });
     }
   }

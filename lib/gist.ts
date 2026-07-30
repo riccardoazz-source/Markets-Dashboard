@@ -46,8 +46,12 @@ export interface QuadrantPoint {
   symbol: string;
   name: string;
   group: string;
-  r3m: number;        // x-axis: 3M return %
-  accel?: number;     // y-axis: acceleration, points/month (absolute, 0 = steady)
+  trendPace?: number;    // x-axis: smoothed 12-month monthly pace, %/month
+  trendImpulse?: number; // y-axis: 1-month change in that pace, pp/month
+  r3m: number | null; // 3M return %, kept for the tooltip
+  /** @deprecated X was the 3M return and Y the acceleration before the axes became
+   *  the 12-month pace and its change. Kept so older snapshots still load. */
+  accel?: number;
   /** @deprecated Y used to be a cross-sectional percentile. Kept so snapshots
    *  saved before the axis became absolute still load; new ones do not write it. */
   accScore?: number;

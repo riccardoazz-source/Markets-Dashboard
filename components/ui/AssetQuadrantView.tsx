@@ -20,9 +20,9 @@ import { PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 // price actually did next. The scores come from /api/asset-quadrant, which runs
 // the SAME pipeline as the live Rotation Quadrant; the formula lives in one place.
 
-interface QPoint { date: string; accel: number; r3m: number; phase: string | null; close: number | null; radius: number; angle: number }
+interface QPoint { date: string; trendPace: number; trendImpulse: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number }
 /** A weekly sample carried forward onto every daily bar. */
-interface DPoint { date: string; accel: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null }
+interface DPoint { date: string; trendPace: number | null; trendImpulse: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null }
 interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number; coarse?: boolean }
 
 const phaseColor = (p: string | null | undefined): string =>
@@ -145,7 +145,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
       while (i < points.length && points[i].date <= bar.date) cur = points[i++];
       return {
         date: bar.date,
-        accel: cur?.accel ?? null,
+        trendPace: cur?.trendPace ?? null,
+        trendImpulse: cur?.trendImpulse ?? null,
         r3m: cur?.r3m ?? null,
         phase: cur?.phase ?? null,
         radius: cur?.radius ?? null,
@@ -184,9 +185,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
   // Symmetric domain: zero has to sit in the MIDDLE, or "above the line" and
   // "below the line" stop being readable at a glance.
-  const accelDomain = useMemo<[number, number]>(() => {
-    const m = Math.max(1, ...dailyPoints.map(p => Math.abs(p.accel ?? 0)));
-    const pad = Math.ceil(m * 1.1 * 2) / 2;
+  const impulseDomain = useMemo<[number, number]>(() => {
+    const m = Math.max(0.5, ...dailyPoints.map(p => Math.abs(p.trendImpulse ?? 0)));
+    const pad = Math.ceil(m * 1.1 * 10) / 10;
     return [-pad, pad];
   }, [dailyPoints]);
 
@@ -216,10 +217,10 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     for (const p of dailyPoints) {
       m.set(p.date, {
         model_phase: p.phase,
-        // Four decimals: the sign of this column decides the phase, and two
+        // Four decimals: the sign of these two columns decides the phase, and two
         // decimals can round a genuine +0.0031 down to 0.00.
-        model_x_pace_pct_mo: p.r3m == null ? null : Math.round((Math.pow(1 + p.r3m / 100, 1 / 3) - 1) * 1e6) / 1e4,
-        model_y_accel_pp_mo: p.accel,
+        model_x_trend_pace_pct_mo: p.trendPace,
+        model_y_impulse_pp_mo: p.trendImpulse,
         model_radius_pct_mo: p.radius,
         model_angle_deg: p.angle,
         model_r3m_pct: p.r3m,
@@ -405,7 +406,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
                   <XAxis dataKey="date" scale="point" tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={40} />
                   <YAxis
-                    domain={accelDomain}
+                    domain={impulseDomain}
                     tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
                     tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}`}
                   />
@@ -413,12 +414,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   <ReferenceLine y={0} stroke="#64748b" strokeDasharray="4 2" strokeWidth={1.2} />
                   {/* Shares the line's dataKey — kept out of the tooltip so the
                       reading is not listed twice. */}
-                  <Area type="monotone" dataKey="accel" stroke="none" fill="#6366f1" fillOpacity={0.08}
+                  <Area type="monotone" dataKey="trendImpulse" stroke="none" fill="#6366f1" fillOpacity={0.08}
                     tooltipType="none" />
                   {/* A dot on every daily bar turned the line into a caterpillar and
                       buried the phase colours underneath it. Thin line, no markers —
                       this is a level to read, not a set of points to count. */}
-                  <Line type="monotone" dataKey="accel" stroke="#a5b4fc" strokeWidth={1.1}
+                  <Line type="monotone" dataKey="trendImpulse" stroke="#a5b4fc" strokeWidth={1.1}
                     strokeOpacity={0.9} dot={false} activeDot={{ r: 3 }} connectNulls isAnimationActive={false} />
                   <Tooltip
                     position={{ y: 0 }}
@@ -426,9 +427,10 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                     contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: 6, color: '#e2e8f0', fontSize: 10, padding: '2px 6px', lineHeight: 1.35 }}
                     formatter={(v: number, _n: string, p: { payload?: DPoint }) => {
                       const pt = p?.payload;
-                      const acc = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(1)} pp/mo` : '—';
-                      const r = pt?.radius != null ? ` · ${pt.radius.toFixed(1)} from centre` : '';
-                      return [`accel ${acc} · 3M ${pt?.r3m != null ? `${pt.r3m >= 0 ? '+' : ''}${pt.r3m.toFixed(1)}%` : '—'} · ${pt?.phase ?? '—'}${r}`, 'Model'];
+                      const imp = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)} pp/mo` : '—';
+                      const pace = pt?.trendPace != null ? `${pt.trendPace >= 0 ? '+' : ''}${pt.trendPace.toFixed(2)} %/mo` : '—';
+                      const r = pt?.radius != null ? ` · ${pt.radius.toFixed(2)} from centre` : '';
+                      return [`pace ${pace} · change ${imp} · ${pt?.phase ?? '—'}${r}`, 'Model'];
                     }}
                   />
                 </ComposedChart>
@@ -436,9 +438,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               )}
 
               <p className="text-[9px] text-gray-600 leading-snug">
-                The <b className="text-gray-500">purple line</b> is the asset&apos;s own acceleration in points per
-                month — above the dashed zero the move is speeding up, below it slowing down. Nothing here depends on
-                any other asset. The{' '}
+                The <b className="text-gray-500">purple line</b> is the CHANGE in the asset&apos;s 12-month pace over
+                the last month (pp/month) — above the dashed zero the trend is strengthening, below it weakening.
+                Nothing here depends on any other asset. The{' '}
                 <b className="text-gray-500">colour strip along the bottom</b> (and the matching tint behind) is the
                 quadrant that follows from it. Vertical dashed lines mark where the call CHANGED: read straight up to
                 the price to see what happened next. Every date is rebuilt with no look-ahead, one sample ≈{' '}

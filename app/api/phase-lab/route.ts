@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { fetchYahooChart } from '@/lib/yahoo';
-import { scoreRotation } from '@/lib/rotationModel';
 import { classifyPhase, ROTATION_PHASES } from '@/lib/rotationPhase';
 import { buildInputsAsOf, fmt, priceAsOf, type Hist, type BtMeta } from '@/lib/backtestCore';
 import { subYears, addMonths } from 'date-fns';
@@ -16,7 +15,7 @@ export const maxDuration = 25;
 // The labels claim a cycle: Recovering is the entry, Fading is the exit. That is a
 // testable claim, and until it is tested the four colours are decoration. This
 // endpoint walks history month by month, labels every asset with the SAME chain the
-// live app uses (buildInputsAsOf → scoreRotation → classifyPhase) using only data
+// live app uses (buildInputsAsOf → trendAxes → classifyPhase) using only data
 // available on that date, and then looks at what the price did over the following
 // 1, 3 and 6 months.
 //
@@ -100,9 +99,8 @@ export async function GET(req: Request) {
       // trailing bars is the minimum the inputs need.
       if (dateStr <= firstDate) { prevPhase = null; continue; }
 
-      const row = scoreRotation(buildInputsAsOf([meta], histMap, d))[0];
-      if (!row || row.score <= -1 || row.item.r3m == null) { prevPhase = null; continue; }
-      const phase = classifyPhase(row.accel, row.item.r3m);
+      const input = buildInputsAsOf([meta], histMap, d)[0];
+      const phase = input ? classifyPhase(input.trendPace, input.trendImpulse) : null;
       if (!phase) { prevPhase = null; continue; }
 
       if (prevPhase) stats.transitions[prevPhase][phase] += 1;

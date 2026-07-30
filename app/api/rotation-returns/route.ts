@@ -5,6 +5,7 @@ import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from 
 import { realizedMonthlyVol, upsideVolEdge, trendQualityR2, rsiWilder, macdHistogram } from '@/lib/rotationModel';
 import { computeWeeklyADX } from '@/lib/adx';
 import { dalioVolumeRatios, rangeExpansion, medianClose, moneyFlow20, ret5Trading, downVolDryUp } from '@/lib/dalioModel';
+import { trendAxes, AXES_LOOKBACK_DAYS } from '@/lib/rotationPhase';
 
 export const runtime = 'edge';
 
@@ -39,6 +40,9 @@ interface RollingReturn {
   r5: number | null;       // 5 trading-day return % (M31 v5 acceleration overlay)
   moneyFlow: number | null;// net buying pressure −1..1 (M31 v5 quiet-accumulation sleeve)
   downVolDry: number | null;// down-day volume dry-up 0..1 (M31 v8 recovery precision)
+  // ── Rotation-quadrant coordinates (lib/rotationPhase.ts) ──
+  trendPace: number | null;    // X: smoothed 12-month monthly pace, %/month
+  trendImpulse: number | null; // Y: change in that pace over the last month, pp/month
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -65,8 +69,13 @@ function rolling(history: { date: string; close: number }[], daysAgo: number): n
   return (current / past - 1) * 100;
 }
 
+// How much history every row needs. The 200-day MA and the 252-day CYC R² want
+// ~325 trading days; the quadrant axes reach a calendar year further back than the
+// oldest pace sample (AXES_LOOKBACK_DAYS), and one day short of that they return
+// null and every asset loses its phase. Take the larger, with a holiday margin.
+const FETCH_DAYS = Math.max(470, AXES_LOOKBACK_DAYS + 60);
+
 // 200-day simple moving average: average of the last 200 daily closes.
-// 470-day fetch ≈ 325 trading days — enough for this MA and the 252-day CYC R².
 function ma200d(history: { date: string; close: number }[]): number | null {
   if (history.length < 200) return null;
   const last200 = history.slice(-200);
@@ -117,6 +126,7 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
   const dalio = dalioVolumeRatios(history.map(p => p.volume));
   const r = range52w(history);
   const adxState = computeWeeklyADX(history); // live weekly ADX (M26 Gemini model)
+  const axes = trendAxes(history);            // quadrant X/Y as of the last bar
   return {
     symbol,
     r1m: rolling(history, 30),
@@ -147,6 +157,8 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     r5: ret5Trading(history.map(p => p.close)),
     moneyFlow: moneyFlow20(history.map(p => p.close), history.map(p => p.volume)),
     downVolDry: downVolDryUp(history.map(p => p.close), history.map(p => p.volume)),
+    trendPace: axes?.trendPace ?? null,
+    trendImpulse: axes?.trendImpulse ?? null,
   };
 }
 
@@ -162,7 +174,7 @@ export async function GET(req: Request) {
     if (cachedExtra && Date.now() - cachedExtra.ts < TTL) {
       return NextResponse.json(cachedExtra.data);
     }
-    const from = subDays(new Date(), 470);
+    const from = subDays(new Date(), FETCH_DAYS);
     const to = new Date();
     const results = await Promise.allSettled(
       syms.map(sym => fetchYahooChart(sym, from, to, '1d').catch(() => []))
@@ -187,7 +199,7 @@ export async function GET(req: Request) {
     ...SECTORS.map(s => s.symbol),
   ];
 
-  const from = subDays(new Date(), 470);
+  const from = subDays(new Date(), FETCH_DAYS);
   const to = new Date();
 
   const results = await Promise.allSettled(

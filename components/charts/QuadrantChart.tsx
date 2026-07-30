@@ -17,17 +17,17 @@ import {
 
 // Rotation Quadrant chart.
 //
-// Every asset is plotted as a dot:
-//   X = 3-month return (%) — shows where the asset has been
-//   Y = model SCORE (0–100 percentile) — the full rotation formula's verdict NOW.
-//       Same number selectPicks ranks on, so the quadrant moves with every formula
-//       change exactly as the Accelerating list and the backtest do.
+// Every asset is plotted as a dot (see lib/rotationPhase.ts for the definition and
+// the evidence behind it):
+//   X = TREND   — monthly pace of the trailing 12-month move (%/month), smoothed
+//   Y = IMPULSE — how much that pace changed over the last month (pp/month)
 //
-// Quadrant split at X=0 (zero 3M return) and Y=50 (median acceleration):
-//   Top-right   → Trending:   strong 3M + accelerating (confirmed uptrend)
-//   Top-left    → Recovering: weak 3M but accelerating (early rotation — the target)
-//   Bottom-right→ Fading:     strong 3M but slowing (watch for exit)
-//   Bottom-left → Lagging:    weak + decelerating (avoid)
+// Y is the derivative of X, so a dot can only travel clockwise, and both splits sit
+// at zero:
+//   Top-right   → Trending:   rising and still gaining pace
+//   Top-left    → Recovering: still down over 12M but the pace is improving — entry
+//   Bottom-right→ Fading:     still up over 12M but losing pace — exit
+//   Bottom-left → Lagging:    falling and still losing pace — wait
 //
 // Accelerating names (top-8 by score) and any clicked rows are drawn bigger and
 // labelled. Labels are placed by a dedicated layer that spaces them apart and
@@ -45,11 +45,15 @@ export interface QuadrantAsset {
   symbol: string;
   name: string;
   group: string;
-  r3m: number;       // x-axis: 3M return %, absolute
-  /** y-axis: acceleration in points/month (computeAccel). Absolute and centred on
-   *  zero, so distance from the centre is the SIZE of the move — an index orbits
-   *  small, a high-beta name orbits wide, and both cross all four quadrants. */
-  accel?: number | null;
+  /** x-axis: smoothed 12-month monthly pace, %/month. */
+  trendPace: number;
+  /** y-axis: change in that pace over the last month, pp/month. Both axes are the
+   *  asset's own absolute numbers and centred on zero, so distance from the centre
+   *  is the SIZE of the swing — an index orbits small, a high-beta name wide — and
+   *  every asset crosses all four quadrants. */
+  trendImpulse: number;
+  /** 3M return %, tooltip only — not a coordinate any more. */
+  r3m: number | null;
   /** @deprecated the old percentile Y. Only saved snapshots still carry it. */
   accScore?: number;
   r1m: number | null;
@@ -58,13 +62,12 @@ export interface QuadrantAsset {
   isSelected: boolean;
 }
 
-// Internal: r3m clamped to the visible domain (so a single outlier can't squash
-// the rest against one edge), while r3m keeps the true value for the tooltip.
+// Internal: the coordinates clamped to the visible domain (so a single outlier
+// can't squash the rest against one edge), while the raw values stay for the
+// tooltip.
 interface PlotAsset extends QuadrantAsset {
-  r3mPlot: number;
-  /** accel clamped into the visible domain, so one runaway asset cannot squash
-   *  everyone else onto the centre line. */
-  accelPlot: number;
+  xPlot: number;
+  yPlot: number;
   /** True when a search is active and this asset is not one of the traced ones. */
   dimmed?: boolean;
 }
@@ -111,17 +114,22 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
   const p = payload[0].payload;
   const color = GROUP_COLORS[p.group] ?? '#6b7280';
   // Where the dot actually is, not just which box it fell in.
-  const pos = quadrantPosition(p.accel ?? null, p.r3m);
+  const pos = quadrantPosition(p.trendPace, p.trendImpulse);
   return (
     <div className="rounded-lg border border-white/10 bg-[#1e293b] px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
       <p className="font-semibold" style={{ color }}>{p.name}</p>
       <p className="text-gray-400">{p.group}</p>
-      <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>
+      {p.r3m != null && <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>}
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">Acceleration:{' '}
-        <span className={(p.accel ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}>
-          {(p.accel ?? 0) >= 0 ? '+' : ''}{(p.accel ?? 0).toFixed(1)} pp/month
+      <p className="text-gray-300">12M pace:{' '}
+        <span className={p.trendPace >= 0 ? 'text-green-400' : 'text-red-400'}>
+          {p.trendPace >= 0 ? '+' : ''}{p.trendPace.toFixed(2)} %/month
+        </span>
+      </p>
+      <p className="text-gray-300">Change in pace:{' '}
+        <span className={p.trendImpulse >= 0 ? 'text-green-400' : 'text-red-400'}>
+          {p.trendImpulse >= 0 ? '+' : ''}{p.trendImpulse.toFixed(2)} pp/month
         </span>
       </p>
       {pos && (
@@ -152,8 +160,8 @@ export interface QuadrantTrail {
   symbol: string;
   name: string;
   group: string;
-  /** accel: the same points/month coordinate the live dots use. */
-  points: { date: string; r3m: number; accel: number }[];
+  /** The same two coordinates the live dots use, as of each past date. */
+  points: { date: string; trendPace: number; trendImpulse: number }[];
 }
 
 // Trail layer: draws each traced asset's journey as a fading tail, oldest segment
@@ -173,8 +181,8 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, clampEdgeY: 
     for (const t of trails) {
       const color = GROUP_COLORS[t.group] ?? '#6b7280';
       const pts = t.points.map(p => ({
-        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.r3m))),
-        y: yScale(Math.max(-clampEdgeY, Math.min(clampEdgeY, p.accel))),
+        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.trendPace))),
+        y: yScale(Math.max(-clampEdgeY, Math.min(clampEdgeY, p.trendImpulse))),
         date: p.date,
       }));
       // The path must END on the live dot. The trail's own "today" step is
@@ -185,7 +193,7 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, clampEdgeY: 
       const dot = live.get(t.symbol);
       if (dot) {
         pts.pop();
-        pts.push({ x: xScale(dot.r3mPlot), y: yScale(dot.accelPlot), date: '' });
+        pts.push({ x: xScale(dot.xPlot), y: yScale(dot.yPlot), date: '' });
       }
       if (pts.length < 2) continue;
 
@@ -297,7 +305,7 @@ function makeLabelLayer(labeled: PlotAsset[]) {
     // Selected first, then by vertical position so nudging is stable.
     const order = [...labeled].sort((a, b) => {
       if (a.isSelected !== b.isSelected) return a.isSelected ? -1 : 1;
-      return yScale(b.accelPlot) - yScale(a.accelPlot);
+      return yScale(b.yPlot) - yScale(a.yPlot);
     });
 
     const placed: Box[] = [];
@@ -305,8 +313,8 @@ function makeLabelLayer(labeled: PlotAsset[]) {
 
     for (const a of order) {
       const color = GROUP_COLORS[a.group] ?? '#6b7280';
-      const cx = xScale(a.r3mPlot);
-      const cy = yScale(a.accelPlot);
+      const cx = xScale(a.xPlot);
+      const cy = yScale(a.yPlot);
       const r = a.isSelected ? 7 : 5;
       const text = shortName(a.name);
       const w = text.length * CHAR + 4;
@@ -413,8 +421,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
     if (assets.length === 0) {
       return {
         plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[],
-        xDomain: [-20, 20] as [number, number], yDomain: [-6, 6] as [number, number],
-        clampEdge: 19.7, clampEdgeY: 5.9,
+        xDomain: [-4, 4] as [number, number], yDomain: [-2, 2] as [number, number],
+        clampEdge: 3.94, clampEdgeY: 1.97,
       };
     }
     // Half-range for one axis: the 90th percentile of |value| padded out, but never
@@ -426,13 +434,15 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       const trailMax = trailVals.length ? Math.max(...trailVals.map(Math.abs)) : 0;
       return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
     };
+    // Floors are in %/month now, not cumulative %: a 3 %/month pace is a 43% year,
+    // so the box only has to be a few points wide before it holds the whole market.
     const M = halfRange(
-      assets.map(a => a.r3m), 15, 6,
-      trails?.flatMap(t => t.points.map(p => p.r3m)) ?? [],
+      assets.map(a => a.trendPace), 3, 1,
+      trails?.flatMap(t => t.points.map(p => p.trendPace)) ?? [],
     );
     const MY = halfRange(
-      assets.map(a => a.accel ?? 0), 3, 1.5,
-      trails?.flatMap(t => t.points.map(p => p.accel)) ?? [],
+      assets.map(a => a.trendImpulse), 1.2, 0.5,
+      trails?.flatMap(t => t.points.map(p => p.trendImpulse)) ?? [],
     );
     const clampEdge = M * 0.985;
     const clampEdgeY = MY * 0.985;
@@ -445,8 +455,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
 
     const plot: PlotAsset[] = assets.map(a => ({
       ...a,
-      r3mPlot: Math.max(-clampEdge, Math.min(clampEdge, a.r3m)),
-      accelPlot: Math.max(-clampEdgeY, Math.min(clampEdgeY, a.accel ?? 0)),
+      xPlot: Math.max(-clampEdge, Math.min(clampEdge, a.trendPace)),
+      yPlot: Math.max(-clampEdgeY, Math.min(clampEdgeY, a.trendImpulse)),
       dimmed: focusing && !focus.has(a.symbol),
     }));
     const normal = plot.filter(a => !a.isAccel);
@@ -527,26 +537,26 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
 
           <CartesianGrid stroke="#1e293b" strokeDasharray="0" />
           <XAxis
-            dataKey="r3mPlot"
+            dataKey="xPlot"
             type="number"
-            name="3M Return"
+            name="12M pace"
             domain={[xMin, xMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`}
-            label={{ value: '3M Return', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
+            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}%`}
+            label={{ value: '12M pace (%/month)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
-            dataKey="accelPlot"
+            dataKey="yPlot"
             type="number"
-            name="Acceleration"
+            name="Change in pace"
             domain={[yMin, yMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}`}
-            label={{ value: 'Acceleration (pp/month)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
+            label={{ value: 'Change in pace (pp/month)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
             width={36}
           />
 

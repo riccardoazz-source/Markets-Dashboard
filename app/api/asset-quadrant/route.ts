@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { fetchYahooChart } from '@/lib/yahoo';
-import { scoreRotation } from '@/lib/rotationModel';
-import { quadrantPosition } from '@/lib/rotationPhase';
+import { quadrantPosition, AXES_LOOKBACK_DAYS } from '@/lib/rotationPhase';
 import { buildInputsAsOf, fmt, priceAsOf, type Hist, type BtMeta } from '@/lib/backtestCore';
 import { subDays, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 
@@ -12,9 +11,9 @@ export const maxDuration = 25;
 
 // One asset's PRICE alongside the quadrant position the model assigned it through
 // time — the evidence for "when the model said Recovering, what did the price do
-// next?". The score comes from the SAME pipeline as the live quadrant
-// (buildInputsAsOf → scoreRotation → classifyPhase), so changing the formula
-// changes this view too; nothing is duplicated here.
+// next?". The coordinates come from the SAME pipeline as the live quadrant
+// (buildInputsAsOf → trendAxes → classifyPhase), so changing the definition changes
+// this view too; nothing is duplicated here.
 
 const BASE_UNIVERSE: BtMeta[] = [
   ...INDEXES.map(i => ({ symbol: i.symbol, name: i.name, group: 'Indexes' })),
@@ -34,7 +33,7 @@ const histCache = new Map<string, { hist: Hist; fromMs: number; ts: number }>();
 // 2) One evaluated point per (symbol, date), so re-covering the same weeks under a
 //    different timeframe costs nothing the second time.
 const pointCache = new Map<string, {
-  pt: { date: string; accel: number; r3m: number; phase: string | null; close: number | null; radius: number; angle: number };
+  pt: { date: string; trendPace: number; trendImpulse: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number };
   ts: number;
 }>();
 
@@ -92,9 +91,12 @@ export async function GET(req: Request) {
   // fixed 400-bar tail, so a step costs the same on MAX as on 3M. The dates
   // themselves are built below, on a fixed weekly grid.
 
-  // Window + a year of lookback: the oldest step still needs its own trailing
-  // history to be scored.
-  const from = subDays(start, 400);
+  // Window + the axes' own lookback: the oldest step still needs its own trailing
+  // history to be placed.
+  // The window plus everything the axes reach back for: 12 months of pace, the
+  // smoothing window and the impulse lag on top (AXES_LOOKBACK_DAYS), and a margin
+  // for holidays. One day short and the oldest steps have no position at all.
+  const from = subDays(start, AXES_LOOKBACK_DAYS + 60);
   const fromMs = from.getTime();
   const symbols = universe.map(m => m.symbol);
 
@@ -125,23 +127,23 @@ export async function GET(req: Request) {
   const price = ownHist.filter(p => p.date >= startStr).map(p => ({ date: p.date, close: p.close }));
 
   type QPoint = {
-    date: string; accel: number; r3m: number; phase: string | null; close: number | null;
+    date: string; trendPace: number; trendImpulse: number; r3m: number | null;
+    phase: string | null; close: number | null;
     /** Where the dot actually sits: distance from the centre and angle round it. */
     radius: number; angle: number;
   };
 
-  // Same chain as everywhere else — buildInputsAsOf → scoreRotation → classifyPhase
-  // — just run on one asset, because acceleration is a property of that asset and
-  // does not change with who else is in the list.
+  // Same chain as everywhere else — buildInputsAsOf → trendAxes → classifyPhase —
+  // just run on one asset, because both coordinates are properties of that asset and
+  // do not change with who else is in the list.
   const evalAt = (d: Date): QPoint | null => {
     const dateStr = fmt(d);
     const cached = pointCache.get(`${symbol}|${dateStr}`);
     if (cached && Date.now() - cached.ts < TTL) return cached.pt;
 
-    const inputs = buildInputsAsOf(universe, histMap, d);
-    const row = scoreRotation(inputs)[0];
-    if (!row || row.score <= -1 || row.item.r3m == null) return null;
-    const pos = quadrantPosition(row.accel, row.item.r3m);
+    const input = buildInputsAsOf(universe, histMap, d)[0];
+    if (!input) return null;
+    const pos = quadrantPosition(input.trendPace, input.trendImpulse);
     if (!pos) return null;
     // Four decimals on the coordinates, not two. The phase is decided by their
     // SIGN, and a value like +0.0031 rounds to 0.00 — so at two decimals a reader
@@ -151,8 +153,9 @@ export async function GET(req: Request) {
     const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
     const pt: QPoint = {
       date: dateStr,
-      accel: r4(row.accel),
-      r3m: row.item.r3m,
+      trendPace: r4(pos.x),
+      trendImpulse: r4(pos.y),
+      r3m: input.r3m,
       phase: pos.phase,
       radius: r4(pos.radius),
       angle: Math.round(pos.angle * 100) / 100,
