@@ -216,7 +216,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     for (const p of dailyPoints) {
       m.set(p.date, {
         model_phase: p.phase,
-        model_x_pace_pct_mo: p.r3m == null ? null : Math.round((Math.pow(1 + p.r3m / 100, 1 / 3) - 1) * 10000) / 100,
+        // Four decimals: the sign of this column decides the phase, and two
+        // decimals can round a genuine +0.0031 down to 0.00.
+        model_x_pace_pct_mo: p.r3m == null ? null : Math.round((Math.pow(1 + p.r3m / 100, 1 / 3) - 1) * 1e6) / 1e4,
         model_y_accel_pp_mo: p.accel,
         model_radius_pct_mo: p.radius,
         model_angle_deg: p.angle,

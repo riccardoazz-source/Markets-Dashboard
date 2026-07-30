@@ -143,14 +143,19 @@ export async function GET(req: Request) {
     if (!row || row.score <= -1 || row.item.r3m == null) return null;
     const pos = quadrantPosition(row.accel, row.item.r3m);
     if (!pos) return null;
-    const r2 = (v: number) => Math.round(v * 100) / 100;
+    // Four decimals on the coordinates, not two. The phase is decided by their
+    // SIGN, and a value like +0.0031 rounds to 0.00 — so at two decimals a reader
+    // recomputing the phase from the exported columns gets the opposite answer,
+    // precisely on the rows where the asset is crossing an axis. Which is where the
+    // interesting transitions are.
+    const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
     const pt: QPoint = {
       date: dateStr,
-      accel: r2(row.accel),
+      accel: r4(row.accel),
       r3m: row.item.r3m,
       phase: pos.phase,
-      radius: r2(pos.radius),
-      angle: r2(pos.angle),
+      radius: r4(pos.radius),
+      angle: Math.round(pos.angle * 100) / 100,
       close: priceAsOf(ownHist, dateStr),
     };
     pointCache.set(`${symbol}|${dateStr}`, { pt, ts: Date.now() });
