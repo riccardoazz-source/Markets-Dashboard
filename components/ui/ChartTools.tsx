@@ -66,8 +66,11 @@ export const DEFAULT_TOOLS: ActiveTools = {
 export function needsFullHistory(t: ActiveTools): boolean {
   return t.sma20 || t.sma50 || t.sma200 || t.sma200w || t.ema20 || t.ema100 ||
     (t.trend && t.trendFull) ||
-    (t.rsi && (t.rsiWeekly || t.rsiMonthly)) ||
-    (t.macd && (t.macdWeekly || t.macdMonthly)) ||
+    // Every grain, not only weekly/monthly: RSI and MACD carry memory, so they have
+    // to be warmed up on all available history or the same date reads differently
+    // depending on the window selected.
+    t.rsi || t.macd ||
+    t.momentumDaily || t.momentumWeekly || t.momentumMonthly ||
     // All three cycle tools rest on a 200-bar average, so on a short window they
     // are only computable from the full history.
     t.stretchSigma || t.maSlope || t.drawdown;

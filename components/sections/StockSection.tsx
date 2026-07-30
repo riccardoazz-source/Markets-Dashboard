@@ -1039,9 +1039,11 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const { ref: fitRef, endRef, height: chartH, paneHeight } = useChartFit(paneCountOf(activeTools), { base: 260, minChart: 150 });
   const oscFullHist = useFullHistory(
     selected?.symbol,
-    !!((activeTools.rsi && rsiGrain) || (activeTools.macd && macdGrain)
-      // The cycle tools rest on a 200-bar average, so on a short window they are
-      // only computable from the full history.
+    // Every indicator with memory needs the full history, not only the weekly and
+    // monthly grains: warmed up from the left edge of a short window, RSI and MACD
+    // give a different answer for the same date.
+    !!(activeTools.rsi || activeTools.macd
+      || activeTools.momentumDaily || activeTools.momentumWeekly || activeTools.momentumMonthly
       || activeTools.stretchSigma || activeTools.maSlope || activeTools.drawdown),
   );
   const [dataMsg, setDataMsg] = useState<string | null>(null);
@@ -1267,8 +1269,14 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
         return { date: p.date, rsi: last };
       });
     }
-    const vals = computeRSI(prices.map(p => p.close).filter((c): c is number => isFinite(c)));
-    return prices.map((p, i) => ({ date: p.date, rsi: vals[i] ?? null }));
+    const full = oscFullHist && oscFullHist.length > prices.length ? oscFullHist : prices;
+    const fullDates = full.map(p => p.date);
+    const vals = computeRSI(full.map(p => p.close), 14);
+    let j = 0, last: number | null = null;
+    return prices.map(p => {
+      while (j < fullDates.length && fullDates[j] <= p.date) { if (vals[j] != null) last = vals[j]; j++; }
+      return { date: p.date, rsi: last };
+    });
   }, [activeTools.rsi, rsiGrain, prices, oscFullHist]);
 
   const macdSeries = useMemo(() => {
@@ -1287,9 +1295,18 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       const macd = onto(w.macd), signal = onto(w.signal), hist = onto(w.hist);
       return prices.map((p, i) => ({ date: p.date, macd: macd[i], signal: signal[i], hist: hist[i] }));
     }
-    const closes = prices.map(p => p.close).filter((c): c is number => isFinite(c));
-    const m = computeMACD(closes);
-    return prices.map((p, i) => ({ date: p.date, macd: m.macd[i] ?? null, signal: m.signal[i] ?? null, hist: m.hist[i] ?? null }));
+    const full = oscFullHist && oscFullHist.length > prices.length ? oscFullHist : prices;
+    const fullDates = full.map(p => p.date);
+    const m = computeMACD(full.map(p => p.close));
+    const onto = (vals: (number | null)[]) => {
+      let j = 0, last: number | null = null;
+      return prices.map(p => {
+        while (j < fullDates.length && fullDates[j] <= p.date) { if (vals[j] != null) last = vals[j]; j++; }
+        return last;
+      });
+    };
+    const macd = onto(m.macd), signal = onto(m.signal), hist = onto(m.hist);
+    return prices.map((p, i) => ({ date: p.date, macd: macd[i], signal: signal[i], hist: hist[i] }));
   }, [activeTools.macd, macdGrain, prices, oscFullHist]);
 
   // Momentum was reachable from the tools but drawn nowhere on this tab: the chips
@@ -1297,19 +1314,23 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   // as everywhere else, on periods scaled to this data's granularity.
   const momentumSeries = useMemo(() => {
     if (prices.length === 0) return null;
-    const closes = prices.map(p => p.close);
-    const avgDPB = avgCalendarDaysPerBar(prices.map(p => p.date));
-    const per = computeIndicatorPeriods(avgDPB);
+    const full = oscFullHist && oscFullHist.length > prices.length ? oscFullHist : prices;
+    const fullDates = full.map(p => p.date);
+    const per = computeIndicatorPeriods(avgCalendarDaysPerBar(fullDates));
     const build = (period: number) => {
-      const vals = computeMomentum(closes, period);
-      return prices.map((p, i) => ({ date: p.date, value: vals[i] ?? null }));
+      const vals = computeMomentum(full.map(p => p.close), period);
+      let j = 0, last: number | null = null;
+      return prices.map(p => {
+        while (j < fullDates.length && fullDates[j] <= p.date) { if (vals[j] != null) last = vals[j]; j++; }
+        return { date: p.date, value: last };
+      });
     };
     return {
       daily: activeTools.momentumDaily ? build(1) : null,
       weekly: activeTools.momentumWeekly ? build(per.momWeek.period) : null,
       monthly: activeTools.momentumMonthly ? build(per.momMonth.period) : null,
     };
-  }, [activeTools.momentumDaily, activeTools.momentumWeekly, activeTools.momentumMonthly, prices]);
+  }, [activeTools.momentumDaily, activeTools.momentumWeekly, activeTools.momentumMonthly, prices, oscFullHist]);
 
   // The stocks tab publishes its own CSV rows: it draws its own chart, so nothing
   // else would, and the export would hand over the last panel's numbers under this

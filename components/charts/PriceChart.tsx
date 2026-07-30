@@ -454,9 +454,14 @@ export function PriceChart({
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
   const rsiGrain = toolsOverlay?.rsiMonthly ? 'monthly' : toolsOverlay?.rsiWeekly ? 'weekly' : null;
   const macdGrain = toolsOverlay?.macdMonthly ? 'monthly' : toolsOverlay?.macdWeekly ? 'weekly' : null;
-  const wantsFullRsi = !!(toolsOverlay?.rsi && rsiGrain);
-  const wantsFullMacd = !!(toolsOverlay?.macd && macdGrain);
-  const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend || wantsFullRsi || wantsFullMacd);
+  // Every grain wants the full history, not just weekly/monthly: an indicator with
+  // memory must be warmed up on everything available and only then shown over the
+  // window, or its value depends on where the window happens to start.
+  const wantsFullRsi = !!toolsOverlay?.rsi;
+  const wantsFullMacd = !!toolsOverlay?.macd;
+  const wantsFullMomentum = !!(toolsOverlay?.momentumDaily || toolsOverlay?.momentumWeekly || toolsOverlay?.momentumMonthly);
+  const fullHist = useFullHistory(symbol,
+    wantsFullMA || wantsFullTrend || wantsFullRsi || wantsFullMacd || wantsFullMomentum);
 
   // vs SPY benchmark overlay — fetched here so the tool works in every section
   // that renders a PriceChart without each one wiring up its own SPY fetch.
@@ -638,7 +643,9 @@ export function PriceChart({
   const rsiVals = toolsOverlay?.rsi
     ? (rsiGrain
         ? (useFull ? projectToVisible(fullDates, computeRsiResampledDaily(fullDates, fullCloses, rsiGrain, 14), visDates) : null)
-        : (P.rsi.ok ? computeRSI(closes, P.rsi.period) : null))
+        : (useFull
+            ? projectToVisible(fullDates, computeRSI(fullCloses, PFull.rsi.period), visDates)
+            : (P.rsi.ok ? computeRSI(closes, P.rsi.period) : null)))
     : null;
   const rsiData = rsiVals ? data.map((d, i) => ({ date: d.date, rsi: rsiVals[i] })) : null;
 
@@ -653,7 +660,16 @@ export function PriceChart({
               hist:   projectToVisible(fullDates, w.hist, visDates),
             };
           })() : null)
-        : (P.macdSlow.ok ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period) : null))
+        : (useFull
+            ? (() => {
+                const m = computeMACD(fullCloses, PFull.macdFast.period, PFull.macdSlow.period, PFull.macdSig.period);
+                return {
+                  macd:   projectToVisible(fullDates, m.macd, visDates),
+                  signal: projectToVisible(fullDates, m.signal, visDates),
+                  hist:   projectToVisible(fullDates, m.hist, visDates),
+                };
+              })()
+            : (P.macdSlow.ok ? computeMACD(closes, P.macdFast.period, P.macdSlow.period, P.macdSig.period) : null)))
     : null;
   const macdData = macdResult
     ? data.map((d, i) => ({
@@ -665,9 +681,13 @@ export function PriceChart({
     : null;
 
   // Momentum sub-charts (periods scaled to data granularity)
-  const momDailyVals   = toolsOverlay?.momentumDaily   ? computeMomentum(closes, 1)                  : null;
-  const momWeeklyVals  = toolsOverlay?.momentumWeekly  ? computeMomentum(closes, P.momWeek.period)  : null;
-  const momMonthlyVals = toolsOverlay?.momentumMonthly ? computeMomentum(closes, P.momMonth.period) : null;
+  const momAt = (period: number, periodFull: number) =>
+    useFull
+      ? projectToVisible(fullDates, computeMomentum(fullCloses, periodFull), visDates)
+      : computeMomentum(closes, period);
+  const momDailyVals   = toolsOverlay?.momentumDaily   ? momAt(1, 1)                                      : null;
+  const momWeeklyVals  = toolsOverlay?.momentumWeekly  ? momAt(P.momWeek.period, PFull.momWeek.period)   : null;
+  const momMonthlyVals = toolsOverlay?.momentumMonthly ? momAt(P.momMonth.period, PFull.momMonth.period) : null;
   const momDailyData   = momDailyVals   ? data.map((d, i) => ({ date: d.date, value: momDailyVals[i]   })) : null;
   const momWeeklyData  = momWeeklyVals  ? data.map((d, i) => ({ date: d.date, value: momWeeklyVals[i]  })) : null;
   const momMonthlyData = momMonthlyVals ? data.map((d, i) => ({ date: d.date, value: momMonthlyVals[i] })) : null;
