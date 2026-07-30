@@ -49,6 +49,49 @@ export function classifyPhase(accel: number | null, r3m: number | null | undefin
   return right ? 'Fading' : 'Lagging';
 }
 
+/**
+ * The asset's position in the quadrant as a POINT, not just a name: which quadrant,
+ * how far from the centre, and at what angle.
+ *
+ * Distance from the centre is the size of the swing — a broad index orbits close in,
+ * a high-beta name orbits wide — and it is the part a phase label throws away. To
+ * measure it the two axes have to be in the same unit, so X is converted from a
+ * 3-month return to the monthly pace that produced it; Y is already points per
+ * month. The radius is then a real distance in %/month, and nothing is being added
+ * to something it cannot be added to.
+ *
+ * The angle turns CLOCKWISE through the cycle — Recovering 135°, Trending 45°,
+ * Fading 315°, Lagging 225° — so a falling angle is an asset going round the way the
+ * model says it should. That makes "does it actually rotate?" a number rather than
+ * an impression.
+ */
+export interface QuadrantPosition {
+  phase: RotationPhase | null;
+  /** X in %/month: the monthly pace implied by the 3-month return. */
+  x: number;
+  /** Y in pp/month: the acceleration. */
+  y: number;
+  /** Distance from the centre, %/month. */
+  radius: number;
+  /** 0° = due right, increasing anticlockwise; the cycle runs the other way. */
+  angle: number;
+}
+
+/** Monthly pace implied by a return over `months` — compounded, not divided. */
+function paceMonthly(r: number, months: number): number {
+  const g = 1 + r / 100;
+  if (g <= 0) return r / months;
+  return (Math.pow(g, 1 / months) - 1) * 100;
+}
+
+export function quadrantPosition(accel: number | null, r3m: number | null | undefined): QuadrantPosition | null {
+  if (accel == null || r3m == null) return null;
+  const x = paceMonthly(r3m, 3);
+  const y = accel;
+  const angle = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  return { phase: classifyPhase(accel, r3m), x, y, radius: Math.hypot(x, y), angle };
+}
+
 export const PHASE_META: Record<RotationPhase, { label: string; cls: string; dot: string; hint: string }> = {
   Recovering: {
     label: 'Recovering', dot: '#60a5fa',

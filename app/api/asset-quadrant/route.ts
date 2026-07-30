@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { scoreRotation } from '@/lib/rotationModel';
-import { classifyPhase } from '@/lib/rotationPhase';
+import { quadrantPosition } from '@/lib/rotationPhase';
 import { buildInputsAsOf, fmt, priceAsOf, type Hist, type BtMeta } from '@/lib/backtestCore';
 import { subDays, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 
@@ -33,7 +33,10 @@ const TTL = 30 * 60_000;
 const histCache = new Map<string, { hist: Hist; fromMs: number; ts: number }>();
 // 2) One evaluated point per (symbol, date), so re-covering the same weeks under a
 //    different timeframe costs nothing the second time.
-const pointCache = new Map<string, { pt: { date: string; accel: number; r3m: number; phase: string | null; close: number | null }; ts: number }>();
+const pointCache = new Map<string, {
+  pt: { date: string; accel: number; r3m: number; phase: string | null; close: number | null; radius: number; angle: number };
+  ts: number;
+}>();
 
 // Weekly grid anchored to a FIXED Monday rather than to the window start, so
 // every timeframe samples the SAME dates and they hit the rank cache. Without
@@ -121,7 +124,11 @@ export async function GET(req: Request) {
   const startStr = fmt(start);
   const price = ownHist.filter(p => p.date >= startStr).map(p => ({ date: p.date, close: p.close }));
 
-  type QPoint = { date: string; accel: number; r3m: number; phase: string | null; close: number | null };
+  type QPoint = {
+    date: string; accel: number; r3m: number; phase: string | null; close: number | null;
+    /** Where the dot actually sits: distance from the centre and angle round it. */
+    radius: number; angle: number;
+  };
 
   // Same chain as everywhere else — buildInputsAsOf → scoreRotation → classifyPhase
   // — just run on one asset, because acceleration is a property of that asset and
@@ -134,11 +141,16 @@ export async function GET(req: Request) {
     const inputs = buildInputsAsOf(universe, histMap, d);
     const row = scoreRotation(inputs)[0];
     if (!row || row.score <= -1 || row.item.r3m == null) return null;
+    const pos = quadrantPosition(row.accel, row.item.r3m);
+    if (!pos) return null;
+    const r2 = (v: number) => Math.round(v * 100) / 100;
     const pt: QPoint = {
       date: dateStr,
-      accel: Math.round(row.accel * 100) / 100,
+      accel: r2(row.accel),
       r3m: row.item.r3m,
-      phase: classifyPhase(row.accel, row.item.r3m),
+      phase: pos.phase,
+      radius: r2(pos.radius),
+      angle: r2(pos.angle),
       close: priceAsOf(ownHist, dateStr),
     };
     pointCache.set(`${symbol}|${dateStr}`, { pt, ts: Date.now() });

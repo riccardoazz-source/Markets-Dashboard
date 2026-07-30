@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { quadrantPosition } from '@/lib/rotationPhase';
 import {
   ResponsiveContainer,
   ScatterChart,
@@ -109,6 +110,8 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
   if (!active || !payload?.length) return null;
   const p = payload[0].payload;
   const color = GROUP_COLORS[p.group] ?? '#6b7280';
+  // Where the dot actually is, not just which box it fell in.
+  const pos = quadrantPosition(p.accel ?? null, p.r3m);
   return (
     <div className="rounded-lg border border-white/10 bg-[#1e293b] px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
       <p className="font-semibold" style={{ color }}>{p.name}</p>
@@ -121,6 +124,11 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
           {(p.accel ?? 0) >= 0 ? '+' : ''}{(p.accel ?? 0).toFixed(1)} pp/month
         </span>
       </p>
+      {pos && (
+        <p className="text-gray-500">
+          {pos.radius.toFixed(1)} %/mo from the centre · {pos.angle.toFixed(0)}°
+        </p>
+      )}
       {p.isAccel && <p className="text-green-400 font-semibold">🌱 Accelerating</p>}
     </div>
   );

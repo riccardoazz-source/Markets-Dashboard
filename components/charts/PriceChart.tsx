@@ -92,6 +92,14 @@ interface Props {
    * without scrolling, and what you cannot see you cannot compare.
    */
   subChartHeight?: number;
+  /**
+   * Extra CSV columns, keyed by date, merged into the rows this chart publishes.
+   * The Quadrant view uses it to put the model's own output — phase, coordinates,
+   * distance from the centre — beside the price and the indicators. Without them a
+   * file shows what the market did and says nothing about what the model called,
+   * which is the one comparison the model work needs.
+   */
+  exportExtra?: Map<string, ExportRow>;
 }
 
 function formatDate(dateStr: string, data: HistoricalPoint[]) {
@@ -445,7 +453,7 @@ export function PriceChart({
   data, symbol, color = '#6366f1', showAverage = false, averageValue,
   height = 220, isCurrency = false, interpolationType = 'monotone',
   enableDragSelect = true, toolsOverlay, totalReturnData, onSetRange, syncId,
-  highlightBands, subChartHeight = 80,
+  highlightBands, subChartHeight = 80, exportExtra,
 }: Props) {
   const { handlers, range, area, clear } = useChartDragSelect();
   // Identity for the CSV slot, so this chart can only ever clear its own entry.
@@ -781,6 +789,8 @@ export function PriceChart({
       if (momDailyVals)   row.momentum_daily   = momDailyVals[i];
       if (momWeeklyVals)  row.momentum_weekly  = momWeeklyVals[i];
       if (momMonthlyVals) row.momentum_monthly = momMonthlyVals[i];
+      const extra = exportExtra?.get(d.date);
+      if (extra) Object.assign(row, extra);
       return row;
     });
     publishChartRows(symbol ?? 'chart', rows, exportToken);

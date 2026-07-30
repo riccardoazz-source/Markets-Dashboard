@@ -15,10 +15,11 @@ import { join } from 'node:path';
 
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
-  'tsc', 'lib/indicators.ts', '--outDir', out,
+  'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 const I = await import(join(out, 'indicators.js'));
+const Q = await import(join(out, 'rotationPhase.js'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, note = '') => {
@@ -132,6 +133,30 @@ const d400 = Array.from({length: 400}, (_, i) => new Date(Date.UTC(2020,0,1+i)).
 const peaked = Array.from({length: 400}, (_, i) => (i <= 299 ? 100 + i : 399 - (i - 299)));
 const msh = I.computeMonthsSinceHigh(d400, peaked, 252);
 ok('months since the high ≈ elapsed months', near(msh[399], (400 - 300) / 30.44, 0.05), `${msh[399].toFixed(2)}`);
+
+console.log('\nQuadrant position — the point, not just the name');
+// The four quadrants, by construction.
+ok('up and accelerating is Trending',   Q.quadrantPosition(2, 10).phase === 'Trending');
+ok('down but accelerating is Recovering', Q.quadrantPosition(2, -10).phase === 'Recovering');
+ok('up but decelerating is Fading',     Q.quadrantPosition(-2, 10).phase === 'Fading');
+ok('down and decelerating is Lagging',  Q.quadrantPosition(-2, -10).phase === 'Lagging');
+// X is the monthly pace, not the 3-month number: +33.1% over 3 months is +10%/month.
+ok('X is the compounded monthly pace', near(Q.quadrantPosition(0, 33.1).x, 10, 0.01),
+   `${Q.quadrantPosition(0, 33.1).x.toFixed(3)}%/mo`);
+// Radius is a real distance in one unit, so a 3-4-5 triangle comes out at 5.
+ok('radius is hypot(x, y) in %/month', near(Q.quadrantPosition(4, 33.1).radius, Math.hypot(10, 4), 0.01),
+   `${Q.quadrantPosition(4, 33.1).radius.toFixed(3)}`);
+// Amplitude survives: the same phase, ten times the swing, ten times the radius.
+const small = Q.quadrantPosition(0.4, 3.3), big = Q.quadrantPosition(4, 36.5);
+ok('a bigger swing sits further out', big.radius > small.radius * 5,
+   `${small.radius.toFixed(2)} vs ${big.radius.toFixed(2)} %/mo`);
+// The cycle runs clockwise, so its angles fall in that order.
+const ang = p => Q.quadrantPosition(p[0], p[1]).angle;
+ok('Recovering ~135°', near(ang([10, -25.7]), 135, 3), `${ang([10, -25.7]).toFixed(1)}°`);
+ok('Trending ~45°',    near(ang([10,  33.1]), 45, 3),  `${ang([10, 33.1]).toFixed(1)}°`);
+ok('Fading ~315°',     near(ang([-10, 33.1]), 315, 3), `${ang([-10, 33.1]).toFixed(1)}°`);
+ok('Lagging ~225°',    near(ang([-10, -25.7]), 225, 3), `${ang([-10, -25.7]).toFixed(1)}°`);
+ok('null when either coordinate is unknown', Q.quadrantPosition(null, 5) === null && Q.quadrantPosition(1, null) === null);
 
 rmSync(out, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed\n`);

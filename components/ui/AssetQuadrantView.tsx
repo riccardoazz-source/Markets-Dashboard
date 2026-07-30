@@ -20,9 +20,9 @@ import { PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 // price actually did next. The scores come from /api/asset-quadrant, which runs
 // the SAME pipeline as the live Rotation Quadrant; the formula lives in one place.
 
-interface QPoint { date: string; accel: number; r3m: number; phase: string | null; close: number | null }
+interface QPoint { date: string; accel: number; r3m: number; phase: string | null; close: number | null; radius: number; angle: number }
 /** A weekly sample carried forward onto every daily bar. */
-interface DPoint { date: string; accel: number | null; r3m: number | null; phase: string | null; close: number | null }
+interface DPoint { date: string; accel: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null }
 interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number; coarse?: boolean }
 
 const phaseColor = (p: string | null | undefined): string =>
@@ -148,6 +148,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         accel: cur?.accel ?? null,
         r3m: cur?.r3m ?? null,
         phase: cur?.phase ?? null,
+        radius: cur?.radius ?? null,
+        angle: cur?.angle ?? null,
         close: bar.close,
       };
     });
@@ -206,6 +208,24 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     if (next.has(p)) next.delete(p); else next.add(p);
     return next;
   });
+  // What the model said, date by date, as CSV columns beside the price and the
+  // tools. A file that shows only what the market did cannot answer "was the call
+  // right?", which is the whole reason for exporting from this panel.
+  const exportExtra = useMemo(() => {
+    const m = new Map<string, Record<string, string | number | null>>();
+    for (const p of dailyPoints) {
+      m.set(p.date, {
+        model_phase: p.phase,
+        model_x_pace_pct_mo: p.r3m == null ? null : Math.round((Math.pow(1 + p.r3m / 100, 1 / 3) - 1) * 10000) / 100,
+        model_y_accel_pp_mo: p.accel,
+        model_radius_pct_mo: p.radius,
+        model_angle_deg: p.angle,
+        model_r3m_pct: p.r3m,
+      });
+    }
+    return m;
+  }, [dailyPoints]);
+
   const priceBands = useMemo(() => (
     focusPhases.size === 0 ? undefined
       : runs.filter(r => r.phase && focusPhases.has(r.phase))
@@ -331,6 +351,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               toolsOverlay={activeTools}
               syncId={SYNC_ID}
               highlightBands={priceBands}
+              exportExtra={exportExtra}
               onSetRange={(from, to) => setCustomRange({ from, to })}
             />
 
@@ -404,7 +425,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                     formatter={(v: number, _n: string, p: { payload?: DPoint }) => {
                       const pt = p?.payload;
                       const acc = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(1)} pp/mo` : '—';
-                      return [`accel ${acc} · 3M ${pt?.r3m != null ? `${pt.r3m >= 0 ? '+' : ''}${pt.r3m.toFixed(1)}%` : '—'} · ${pt?.phase ?? '—'}`, 'Model'];
+                      const r = pt?.radius != null ? ` · ${pt.radius.toFixed(1)} from centre` : '';
+                      return [`accel ${acc} · 3M ${pt?.r3m != null ? `${pt.r3m >= 0 ? '+' : ''}${pt.r3m.toFixed(1)}%` : '—'} · ${pt?.phase ?? '—'}${r}`, 'Model'];
                     }}
                   />
                 </ComposedChart>
