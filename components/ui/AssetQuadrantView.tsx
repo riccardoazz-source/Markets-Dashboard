@@ -5,7 +5,7 @@ import { PanelClose } from '@/components/ui/PanelClose';
 import clsx from 'clsx';
 import {
   ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis,
-  CartesianGrid, Tooltip, ReferenceLine, ReferenceArea,
+  CartesianGrid, Tooltip, ReferenceLine, ReferenceArea, Customized,
 } from 'recharts';
 import { DetailModal } from './DetailModal';
 import { TimeframeSelector } from './TimeframeSelector';
@@ -24,6 +24,68 @@ interface QPoint { date: string; trendGap: number; momentum: number; r3m: number
 /** A weekly sample carried forward onto every daily bar. */
 interface DPoint { date: string; trendGap: number | null; momentum: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null }
 interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number; coarse?: boolean }
+
+// Recharts hands a Customized layer the live pixel scales; only the parts used here.
+interface AxisLike { scale?: (v: string) => number }
+interface LayerProps {
+  xAxisMap?: Record<string, AxisLike>;
+  offset?: { top: number; left: number; width: number; height: number };
+}
+
+const fmtRet = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+
+/**
+ * What the price did during each call, written above its band.
+ *
+ * Drawn in a Customized layer rather than as ReferenceArea labels because it needs
+ * the real pixel width of each band: a two-day call is a sliver, and a number
+ * printed on it would overlap its neighbours and make the strip unreadable. Bands
+ * narrower than the text simply go unlabelled — the figure is still in the tooltip
+ * and in the CSV, so nothing is lost, and the chart stays legible.
+ */
+function makeRunLabelLayer(runs: Run[], lit: (p: string | null | undefined) => boolean) {
+  return function RunLabelLayer(props: LayerProps) {
+    const { xAxisMap, offset } = props;
+    const xScale = Object.values(xAxisMap ?? {})[0]?.scale;
+    // Below ~44px the pane is a colour strip with no room for text.
+    if (!xScale || !offset || offset.height < 44) return null;
+    const nodes: React.ReactNode[] = [];
+    for (const r of runs) {
+      if (!r.phase || r.ret == null) continue;
+      const x1 = xScale(r.from), x2 = xScale(r.to);
+      if (x1 == null || x2 == null || !isFinite(x1) || !isFinite(x2)) continue;
+      const w = Math.abs(x2 - x1);
+      const text = fmtRet(r.ret);
+      if (w < text.length * 5.2 + 6) continue;
+      nodes.push(
+        <text
+          key={`runlab-${r.from}`}
+          x={(x1 + x2) / 2}
+          y={offset.top + 9}
+          textAnchor="middle"
+          fontSize={9}
+          fontWeight={600}
+          fill={phaseColor(r.phase)}
+          opacity={lit(r.phase) ? 0.95 : 0.2}
+        >
+          {text}
+        </text>,
+      );
+    }
+    return <g>{nodes}</g>;
+  };
+}
+
+/** One stretch of chart where the model held the same call, and what the price did. */
+interface Run {
+  from: string;
+  to: string;
+  phase: string | null;
+  /** Price change over the run, %. Null when either end has no close. */
+  ret: number | null;
+  /** Calendar days the call was in force. */
+  days: number;
+}
 
 const phaseColor = (p: string | null | undefined): string =>
   p && PHASE_META[p as RotationPhase] ? PHASE_META[p as RotationPhase].dot : '#6b7280';
@@ -166,11 +228,11 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   // Recharts silently drops a reference area whose edge it cannot place — which is
   // why some stretches came out uncoloured.
   const runs = useMemo(() => {
-    const out: { from: string; to: string; phase: string | null }[] = [];
+    const out: Run[] = [];
     for (const p of dailyPoints) {
       const last = out[out.length - 1];
       if (last && last.phase === p.phase) last.to = p.date;
-      else out.push({ from: p.date, to: p.date, phase: p.phase });
+      else out.push({ from: p.date, to: p.date, phase: p.phase, ret: null, days: 0 });
     }
     // A phase holds until the next one starts, so each run ends where the next
     // begins — otherwise a one-bar phase is a zero-width band that draws nothing.
@@ -178,6 +240,16 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     const last = out[out.length - 1];
     if (last && last.from === last.to && dailyPoints.length >= 2) {
       last.from = dailyPoints[dailyPoints.length - 2].date;
+    }
+    // What the PRICE did while each call was showing. Measured from the first close
+    // of the run to the close on the day the next call starts, so the handover day
+    // belongs to the call that was in force up to it and no move is counted twice
+    // or dropped between two runs.
+    const closeAt = new Map(dailyPoints.map(p => [p.date, p.close]));
+    for (const r of out) {
+      const a = closeAt.get(r.from), b = closeAt.get(r.to);
+      r.ret = a != null && b != null && a > 0 ? (b / a - 1) * 100 : null;
+      r.days = Math.max(1, Math.round((Date.parse(r.to) - Date.parse(r.from)) / 86_400_000));
     }
     return out;
   }, [dailyPoints]);
@@ -193,12 +265,26 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
   // Time spent, measured in DAYS on the chart rather than in samples, so it says
   // what the strip shows. Days with no call are left out of the denominator.
+  //
+  // Alongside it, what the price did on AVERAGE while that call was showing, over
+  // this window only — the number that says whether the label was worth anything
+  // here. A phase the window never contains simply has no chip: with a 1-year view
+  // of a rising asset there may be no Lagging at all, and inventing a 0% for it
+  // would read as "flat" instead of "never happened".
   const summary = useMemo(() => {
     const counts = new Map<string, number>();
     let total = 0;
     for (const p of dailyPoints) if (p.phase) { counts.set(p.phase, (counts.get(p.phase) ?? 0) + 1); total++; }
-    return { rows: [...counts.entries()].sort((a, b) => b[1] - a[1]), total };
-  }, [dailyPoints]);
+    const stats = new Map<string, { avg: number | null; runs: number }>();
+    for (const ph of counts.keys()) {
+      const rs = runs.filter(r => r.phase === ph && r.ret != null);
+      stats.set(ph, {
+        avg: rs.length ? rs.reduce((s, r) => s + (r.ret as number), 0) / rs.length : null,
+        runs: rs.length,
+      });
+    }
+    return { rows: [...counts.entries()].sort((a, b) => b[1] - a[1]), total, stats };
+  }, [dailyPoints, runs]);
 
   // Clicking a phase in "time spent" isolates it: everything else fades on the
   // strip and the matching stretches light up on the PRICE chart above, which is
@@ -226,8 +312,39 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         model_r3m_pct: p.r3m,
       });
     }
+    // The same run figures the strip is labelled with, carried on every date of the
+    // run: a spreadsheet can then pivot on run_id to get one row per call, without
+    // the file having to hold two tables of different lengths.
+    const r2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
+    runs.forEach((r, i) => {
+      if (!r.phase) return;
+      const avg = summary.stats.get(r.phase)?.avg ?? null;
+      for (const p of dailyPoints) {
+        if (p.date < r.from || p.date > r.to) continue;
+        const row = m.get(p.date);
+        if (!row) continue;
+        row.model_run_id = i + 1;
+        row.model_run_start = r.from;
+        row.model_run_days = r.days;
+        row.model_run_return_pct = r2(r.ret);
+        row.model_phase_avg_return_pct = r2(avg);
+      }
+    });
     return m;
-  }, [dailyPoints]);
+  }, [dailyPoints, runs, summary]);
+
+  // The same figure the band is labelled with, reachable by date — a narrow band
+  // carries no label, and the tooltip is where it can still be read.
+  const runRetAt = useMemo(() => {
+    const m = new Map<string, { ret: number | null; days: number; phase: string | null }>();
+    for (const r of runs) {
+      for (const p of dailyPoints) {
+        if (p.date < r.from || p.date > r.to) continue;
+        m.set(p.date, { ret: r.ret, days: r.days, phase: r.phase });
+      }
+    }
+    return m;
+  }, [runs, dailyPoints]);
 
   const priceBands = useMemo(() => (
     focusPhases.size === 0 ? undefined
@@ -398,6 +515,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       fill={phaseColor(r.phase)} fillOpacity={focused(r.phase) ? 0.95 : 0.12} stroke="none"
                     />
                   ))}
+                  {/* What the price did during each call, over its own band. */}
+                  <Customized component={makeRunLabelLayer(runs, focused)} />
                   {/* Dashed line at every phase change — read straight up to the price. */}
                   {transitions.map(d => (
                     <ReferenceLine key={`tr-${d}`} x={d} stroke="#94a3b8" strokeDasharray="3 3"
@@ -430,7 +549,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       const mom = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—';
                       const gap = pt?.trendGap != null ? `${pt.trendGap >= 0 ? '+' : ''}${pt.trendGap.toFixed(2)}%` : '—';
                       const r = pt?.radius != null ? ` · ${pt.radius.toFixed(2)} from centre` : '';
-                      return [`trend gap ${gap} · momentum ${mom} · ${pt?.phase ?? '—'}${r}`, 'Model'];
+                      const run = pt ? runRetAt.get(pt.date) : undefined;
+                      const runTxt = run?.ret != null ? ` · this call ${fmtRet(run.ret)} in ${run.days}d` : '';
+                      return [`trend gap ${gap} · momentum ${mom} · ${pt?.phase ?? '—'}${r}${runTxt}`, 'Model'];
                     }}
                   />
                 </ComposedChart>
@@ -443,15 +564,19 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                 other axis is how far the price sits from its own 40-day trend. Nothing here depends on any other
                 asset. The{' '}
                 <b className="text-gray-500">colour strip along the bottom</b> (and the matching tint behind) is the
-                quadrant that follows from it. Vertical dashed lines mark where the call CHANGED: read straight up to
-                the price to see what happened next. Every date is rebuilt with no look-ahead, one sample ≈{' '}
+                quadrant that follows from it, and the figure above each band is what the PRICE did while that call
+                was showing (bands too narrow for the text carry it in the tooltip and in the CSV instead). Vertical
+                dashed lines mark where the call CHANGED: read straight up to the price to see what happened next. Every date is rebuilt with no look-ahead, one sample ≈{' '}
                 {data?.stepDays ?? '—'} days
                 {data?.coarse ? ' — samples between those dates are not shown, so very short phases can be missed' : ''}.
               </p>
 
               {summary.rows.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap pt-0.5">
-                  <span className="text-[9px] text-gray-600 uppercase tracking-wider">Time spent</span>
+                  <span className="text-[9px] text-gray-600 uppercase tracking-wider"
+                    title="Share of the visible window spent in each phase, and the average price move per stretch of that phase over this window">
+                    Time spent · avg move
+                  </span>
                   {summary.rows.map(([ph, n]) => (
                     <button
                       key={ph}
@@ -466,6 +591,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       )}
                     >
                       {ph} {Math.round((n / Math.max(1, summary.total)) * 100)}%
+                      {summary.stats.get(ph)?.avg != null && (
+                        <span className="opacity-70"> · avg {fmtRet(summary.stats.get(ph)!.avg as number)}</span>
+                      )}
                     </button>
                   ))}
                   {focusPhases.size > 0 && (
