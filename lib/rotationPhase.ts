@@ -3,7 +3,7 @@
 //
 // The four areas are defined the way the chart is read:
 //
-//   X = TREND GAP — how far the price is from its own 100-day trend, in %,
+//   X = TREND GAP — how far the price is from its own 40-day trend, in %,
 //                   averaged over a month so it does not jitter.
 //                   Above zero = in an up-leg, below zero = in a down-leg.
 //   Y = MOMENTUM  — the MACD(16,35,12) histogram as % of price.
@@ -27,7 +27,7 @@
 //                                                                  a Trending run
 //   3M return + accel           +12%      +34%     +0%     +12%         −10.7%
 //   12M pace + its change       +20%      +36%     +1%     +11%         −10.4%
-//   trend gap + momentum        +41%      +54%     +5%     −20%          −3.9%
+//   trend gap + momentum        +31%      +55%     +8%     −21%          −4.0%
 //
 // The first two could not describe the present, let alone the future: "Lagging" RISING
 // at 11-12%/yr is not a falling asset, and a "Trending" band that holds a 10% drawdown is
@@ -35,14 +35,34 @@
 // contains a crash. Against the swing ground truth its balanced accuracy is 41% where the
 // 12-month version scored 34% and a coin toss scores 25%.
 //
+// WHY 40 DAYS AND NOT 100. A 100-day trend missed a third of the real bottoms, and for a
+// single reason: at 91% of the misses the price was still ABOVE that trend when it turned
+// — median +5.6% above, only 13% off its 52-week high. The dip never took it into the
+// lower half, so X > 0 forced the top half and the turn came out as Trending instead of
+// Recovering. A 40-day trend lets an ordinary pullback cross the axis, which is what the
+// label is for:
+//
+//                     swing lows flagged   swing highs flagged   clockwise
+//   100-day trend             67%                  78%              64%
+//    40-day trend             76%                  80%              70%
+//
+// A drawdown-from-the-52-week-high axis was tried too, since that was the one variable
+// with real separation at the turn. It flags 84-91% of bottoms and ruins everything else:
+// "near the high" becomes so narrow that Fading only fires while the price is still
+// ripping (+62% to +139%/yr during the phase — a sell label on a rally), the tops fall to
+// 34-46%, and rotation drops to 45-50% clockwise. Rejected on those numbers.
+//
 // WHAT THE SEARCH ALSO SHOWED, because it constrains what this model can promise:
 //   • Which HALF of the cycle an asset is in — up-leg or down-leg — is readable from the
-//     data: 74% recall on Trending, 67% on Lagging.
+//     data: 74% recall on Trending, 67% on Lagging, and 76% of the real swing lows carry a
+//     Recovering call within a fortnight of the low.
 //   • WHEN the leg will turn is not. At the moment it happens, Trending and Fading are
-//     statistically the same picture (median RSI 60.5 vs 48.6, distance from the 100-day
+//     statistically the same picture (median RSI 60.5 vs 48.6, distance from a 100-day
 //     trend +5.8% vs +1.7%), and no combination of the indicators tested recognises the
 //     two turn zones better than ~40%. Recovering and Fading are therefore honest
-//     warnings, not forecasts.
+//     warnings, not forecasts. Measured live on 84 assets over 20 years the forward return
+//     is nearly identical in all four (+3.2% to +4.3% at three months): this model says
+//     where an asset IS, not what it will do next.
 //   • The price paid for describing the present correctly is speed: a label lasts ~18 days
 //     against the ~29 days of a real turn zone, so the strip changes colour more often
 //     than the 12-month version did (71 days). That is the trade, and it is deliberate:
@@ -61,18 +81,18 @@ export type RotationPhase = 'Recovering' | 'Trending' | 'Fading' | 'Lagging';
 export const ROTATION_PHASES: RotationPhase[] = ['Recovering', 'Trending', 'Fading', 'Lagging'];
 
 /** The trend the price is measured against, in trading days. */
-export const TREND_SPAN = 100;
+export const TREND_SPAN = 40;
 /** The trend gap is averaged over this many trading days before use. */
 export const TREND_SMOOTH = 21;
 /** MACD parameters for the momentum axis, in trading days. */
 export const MOM_FAST = 16, MOM_SLOW = 35, MOM_SIGNAL = 12;
 /** Calendar days of history the axes need, with room for the EMAs to converge. */
-export const AXES_LOOKBACK_DAYS = 480;
+export const AXES_LOOKBACK_DAYS = 300;
 
 /**
  * Which quadrant a point falls in.
  *
- * trendGap: % above (+) or below (−) the asset's own 100-day trend, month-averaged (X).
+ * trendGap: % above (+) or below (−) the asset's own 40-day trend, month-averaged (X).
  * momentum: MACD histogram as % of price — gaining (+) or losing (−) ground now (Y).
  * Null when either is unknown; an asset without enough history has no position in the
  * cycle, and guessing one would be worse than saying nothing.
@@ -97,12 +117,12 @@ export function classifyPhase(trendGap: number | null | undefined, momentum: num
  * The angle turns CLOCKWISE through the cycle — Recovering 135°, Trending 45°,
  * Fading 315°, Lagging 225° — so a falling angle is an asset going round the way the
  * model says it should. That makes "does it actually rotate?" a number rather than an
- * impression; on the eight assets measured, 63% of the transitions step to the next
+ * impression; on the eight assets measured, 70% of the transitions step to the next
  * quadrant clockwise.
  */
 export interface QuadrantPosition {
   phase: RotationPhase | null;
-  /** X in %: the month-averaged gap to the 100-day trend. */
+  /** X in %: the month-averaged gap to the 40-day trend. */
   x: number;
   /** Y in % of price: the MACD histogram. */
   y: number;
@@ -158,7 +178,7 @@ function emaSeries(v: number[], span: number): number[] {
 }
 
 export interface TrendAxes {
-  /** X: % above/below the 100-day trend, averaged over a month. */
+  /** X: % above/below the 40-day trend, averaged over a month. */
   trendGap: number;
   /** Y: MACD(16,35,12) histogram as % of price. */
   momentum: number;
@@ -167,7 +187,7 @@ export interface TrendAxes {
 /**
  * The two quadrant coordinates as of a date, from the asset's own price history.
  * `asOf` defaults to the last bar. Null when the history is too short for the EMAs to
- * mean anything — reported rather than approximated, because an EMA-100 seeded ten bars
+ * mean anything — reported rather than approximated, because an EMA-40 seeded ten bars
  * ago is just the last ten bars wearing a longer name.
  */
 export function trendAxes(hist: PricePoint[] | undefined, asOf?: string | Date): TrendAxes | null {
@@ -187,7 +207,7 @@ export function trendAxes(hist: PricePoint[] | undefined, asOf?: string | Date):
   const scale = bpm / 21;
   const W = (d: number) => Math.max(2, Math.round(d * scale));
   const spanTrend = W(TREND_SPAN), smooth = W(TREND_SMOOTH);
-  // Two and a half spans of warm-up: below that the "100-day trend" is mostly the seed.
+  // Two and a half spans of warm-up: below that the "40-day trend" is mostly the seed.
   if (closes.length < spanTrend * 2.5 + smooth) return null;
 
   const trend = emaSeries(closes, spanTrend);
@@ -209,21 +229,21 @@ export const PHASE_META: Record<RotationPhase, { label: string; cls: string; dot
   Recovering: {
     label: 'Recovering', dot: '#60a5fa',
     cls: 'bg-blue-500/15 text-blue-300',
-    hint: 'Recovering — still below its own 100-day trend, but momentum has turned up: the fall has stopped and the price is starting to take ground back. The entry.',
+    hint: 'Recovering — still below its own 40-day trend, but momentum has turned up: the fall has stopped and the price is starting to take ground back. The entry.',
   },
   Trending: {
     label: 'Trending', dot: '#22c55e',
     cls: 'bg-green-500/15 text-green-300',
-    hint: 'Trending — above its own 100-day trend and momentum is still positive: the move is running.',
+    hint: 'Trending — above its own 40-day trend and momentum is still positive: the move is running.',
   },
   Fading: {
     label: 'Fading', dot: '#d97706',
     cls: 'bg-amber-500/15 text-amber-300',
-    hint: 'Fading — still above its own 100-day trend, but momentum has turned down: the rise is losing pace. The exit.',
+    hint: 'Fading — still above its own 40-day trend, but momentum has turned down: the rise is losing pace. The exit.',
   },
   Lagging: {
     label: 'Lagging', dot: '#f87171',
     cls: 'bg-red-500/15 text-red-300',
-    hint: 'Lagging — below its own 100-day trend and momentum is still negative: the price is falling, wait for Recovering.',
+    hint: 'Lagging — below its own 40-day trend and momentum is still negative: the price is falling, wait for Recovering.',
   },
 };

@@ -440,7 +440,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               <p className="text-[9px] text-gray-600 leading-snug">
                 The <b className="text-gray-500">purple line</b> is the asset&apos;s momentum — the MACD histogram as
                 a % of price — above the dashed zero the move is gaining ground, below it losing it. The quadrant&apos;s
-                other axis is how far the price sits from its own 100-day trend. Nothing here depends on any other
+                other axis is how far the price sits from its own 40-day trend. Nothing here depends on any other
                 asset. The{' '}
                 <b className="text-gray-500">colour strip along the bottom</b> (and the matching tint behind) is the
                 quadrant that follows from it. Vertical dashed lines mark where the call CHANGED: read straight up to

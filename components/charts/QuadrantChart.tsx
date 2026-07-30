@@ -19,7 +19,7 @@ import {
 //
 // Every asset is plotted as a dot (see lib/rotationPhase.ts for the definition and
 // the evidence behind it):
-//   X = TREND GAP — how far the price is from its own 100-day trend (%), month-averaged
+//   X = TREND GAP — how far the price is from its own 40-day trend (%), month-averaged
 //   Y = MOMENTUM  — the MACD(16,35,12) histogram as % of price
 //
 // Both splits sit at zero:
@@ -44,7 +44,7 @@ export interface QuadrantAsset {
   symbol: string;
   name: string;
   group: string;
-  /** x-axis: % above/below its own 100-day trend, month-averaged. */
+  /** x-axis: % above/below its own 40-day trend, month-averaged. */
   trendGap: number;
   /** y-axis: the MACD histogram as % of price. Both axes are the
    *  asset's own absolute numbers and centred on zero, so distance from the centre
@@ -121,7 +121,7 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
       {p.r3m != null && <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>}
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">From its 100-day trend:{' '}
+      <p className="text-gray-300">From its 40-day trend:{' '}
         <span className={p.trendGap >= 0 ? 'text-green-400' : 'text-red-400'}>
           {p.trendGap >= 0 ? '+' : ''}{p.trendGap.toFixed(2)}%
         </span>
@@ -420,8 +420,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
     if (assets.length === 0) {
       return {
         plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[],
-        xDomain: [-8, 8] as [number, number], yDomain: [-1.5, 1.5] as [number, number],
-        clampEdge: 7.88, clampEdgeY: 1.48,
+        xDomain: [-5, 5] as [number, number], yDomain: [-1.5, 1.5] as [number, number],
+        clampEdge: 4.93, clampEdgeY: 1.48,
       };
     }
     // Half-range for one axis: the 90th percentile of |value| padded out, but never
@@ -433,10 +433,10 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       const trailMax = trailVals.length ? Math.max(...trailVals.map(Math.abs)) : 0;
       return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
     };
-    // Both axes are in % of price, and they live on very different scales: the gap to
-    // the 100-day trend runs to ±10% or more, the MACD histogram rarely past ±2%.
+    // Both axes are in % of price, and they live on different scales: the gap to the
+    // 40-day trend runs to a few points, the MACD histogram rarely past ±2%.
     const M = halfRange(
-      assets.map(a => a.trendGap), 6, 2,
+      assets.map(a => a.trendGap), 4, 1.5,
       trails?.flatMap(t => t.points.map(p => p.trendGap)) ?? [],
     );
     const MY = halfRange(
@@ -543,8 +543,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`}
-            label={{ value: 'Distance from its 100-day trend (%)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
+            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}%`}
+            label={{ value: 'Distance from its 40-day trend (%)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
             dataKey="yPlot"

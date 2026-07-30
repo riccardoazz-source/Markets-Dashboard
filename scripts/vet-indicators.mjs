@@ -200,7 +200,14 @@ ok('a wilder asset orbits wider',
 
 // Too little history is null, not a number computed from whatever is there: an EMA-100
 // seeded twenty bars ago is just those twenty bars wearing a longer name.
-ok('null below the required warm-up', Q.trendAxes(mkSeries(200, i => 100 + i)) === null);
+// The warm-up is 2.5 trend spans plus the smoothing window; one bar short must be null,
+// not a number, and one bar past it must be a number — the boundary tested from both sides.
+// The warm-up is 2.5 trend spans plus the smoothing window, counted in BARS and scaled by
+// the calendar the history actually has (weekday bars → ~21.7 a month). Tested from both
+// sides with a margin, so the check does not encode that scaling twice.
+const need = Q.TREND_SPAN * 2.5 + Q.TREND_SMOOTH;
+ok('null below the warm-up', Q.trendAxes(mkSeries(Math.round(need * 0.9), i => 100 + i)) === null);
+ok('a number above it', Q.trendAxes(mkSeries(Math.round(need * 1.15), i => 100 + i)) != null);
 ok('null on an empty history', Q.trendAxes([]) === null && Q.trendAxes(undefined) === null);
 // As-of dates never read forward: asking for a date in the middle gives the same answer
 // as truncating the file there.

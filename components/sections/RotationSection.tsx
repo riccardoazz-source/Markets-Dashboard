@@ -57,7 +57,7 @@ interface RotationItem {
   r5?: number | null;       // 5 trading-day return % (Dalio EMS v5 acceleration overlay)
   moneyFlow?: number | null;// net buying pressure −1..1 (Dalio EMS v5 quiet-accumulation)
   downVolDry?: number | null;// down-day volume dry-up 0..1 (Dalio EMS v8 recovery precision)
-  trendGap?: number | null; // quadrant X: % from its own 100-day trend
+  trendGap?: number | null; // quadrant X: % from its own 40-day trend
   momentum?: number | null; // quadrant Y: MACD histogram as % of price
 }
 
@@ -172,7 +172,7 @@ function RotationLegend() {
         Model formula (Dalio EMS)
       </summary>
       <div className="px-3 pb-3 pt-1 space-y-2 text-gray-400">
-        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. The score RANKS the Accelerating list and drives the Backtest. The <span className="text-gray-200">Quadrant</span> uses two absolute coordinates instead — how far the price sits from its own 100-day trend, and whether momentum is gaining or losing ground (the MACD histogram) — so every asset orbits the centre with its own radius and nothing depends on who else is on screen.</p>
+        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. The score RANKS the Accelerating list and drives the Backtest. The <span className="text-gray-200">Quadrant</span> uses two absolute coordinates instead — how far the price sits from its own 40-day trend, and whether momentum is gaining or losing ground (the MACD histogram) — so every asset orbits the centre with its own radius and nothing depends on who else is on screen.</p>
         <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
 {`FinalScore = ( core + 0.10·AccelBoost + 0.30·DrawdownQuality ) · ClassWeight
 
@@ -506,7 +506,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   };
 
   // Build quadrant chart data from the currently filtered view.
-  // X = how far the price is from its own 100-day trend, Y = whether momentum is
+  // X = how far the price is from its own 40-day trend, Y = whether momentum is
   // gaining or losing ground. Both are the asset's own numbers and both are centred on
   // zero, so the quadrant is a cycle every asset travels, distance from the centre is
   // the size of the swing, and nothing depends on who else is on screen.
