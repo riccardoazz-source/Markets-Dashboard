@@ -1345,7 +1345,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
     const drawdown = activeTools.drawdown ? onto(computeDrawdown(fullCloses, yearBars)) : null;
     const sinceHigh = activeTools.drawdown ? onto(computeMonthsSinceHigh(fullDates, fullCloses, yearBars)) : null;
     return {
-      stretch, slope, drawdown,
+      stretch, slope, drawdown, regime, sinceHigh,
       regimeNow: regime ? lastOf(regime) : null,
       sinceHighNow: sinceHigh ? lastOf(sinceHigh) : null,
     };
@@ -1372,7 +1372,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
       const mm = at(momentumSeries?.monthly, i); if (mm) row.momentum_monthly = mm.value;
       const st = at(cycle?.stretch, i);  if (st) row.stretch_sigma = st.value;
       const sl = at(cycle?.slope, i);    if (sl) row.ma200_slope_pct_mo = sl.value;
+      const rg = at(cycle?.regime, i);    if (rg) row.regime_months = rg.value;
       const dd = at(cycle?.drawdown, i); if (dd) row.drawdown_52w_pct = dd.value;
+      const sh = at(cycle?.sinceHigh, i); if (sh) row.months_since_high = sh.value;
       return row;
     });
     publishChartRows(selected?.symbol ?? 'stock', rows, token);
