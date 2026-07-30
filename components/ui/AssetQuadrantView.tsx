@@ -262,6 +262,10 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     const pad = Math.ceil(m * 1.1);
     return [-pad, pad];
   }, [dailyPoints]);
+  // The ribbon is a strip along the FLOOR of the pane, so its height has to follow the
+  // axis. Hard-coding it (it used to run 0 → 7) made it a band across the middle of the
+  // chart the moment the axis changed scale.
+  const ribbonTop = momentumDomain[0] + (momentumDomain[1] - momentumDomain[0]) * 0.11;
 
   // Time spent, measured in DAYS on the chart rather than in samples, so it says
   // what the strip shows. Days with no call are left out of the denominator.
@@ -511,7 +515,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   ))}
                   {runs.filter(r => r.phase).map((r, i) => (
                     <ReferenceArea
-                      key={`ribbon-${i}-${r.from}`} x1={r.from} x2={r.to} y1={0} y2={7}
+                      key={`ribbon-${i}-${r.from}`} x1={r.from} x2={r.to} y1={momentumDomain[0]} y2={ribbonTop}
                       fill={phaseColor(r.phase)} fillOpacity={focused(r.phase) ? 0.95 : 0.12} stroke="none"
                     />
                   ))}
@@ -558,20 +562,11 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               </ResponsiveContainer>
               )}
 
-              <p className="text-[9px] text-gray-600 leading-snug">
-                The <b className="text-gray-500">purple line</b> is where the price sits inside the leg it is
-                travelling: above the dashed zero, how far it has climbed from the low that started the up-leg; below
-                it, how far it has given back from the high. The leg only turns when the price reverses by 0.75× its
-                own monthly volatility, so each colour is a whole leg rather than a wobble. The quadrant&apos;s other
-                axis is how far the price sits from its own 40-day trend. Nothing here depends on any other asset.
-                The{' '}
-                <b className="text-gray-500">colour strip along the bottom</b> (and the matching tint behind) is the
-                quadrant that follows from it, and the figure above each band is what the PRICE did while that call
-                was showing (bands too narrow for the text carry it in the tooltip and in the CSV instead). Vertical
-                dashed lines mark where the call CHANGED: read straight up to the price to see what happened next. Every date is rebuilt with no look-ahead, one sample ≈{' '}
-                {data?.stepDays ?? '—'} days
-                {data?.coarse ? ' — samples between those dates are not shown, so very short phases can be missed' : ''}.
-              </p>
+              {data?.coarse && (
+                <p className="text-[9px] text-gray-600">
+                  Coarse resolution — samples between the plotted dates are missing, so very short phases can be lost.
+                </p>
+              )}
 
               {summary.rows.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap pt-0.5">
