@@ -219,7 +219,14 @@ export function RSISubChart({ data, grain, syncId, height = 80 }: { data: { date
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-          <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+          {/* scale="point" on every chart in the sync group. A chart containing a Bar
+              lays its category axis out in BANDS — item i centred at bandwidth·(i+0.5)
+              — while a line or area chart places item i at i·(width/(n−1)). With ~1700
+              daily bars across ~1580px that is under a pixel, but it is enough to
+              resolve the cursor to the NEIGHBOURING bar: the volume, MACD and momentum
+              panes were reading one day earlier than the price, RSI and the cycle
+              panes. One scale everywhere and the geometry cannot differ. */}
+          <XAxis dataKey="date" scale="point" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis domain={[0, 100]} ticks={[30, 50, 70]}
             tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH} />
           <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.6} />
@@ -276,7 +283,7 @@ export function MACDSubChart({ data, grain, syncId, height = 80 }: {
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-          <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+          <XAxis dataKey="date" scale="point" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => (v as number).toFixed(2)} />
           <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.4} />
@@ -319,7 +326,7 @@ export function VolumeSubChart({ data, syncId, height = 70, grain = 'daily' }: {
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-          <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+          <XAxis dataKey="date" scale="point" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => fmt(v as number)} />
           <Bar dataKey="volume" name="Volume" fill="#94a3b8"
@@ -356,7 +363,7 @@ export function MomentumSubChart({
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-          <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+          <XAxis dataKey="date" scale="point" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
             tickFormatter={v => `${(v as number).toFixed(1)}%`} />
           <ReferenceLine y={0} stroke="#6b7280" strokeOpacity={0.5} />
@@ -410,7 +417,7 @@ export function CyclePane({
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={data} syncId={syncId} syncMethod="value" margin={{ top: 2, right: 4, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-          <XAxis dataKey="date" tick={false} axisLine={false} tickLine={false} height={0} />
+          <XAxis dataKey="date" scale="point" tick={false} axisLine={false} tickLine={false} height={0} />
           <YAxis domain={domain} tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false}
             width={SYNC_AXIS_WIDTH} tickFormatter={v => `${(v as number).toFixed(1)}`} />
           {zeroLines.map(y => (
@@ -936,6 +943,7 @@ export function PriceChart({
           <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
           <XAxis
             dataKey="date"
+            scale="point"
             tickFormatter={d => formatDate(d as string, data)}
             tick={{ fill: '#6b7280', fontSize: 11 }}
             axisLine={false}

@@ -380,7 +380,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       strokeOpacity={focusPhases.size > 0 ? 0.18 : 0.55} />
                   ))}
                   <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={40} />
+                  <XAxis dataKey="date" scale="point" tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} minTickGap={40} />
                   <YAxis
                     domain={accelDomain}
                     tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}

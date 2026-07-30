@@ -597,7 +597,7 @@ function DualChart({
           syncId={syncId} syncMethod="value"
           {...handlers} style={{ cursor: 'crosshair' }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1e2133" vertical={false} />
-        <XAxis dataKey="date" tickFormatter={d => formatXDate(d as string, prices)}
+        <XAxis dataKey="date" scale="point" tickFormatter={d => formatXDate(d as string, prices)}
           tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={50} />
         <YAxis yAxisId="price" tick={{ fill: '#6b7280', fontSize: 11 }}
           axisLine={false} tickLine={false} width={STOCK_AXIS_WIDTH}
