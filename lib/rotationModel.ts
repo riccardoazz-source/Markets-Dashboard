@@ -470,8 +470,8 @@ export interface ModelInput {
   // QUADRANT says where in the cycle an asset is. They answer different questions,
   // so tuning one never silently moves the other. Both come from trendAxes() on the
   // asset's own history, so every producer of ModelInput fills them the same way.
-  trendGap?: number | null; // X: % above/below its own 100-day trend, month-averaged
-  momentum?: number | null; // Y: MACD(16,35,12) histogram as % of price
+  trendGap?: number | null; // X: % above/below its own 40-day trend, month-averaged
+  momentum?: number | null; // Y: % into the current leg, signed by its direction
 }
 
 export interface ScoredItem<T extends ModelInput> {

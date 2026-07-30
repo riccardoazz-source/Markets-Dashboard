@@ -163,48 +163,62 @@ const mkSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
   date: new Date(Date.UTC(2016, 0, 4) + Math.floor(i / 5) * 7 * 86400000 + (i % 5) * 86400000).toISOString().slice(0, 10),
   close: f(i),
 }));
-// A price compounding at a constant rate sits a FIXED distance above its own trend and
-// its MACD histogram is zero: the two EMAs and the signal all grow at the same rate.
+// A price that only ever rises never reverses, so it is one long up-leg: the swing
+// reads the whole gain from the first bar and the phase is Trending throughout.
 const steady = mkSeries(900, i => 100 * Math.pow(1.0008, i));
 const axSteady = Q.trendAxes(steady);
 ok('a constant riser sits above its trend', axSteady.trendGap > 0, `${axSteady.trendGap.toFixed(3)}%`);
-ok('a constant riser has ~zero momentum', near(axSteady.momentum, 0, 0.02), `${axSteady.momentum.toFixed(4)}%`);
+ok('a constant riser is advancing in its leg', axSteady.momentum > 0, `+${axSteady.momentum.toFixed(1)}% off its low`);
+ok('the leg measures the whole rise', near(axSteady.momentum, (Math.pow(1.0008, 899) - 1) * 100, 0.5),
+   `${axSteady.momentum.toFixed(1)}% vs ${((Math.pow(1.0008, 899) - 1) * 100).toFixed(1)}%`);
 ok('a constant riser is Trending', Q.classifyPhase(axSteady.trendGap, axSteady.momentum) === 'Trending');
-// A flat price is exactly ON its trend with no momentum.
+// A flat price is on its trend, has no leg to speak of, and must not pretend otherwise.
 const flat = mkSeries(900, () => 100);
 const axFlat = Q.trendAxes(flat);
 ok('a flat price sits on its trend', near(axFlat.trendGap, 0, 1e-9), `${axFlat.trendGap.toFixed(9)}`);
-ok('a flat price has zero momentum', near(axFlat.momentum, 0, 1e-9));
-// Rising for years, then flat for two months: still above the trend, momentum now negative
-// — the exit.
-const stalling = mkSeries(900, i => 100 * Math.pow(1.0015, Math.min(i, 860)));
-const axStall = Q.trendAxes(stalling);
-ok('a stalled riser is Fading', Q.classifyPhase(axStall.trendGap, axStall.momentum) === 'Fading',
-   `gap ${axStall.trendGap.toFixed(2)}%, momentum ${axStall.momentum.toFixed(3)}%`);
-// Falling for years, then flat: still below the trend, momentum now positive — the entry.
-const bouncing = mkSeries(900, i => 100 * Math.pow(0.9985, Math.min(i, 860)));
-const axBounce = Q.trendAxes(bouncing);
-ok('a fall that stops is Recovering', Q.classifyPhase(axBounce.trendGap, axBounce.momentum) === 'Recovering',
-   `gap ${axBounce.trendGap.toFixed(2)}%, momentum ${axBounce.momentum.toFixed(3)}%`);
-// A steady fall, still falling, is Lagging.
+ok('a flat price has a zero leg', near(axFlat.momentum, 0, 1e-9));
+// Rises for years, then gives back 12% — more than any plausible threshold — so the
+// leg has turned while the price is still above its 40-day trend: the exit.
+const topped = mkSeries(900, i => (i <= 820 ? 100 * Math.pow(1.0015, i) : 100 * Math.pow(1.0015, 820) * (1 - 0.12 * (i - 820) / 79)));
+const axTop = Q.trendAxes(topped);
+ok('a top that gives 12% back is Fading or Lagging',
+   ['Fading', 'Lagging'].includes(Q.classifyPhase(axTop.trendGap, axTop.momentum)),
+   `gap ${axTop.trendGap.toFixed(2)}%, leg ${axTop.momentum.toFixed(1)}%`);
+ok('the leg reads the give-back, not the rise', axTop.momentum < 0, `${axTop.momentum.toFixed(1)}%`);
+// Rises for years, crashes 30%, then takes 8% back: the leg has turned up while the price
+// is still well below its 40-day trend — the entry. Both halves matter. A bounce too small
+// leaves the leg pointing down (Lagging); a bounce large or slow enough to lift the price
+// back above its trend is no longer a recovery but a trend, and the model says Trending —
+// which is why the crash has to be deep enough to leave room for the bounce underneath it.
+const crashed = mkSeries(900, i => {
+  if (i <= 850) return 100 * Math.pow(1.0005, i);
+  const top = 100 * Math.pow(1.0005, 850);
+  if (i <= 880) return top * (1 - 0.30 * (i - 850) / 30);
+  return top * 0.70 * (1 + 0.08 * (i - 880) / 19);
+});
+const axBot = Q.trendAxes(crashed);
+ok('a bounce off a crash is Recovering',
+   Q.classifyPhase(axBot.trendGap, axBot.momentum) === 'Recovering',
+   `gap ${axBot.trendGap.toFixed(2)}%, leg ${axBot.momentum.toFixed(1)}%`);
+// A steady fall is below its trend and giving ground: Lagging.
 const falling = mkSeries(900, i => 100 * Math.pow(0.999, i));
-ok('a steady fall is Lagging', Q.classifyPhase(...Object.values(Q.trendAxes(falling))) !== 'Trending');
-ok('a steady fall sits below its trend', Q.trendAxes(falling).trendGap < 0, `${Q.trendAxes(falling).trendGap.toFixed(3)}%`);
-// Amplitude: a volatile series swings further from its own trend than a calm one, which
-// is what makes distance from the centre mean the size of the move.
-const calm = mkSeries(900, i => 100 * (1 + 0.02 * Math.sin(i / 40)));
-const wild = mkSeries(900, i => 100 * (1 + 0.20 * Math.sin(i / 40)));
-ok('a wilder asset orbits wider',
-   Math.abs(Q.trendAxes(wild).trendGap) > Math.abs(Q.trendAxes(calm).trendGap) * 5,
-   `${Q.trendAxes(calm).trendGap.toFixed(2)}% vs ${Q.trendAxes(wild).trendGap.toFixed(2)}%`);
+const axFall = Q.trendAxes(falling);
+ok('a steady fall is Lagging', Q.classifyPhase(axFall.trendGap, axFall.momentum) === 'Lagging',
+   `gap ${axFall.trendGap.toFixed(2)}%, leg ${axFall.momentum.toFixed(1)}%`);
+// The reversal threshold scales with the asset's own volatility: the SAME 5% fall ends a
+// leg on a calm series and does not on a wild one. That is what lets one threshold serve
+// the TSX and Bitcoin at once, with no per-asset tuning.
+// Alternating steps of ±amp fix the monthly volatility by arithmetic: ±0.3% daily is
+// ~1.4%/month, ±3% daily is ~14%/month, so the thresholds are ~2% and ~10%.
+const churn = (amp) => mkSeries(880, i => {
+  const base = 100 * (1 + amp * (i % 2 ? 1 : -1));
+  return i < 872 ? base : base * (1 - 0.05 * (i - 871) / 8);   // a 5% fall at the very end
+});
+const calmLeg = Q.trendAxes(churn(0.0015)).momentum, wildLeg = Q.trendAxes(churn(0.015)).momentum;
+ok('a 5% fall ends a calm asset\'s leg', calmLeg < 0, `${calmLeg.toFixed(1)}%`);
+ok('the same fall does not end a volatile one\'s', wildLeg >= 0, `${wildLeg.toFixed(1)}%`);
 
-// Too little history is null, not a number computed from whatever is there: an EMA-100
-// seeded twenty bars ago is just those twenty bars wearing a longer name.
-// The warm-up is 2.5 trend spans plus the smoothing window; one bar short must be null,
-// not a number, and one bar past it must be a number — the boundary tested from both sides.
-// The warm-up is 2.5 trend spans plus the smoothing window, counted in BARS and scaled by
-// the calendar the history actually has (weekday bars → ~21.7 a month). Tested from both
-// sides with a margin, so the check does not encode that scaling twice.
+// Too little history is null, not a number computed from whatever is there.
 const need = Q.TREND_SPAN * 2.5 + Q.TREND_SMOOTH;
 ok('null below the warm-up', Q.trendAxes(mkSeries(Math.round(need * 0.9), i => 100 + i)) === null);
 ok('a number above it', Q.trendAxes(mkSeries(Math.round(need * 1.15), i => 100 + i)) != null);

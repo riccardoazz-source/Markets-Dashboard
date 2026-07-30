@@ -103,10 +103,10 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
     const upToAsOf = h.slice(Math.max(0, lo - HIST_TAIL), lo);  // daily OHLC, no look-ahead
     const closesAsOf = upToAsOf.map(p => p.close);
     const adxState = computeWeeklyADX(upToAsOf);              // weekly ADX as of this date (M26)
-    // Quadrant coordinates: the gap to the 100-day trend and the MACD histogram.
-    // Computed on the FULL history `h` (not the 400-bar tail) because the trend EMA
-    // needs a long warm-up, and seeded on a short tail it would just be that tail
-    // wearing a longer name.
+    // Quadrant coordinates: the gap to the 40-day trend, and how far into its current
+    // leg the price has travelled. Computed on the FULL history `h` (not the 400-bar
+    // tail) because the trend EMA needs a warm-up and the leg is a running state that
+    // has to be walked from the beginning, not guessed from a window.
     const axes = trendAxes(h, asOf);
     return {
       symbol: m.symbol, name: m.name, group: m.group,

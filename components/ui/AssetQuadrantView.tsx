@@ -258,8 +258,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   // Symmetric domain: zero has to sit in the MIDDLE, or "above the line" and
   // "below the line" stop being readable at a glance.
   const momentumDomain = useMemo<[number, number]>(() => {
-    const m = Math.max(0.3, ...dailyPoints.map(p => Math.abs(p.momentum ?? 0)));
-    const pad = Math.ceil(m * 1.1 * 20) / 20;
+    const m = Math.max(2, ...dailyPoints.map(p => Math.abs(p.momentum ?? 0)));
+    const pad = Math.ceil(m * 1.1);
     return [-pad, pad];
   }, [dailyPoints]);
 
@@ -306,7 +306,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         // Four decimals: the sign of these two columns decides the phase, and two
         // decimals can round a genuine +0.0031 down to 0.00.
         model_x_trend_gap_pct: p.trendGap,
-        model_y_momentum_pct: p.momentum,
+        model_y_swing_pct: p.momentum,
         model_radius_pct_mo: p.radius,
         model_angle_deg: p.angle,
         model_r3m_pct: p.r3m,
@@ -527,7 +527,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   <YAxis
                     domain={momentumDomain}
                     tick={{ fill: '#6b7280', fontSize: 9 }} axisLine={false} tickLine={false} width={SYNC_AXIS_WIDTH}
-                    tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(2)}`}
+                    tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`}
                   />
                   {/* Zero = steady. Above it the move is speeding up, below it slowing. */}
                   <ReferenceLine y={0} stroke="#64748b" strokeDasharray="4 2" strokeWidth={1.2} />
@@ -546,12 +546,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                     contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: 6, color: '#e2e8f0', fontSize: 10, padding: '2px 6px', lineHeight: 1.35 }}
                     formatter={(v: number, _n: string, p: { payload?: DPoint }) => {
                       const pt = p?.payload;
-                      const mom = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}%` : '—';
+                      const mom = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}% ${v >= 0 ? 'off the low' : 'off the high'}` : '—';
                       const gap = pt?.trendGap != null ? `${pt.trendGap >= 0 ? '+' : ''}${pt.trendGap.toFixed(2)}%` : '—';
                       const r = pt?.radius != null ? ` · ${pt.radius.toFixed(2)} from centre` : '';
                       const run = pt ? runRetAt.get(pt.date) : undefined;
                       const runTxt = run?.ret != null ? ` · this call ${fmtRet(run.ret)} in ${run.days}d` : '';
-                      return [`trend gap ${gap} · momentum ${mom} · ${pt?.phase ?? '—'}${r}${runTxt}`, 'Model'];
+                      return [`trend gap ${gap} · leg ${mom} · ${pt?.phase ?? '—'}${r}${runTxt}`, 'Model'];
                     }}
                   />
                 </ComposedChart>
@@ -559,10 +559,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               )}
 
               <p className="text-[9px] text-gray-600 leading-snug">
-                The <b className="text-gray-500">purple line</b> is the asset&apos;s momentum — the MACD histogram as
-                a % of price — above the dashed zero the move is gaining ground, below it losing it. The quadrant&apos;s
-                other axis is how far the price sits from its own 40-day trend. Nothing here depends on any other
-                asset. The{' '}
+                The <b className="text-gray-500">purple line</b> is where the price sits inside the leg it is
+                travelling: above the dashed zero, how far it has climbed from the low that started the up-leg; below
+                it, how far it has given back from the high. The leg only turns when the price reverses by 0.75× its
+                own monthly volatility, so each colour is a whole leg rather than a wobble. The quadrant&apos;s other
+                axis is how far the price sits from its own 40-day trend. Nothing here depends on any other asset.
+                The{' '}
                 <b className="text-gray-500">colour strip along the bottom</b> (and the matching tint behind) is the
                 quadrant that follows from it, and the figure above each band is what the PRICE did while that call
                 was showing (bands too narrow for the text carry it in the tooltip and in the CSV instead). Vertical

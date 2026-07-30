@@ -20,13 +20,14 @@ import {
 // Every asset is plotted as a dot (see lib/rotationPhase.ts for the definition and
 // the evidence behind it):
 //   X = TREND GAP — how far the price is from its own 40-day trend (%), month-averaged
-//   Y = MOMENTUM  — the MACD(16,35,12) histogram as % of price
+//   Y = SWING     — % into the leg the price is travelling: above the low it started
+//                   from, or below the high it started from
 //
 // Both splits sit at zero:
-//   Top-right   → Trending:   above its trend and still gaining ground
-//   Top-left    → Recovering: below its trend but momentum has turned up — entry
-//   Bottom-right→ Fading:     above its trend but momentum has turned down — exit
-//   Bottom-left → Lagging:    below its trend and still losing ground — wait
+//   Top-right   → Trending:   above its trend and advancing in its leg
+//   Top-left    → Recovering: below its trend but the leg has turned up — entry
+//   Bottom-right→ Fading:     above its trend but the leg has turned down — exit
+//   Bottom-left → Lagging:    below its trend and still giving ground back — wait
 //
 // Accelerating names (top-8 by score) and any clicked rows are drawn bigger and
 // labelled. Labels are placed by a dedicated layer that spaces them apart and
@@ -46,7 +47,7 @@ export interface QuadrantAsset {
   group: string;
   /** x-axis: % above/below its own 40-day trend, month-averaged. */
   trendGap: number;
-  /** y-axis: the MACD histogram as % of price. Both axes are the
+  /** y-axis: % into the current leg, signed by its direction. Both axes are the
    *  asset's own absolute numbers and centred on zero, so distance from the centre
    *  is the SIZE of the swing — an index orbits small, a high-beta name wide — and
    *  every asset crosses all four quadrants. */
@@ -126,9 +127,10 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
           {p.trendGap >= 0 ? '+' : ''}{p.trendGap.toFixed(2)}%
         </span>
       </p>
-      <p className="text-gray-300">Momentum:{' '}
+      <p className="text-gray-300">Current leg:{' '}
         <span className={p.momentum >= 0 ? 'text-green-400' : 'text-red-400'}>
-          {p.momentum >= 0 ? '+' : ''}{p.momentum.toFixed(2)}% {p.momentum >= 0 ? '(gaining)' : '(losing)'}
+          {p.momentum >= 0 ? '+' : ''}{p.momentum.toFixed(1)}%{' '}
+          {p.momentum >= 0 ? 'off its low' : 'off its high'}
         </span>
       </p>
       {pos && (
@@ -420,8 +422,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
     if (assets.length === 0) {
       return {
         plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[],
-        xDomain: [-5, 5] as [number, number], yDomain: [-1.5, 1.5] as [number, number],
-        clampEdge: 4.93, clampEdgeY: 1.48,
+        xDomain: [-5, 5] as [number, number], yDomain: [-12, 12] as [number, number],
+        clampEdge: 4.93, clampEdgeY: 11.8,
       };
     }
     // Half-range for one axis: the 90th percentile of |value| padded out, but never
@@ -434,13 +436,13 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
     };
     // Both axes are in % of price, and they live on different scales: the gap to the
-    // 40-day trend runs to a few points, the MACD histogram rarely past ±2%.
+    // 40-day trend runs to a few points, a whole leg to tens of them.
     const M = halfRange(
       assets.map(a => a.trendGap), 4, 1.5,
       trails?.flatMap(t => t.points.map(p => p.trendGap)) ?? [],
     );
     const MY = halfRange(
-      assets.map(a => a.momentum), 1, 0.4,
+      assets.map(a => a.momentum), 6, 2,
       trails?.flatMap(t => t.points.map(p => p.momentum)) ?? [],
     );
     const clampEdge = M * 0.985;
@@ -549,13 +551,13 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
           <YAxis
             dataKey="yPlot"
             type="number"
-            name="Momentum"
+            name="Current leg"
             domain={[yMin, yMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}`}
-            label={{ value: 'Momentum — MACD histogram (%)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
+            label={{ value: 'Current leg (% off its low / high)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
             width={36}
           />
 

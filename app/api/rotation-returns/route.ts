@@ -41,8 +41,8 @@ interface RollingReturn {
   moneyFlow: number | null;// net buying pressure −1..1 (M31 v5 quiet-accumulation sleeve)
   downVolDry: number | null;// down-day volume dry-up 0..1 (M31 v8 recovery precision)
   // ── Rotation-quadrant coordinates (lib/rotationPhase.ts) ──
-  trendGap: number | null; // X: % above/below its own 100-day trend, month-averaged
-  momentum: number | null; // Y: MACD(16,35,12) histogram as % of price
+  trendGap: number | null; // X: % above/below its own 40-day trend, month-averaged
+  momentum: number | null; // Y: % into the current leg, signed by its direction
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -70,9 +70,9 @@ function rolling(history: { date: string; close: number }[], daysAgo: number): n
 }
 
 // How much history every row needs. The 200-day MA and the 252-day CYC R² want
-// ~325 trading days; the quadrant axes reach a calendar year further back than the
-// oldest pace sample (AXES_LOOKBACK_DAYS), and one day short of that they return
-// null and every asset loses its phase. Take the larger, with a holiday margin.
+// ~325 trading days; the quadrant axes need their EMA warm-up and volatility window
+// (AXES_LOOKBACK_DAYS), and one day short of that they return null and every asset
+// loses its phase. Take the larger, with a holiday margin.
 const FETCH_DAYS = Math.max(470, AXES_LOOKBACK_DAYS + 60);
 
 // 200-day simple moving average: average of the last 200 daily closes.

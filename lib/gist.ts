@@ -46,8 +46,8 @@ export interface QuadrantPoint {
   symbol: string;
   name: string;
   group: string;
-  trendGap?: number; // x-axis: % from its own 100-day trend, month-averaged
-  momentum?: number; // y-axis: MACD histogram as % of price
+  trendGap?: number; // x-axis: % from its own 40-day trend, month-averaged
+  momentum?: number; // y-axis: % into the current leg, signed by its direction
   r3m: number | null; // 3M return %, kept for the tooltip
   /** @deprecated X was the 3M return and Y the acceleration before the axes became
    *  the trend gap and momentum. Kept so older snapshots still load. */

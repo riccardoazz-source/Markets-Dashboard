@@ -6,34 +6,50 @@
 //   X = TREND GAP — how far the price is from its own 40-day trend, in %,
 //                   averaged over a month so it does not jitter.
 //                   Above zero = in an up-leg, below zero = in a down-leg.
-//   Y = MOMENTUM  — the MACD(16,35,12) histogram as % of price.
-//                   Above zero = the move is gaining ground right now, below = losing it.
+//   Y = SWING     — where the price is inside the leg it is currently travelling:
+//                   % ABOVE the low the up-leg started from (+), or % BELOW the high
+//                   the down-leg started from (−). The leg only turns when the price
+//                   reverses by 0.75× the asset's own monthly volatility, so the sign
+//                   of Y changes at real turns and each coloured band is a LEG.
 //
 //   Recovering (top-left)    : below its trend but momentum has turned up — the entry, BUY
 //   Trending   (top-right)   : above its trend and still gaining — hold
 //   Fading     (bottom-right): above its trend but momentum has turned down — the exit, SELL
 //   Lagging    (bottom-left) : below its trend and still losing — wait for Recovering
 //
-// WHY THESE TWO, and not the 3-month return + acceleration, nor the 12-month pace and
-// its change. Both of those were measured against a ground truth built from the real
-// swings of the price (a ZigZag confirmed by a reversal of 1.5× the asset's own monthly
-// volatility; the first third of each leg is the turn, the rest the trend), on ten years
-// of daily history for eight assets — Micron, Gold, S&P 500, Microsoft, Bitcoin, Silver,
-// a cloud-sector ETF and the TSX.
+// WHY Y IS A SWING AND NOT A MOMENTUM OSCILLATOR. Three definitions were measured on ten
+// years of daily history for eight assets — Micron, Gold, S&P 500, Microsoft, Bitcoin,
+// Silver, a cloud-sector ETF and the TSX — by the only test that matters to someone
+// reading the strip: what the price did, on average, DURING each coloured band.
 //
-// What the price ACTUALLY did while each label was showing (annualised, from daily closes):
+//                            Recovering  Trending  Fading  Lagging
+//   3M return + acceleration      +1.1%     +1.8%   +1.5%    +0.6%
+//   12M pace + its change         +1.3%     +2.1%   +1.2%    +0.7%
+//   trend gap + MACD histogram    +1.4%     +2.9%   +0.8%    −0.6%
+//   trend gap + SWING             +1.5%     +7.0%   −0.2%    −1.7%
 //
-//                          Recovering  Trending  Fading  Lagging   worst dip inside
-//                                                                  a Trending run
-//   3M return + accel           +12%      +34%     +0%     +12%         −10.7%
-//   12M pace + its change       +20%      +36%     +1%     +11%         −10.4%
-//   trend gap + momentum        +31%      +55%     +8%     −21%          −4.0%
+// Only the last one has the signs the four names claim: the rise concentrated in
+// Trending, Fading and Lagging actually negative. The reason the others could not get
+// there is structural, not a matter of tuning. Those Y axes are momentum oscillators,
+// and momentum changes sign every two or three weeks, so each band captured a FRAGMENT
+// of a move — the median band moved 0.0%. No average over fragments can ever show "the
+// bulk of the correction", because no band ever contains a whole correction.
 //
-// The first two could not describe the present, let alone the future: "Lagging" RISING
-// at 11-12%/yr is not a falling asset, and a "Trending" band that holds a 10% drawdown is
-// not a trend. This one gets the signs right on all four, and a Trending stretch no longer
-// contains a crash. Against the swing ground truth its balanced accuracy is 41% where the
-// 12-month version scored 34% and a coin toss scores 25%.
+// A swing axis cuts the price where the price itself turns, so a band IS a leg. Measured
+// against the same eight assets: Trending takes 46% of all the upside while carrying only
+// 33% of the downside; Fading and Lagging carry 24% and 28% of the downside on 16% and 20%
+// of the time. After a Recovering the next call is Trending 56% of the time (was 50%),
+// after a Fading it is Lagging 42% (was 37%).
+//
+// WHY 0.75 SIGMA. The reversal threshold trades the quality of the AVERAGES against the
+// quality of the TRANSITIONS, and the two peak at different places. At 0.5σ the averages
+// are strongest (Trending +5.7%, Fading −1.2%, Lagging −2.3%) but half the Recovering
+// calls fall straight back to Lagging, because small bounces fail. At 1σ the transitions
+// are strongest (Recovering → Trending 72%, Fading → Lagging 67%) but Lagging turns
+// positive at the median, because a threshold that large keeps the label on through the
+// rebound. 0.75σ is the only setting that beats the previous model on EVERY one of those
+// six numbers at once, and it sits in the middle of the curve rather than on a peak — so
+// it is a choice about robustness, not a parameter fitted to these eight assets.
 //
 // WHY 40 DAYS AND NOT 100. A 100-day trend missed a third of the real bottoms, and for a
 // single reason: at 91% of the misses the price was still ABOVE that trend when it turned
@@ -54,8 +70,8 @@
 //
 // WHAT THE SEARCH ALSO SHOWED, because it constrains what this model can promise:
 //   • Which HALF of the cycle an asset is in — up-leg or down-leg — is readable from the
-//     data: 74% recall on Trending, 67% on Lagging, and 76% of the real swing lows carry a
-//     Recovering call within a fortnight of the low.
+//     data: 69% recall on Trending, 54% on Lagging, 47% balanced against the swing truth
+//     where a coin toss scores 25%.
 //   • WHEN the leg will turn is not. At the moment it happens, Trending and Fading are
 //     statistically the same picture (median RSI 60.5 vs 48.6, distance from a 100-day
 //     trend +5.8% vs +1.7%), and no combination of the indicators tested recognises the
@@ -68,8 +84,10 @@
 //     than the 12-month version did (71 days). That is the trade, and it is deliberate:
 //     the alternative was labels that stayed put while being wrong.
 //
-// AMPLITUDE. Distance from the centre is in % of price and is dominated by the trend gap,
-// so it keeps meaning the size of the swing. Measured on the real swings, one full cycle
+// AMPLITUDE. Distance from the centre is in % of price and is dominated by Y, which IS
+// the size of the leg the asset is travelling — so it keeps meaning the size of the move,
+// more directly than any earlier version: Bitcoin orbits at 23.7%, Micron 17.5%, Microsoft
+// 9.9%, the S&P 500 7.1%, the TSX 6.0%. Measured on the real swings, one full cycle
 // moves the S&P 500 about +14% up then −10% down over ~72 days, Micron +52%/−25% over
 // ~130 days, Bitcoin +66%/−35% over ~114 days. A broad index orbits close in, a high-beta
 // name orbits wide, and nothing here depends on any other asset: an asset's own history is
@@ -84,8 +102,12 @@ export const ROTATION_PHASES: RotationPhase[] = ['Recovering', 'Trending', 'Fadi
 export const TREND_SPAN = 40;
 /** The trend gap is averaged over this many trading days before use. */
 export const TREND_SMOOTH = 21;
-/** MACD parameters for the momentum axis, in trading days. */
-export const MOM_FAST = 16, MOM_SLOW = 35, MOM_SIGNAL = 12;
+/** A leg turns when the price reverses by this multiple of its own monthly volatility. */
+export const SWING_SIGMA = 0.75;
+/** Floor on that reversal, %, so a near-motionless series still needs a real move. */
+export const SWING_FLOOR = 2;
+/** Window for the monthly volatility the threshold is scaled by, in trading days. */
+export const VOL_SPAN = 63;
 /** Calendar days of history the axes need, with room for the EMAs to converge. */
 export const AXES_LOOKBACK_DAYS = 300;
 
@@ -93,7 +115,8 @@ export const AXES_LOOKBACK_DAYS = 300;
  * Which quadrant a point falls in.
  *
  * trendGap: % above (+) or below (−) the asset's own 40-day trend, month-averaged (X).
- * momentum: MACD histogram as % of price — gaining (+) or losing (−) ground now (Y).
+ * momentum: where the price is inside the leg it is travelling — % above the low an
+ * up-leg started from (+), or % below the high a down-leg started from (−) (Y).
  * Null when either is unknown; an asset without enough history has no position in the
  * cycle, and guessing one would be worse than saying nothing.
  */
@@ -124,7 +147,7 @@ export interface QuadrantPosition {
   phase: RotationPhase | null;
   /** X in %: the month-averaged gap to the 40-day trend. */
   x: number;
-  /** Y in % of price: the MACD histogram. */
+  /** Y in %: how far into the current leg the price has travelled, signed by its direction. */
   y: number;
   /** Distance from the centre, in %. */
   radius: number;
@@ -180,8 +203,70 @@ function emaSeries(v: number[], span: number): number[] {
 export interface TrendAxes {
   /** X: % above/below the 40-day trend, averaged over a month. */
   trendGap: number;
-  /** Y: MACD(16,35,12) histogram as % of price. */
+  /** Y: % into the current leg — above the low it started from, or below the high. */
   momentum: number;
+}
+
+/**
+ * Realized monthly volatility per bar, in %, from a rolling window of log returns.
+ * Kept as running sums rather than a re-scan per bar: this function is called once per
+ * plotted date on a decade of history, and the naive version made that quadratic.
+ */
+function rollingVol(closes: number[], span: number): (number | null)[] {
+  const out = new Array<number | null>(closes.length).fill(null);
+  const lr = new Array<number>(closes.length).fill(0);
+  for (let i = 1; i < closes.length; i++) lr[i] = Math.log(closes[i] / closes[i - 1]);
+  let sum = 0, sumSq = 0;
+  for (let i = 1; i < closes.length; i++) {
+    sum += lr[i]; sumSq += lr[i] * lr[i];
+    if (i > span) { sum -= lr[i - span]; sumSq -= lr[i - span] * lr[i - span]; }
+    const n = Math.min(i, span);
+    if (n < Math.max(10, span / 3)) continue;
+    const mean = sum / n;
+    const varr = Math.max(0, sumSq / n - mean * mean);
+    out[i] = Math.sqrt(varr) * Math.sqrt(21) * 100;
+  }
+  return out;
+}
+
+/**
+ * Where the price sits inside the leg it is currently travelling.
+ *
+ * The leg turns only when the price reverses by `SWING_SIGMA` times the asset's own
+ * monthly volatility, so a 4% wobble ends a leg for the TSX and does not for Bitcoin,
+ * and the threshold needs no per-asset tuning. Returns % above the low an up-leg
+ * started from, or % below the high a down-leg started from — positive means the
+ * price is advancing, negative that it is giving ground back.
+ *
+ * The scan is causal: at every bar it only ever looks at bars before it, so the value
+ * on a past date is the value the model would have shown on that date.
+ */
+function swingPosition(closes: number[], vol: (number | null)[], fallbackVol: number): number {
+  // `hi` tracks the high while an up-leg runs and becomes the top the following
+  // down-leg retraces FROM; `lo` tracks the low while a down-leg runs and becomes the
+  // bottom the following up-leg advances FROM. Neither is reset at the turn, so both
+  // legs are measured from the real extreme rather than from the price at which the
+  // reversal happened to be confirmed.
+  //
+  // The result is then clamped to the sign of the leg. Without that, a price slipping
+  // just past the point its leg began — without falling far enough to end it — would
+  // report a number whose sign contradicts the leg, and the sign is what decides the
+  // phase. Zero there means "back at the start of the leg", which the classifier reads
+  // as the leg simply continuing.
+  let dir = 1, hi = closes[0], lo = closes[0], y = 0;
+  for (let i = 0; i < closes.length; i++) {
+    const c = closes[i];
+    const th = Math.max(SWING_FLOOR, SWING_SIGMA * (vol[i] ?? fallbackVol));
+    if (dir > 0) {
+      if (c > hi) hi = c;
+      if ((c / hi - 1) * 100 <= -th) { dir = -1; lo = c; }
+    } else {
+      if (c < lo) lo = c;
+      if ((c / lo - 1) * 100 >= th) { dir = 1; hi = c; }
+    }
+    y = dir > 0 ? Math.max(0, (c / lo - 1) * 100) : Math.min(0, (c / hi - 1) * 100);
+  }
+  return y;
 }
 
 /**
@@ -215,11 +300,14 @@ export function trendAxes(hist: PricePoint[] | undefined, asOf?: string | Date):
   for (let i = closes.length - smooth; i < closes.length; i++) sum += (closes[i] / trend[i] - 1) * 100;
   const trendGap = sum / smooth;
 
-  const fast = emaSeries(closes, W(MOM_FAST)), slow = emaSeries(closes, W(MOM_SLOW));
-  const line = closes.map((c, i) => ((fast[i] - slow[i]) / c) * 100);
-  const signal = emaSeries(line, W(MOM_SIGNAL));
-  const last = closes.length - 1;
-  const momentum = line[last] - signal[last];
+  const vol = rollingVol(closes, W(VOL_SPAN));
+  const known = vol.filter((v): v is number => v != null);
+  if (!known.length) return null;
+  // Median of what is known, for the bars before the volatility window is full: a
+  // zero there would turn the floor into the only threshold and cut the early legs
+  // at 2% regardless of what the asset normally does.
+  const sorted = [...known].sort((a, b) => a - b);
+  const momentum = swingPosition(closes, vol, sorted[sorted.length >> 1]);
 
   if (!isFinite(trendGap) || !isFinite(momentum)) return null;
   return { trendGap, momentum };
