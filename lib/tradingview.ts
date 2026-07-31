@@ -109,12 +109,19 @@ export function tradingViewSymbol(symbol: string, group?: string): string | null
   const crypto = /^([A-Z0-9]{2,10})-USD$/.exec(s);
   if (crypto) return `CRYPTO:${crypto[1]}USD`;
 
-  // FX: 'EURUSD=X' → 'FX:EURUSD'. Yahoo also writes single-currency pairs against
-  // the dollar as 'JPY=X', which means USD/JPY.
+  // FX: 'EURUSD=X' → 'FX_IDC:EURUSD'. Yahoo also writes a pair against the dollar as
+  // 'JPY=X', which means USD/JPY.
+  //
+  // FX_IDC and not FX. The FX feed is a broker's book: it carries the majors and only
+  // in the market's own direction, so USD/GBP, USD/AUD and USD/NZD — which this app
+  // charts that way round — are simply absent from it, as are USD/INR, USD/BRL and the
+  // renminbi crosses. FX_IDC is an indicative rate feed that carries every pair in
+  // either direction, which is also what Yahoo's own rates are, so the two series
+  // actually correspond.
   const fxPair = /^([A-Z]{6})=X$/.exec(s);
-  if (fxPair) return `FX:${fxPair[1]}`;
+  if (fxPair) return `FX_IDC:${fxPair[1]}`;
   const fxSingle = /^([A-Z]{3})=X$/.exec(s);
-  if (fxSingle) return `FX:USD${fxSingle[1]}`;
+  if (fxSingle) return `FX_IDC:USD${fxSingle[1]}`;
 
   const listing = /^([A-Z0-9]{1,8})\.([A-Z]{1,3})$/.exec(s);
   if (listing && SUFFIX_EXCHANGE[listing[2]]) return `${SUFFIX_EXCHANGE[listing[2]]}:${listing[1]}`;

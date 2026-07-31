@@ -92,7 +92,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
             )}
             <ReturnsTableButton name={name} symbol={symbol} />
               <QuadrantButton name={name} symbol={symbol} group={group} />
-            <TradingViewButton symbol={symbol} group={group} />
+            <TradingViewButton symbol={symbol} name={name} group={group} />
             <GeminiCommentButton key={symbol} name={name} symbol={symbol} assetClass={group}
               price={q?.price} dayPct={q?.changePercent} />
           </div>

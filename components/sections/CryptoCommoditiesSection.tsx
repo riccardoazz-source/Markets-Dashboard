@@ -362,7 +362,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
               )}
               <ReturnsTableButton name={selectedCrypto.name} symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} />
               <QuadrantButton name={selectedCrypto.name} symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} group="Crypto" />
-              <TradingViewButton symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} group="Crypto" />
+              <TradingViewButton symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} name={selectedCrypto.name} group="Crypto" />
               <GeminiCommentButton
                 key={selected}
                 name={selectedCrypto.name}

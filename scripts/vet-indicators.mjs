@@ -240,6 +240,7 @@ for (const [group, syms] of [
   ['Commodities', CFG.COMMODITIES.map(i => i.symbol)],
   ['Sectors', CFG.SECTORS.map(i => i.symbol)],
   ['Crypto', Object.values(CFG.CRYPTO_YAHOO_SYMBOLS)],
+  ['Currencies', CFG.CURRENCY_PAIRS.map(p => p.symbol)],
 ]) {
   const missing = syms.filter(s => !TV.tradingViewSymbol(s, group));
   ok(`${group}: all ${syms.length} map`, missing.length === 0, missing.join(', '));
@@ -249,8 +250,12 @@ ok('^GSPC is the S&P index, not a ticker called GSPC', TV.tradingViewSymbol('^GS
 ok('SI=F is silver futures, not the company SI', TV.tradingViewSymbol('SI=F') === 'COMEX:SI1!');
 ok('GC=F is gold futures', TV.tradingViewSymbol('GC=F') === 'COMEX:GC1!');
 ok('BTC-USD is the crypto index', TV.tradingViewSymbol('BTC-USD') === 'CRYPTO:BTCUSD');
-ok('JPY=X means USD/JPY', TV.tradingViewSymbol('JPY=X') === 'FX:USDJPY');
-ok('EURUSD=X is the pair as written', TV.tradingViewSymbol('EURUSD=X') === 'FX:EURUSD');
+ok('JPY=X means USD/JPY', TV.tradingViewSymbol('JPY=X') === 'FX_IDC:USDJPY');
+ok('EURUSD=X is the pair as written', TV.tradingViewSymbol('EURUSD=X') === 'FX_IDC:EURUSD');
+// The app charts some pairs the opposite way round from the market's convention, and a
+// broker feed does not carry those at all — the indicative feed does, in both directions.
+ok('an inverted major keeps its direction', TV.tradingViewSymbol('USDGBP=X') === 'FX_IDC:USDGBP');
+ok('an emerging cross is covered', TV.tradingViewSymbol('EURBRL=X') === 'FX_IDC:EURBRL');
 ok('a London listing keeps its venue', TV.tradingViewSymbol('EIMI.L') === 'LSE:EIMI');
 ok('a plain US ticker is passed through', TV.tradingViewSymbol('MU') === 'MU');
 ok('an unmappable symbol yields no link',

@@ -412,7 +412,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               )}
               <ReturnsTableButton name={selectedSector?.name ?? selected!} symbol={selected!} />
               <QuadrantButton name={selectedSector?.name ?? selected!} symbol={selected!} group="Sectors" />
-              <TradingViewButton symbol={selected!} group="Sectors" />
+              <TradingViewButton symbol={selected!} name={selectedSector?.name ?? selected!} group="Sectors" />
               {/* Sector ETFs distribute, so this is where the drawer earns its place.
                   Offered only when there are dividends behind it. */}
               {divData && divData.dividends.length > 0 && (

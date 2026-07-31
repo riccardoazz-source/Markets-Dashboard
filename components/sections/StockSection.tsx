@@ -1619,7 +1619,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               )}
               <ReturnsTableButton name={selected.name} symbol={selected.symbol} />
               <QuadrantButton name={selected.name} symbol={selected.symbol} group="Stocks" stocks={watchlistSymbols} />
-              <TradingViewButton symbol={selected.symbol} group="Stocks" />
+              <TradingViewButton symbol={selected.symbol} name={selected.name} group="Stocks" />
               <FundamentalsButton name={selected.name} symbol={selected.symbol} subtitle="Stocks">
                 <StockFundamentals
                   symbol={selected.symbol}

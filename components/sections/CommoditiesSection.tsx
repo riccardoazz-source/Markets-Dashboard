@@ -295,7 +295,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
               )}
               <ReturnsTableButton name={selectedConfig?.name ?? selected!} symbol={selected!} />
               <QuadrantButton name={selectedConfig?.name ?? selected!} symbol={selected!} group="Commodities" />
-              <TradingViewButton symbol={selected!} group="Commodities" />
+              <TradingViewButton symbol={selected!} name={selectedConfig?.name ?? selected!} group="Commodities" />
               <GeminiCommentButton
                 key={selected!}
                 name={selectedConfig?.name ?? selected!}

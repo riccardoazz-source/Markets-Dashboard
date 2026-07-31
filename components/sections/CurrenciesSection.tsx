@@ -18,6 +18,7 @@ import { ArrowRight, RefreshCw, BarChart2 } from 'lucide-react';
 import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
+import { TradingViewButton } from '@/components/ui/TradingViewButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 
 interface CurrencyRate {
@@ -294,6 +295,11 @@ export function CurrenciesSection({ jumpTo, onCompare }: { jumpTo?: string | nul
                 </button>
               )}
               <ReturnsTableButton name={`${selected.from}/${selected.to}`} symbol={`${selected.from}${selected.to}=X`} />
+              <TradingViewButton
+                symbol={`${selected.from}${selected.to}=X`}
+                name={`${selected.from}/${selected.to}`}
+                group="Currency"
+              />
               <GeminiCommentButton
                 key={`${selected.from}${selected.to}`}
                 name={`${selected.from}/${selected.to}`}
