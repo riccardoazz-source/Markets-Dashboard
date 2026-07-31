@@ -38,6 +38,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { TradingViewButton } from '@/components/ui/TradingViewButton';
 import { FundamentalsButton } from '@/components/ui/FundamentalsButton';
 import { VolumeSubChart, CyclePane, RSISubChart, MACDSubChart, MomentumSubChart, SYNC_AXIS_WIDTH } from '@/components/charts/PriceChart';
 import { publishChartRows, clearChartRows, type ExportRow } from '@/lib/chartExport';
@@ -1618,6 +1619,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
               )}
               <ReturnsTableButton name={selected.name} symbol={selected.symbol} />
               <QuadrantButton name={selected.name} symbol={selected.symbol} group="Stocks" stocks={watchlistSymbols} />
+              <TradingViewButton symbol={selected.symbol} group="Stocks" />
               <FundamentalsButton name={selected.name} symbol={selected.symbol} subtitle="Stocks">
                 <StockFundamentals
                   symbol={selected.symbol}

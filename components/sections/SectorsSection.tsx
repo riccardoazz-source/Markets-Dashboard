@@ -24,6 +24,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { TradingViewButton } from '@/components/ui/TradingViewButton';
 import { FundamentalsButton } from '@/components/ui/FundamentalsButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
@@ -411,6 +412,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               )}
               <ReturnsTableButton name={selectedSector?.name ?? selected!} symbol={selected!} />
               <QuadrantButton name={selectedSector?.name ?? selected!} symbol={selected!} group="Sectors" />
+              <TradingViewButton symbol={selected!} group="Sectors" />
               {/* Sector ETFs distribute, so this is where the drawer earns its place.
                   Offered only when there are dividends behind it. */}
               {divData && divData.dividends.length > 0 && (

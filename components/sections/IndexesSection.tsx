@@ -23,6 +23,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { TradingViewButton } from '@/components/ui/TradingViewButton';
 import { FundamentalsButton } from '@/components/ui/FundamentalsButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
@@ -357,6 +358,7 @@ export function IndexesSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
               )}
               <ReturnsTableButton name={selectedConfig?.name ?? selected!} symbol={selected!} />
               <QuadrantButton name={selectedConfig?.name ?? selected!} symbol={selected!} group="Indexes" />
+              <TradingViewButton symbol={selected!} group="Indexes" />
               {/* Only offered when there is something behind it: most indexes
                   distribute nothing, and an empty drawer is worse than no button. */}
               {divData && divData.dividends.length > 0 && (

@@ -15,11 +15,13 @@ import { join } from 'node:path';
 
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
-  'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', '--outDir', out,
+  'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 const I = await import(join(out, 'indicators.js'));
 const Q = await import(join(out, 'rotationPhase.js'));
+const TV = await import(join(out, 'tradingview.js'));
+const CFG = await import(join(out, 'config.js'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, note = '') => {
@@ -229,6 +231,32 @@ const cut = steady[700].date;
 const asOf = Q.trendAxes(steady, cut), truncated = Q.trendAxes(steady.slice(0, 701));
 ok('as-of reads no forward data',
    near(asOf.trendGap, truncated.trendGap, 1e-12) && near(asOf.momentum, truncated.momentum, 1e-12));
+
+console.log('\nTradingView links — every configured asset must map, and map correctly');
+// Coverage: an asset added to config.ts with no mapping loses its button silently,
+// which is exactly the kind of regression nobody notices until they need the link.
+for (const [group, syms] of [
+  ['Indexes', CFG.INDEXES.map(i => i.symbol)],
+  ['Commodities', CFG.COMMODITIES.map(i => i.symbol)],
+  ['Sectors', CFG.SECTORS.map(i => i.symbol)],
+  ['Crypto', Object.values(CFG.CRYPTO_YAHOO_SYMBOLS)],
+]) {
+  const missing = syms.filter(s => !TV.tradingViewSymbol(s, group));
+  ok(`${group}: all ${syms.length} map`, missing.length === 0, missing.join(', '));
+}
+// Correctness on the cases where a wrong answer opens a real chart of the wrong thing.
+ok('^GSPC is the S&P index, not a ticker called GSPC', TV.tradingViewSymbol('^GSPC') === 'TVC:SPX');
+ok('SI=F is silver futures, not the company SI', TV.tradingViewSymbol('SI=F') === 'COMEX:SI1!');
+ok('GC=F is gold futures', TV.tradingViewSymbol('GC=F') === 'COMEX:GC1!');
+ok('BTC-USD is the crypto index', TV.tradingViewSymbol('BTC-USD') === 'CRYPTO:BTCUSD');
+ok('JPY=X means USD/JPY', TV.tradingViewSymbol('JPY=X') === 'FX:USDJPY');
+ok('EURUSD=X is the pair as written', TV.tradingViewSymbol('EURUSD=X') === 'FX:EURUSD');
+ok('a London listing keeps its venue', TV.tradingViewSymbol('EIMI.L') === 'LSE:EIMI');
+ok('a plain US ticker is passed through', TV.tradingViewSymbol('MU') === 'MU');
+ok('an unmappable symbol yields no link',
+   TV.tradingViewSymbol('^UNKNOWNIDX') === null && TV.tradingViewUrl('^UNKNOWNIDX') === null);
+ok('the URL carries the encoded symbol',
+   TV.tradingViewUrl('^GSPC') === 'https://www.tradingview.com/chart/?symbol=TVC%3ASPX');
 
 rmSync(out, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed\n`);
