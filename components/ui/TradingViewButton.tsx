@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { CandlestickChart, ExternalLink, X } from 'lucide-react';
-import { tradingViewSymbol, tradingViewUrl, tradingViewCanEmbed, tradingViewIsProxy } from '@/lib/tradingview';
+import { tradingViewSymbol, tradingViewIsProxy } from '@/lib/tradingview';
 
 /**
  * "TradingView" — opens THIS asset's TradingView chart in a panel, like Quadrant and
@@ -13,11 +13,16 @@ import { tradingViewSymbol, tradingViewUrl, tradingViewCanEmbed, tradingViewIsPr
  * and would render an empty box.
  *
  * The symbol is RESOLVED against TradingView's search before the chart is drawn (see
- * /api/tv-symbol). That check exists because the embed does not raise an error for a
- * symbol it does not know: it silently loads its default, which is how a mistaken
- * "TVC:KOSPI" came up showing Apple. A wrong chart that looks right is the one thing
- * this component must never do, so the header always carries both symbols and the
- * name TradingView itself gives the instrument.
+ * /api/tv-symbol), because the embed does not raise an error for a symbol it does not
+ * know: it silently loads its default.
+ *
+ * That still is not a guarantee. Some exchanges — KRX, SGX and others that require an
+ * entitlement — are correct symbols the embed simply may not serve, and there too it
+ * draws its default instead of complaining. Nothing in the page can detect that: the
+ * frame is another origin. So the panel opens for every asset, and the two defences are
+ * the ones a reader can actually use — the header carries our symbol, TradingView's,
+ * and the name TRADINGVIEW gives the instrument, and "Full site" opens the real chart,
+ * which does serve those exchanges.
  */
 interface Resolved { tv: string | null; description?: string; verified: boolean; corrected?: boolean }
 
@@ -33,18 +38,6 @@ export function TradingViewButton({ symbol, name, group }: {
   if (!candidate) return null;
 
   const cls = 'flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] sm:text-xs font-medium';
-
-  // A venue the embed cannot serve goes straight to the full site, where it works,
-  // rather than into a panel that would draw TradingView's default instrument.
-  if (!tradingViewCanEmbed(candidate)) {
-    return (
-      <a href={tradingViewUrl(symbol, group) ?? '#'} target="_blank" rel="noopener noreferrer" className={cls}
-        title={`Open ${candidate} on TradingView — this exchange cannot be shown in an embedded chart`}>
-        <ExternalLink size={13} />
-        <span className="hidden sm:inline">TradingView</span>
-      </a>
-    );
-  }
 
   return (
     <>
@@ -139,21 +132,7 @@ function TradingViewPanel({ symbol, name, group, onClose }: {
         )}
 
         <div className="bg-[#131722]" style={{ height: 'min(72vh, 620px)' }}>
-          {res?.tv && !tradingViewCanEmbed(res.tv) ? (
-            <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
-              <p className="text-xs text-gray-500 max-w-md">
-                TradingView cannot show <span className="text-gray-300">{res.tv}</span> in an embedded chart — that
-                exchange needs an entitlement, and the embed would silently draw a different instrument instead.
-                The full site opens it correctly.
-              </p>
-              {url && (
-                <a href={url} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-accent/50 text-accent hover:bg-accent/10 transition-colors text-xs font-medium">
-                  <ExternalLink size={13} /> Open on TradingView
-                </a>
-              )}
-            </div>
-          ) : failed || (res && !res.tv) ? (
+          {failed || (res && !res.tv) ? (
             <div className="h-full flex items-center justify-center px-6 text-center">
               <p className="text-xs text-gray-500 max-w-md">
                 TradingView has no chart for <span className="text-gray-300">{symbol}</span>.
