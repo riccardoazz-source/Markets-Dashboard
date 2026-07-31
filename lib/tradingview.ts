@@ -146,6 +146,31 @@ export function tradingViewSymbol(symbol: string, group?: string): string | null
   return null;
 }
 
+/**
+ * Venues an anonymous TradingView EMBED is allowed to draw.
+ *
+ * This is a different question from whether the symbol is right, and it caught us out:
+ * KRX:KOSPI and SGX:STI are correct — the full site opens exactly the right index —
+ * but the embed cannot serve an exchange that requires an entitlement, and instead of
+ * saying so it draws its default instrument. That is how a correct symbol produced a
+ * chart of Apple.
+ *
+ * TradingView's own feeds (TVC, FX_IDC, CRYPTO) and the US venues are served to
+ * anyone. For everything else the button opens the full site instead of framing a
+ * chart that may quietly be somebody else's.
+ */
+const EMBEDDABLE = new Set([
+  'TVC', 'FX_IDC', 'FX', 'CRYPTO', 'NASDAQ', 'NYSE', 'AMEX', 'CBOE',
+  'COMEX', 'NYMEX', 'CBOT', 'ICEUS', 'BINANCE', 'COINBASE',
+]);
+
+/** Can an anonymous embed draw this symbol, or does it need the full site? */
+export function tradingViewCanEmbed(tv: string | null | undefined): boolean {
+  if (!tv) return false;
+  if (!tv.includes(':')) return true;              // a bare US ticker
+  return EMBEDDABLE.has(tv.split(':')[0].toUpperCase());
+}
+
 /** Chart URL for a symbol, or null when it cannot be mapped safely. */
 export function tradingViewUrl(symbol: string, group?: string): string | null {
   const tv = tradingViewSymbol(symbol, group);

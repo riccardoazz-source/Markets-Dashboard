@@ -262,6 +262,16 @@ ok('a plain US ticker is passed through', TV.tradingViewSymbol('MU') === 'MU');
 // candidate now (/api/tv-symbol verifies it), but a known-dead entry has no business
 // being the candidate.
 ok('KOSPI is on KRX, not TVC', TV.tradingViewSymbol('^KS11') === 'KRX:KOSPI');
+// Whether the symbol is RIGHT and whether the embed may DRAW it are two questions, and
+// conflating them is what put Apple on screen: KRX:KOSPI is correct, and an anonymous
+// embed still cannot serve it, so that one has to open the full site instead.
+ok('an entitled exchange is not embeddable', TV.tradingViewCanEmbed('KRX:KOSPI') === false);
+ok('TradingView\'s own feeds are embeddable', TV.tradingViewCanEmbed('TVC:SPX') === true
+   && TV.tradingViewCanEmbed('FX_IDC:EURUSD') === true && TV.tradingViewCanEmbed('CRYPTO:BTCUSD') === true);
+ok('US venues and bare tickers are embeddable',
+   TV.tradingViewCanEmbed('AMEX:URTH') === true && TV.tradingViewCanEmbed('MU') === true
+   && TV.tradingViewCanEmbed('COMEX:GC1!') === true);
+ok('nothing is not embeddable', TV.tradingViewCanEmbed(null) === false);
 ok('an unmappable symbol yields no link',
    TV.tradingViewSymbol('^UNKNOWNIDX') === null && TV.tradingViewUrl('^UNKNOWNIDX') === null);
 ok('the URL carries the encoded symbol',

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { CandlestickChart, ExternalLink, X } from 'lucide-react';
-import { tradingViewSymbol, tradingViewIsProxy } from '@/lib/tradingview';
+import { tradingViewSymbol, tradingViewUrl, tradingViewCanEmbed, tradingViewIsProxy } from '@/lib/tradingview';
 
 /**
  * "TradingView" — opens THIS asset's TradingView chart in a panel, like Quadrant and
@@ -28,14 +28,30 @@ export function TradingViewButton({ symbol, name, group }: {
   group?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const candidate = tradingViewSymbol(symbol, group);
   // Nothing in our table means nothing to even ask about.
-  if (!tradingViewSymbol(symbol, group)) return null;
+  if (!candidate) return null;
+
+  const cls = 'flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] sm:text-xs font-medium';
+
+  // A venue the embed cannot serve goes straight to the full site, where it works,
+  // rather than into a panel that would draw TradingView's default instrument.
+  if (!tradingViewCanEmbed(candidate)) {
+    return (
+      <a href={tradingViewUrl(symbol, group) ?? '#'} target="_blank" rel="noopener noreferrer" className={cls}
+        title={`Open ${candidate} on TradingView — this exchange cannot be shown in an embedded chart`}>
+        <ExternalLink size={13} />
+        <span className="hidden sm:inline">TradingView</span>
+      </a>
+    );
+  }
+
   return (
     <>
       <button
         onClick={() => setOpen(true)}
         title="Open the TradingView chart for this asset"
-        className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] sm:text-xs font-medium"
+        className={cls}
       >
         <CandlestickChart size={13} />
         <span className="hidden sm:inline">TradingView</span>
@@ -123,7 +139,21 @@ function TradingViewPanel({ symbol, name, group, onClose }: {
         )}
 
         <div className="bg-[#131722]" style={{ height: 'min(72vh, 620px)' }}>
-          {failed || (res && !res.tv) ? (
+          {res?.tv && !tradingViewCanEmbed(res.tv) ? (
+            <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
+              <p className="text-xs text-gray-500 max-w-md">
+                TradingView cannot show <span className="text-gray-300">{res.tv}</span> in an embedded chart — that
+                exchange needs an entitlement, and the embed would silently draw a different instrument instead.
+                The full site opens it correctly.
+              </p>
+              {url && (
+                <a href={url} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-accent/50 text-accent hover:bg-accent/10 transition-colors text-xs font-medium">
+                  <ExternalLink size={13} /> Open on TradingView
+                </a>
+              )}
+            </div>
+          ) : failed || (res && !res.tv) ? (
             <div className="h-full flex items-center justify-center px-6 text-center">
               <p className="text-xs text-gray-500 max-w-md">
                 TradingView has no chart for <span className="text-gray-300">{symbol}</span>.
