@@ -12,7 +12,13 @@
 // case the caller shows no button rather than a misleading one.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Indices. TVC: is TradingView's own index feed and needs no exchange entitlement. */
+/**
+ * Indices. TVC: is TradingView's own index feed and needs no exchange entitlement.
+ *
+ * These are CANDIDATES, not answers: /api/tv-symbol checks each one against
+ * TradingView's symbol search and replaces it when it does not exist, because their
+ * embed draws its default instrument for an unknown symbol instead of failing.
+ */
 const INDEX_MAP: Record<string, string> = {
   '^GSPC': 'TVC:SPX',
   '^NDX': 'TVC:NDX',
@@ -28,7 +34,9 @@ const INDEX_MAP: Record<string, string> = {
   '^HSI': 'TVC:HSI',
   '^STI': 'TVC:STI',
   '^BSESN': 'BSE:SENSEX',
-  '^KS11': 'TVC:KOSPI',
+  // TVC has no KOSPI: the embed answered a request for it by quietly drawing Apple,
+  // which is why every symbol is now checked against TradingView's search before use.
+  '^KS11': 'KRX:KOSPI',
   '^AXJO': 'ASX:XJO',
   '^GSPTSE': 'TSX:TSX',
   '^BVSP': 'BMFBOVESPA:IBOV',

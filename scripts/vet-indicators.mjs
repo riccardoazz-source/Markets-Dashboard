@@ -258,6 +258,10 @@ ok('an inverted major keeps its direction', TV.tradingViewSymbol('USDGBP=X') ===
 ok('an emerging cross is covered', TV.tradingViewSymbol('EURBRL=X') === 'FX_IDC:EURBRL');
 ok('a London listing keeps its venue', TV.tradingViewSymbol('EIMI.L') === 'LSE:EIMI');
 ok('a plain US ticker is passed through', TV.tradingViewSymbol('MU') === 'MU');
+// TVC has no KOSPI — asking for it made the embed draw Apple. The table is only ever a
+// candidate now (/api/tv-symbol verifies it), but a known-dead entry has no business
+// being the candidate.
+ok('KOSPI is on KRX, not TVC', TV.tradingViewSymbol('^KS11') === 'KRX:KOSPI');
 ok('an unmappable symbol yields no link',
    TV.tradingViewSymbol('^UNKNOWNIDX') === null && TV.tradingViewUrl('^UNKNOWNIDX') === null);
 ok('the URL carries the encoded symbol',
