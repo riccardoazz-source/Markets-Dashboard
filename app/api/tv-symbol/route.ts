@@ -16,8 +16,10 @@ export const runtime = 'edge';
 // still matters: it says which of several matches is the right one (SPX on TVC, not
 // a fund called SPX), and the search only has to confirm it.
 //
-// Anything unresolvable comes back with tv: null, and the UI shows no chart rather
-// than someone else's.
+// It can only ever CORRECT the table, never overrule it into silence: whatever
+// happens here, the answer falls back to the table's symbol, because the UI draws that
+// one immediately and a verifier that can take the chart away is worse than the mistake
+// it was added to catch.
 
 interface Resolved {
   tv: string | null;
@@ -111,9 +113,12 @@ export async function GET(req: Request) {
       data = { tv: `${match.exchange}:${match.symbol}`, description: match.description, verified: true };
     } else {
       const best = bestFor(hits, group, ticker);
+      // No confident replacement: keep the table's symbol. It may be right — the search
+      // does not index everything the charts carry — and it is certainly better than
+      // nothing, which is what the reader would otherwise get.
       data = best
         ? { tv: `${best.exchange}:${best.symbol}`, description: best.description, verified: true, corrected: true }
-        : { tv: null, verified: true };
+        : { tv: candidate, verified: false };
     }
   } catch {
     // Search unreachable: fall back to the table and SAY it is unverified, so the UI

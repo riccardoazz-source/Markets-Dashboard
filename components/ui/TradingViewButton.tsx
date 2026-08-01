@@ -12,17 +12,19 @@ import { tradingViewSymbol, tradingViewIsProxy } from '@/lib/tradingview';
  * only page of theirs that may be framed — tradingview.com/chart sets X-Frame-Options
  * and would render an empty box.
  *
- * The symbol is RESOLVED against TradingView's search before the chart is drawn (see
- * /api/tv-symbol), because the embed does not raise an error for a symbol it does not
- * know: it silently loads its default.
+ * The chart is drawn IMMEDIATELY from the table in lib/tradingview.ts. /api/tv-symbol
+ * then asks TradingView's search whether that symbol exists and may swap in a better
+ * one, but it can only ever correct the chart — never delay it and never withhold it.
+ * The first version of this had the resolver decide whether to draw at all, and one
+ * unexpected answer from their search took every chart down at once; a check that can
+ * turn the feature off is worse than the mistake it was added to catch.
  *
- * That still is not a guarantee. Some exchanges — KRX, SGX and others that require an
- * entitlement — are correct symbols the embed simply may not serve, and there too it
- * draws its default instead of complaining. Nothing in the page can detect that: the
- * frame is another origin. So the panel opens for every asset, and the two defences are
- * the ones a reader can actually use — the header carries our symbol, TradingView's,
- * and the name TRADINGVIEW gives the instrument, and "Full site" opens the real chart,
- * which does serve those exchanges.
+ * Even a verified symbol is not a guarantee: exchanges that require an entitlement —
+ * KRX, SGX and others — are correct symbols the embed may not serve, and there too it
+ * draws its default rather than complaining. Nothing in the page can detect that, the
+ * frame being another origin. So the two defences are the ones a reader can use: the
+ * header carries our symbol, TradingView's, and the name TRADINGVIEW gives the
+ * instrument, and "Full site" opens the real chart, which does serve those exchanges.
  */
 interface Resolved { tv: string | null; description?: string; verified: boolean; corrected?: boolean }
 
@@ -58,20 +60,21 @@ function TradingViewPanel({ symbol, name, group, onClose }: {
   symbol: string; name?: string; group?: string; onClose: () => void;
 }) {
   const [res, setRes] = useState<Resolved | null>(null);
-  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const q = new URLSearchParams({ symbol, name: name ?? '', group: group ?? '' });
     fetch(`/api/tv-symbol?${q}`)
       .then(r => r.json())
-      .then((d: Resolved) => { if (!cancelled) setRes(d); })
-      .catch(() => { if (!cancelled) setFailed(true); });
+      .then((d: Resolved) => { if (!cancelled && d?.tv) setRes(d); })
+      .catch(() => {/* the table's symbol is already on screen; nothing to do */});
     return () => { cancelled = true; };
   }, [symbol, name, group]);
 
   const proxy = tradingViewIsProxy(symbol);
-  const tv = res?.tv ?? null;
+  // The table first, the resolver only if it came back with something. This is why the
+  // chart appears at once and why an unreachable resolver costs nothing.
+  const tv = res?.tv ?? tradingViewSymbol(symbol, group);
   const url = tv ? `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tv)}` : null;
 
   // Their embed reads its configuration from the query string. Daily candles, dark to
@@ -120,11 +123,6 @@ function TradingViewPanel({ symbol, name, group, onClose }: {
           </button>
         </div>
 
-        {res && !res.verified && (
-          <p className="text-[10px] text-amber-400 bg-amber-400/10 px-3 py-1.5">
-            ⚠ TradingView&apos;s symbol search could not be reached, so this symbol is unverified — check the name on the chart matches the asset.
-          </p>
-        )}
         {res?.corrected && (
           <p className="text-[10px] text-gray-500 px-3 py-1.5">
             Resolved by TradingView&apos;s search — our own mapping for this asset did not exist there.
@@ -132,17 +130,9 @@ function TradingViewPanel({ symbol, name, group, onClose }: {
         )}
 
         <div className="bg-[#131722]" style={{ height: 'min(72vh, 620px)' }}>
-          {failed || (res && !res.tv) ? (
-            <div className="h-full flex items-center justify-center px-6 text-center">
-              <p className="text-xs text-gray-500 max-w-md">
-                TradingView has no chart for <span className="text-gray-300">{symbol}</span>.
-                Rather than draw someone else&apos;s instrument, this shows nothing.
-              </p>
-            </div>
-          ) : !src ? (
-            <div className="h-full flex items-center justify-center text-xs text-gray-600">Resolving symbol…</div>
-          ) : (
+          {src ? (
             <iframe
+              key={src}
               src={src}
               title={`TradingView chart — ${tv}`}
               className="w-full h-full block"
@@ -150,6 +140,12 @@ function TradingViewPanel({ symbol, name, group, onClose }: {
               allow="clipboard-write"
               referrerPolicy="origin"
             />
+          ) : (
+            <div className="h-full flex items-center justify-center px-6 text-center">
+              <p className="text-xs text-gray-500 max-w-md">
+                TradingView has no chart for <span className="text-gray-300">{symbol}</span>.
+              </p>
+            </div>
           )}
         </div>
       </div>
