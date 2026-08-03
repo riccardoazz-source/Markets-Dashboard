@@ -3,9 +3,10 @@
 //
 // The four areas are defined the way the chart is read:
 //
-//   X = TREND GAP — how far the price is from its own 40-day trend, in %,
-//                   averaged over a month so it does not jitter.
-//                   Above zero = in an up-leg, below zero = in a down-leg.
+//   X = RANGE POSITION — how far the price is from the MIDDLE of its own 40-day
+//                   range, in %, averaged over three weeks, less a penalty when the
+//                   market is more agitated than that asset's own normal.
+//                   Above zero = in the upper half of its range, below = the lower.
 //   Y = SWING     — where the price is inside the leg it is currently travelling:
 //                   % ABOVE the low the up-leg started from (+), or % BELOW the high
 //                   the down-leg started from (−). The leg only turns when the price
@@ -43,32 +44,41 @@
 //
 // WHY 0.75 SIGMA. The reversal threshold trades the quality of the AVERAGES against the
 // quality of the TRANSITIONS, and the two peak at different places. At 0.5σ the averages
-// are strongest (Trending +5.7%, Fading −1.2%, Lagging −2.3%) but half the Recovering
-// calls fall straight back to Lagging, because small bounces fail. At 1σ the transitions
-// are strongest (Recovering → Trending 72%, Fading → Lagging 67%) but Lagging turns
-// positive at the median, because a threshold that large keeps the label on through the
-// rebound. 0.75σ is the only setting that beats the previous model on EVERY one of those
-// six numbers at once, and it sits in the middle of the curve rather than on a peak — so
-// it is a choice about robustness, not a parameter fitted to these eight assets.
+// are strongest but half the Recovering calls fall straight back to Lagging, because
+// small bounces fail. At 1σ the transitions are strongest but Lagging turns positive at
+// the median, because a threshold that large keeps the label on through the rebound.
+// 0.75σ is the only setting that beats the previous model on every one of those six
+// numbers at once, and it sits mid-curve rather than on a peak.
 //
-// WHY 40 DAYS AND NOT 100. A 100-day trend missed a third of the real bottoms, and for a
-// single reason: at 91% of the misses the price was still ABOVE that trend when it turned
-// — median +5.6% above, only 13% off its 52-week high. The dip never took it into the
-// lower half, so X > 0 forced the top half and the turn came out as Trending instead of
-// Recovering. A 40-day trend lets an ordinary pullback cross the axis, which is what the
-// label is for:
+// WHY THE MIDDLE OF A RANGE, AND NOT A MOVING AVERAGE. X used to be the gap to a 40-day
+// EMA. The variable was chosen by profiling what actually HAPPENS inside each state —
+// not what the levels are — on ten assets, NASDAQ 100 back to 1985 and Healthcare to
+// 1998, against the swing ground truth. How much more likely an event is inside a state
+// than on an average day:
 //
-//                     swing lows flagged   swing highs flagged   clockwise
-//   100-day trend             67%                  78%              64%
-//    40-day trend             76%                  80%              70%
+//                                      Recovering  Trending  Fading  Lagging
+//   new 20-day low                           0.70      0.04    0.85     3.23
+//   new 52-week high                         0.72      2.10    0.56     0.00
+//   MACD line crosses above zero             1.73      1.01    0.58     0.20
+//   MACD crosses below its signal            0.56      0.85    1.74     1.28
+//   MACD histogram tops out                  0.76      0.90    1.64     0.96
+//   RSI crosses above 30                     1.50      0.25    0.56     1.88
 //
-// A drawdown-from-the-52-week-high axis was tried too, since that was the one variable
-// with real separation at the turn. It flags 84-91% of bottoms and ruins everything else:
-// "near the high" becomes so narrow that Fading only fires while the price is still
-// ripping (+62% to +139%/yr during the phase — a sell label on a rally), the tops fall to
-// 34-46%, and rotation drops to 45-50% clockwise. Rejected on those numbers.
+// New highs against new lows is the sharpest separation in the whole study — 1.84 vs
+// 0.04 in Trending, 0.01 vs 3.23 in Lagging, ratios of 40:1 and 80:1 — and the distance
+// from the middle of a range is exactly that, measured continuously and in % of price so
+// the radius still means the size of the move. Swapping it in moved every magnitude by
+// less than one standard error (Recovering +1.4→+1.0 ±0.2, Lagging −1.6→−1.3 ±0.3) and
+// moved the rotation far outside it: Recovering→Trending 57%→65% and Fading→Lagging
+// 43%→57%, on ~570 bands, which is 3.8 and 6.7 standard errors.
 //
-// WHAT THE SEARCH ALSO SHOWED, because it constrains what this model can promise:
+// The volatility term comes from the same profile, and it is the only thing there the
+// price axes cannot see: Recovering happens in disorder (21-day volatility +0.19σ above
+// the asset's own normal) and Trending in calm (−0.28σ). Volume, which one would expect
+// to matter, does not: across the four states it ranges from −0.05σ to +0.06σ. It was
+// measured and left out.
+//
+// WHAT THE SEARCH ALSO SHOWED// WHAT THE SEARCH ALSO SHOWED, because it constrains what this model can promise:
 //   • Which HALF of the cycle an asset is in — up-leg or down-leg — is readable from the
 //     data: 69% recall on Trending, 54% on Lagging, 47% balanced against the swing truth
 //     where a coin toss scores 25%.
@@ -98,10 +108,18 @@ export type RotationPhase = 'Recovering' | 'Trending' | 'Fading' | 'Lagging';
 
 export const ROTATION_PHASES: RotationPhase[] = ['Recovering', 'Trending', 'Fading', 'Lagging'];
 
-/** The trend the price is measured against, in trading days. */
-export const TREND_SPAN = 40;
-/** The trend gap is averaged over this many trading days before use. */
-export const TREND_SMOOTH = 21;
+/** The range the price is placed inside, in trading days. */
+export const RANGE_SPAN = 40;
+/** That position is averaged over this many trading days before use. */
+export const RANGE_SMOOTH = 15;
+/**
+ * How much an unusually agitated market pushes X down, as a multiple of the range's own
+ * half-width. Recovering happens in disorder (21-day volatility +0.19σ above the asset's
+ * own normal) and Trending in calm (−0.28σ); this is the only place that fact is used.
+ */
+export const CALM_WEIGHT = 1;
+/** The two windows whose ratio says whether the market is more agitated than usual. */
+export const VOL_FAST = 21;
 /** A leg turns when the price reverses by this multiple of its own monthly volatility. */
 export const SWING_SIGMA = 0.75;
 /** Floor on that reversal, %, so a near-motionless series still needs a real move. */
@@ -114,15 +132,15 @@ export const AXES_LOOKBACK_DAYS = 300;
 /**
  * Which quadrant a point falls in.
  *
- * trendGap: % above (+) or below (−) the asset's own 40-day trend, month-averaged (X).
+ * rangePos: % above (+) or below (−) the middle of the asset's own 40-day range (X).
  * momentum: where the price is inside the leg it is travelling — % above the low an
  * up-leg started from (+), or % below the high a down-leg started from (−) (Y).
  * Null when either is unknown; an asset without enough history has no position in the
  * cycle, and guessing one would be worse than saying nothing.
  */
-export function classifyPhase(trendGap: number | null | undefined, momentum: number | null | undefined): RotationPhase | null {
-  if (trendGap == null || momentum == null) return null;
-  const up = trendGap > 0;
+export function classifyPhase(rangePos: number | null | undefined, momentum: number | null | undefined): RotationPhase | null {
+  if (rangePos == null || momentum == null) return null;
+  const up = rangePos > 0;
   // Exactly zero momentum means nothing has changed, so the leg simply continues.
   if (momentum === 0) return up ? 'Trending' : 'Lagging';
   if (momentum > 0) return up ? 'Trending' : 'Recovering';
@@ -145,7 +163,7 @@ export function classifyPhase(trendGap: number | null | undefined, momentum: num
  */
 export interface QuadrantPosition {
   phase: RotationPhase | null;
-  /** X in %: the month-averaged gap to the 40-day trend. */
+  /** X in %: the averaged distance from the middle of the 40-day range. */
   x: number;
   /** Y in %: how far into the current leg the price has travelled, signed by its direction. */
   y: number;
@@ -156,11 +174,11 @@ export interface QuadrantPosition {
 }
 
 export function quadrantPosition(
-  trendGap: number | null | undefined,
+  rangePos: number | null | undefined,
   momentum: number | null | undefined,
 ): QuadrantPosition | null {
-  if (trendGap == null || momentum == null) return null;
-  const x = trendGap, y = momentum;
+  if (rangePos == null || momentum == null) return null;
+  const x = rangePos, y = momentum;
   const angle = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
   return { phase: classifyPhase(x, y), x, y, radius: Math.hypot(x, y), angle };
 }
@@ -201,8 +219,8 @@ function emaSeries(v: number[], span: number): number[] {
 }
 
 export interface TrendAxes {
-  /** X: % above/below the 40-day trend, averaged over a month. */
-  trendGap: number;
+  /** X: % from the middle of the 40-day range, averaged, less the agitation penalty. */
+  rangePos: number;
   /** Y: % into the current leg — above the low it started from, or below the high. */
   momentum: number;
 }
@@ -275,6 +293,25 @@ function swingPosition(closes: number[], vol: (number | null)[], fallbackVol: nu
  * mean anything — reported rather than approximated, because an EMA-40 seeded ten bars
  * ago is just the last ten bars wearing a longer name.
  */
+/**
+ * Rolling min and max of `closes` over the last `span` bars, for the last `count` bars.
+ * Only the tail is needed — this is called once per plotted date — so a plain scan is
+ * both simpler and faster here than maintaining a deque over the whole history.
+ */
+function rangeTail(closes: number[], span: number, count: number): { mid: number; half: number }[] {
+  const out: { mid: number; half: number }[] = [];
+  for (let i = closes.length - count; i < closes.length; i++) {
+    if (i < span) { out.push({ mid: NaN, half: NaN }); continue; }
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - span + 1; j <= i; j++) { if (closes[j] > hi) hi = closes[j]; if (closes[j] < lo) lo = closes[j]; }
+    const m = (hi + lo) / 2;
+    out.push(m > 0
+      ? { mid: (closes[i] / m - 1) * 100, half: ((hi - lo) / 2 / m) * 100 }
+      : { mid: NaN, half: NaN });
+  }
+  return out;
+}
+
 export function trendAxes(hist: PricePoint[] | undefined, asOf?: string | Date): TrendAxes | null {
   if (!hist || hist.length < 2) return null;
   const asOfStr = asOf == null
@@ -291,47 +328,61 @@ export function trendAxes(hist: PricePoint[] | undefined, asOf?: string | Date):
   const bpm = barsPerMonth(hist.slice(0, lo));
   const scale = bpm / 21;
   const W = (d: number) => Math.max(2, Math.round(d * scale));
-  const spanTrend = W(TREND_SPAN), smooth = W(TREND_SMOOTH);
-  // Two and a half spans of warm-up: below that the "40-day trend" is mostly the seed.
-  if (closes.length < spanTrend * 2.5 + smooth) return null;
-
-  const trend = emaSeries(closes, spanTrend);
-  let sum = 0;
-  for (let i = closes.length - smooth; i < closes.length; i++) sum += (closes[i] / trend[i] - 1) * 100;
-  const trendGap = sum / smooth;
+  const span = W(RANGE_SPAN), smooth = W(RANGE_SMOOTH);
+  if (closes.length < span * 2.5 + smooth) return null;
 
   const vol = rollingVol(closes, W(VOL_SPAN));
+  const volFast = rollingVol(closes, W(VOL_FAST));
   const known = vol.filter((v): v is number => v != null);
   if (!known.length) return null;
   // Median of what is known, for the bars before the volatility window is full: a
   // zero there would turn the floor into the only threshold and cut the early legs
   // at 2% regardless of what the asset normally does.
   const sorted = [...known].sort((a, b) => a - b);
-  const momentum = swingPosition(closes, vol, sorted[sorted.length >> 1]);
+  const volMedian = sorted[sorted.length >> 1];
 
-  if (!isFinite(trendGap) || !isFinite(momentum)) return null;
-  return { trendGap, momentum };
+  // X: how far the price sits from the MIDDLE of its own 40-day range, in % of price,
+  // averaged over three weeks — then pushed down when the market is more agitated than
+  // its own normal, by up to the range's half-width.
+  const tail = rangeTail(closes, span, smooth);
+  let sum = 0, n = 0;
+  for (let k = 0; k < tail.length; k++) {
+    const t = tail[k];
+    if (!isFinite(t.mid)) continue;
+    const i = closes.length - smooth + k;
+    const fast = volFast[i], slow = vol[i] ?? volMedian;
+    const agitation = fast != null && slow ? fast / slow - 1 : 0;
+    sum += t.mid - CALM_WEIGHT * agitation * t.half;
+    n++;
+  }
+  if (n < smooth) return null;
+  const rangePos = sum / n;
+
+  const momentum = swingPosition(closes, vol, volMedian);
+
+  if (!isFinite(rangePos) || !isFinite(momentum)) return null;
+  return { rangePos, momentum };
 }
 
 export const PHASE_META: Record<RotationPhase, { label: string; cls: string; dot: string; hint: string }> = {
   Recovering: {
     label: 'Recovering', dot: '#60a5fa',
     cls: 'bg-blue-500/15 text-blue-300',
-    hint: 'Recovering — still below its own 40-day trend, but momentum has turned up: the fall has stopped and the price is starting to take ground back. The entry.',
+    hint: 'Recovering — still in the lower half of its 40-day range, but the leg has turned up: the fall has stopped and the price is taking ground back. The entry.',
   },
   Trending: {
     label: 'Trending', dot: '#22c55e',
     cls: 'bg-green-500/15 text-green-300',
-    hint: 'Trending — above its own 40-day trend and momentum is still positive: the move is running.',
+    hint: 'Trending — in the upper half of its 40-day range and still advancing: the move is running. This is where new highs happen — twice as often as on an average day.',
   },
   Fading: {
     label: 'Fading', dot: '#d97706',
     cls: 'bg-amber-500/15 text-amber-300',
-    hint: 'Fading — still above its own 40-day trend, but momentum has turned down: the rise is losing pace. The exit.',
+    hint: 'Fading — still in the upper half of its range, but the leg has turned down: MACD crossing below its signal is 1.7× more likely here than on an average day. The exit.',
   },
   Lagging: {
     label: 'Lagging', dot: '#f87171',
     cls: 'bg-red-500/15 text-red-300',
-    hint: 'Lagging — below its own 40-day trend and momentum is still negative: the price is falling, wait for Recovering.',
+    hint: 'Lagging — in the lower half of its range and still giving ground: new 20-day lows are 3.2× more likely here than on an average day. Wait for Recovering.',
   },
 };

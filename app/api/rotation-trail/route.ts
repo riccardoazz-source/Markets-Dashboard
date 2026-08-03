@@ -91,7 +91,7 @@ export async function GET(req: Request) {
   symbols.forEach((s, i) => histMap.set(s, results[i].status === 'fulfilled' ? results[i].value : []));
 
   const meta = new Map(universe.map(m => [m.symbol, m]));
-  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; trendGap: number; momentum: number }[] }>();
+  const trails = new Map<string, { symbol: string; name: string; group: string; points: { date: string; rangePos: number; momentum: number }[] }>();
   for (const s of wanted) {
     const m = meta.get(s);
     trails.set(s, { symbol: s, name: m?.name ?? s, group: m?.group ?? 'Stocks', points: [] });
@@ -105,12 +105,12 @@ export async function GET(req: Request) {
     const inputs = buildInputsAsOf(tracedMeta, histMap, d);
     const dateStr = fmt(d);
     for (const input of inputs) {
-      const pos = quadrantPosition(input.trendGap, input.momentum);
+      const pos = quadrantPosition(input.rangePos, input.momentum);
       if (!pos) continue;
       const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
       trails.get(input.symbol)!.points.push({
         date: dateStr,
-        trendGap: r4(pos.x),
+        rangePos: r4(pos.x),
         momentum: r4(pos.y),
       });
     }

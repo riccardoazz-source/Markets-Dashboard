@@ -19,15 +19,15 @@ import {
 //
 // Every asset is plotted as a dot (see lib/rotationPhase.ts for the definition and
 // the evidence behind it):
-//   X = TREND GAP — how far the price is from its own 40-day trend (%), month-averaged
+//   X = RANGE POSITION — how far the price is from the middle of its own 40-day range (%)
 //   Y = SWING     — % into the leg the price is travelling: above the low it started
 //                   from, or below the high it started from
 //
 // Both splits sit at zero:
-//   Top-right   → Trending:   above its trend and advancing in its leg
-//   Top-left    → Recovering: below its trend but the leg has turned up — entry
-//   Bottom-right→ Fading:     above its trend but the leg has turned down — exit
-//   Bottom-left → Lagging:    below its trend and still giving ground back — wait
+//   Top-right   → Trending:   in the upper half of its range and advancing
+//   Top-left    → Recovering: in the lower half but the leg has turned up — entry
+//   Bottom-right→ Fading:     in the upper half but the leg has turned down — exit
+//   Bottom-left → Lagging:    in the lower half and still giving ground back — wait
 //
 // Accelerating names (top-8 by score) and any clicked rows are drawn bigger and
 // labelled. Labels are placed by a dedicated layer that spaces them apart and
@@ -45,8 +45,8 @@ export interface QuadrantAsset {
   symbol: string;
   name: string;
   group: string;
-  /** x-axis: % above/below its own 40-day trend, month-averaged. */
-  trendGap: number;
+  /** x-axis: % from the middle of its own 40-day range, averaged. */
+  rangePos: number;
   /** y-axis: % into the current leg, signed by its direction. Both axes are the
    *  asset's own absolute numbers and centred on zero, so distance from the centre
    *  is the SIZE of the swing — an index orbits small, a high-beta name wide — and
@@ -114,7 +114,7 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
   const p = payload[0].payload;
   const color = GROUP_COLORS[p.group] ?? '#6b7280';
   // Where the dot actually is, not just which box it fell in.
-  const pos = quadrantPosition(p.trendGap, p.momentum);
+  const pos = quadrantPosition(p.rangePos, p.momentum);
   return (
     <div className="rounded-lg border border-white/10 bg-[#1e293b] px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
       <p className="font-semibold" style={{ color }}>{p.name}</p>
@@ -122,9 +122,9 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
       {p.r3m != null && <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>}
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">From its 40-day trend:{' '}
-        <span className={p.trendGap >= 0 ? 'text-green-400' : 'text-red-400'}>
-          {p.trendGap >= 0 ? '+' : ''}{p.trendGap.toFixed(2)}%
+      <p className="text-gray-300">In its 40-day range:{' '}
+        <span className={p.rangePos >= 0 ? 'text-green-400' : 'text-red-400'}>
+          {p.rangePos >= 0 ? '+' : ''}{p.rangePos.toFixed(2)}%
         </span>
       </p>
       <p className="text-gray-300">Current leg:{' '}
@@ -162,7 +162,7 @@ export interface QuadrantTrail {
   name: string;
   group: string;
   /** The same two coordinates the live dots use, as of each past date. */
-  points: { date: string; trendGap: number; momentum: number }[];
+  points: { date: string; rangePos: number; momentum: number }[];
 }
 
 // Trail layer: draws each traced asset's journey as a fading tail, oldest segment
@@ -182,7 +182,7 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, clampEdgeY: 
     for (const t of trails) {
       const color = GROUP_COLORS[t.group] ?? '#6b7280';
       const pts = t.points.map(p => ({
-        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.trendGap))),
+        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.rangePos))),
         y: yScale(Math.max(-clampEdgeY, Math.min(clampEdgeY, p.momentum))),
         date: p.date,
       }));
@@ -435,11 +435,11 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       const trailMax = trailVals.length ? Math.max(...trailVals.map(Math.abs)) : 0;
       return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
     };
-    // Both axes are in % of price, and they live on different scales: the gap to the
-    // 40-day trend runs to a few points, a whole leg to tens of them.
+    // Both axes are in % of price, and they live on different scales: the position in a
+    // 40-day range runs to a few points, a whole leg to tens of them.
     const M = halfRange(
-      assets.map(a => a.trendGap), 4, 1.5,
-      trails?.flatMap(t => t.points.map(p => p.trendGap)) ?? [],
+      assets.map(a => a.rangePos), 4, 1.5,
+      trails?.flatMap(t => t.points.map(p => p.rangePos)) ?? [],
     );
     const MY = halfRange(
       assets.map(a => a.momentum), 6, 2,
@@ -456,7 +456,7 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
 
     const plot: PlotAsset[] = assets.map(a => ({
       ...a,
-      xPlot: Math.max(-clampEdge, Math.min(clampEdge, a.trendGap)),
+      xPlot: Math.max(-clampEdge, Math.min(clampEdge, a.rangePos)),
       yPlot: Math.max(-clampEdgeY, Math.min(clampEdgeY, a.momentum)),
       dimmed: focusing && !focus.has(a.symbol),
     }));
@@ -540,13 +540,13 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
           <XAxis
             dataKey="xPlot"
             type="number"
-            name="Trend gap"
+            name="Range position"
             domain={[xMin, xMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}%`}
-            label={{ value: 'Distance from its 40-day trend (%)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
+            label={{ value: 'Position in its 40-day range (%)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
             dataKey="yPlot"

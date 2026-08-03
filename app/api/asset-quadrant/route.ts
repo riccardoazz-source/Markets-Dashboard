@@ -33,7 +33,7 @@ const histCache = new Map<string, { hist: Hist; fromMs: number; ts: number }>();
 // 2) One evaluated point per (symbol, date), so re-covering the same weeks under a
 //    different timeframe costs nothing the second time.
 const pointCache = new Map<string, {
-  pt: { date: string; trendGap: number; momentum: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number };
+  pt: { date: string; rangePos: number; momentum: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number };
   ts: number;
 }>();
 
@@ -127,7 +127,7 @@ export async function GET(req: Request) {
   const price = ownHist.filter(p => p.date >= startStr).map(p => ({ date: p.date, close: p.close }));
 
   type QPoint = {
-    date: string; trendGap: number; momentum: number; r3m: number | null;
+    date: string; rangePos: number; momentum: number; r3m: number | null;
     phase: string | null; close: number | null;
     /** Where the dot actually sits: distance from the centre and angle round it. */
     radius: number; angle: number;
@@ -143,7 +143,7 @@ export async function GET(req: Request) {
 
     const input = buildInputsAsOf(universe, histMap, d)[0];
     if (!input) return null;
-    const pos = quadrantPosition(input.trendGap, input.momentum);
+    const pos = quadrantPosition(input.rangePos, input.momentum);
     if (!pos) return null;
     // Four decimals on the coordinates, not two. The phase is decided by their
     // SIGN, and a value like +0.0031 rounds to 0.00 — so at two decimals a reader
@@ -153,7 +153,7 @@ export async function GET(req: Request) {
     const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
     const pt: QPoint = {
       date: dateStr,
-      trendGap: r4(pos.x),
+      rangePos: r4(pos.x),
       momentum: r4(pos.y),
       r3m: input.r3m,
       phase: pos.phase,

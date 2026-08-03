@@ -41,7 +41,7 @@ interface RollingReturn {
   moneyFlow: number | null;// net buying pressure −1..1 (M31 v5 quiet-accumulation sleeve)
   downVolDry: number | null;// down-day volume dry-up 0..1 (M31 v8 recovery precision)
   // ── Rotation-quadrant coordinates (lib/rotationPhase.ts) ──
-  trendGap: number | null; // X: % above/below its own 40-day trend, month-averaged
+  rangePos: number | null; // X: % from the middle of its own 40-day range, averaged
   momentum: number | null; // Y: % into the current leg, signed by its direction
 }
 
@@ -157,7 +157,7 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
     r5: ret5Trading(history.map(p => p.close)),
     moneyFlow: moneyFlow20(history.map(p => p.close), history.map(p => p.volume)),
     downVolDry: downVolDryUp(history.map(p => p.close), history.map(p => p.volume)),
-    trendGap: axes?.trendGap ?? null,
+    rangePos: axes?.rangePos ?? null,
     momentum: axes?.momentum ?? null,
   };
 }
