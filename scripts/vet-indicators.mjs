@@ -226,6 +226,30 @@ const need = Q.RANGE_SPAN * 2.5 + Q.RANGE_SMOOTH;
 ok('null below the warm-up', Q.trendAxes(mkSeries(Math.round(need * 0.9), i => 100 + i)) === null);
 ok('a number above it', Q.trendAxes(mkSeries(Math.round(need * 1.3), i => 100 + i)) != null);
 ok('null on an empty history', Q.trendAxes([]) === null && Q.trendAxes(undefined) === null);
+// The whole-series pass and the single-date one must agree BAR FOR BAR. They are two
+// implementations of the same definition — one incremental, one direct — and the panel
+// draws from the first while the rotation table reads the second, so a divergence would
+// put two different models on screen at once.
+{
+  const series = Q.trendAxesSeries(steady);
+  let worst = 0, checked = 0;
+  for (let i = 700; i < steady.length; i += 37) {
+    const one = Q.trendAxes(steady, steady[i].date);
+    if (!one || !series[i]) continue;
+    worst = Math.max(worst, Math.abs(one.rangePos - series[i].rangePos), Math.abs(one.momentum - series[i].momentum));
+    checked++;
+  }
+  ok('the one-pass series matches the per-date answer', checked > 3 && worst < 1e-9,
+     `${checked} dates, worst difference ${worst.toExponential(1)}`);
+  const crashSeries = Q.trendAxesSeries(crashed);
+  const crashOne = Q.trendAxes(crashed, crashed[crashed.length - 1].date);
+  ok('…on a crashing series too',
+     crashSeries[crashSeries.length - 1] != null && crashOne != null
+     && Math.abs(crashSeries[crashSeries.length - 1].rangePos - crashOne.rangePos) < 1e-9);
+  ok('the series is null exactly where the single date is',
+     Q.trendAxesSeries(mkSeries(60, i => 100 + i)).every(v => v === null));
+}
+
 // As-of dates never read forward.
 const cut = steady[700].date;
 const asOf = Q.trendAxes(steady, cut), truncated = Q.trendAxes(steady.slice(0, 701));

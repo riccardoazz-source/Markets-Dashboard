@@ -23,7 +23,7 @@ import { PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 interface QPoint { date: string; rangePos: number; momentum: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number }
 /** A weekly sample carried forward onto every daily bar. */
 interface DPoint { date: string; rangePos: number | null; momentum: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null }
-interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number; coarse?: boolean }
+interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number }
 
 // Recharts hands a Customized layer the live pixel scales; only the parts used here.
 interface AxisLike { scale?: (v: string) => number }
@@ -116,7 +116,6 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   const [activeTools, setActiveTools] = useState<ActiveTools>(DEFAULT_TOOLS);
   const [priceData, setPriceData] = useState<HistoricalPoint[] | null>(null);
   const [priceLoading, setPriceLoading] = useState(true);
-  const [refining, setRefining] = useState(false);
   const [focusPhases, setFocusPhases] = useState<Set<string>>(new Set());
 
   // The price is ONE symbol and comes back in milliseconds; the model history has
@@ -135,11 +134,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     return () => { cancelled = true; };
   }, [symbol, timeframe]);
 
-  // A long window cannot be ranked end to end inside one request's budget, so the
-  // server returns what it managed and flags it. Rather than block on a single
-  // very long call, ask again: the server's per-date cache makes everything
-  // already computed free, so each round spends its whole budget going further
-  // and the chart refines in front of the user until it is complete.
+  // One request is now enough: the server computes the whole history in a single pass
+  // and can no longer come back partial, so the rounds of refinement this used to need
+  // are gone with the weekly grid that made them necessary.
   // Depend on the CONTENT of the stock list, not the array identity: a caller that
   // rebuilds the array each render would otherwise re-fire the fetch forever.
   const stocksKey = useMemo(() => stocks?.slice().sort().join(',') ?? '', [stocks]);
@@ -149,33 +146,27 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     const st = stocksKey ? `&stocks=${encodeURIComponent(stocksKey)}` : '';
     const ck = `${symbol}|${timeframe}|${stocksKey}`;
     const cached = viewCache.get(ck);
-    if (cached) { setData(cached); setError(null); setLoading(false); setRefining(false); return; }
+    if (cached) { setData(cached); setError(null); setLoading(false); return; }
 
-    const MAX_ROUNDS = 8;
-    const run = (round: number) => {
-      if (cancelled) return;
-      if (round === 0) setLoading(true);
-      setError(null);
-      fetch(`/api/asset-quadrant?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}${st}&r=${round}`)
-        .then(r => r.json())
-        .then((j: Payload & { error?: string }) => {
-          if (cancelled) return;
-          if (j.error || !j.points?.length) {
-            setError('Could not build the model history for this window.');
-            setData(null); setRefining(false); return;
-          }
-          setData(j);
-          setLoading(false);
-          if (j.coarse && round + 1 < MAX_ROUNDS) { setRefining(true); run(round + 1); }
-          else { setRefining(false); if (!j.coarse) viewCache.set(ck, j); }
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setError('Could not load the quadrant history.');
-          setLoading(false); setRefining(false);
-        });
-    };
-    run(0);
+    setLoading(true);
+    setError(null);
+    fetch(`/api/asset-quadrant?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}${st}`)
+      .then(r => r.json())
+      .then((j: Payload & { error?: string }) => {
+        if (cancelled) return;
+        if (j.error || !j.points?.length) {
+          setError('Could not build the model history for this window.');
+          setData(null); return;
+        }
+        setData(j);
+        setLoading(false);
+        viewCache.set(ck, j);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError('Could not load the quadrant history.');
+        setLoading(false);
+      });
     return () => { cancelled = true; };
   }, [symbol, timeframe, stocksKey]);
 
@@ -500,7 +491,6 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <p className="text-[11px] font-medium text-gray-400">
                   Model quadrant over time
-                  {refining && <span className="ml-2 text-[10px] text-accent animate-pulse">refining…</span>}
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   {Object.entries(PHASE_META).map(([k, m]) => (
@@ -513,7 +503,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
 
               {loading ? (
                 <div className="flex items-center justify-center gap-2 text-[11px] text-gray-500" style={{ height: heights.quadrant }}>
-                  <LoadingSpinner size={16} /> ranking the universe week by week…
+                  <LoadingSpinner size={16} /> rebuilding the model day by day…
                 </div>
               ) : error ? (
                 <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ {error}</p>
@@ -576,12 +566,6 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                   />
                 </ComposedChart>
               </ResponsiveContainer>
-              )}
-
-              {data?.coarse && (
-                <p className="text-[9px] text-gray-600">
-                  Coarse resolution — samples between the plotted dates are missing, so very short phases can be lost.
-                </p>
               )}
 
               {summary.rows.length > 0 && (

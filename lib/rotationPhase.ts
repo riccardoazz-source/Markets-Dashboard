@@ -312,6 +312,90 @@ function rangeTail(closes: number[], span: number, count: number): { mid: number
   return out;
 }
 
+/**
+ * The axes for EVERY bar, in one pass.
+ *
+ * trendAxes() answers for a single date and costs a walk of the whole history each time,
+ * because the leg is a running state that cannot be started in the middle. Asking it once
+ * per plotted day would be quadratic, which is why the per-asset panel used to evaluate
+ * the model once a WEEK and carry each call forward — and that is exactly what made its
+ * bands wrong: every one of them began and ended up to a week late, so a Lagging stretch
+ * collected a week of the rebound that ended it. On the NASDAQ 100 over ten years that
+ * alone turned Lagging from −2.0% a band into +0.7%.
+ *
+ * Here the rolling parts are kept incrementally — a monotonic deque for the range, running
+ * sums for the volatility and the smoothing — so the whole series costs one pass and the
+ * panel can label every single day.
+ *
+ * Returns an array aligned with `hist`, null wherever there is not enough history yet.
+ */
+export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | null)[] {
+  if (!hist || hist.length < 2) return hist ? hist.map(() => null) : [];
+  const n = hist.length;
+  const closes = new Array<number>(n);
+  for (let i = 0; i < n; i++) closes[i] = hist[i].close;
+  const out = new Array<TrendAxes | null>(n).fill(null);
+
+  const bpm = barsPerMonth(hist);
+  const scale = bpm / 21;
+  const W = (d: number) => Math.max(2, Math.round(d * scale));
+  const span = W(RANGE_SPAN), smooth = W(RANGE_SMOOTH);
+
+  const vol = rollingVol(closes, W(VOL_SPAN));
+  const volFast = rollingVol(closes, W(VOL_FAST));
+  const known = vol.filter((v): v is number => v != null);
+  if (!known.length) return out;
+  const sorted = [...known].sort((a, b) => a - b);
+  const volMedian = sorted[sorted.length >> 1];
+
+  // Rolling max and min over `span`, monotonic deques: each index enters and leaves once.
+  const maxQ: number[] = [], minQ: number[] = [];
+  const raw = new Array<number | null>(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    while (maxQ.length && closes[maxQ[maxQ.length - 1]] <= closes[i]) maxQ.pop();
+    maxQ.push(i);
+    while (minQ.length && closes[minQ[minQ.length - 1]] >= closes[i]) minQ.pop();
+    minQ.push(i);
+    if (maxQ[0] <= i - span) maxQ.shift();
+    if (minQ[0] <= i - span) minQ.shift();
+    if (i < span - 1) continue;
+    const hiV = closes[maxQ[0]], loV = closes[minQ[0]], mid = (hiV + loV) / 2;
+    if (!(mid > 0)) continue;
+    const half = ((hiV - loV) / 2 / mid) * 100;
+    const fast = volFast[i], slow = vol[i] ?? volMedian;
+    const agitation = fast != null && slow ? fast / slow - 1 : 0;
+    raw[i] = (closes[i] / mid - 1) * 100 - CALM_WEIGHT * agitation * half;
+  }
+  // Running mean of the last `smooth` values of raw.
+  let sum = 0, count = 0;
+  const smoothed = new Array<number | null>(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    if (raw[i] != null) { sum += raw[i] as number; count++; }
+    const drop = i - smooth;
+    if (drop >= 0 && raw[drop] != null) { sum -= raw[drop] as number; count--; }
+    if (count === smooth) smoothed[i] = sum / smooth;
+  }
+
+  // The leg, carried forward bar by bar — the same state machine swingPosition runs.
+  let dir = 1, hi = closes[0], lo = closes[0];
+  const warm = span * 2.5 + smooth;
+  for (let i = 0; i < n; i++) {
+    const c = closes[i];
+    const th = Math.max(SWING_FLOOR, SWING_SIGMA * (vol[i] ?? volMedian));
+    if (dir > 0) {
+      if (c > hi) hi = c;
+      if ((c / hi - 1) * 100 <= -th) { dir = -1; lo = c; }
+    } else {
+      if (c < lo) lo = c;
+      if ((c / lo - 1) * 100 >= th) { dir = 1; hi = c; }
+    }
+    const y = dir > 0 ? Math.max(0, (c / lo - 1) * 100) : Math.min(0, (c / hi - 1) * 100);
+    const x = smoothed[i];
+    if (i + 1 >= warm && x != null && isFinite(x) && isFinite(y)) out[i] = { rangePos: x, momentum: y };
+  }
+  return out;
+}
+
 export function trendAxes(hist: PricePoint[] | undefined, asOf?: string | Date): TrendAxes | null {
   if (!hist || hist.length < 2) return null;
   const asOfStr = asOf == null
