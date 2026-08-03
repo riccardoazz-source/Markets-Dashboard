@@ -221,8 +221,23 @@ const churn = (amp) => mkSeries(880, i => {
 ok('a 5% fall ends a calm asset\'s leg', Q.trendAxes(churn(0.0015)).momentum < 0);
 ok('the same fall does not end a volatile one\'s', Q.trendAxes(churn(0.015)).momentum >= 0);
 
+// The top half has to be earned on BOTH horizons. A price that has fallen for a year and
+// is bouncing sits high in its 40-day range and low in its year-long one, and the lower
+// of the two is what counts — otherwise every bear-market rally would read as Trending.
+{
+  const rallyInABear = mkSeries(900, i => {
+    if (i <= 500) return 100;                          // a base to give the ranges something
+    if (i <= 830) return 100 * Math.pow(0.9975, i - 500);   // a long, deep decline
+    return 100 * Math.pow(0.9975, 330) * (1 + 0.10 * (i - 830) / 69);  // then a 10% rally
+  });
+  const ax = Q.trendAxes(rallyInABear);
+  ok('a rally inside a decline is not Trending',
+     Q.classifyPhase(ax.rangePos, ax.momentum) === 'Recovering',
+     `range ${ax.rangePos.toFixed(2)}%, leg ${ax.momentum.toFixed(1)}%`);
+}
+
 // Too little history is null, not a number computed from whatever is there.
-const need = Q.RANGE_SPAN * 2.5 + Q.RANGE_SMOOTH;
+const need = Math.max(Q.RANGE_SPAN * 2.5, Q.RANGE_LONG) + Q.RANGE_SMOOTH;
 ok('null below the warm-up', Q.trendAxes(mkSeries(Math.round(need * 0.9), i => 100 + i)) === null);
 ok('a number above it', Q.trendAxes(mkSeries(Math.round(need * 1.3), i => 100 + i)) != null);
 ok('null on an empty history', Q.trendAxes([]) === null && Q.trendAxes(undefined) === null);

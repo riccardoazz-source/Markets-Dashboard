@@ -3,10 +3,12 @@
 //
 // The four areas are defined the way the chart is read:
 //
-//   X = RANGE POSITION — how far the price is from the MIDDLE of its own 40-day
-//                   range, in %, averaged over three weeks, less a penalty when the
-//                   market is more agitated than that asset's own normal.
-//                   Above zero = in the upper half of its range, below = the lower.
+//   X = RANGE POSITION — how far the price is from the MIDDLE of its own range, in %,
+//                   averaged over three weeks, less a penalty when the market is more
+//                   agitated than that asset's own normal. Measured on a 40-day range
+//                   AND on a year-long one, and the LOWER of the two is taken: the top
+//                   half has to be earned on both horizons, or every bear-market rally
+//                   would qualify. Above zero = upper half, below = lower.
 //   Y = SWING     — where the price is inside the leg it is currently travelling:
 //                   % ABOVE the low the up-leg started from (+), or % BELOW the high
 //                   the down-leg started from (−). The leg only turns when the price
@@ -110,6 +112,20 @@ export const ROTATION_PHASES: RotationPhase[] = ['Recovering', 'Trending', 'Fadi
 
 /** The range the price is placed inside, in trading days. */
 export const RANGE_SPAN = 40;
+/**
+ * A second, year-long range the price must ALSO be in the upper half of before the top
+ * two quadrants are reachable.
+ *
+ * Without it a 40-day range is crossed by every bear-market rally, and the model called
+ * the NASDAQ 100 "Trending" on 22% of 2022 — a year it fell a third — at an average of
+ * −1.4% a band. Taking the LOWER of the two positions leaves those rallies where they
+ * belong: over ten assets, Trending inside a sustained decline (more than 15% below the
+ * 1-year peak and under the 200-day trend) falls from 17% of the days to 2%, and in 2022
+ * the NASDAQ reads Lagging 54% at −5.0% and Recovering 43% at +0.3% — falling, with
+ * bounces, and no trend to join. Every all-history figure held or improved: Recovering
+ * +1.0% → +1.7% a band, Trending +5.0% → +4.8%, Lagging −1.3% → −1.5%.
+ */
+export const RANGE_LONG = 200;
 /** That position is averaged over this many trading days before use. */
 export const RANGE_SMOOTH = 15;
 /**
@@ -127,7 +143,7 @@ export const SWING_FLOOR = 2;
 /** Window for the monthly volatility the threshold is scaled by, in trading days. */
 export const VOL_SPAN = 63;
 /** Calendar days of history the axes need, with room for the EMAs to converge. */
-export const AXES_LOOKBACK_DAYS = 300;
+export const AXES_LOOKBACK_DAYS = 430;
 
 /**
  * Which quadrant a point falls in.
@@ -339,7 +355,7 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
   const bpm = barsPerMonth(hist);
   const scale = bpm / 21;
   const W = (d: number) => Math.max(2, Math.round(d * scale));
-  const span = W(RANGE_SPAN), smooth = W(RANGE_SMOOTH);
+  const span = W(RANGE_SPAN), spanLong = W(RANGE_LONG), smooth = W(RANGE_SMOOTH);
 
   const vol = rollingVol(closes, W(VOL_SPAN));
   const volFast = rollingVol(closes, W(VOL_FAST));
@@ -349,7 +365,7 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
   const volMedian = sorted[sorted.length >> 1];
 
   // Rolling max and min over `span`, monotonic deques: each index enters and leaves once.
-  const maxQ: number[] = [], minQ: number[] = [];
+  const maxQ: number[] = [], minQ: number[] = [], maxL: number[] = [], minL: number[] = [];
   const raw = new Array<number | null>(n).fill(null);
   for (let i = 0; i < n; i++) {
     while (maxQ.length && closes[maxQ[maxQ.length - 1]] <= closes[i]) maxQ.pop();
@@ -358,13 +374,21 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
     minQ.push(i);
     if (maxQ[0] <= i - span) maxQ.shift();
     if (minQ[0] <= i - span) minQ.shift();
-    if (i < span - 1) continue;
+    while (maxL.length && closes[maxL[maxL.length - 1]] <= closes[i]) maxL.pop();
+    maxL.push(i);
+    while (minL.length && closes[minL[minL.length - 1]] >= closes[i]) minL.pop();
+    minL.push(i);
+    if (maxL[0] <= i - spanLong) maxL.shift();
+    if (minL[0] <= i - spanLong) minL.shift();
+    if (i < spanLong - 1) continue;
     const hiV = closes[maxQ[0]], loV = closes[minQ[0]], mid = (hiV + loV) / 2;
-    if (!(mid > 0)) continue;
+    const midL = (closes[maxL[0]] + closes[minL[0]]) / 2;
+    if (!(mid > 0) || !(midL > 0)) continue;
     const half = ((hiV - loV) / 2 / mid) * 100;
     const fast = volFast[i], slow = vol[i] ?? volMedian;
     const agitation = fast != null && slow ? fast / slow - 1 : 0;
-    raw[i] = (closes[i] / mid - 1) * 100 - CALM_WEIGHT * agitation * half;
+    raw[i] = Math.min((closes[i] / mid - 1) * 100, (closes[i] / midL - 1) * 100)
+      - CALM_WEIGHT * agitation * half;
   }
   // Running mean of the last `smooth` values of raw.
   let sum = 0, count = 0;
@@ -378,7 +402,7 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
 
   // The leg, carried forward bar by bar — the same state machine swingPosition runs.
   let dir = 1, hi = closes[0], lo = closes[0];
-  const warm = span * 2.5 + smooth;
+  const warm = Math.max(span * 2.5, spanLong) + smooth;
   for (let i = 0; i < n; i++) {
     const c = closes[i];
     const th = Math.max(SWING_FLOOR, SWING_SIGMA * (vol[i] ?? volMedian));
@@ -412,8 +436,8 @@ export function trendAxes(hist: PricePoint[] | undefined, asOf?: string | Date):
   const bpm = barsPerMonth(hist.slice(0, lo));
   const scale = bpm / 21;
   const W = (d: number) => Math.max(2, Math.round(d * scale));
-  const span = W(RANGE_SPAN), smooth = W(RANGE_SMOOTH);
-  if (closes.length < span * 2.5 + smooth) return null;
+  const span = W(RANGE_SPAN), spanLong = W(RANGE_LONG), smooth = W(RANGE_SMOOTH);
+  if (closes.length < Math.max(span * 2.5, spanLong) + smooth) return null;
 
   const vol = rollingVol(closes, W(VOL_SPAN));
   const volFast = rollingVol(closes, W(VOL_FAST));
@@ -429,14 +453,15 @@ export function trendAxes(hist: PricePoint[] | undefined, asOf?: string | Date):
   // averaged over three weeks — then pushed down when the market is more agitated than
   // its own normal, by up to the range's half-width.
   const tail = rangeTail(closes, span, smooth);
+  const tailLong = rangeTail(closes, spanLong, smooth);
   let sum = 0, n = 0;
   for (let k = 0; k < tail.length; k++) {
-    const t = tail[k];
-    if (!isFinite(t.mid)) continue;
+    const t = tail[k], tl = tailLong[k];
+    if (!isFinite(t.mid) || !isFinite(tl.mid)) continue;
     const i = closes.length - smooth + k;
     const fast = volFast[i], slow = vol[i] ?? volMedian;
     const agitation = fast != null && slow ? fast / slow - 1 : 0;
-    sum += t.mid - CALM_WEIGHT * agitation * t.half;
+    sum += Math.min(t.mid, tl.mid) - CALM_WEIGHT * agitation * t.half;
     n++;
   }
   if (n < smooth) return null;
