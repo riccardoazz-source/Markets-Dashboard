@@ -79,7 +79,10 @@ function makeRunLabelLayer(runs: Run[], lit: (p: string | null | undefined) => b
 /** One stretch of chart where the model held the same call, and what the price did. */
 interface Run {
   from: string;
+  /** Right edge for DRAWING: the day the next call starts, so bands touch. */
   to: string;
+  /** Last day this call was actually in force — what the return is measured to. */
+  end: string;
   phase: string | null;
   /** Price change over the run, %. Null when either end has no close. */
   ret: number | null;
@@ -231,25 +234,38 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     const out: Run[] = [];
     for (const p of dailyPoints) {
       const last = out[out.length - 1];
-      if (last && last.phase === p.phase) last.to = p.date;
-      else out.push({ from: p.date, to: p.date, phase: p.phase, ret: null, days: 0 });
+      if (last && last.phase === p.phase) { last.to = p.date; last.end = p.date; }
+      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, days: 0 });
     }
-    // A phase holds until the next one starts, so each run ends where the next
-    // begins — otherwise a one-bar phase is a zero-width band that draws nothing.
+    // A phase holds until the next one starts, so each band is DRAWN to where the next
+    // begins — otherwise a one-bar phase is a zero-width band that draws nothing. `end`
+    // keeps the run's own last day, which is what the return is measured to.
     for (let i = 0; i < out.length - 1; i++) out[i].to = out[i + 1].from;
     const last = out[out.length - 1];
     if (last && last.from === last.to && dailyPoints.length >= 2) {
       last.from = dailyPoints[dailyPoints.length - 2].date;
     }
-    // What the PRICE did while each call was showing. Measured from the first close
-    // of the run to the close on the day the next call starts, so the handover day
-    // belongs to the call that was in force up to it and no move is counted twice
-    // or dropped between two runs.
+    // What the PRICE did while each call was showing: from the close at which the call
+    // appeared to the close at which it changed.
+    //
+    // Not to the day the NEXT call starts, which is what this used to do. That day is
+    // the one whose move broke the phase, so every band was inheriting the first day of
+    // the opposite regime — Trending gave up its first day down, Lagging collected its
+    // first day of rebound. Measured across ten assets it inverted the whole picture:
+    // Lagging came out at +1.25% on average and Trending at +2.14%, where the same bands
+    // measured to their own last day give Trending +4.83% and Lagging −1.55%.
+    //
+    // Nor from the day BEFORE the call appeared, which would be worse still: the phase
+    // changed BECAUSE of that day's move, so crediting the move to the new phase would
+    // let every phase confirm itself.
+    //
+    // The flip day itself therefore belongs to neither band, and that is the honest
+    // place for it: it is the day the model changed its mind because of what happened.
     const closeAt = new Map(dailyPoints.map(p => [p.date, p.close]));
     for (const r of out) {
-      const a = closeAt.get(r.from), b = closeAt.get(r.to);
+      const a = closeAt.get(r.from), b = closeAt.get(r.end);
       r.ret = a != null && b != null && a > 0 ? (b / a - 1) * 100 : null;
-      r.days = Math.max(1, Math.round((Date.parse(r.to) - Date.parse(r.from)) / 86_400_000));
+      r.days = Math.max(1, Math.round((Date.parse(r.end) - Date.parse(r.from)) / 86_400_000));
     }
     return out;
   }, [dailyPoints]);
@@ -324,7 +340,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
       if (!r.phase) return;
       const avg = summary.stats.get(r.phase)?.avg ?? null;
       for (const p of dailyPoints) {
-        if (p.date < r.from || p.date > r.to) continue;
+        if (p.date < r.from || p.date > r.end) continue;
         const row = m.get(p.date);
         if (!row) continue;
         row.model_run_id = i + 1;
@@ -343,7 +359,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     const m = new Map<string, { ret: number | null; days: number; phase: string | null }>();
     for (const r of runs) {
       for (const p of dailyPoints) {
-        if (p.date < r.from || p.date > r.to) continue;
+        if (p.date < r.from || p.date > r.end) continue;
         m.set(p.date, { ret: r.ret, days: r.days, phase: r.phase });
       }
     }
