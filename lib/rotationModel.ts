@@ -470,7 +470,7 @@ export interface ModelInput {
   // QUADRANT says where in the cycle an asset is. They answer different questions,
   // so tuning one never silently moves the other. Both come from trendAxes() on the
   // asset's own history, so every producer of ModelInput fills them the same way.
-  rangePos?: number | null; // X: % from the middle of its own 40-day range, averaged
+  macroGap?: number | null; // X: % above/below its own 200-day moving average
   momentum?: number | null; // Y: % into the current leg, signed by its direction
 }
 

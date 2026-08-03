@@ -57,7 +57,7 @@ interface RotationItem {
   r5?: number | null;       // 5 trading-day return % (Dalio EMS v5 acceleration overlay)
   moneyFlow?: number | null;// net buying pressure −1..1 (Dalio EMS v5 quiet-accumulation)
   downVolDry?: number | null;// down-day volume dry-up 0..1 (Dalio EMS v8 recovery precision)
-  rangePos?: number | null; // quadrant X: % from the middle of its own 40-day range
+  macroGap?: number | null; // quadrant X: % above/below its own 200-day average
   momentum?: number | null; // quadrant Y: % into the current leg, signed by its direction
 }
 
@@ -91,7 +91,7 @@ interface RollingReturn {
   r5: number | null;
   moneyFlow: number | null;
   downVolDry: number | null;
-  rangePos: number | null;
+  macroGap: number | null;
   momentum: number | null;
 }
 
@@ -172,7 +172,7 @@ function RotationLegend() {
         Model formula (Dalio EMS)
       </summary>
       <div className="px-3 pb-3 pt-1 space-y-2 text-gray-400">
-        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. The score RANKS the Accelerating list and drives the Backtest. The <span className="text-gray-200">Quadrant</span> uses two absolute coordinates instead — where the price sits in its own 40-day range, and how far into the current leg it has travelled (up from the low, or back from the high) — so every asset orbits the centre with its own radius and nothing depends on who else is on screen.</p>
+        <p>Inputs are point-in-time (no look-ahead). <span className="text-gray-200">pctile</span> = cross-sectional percentile vs the whole universe. The score RANKS the Accelerating list and drives the Backtest. The <span className="text-gray-200">Quadrant</span> uses two absolute coordinates instead — how far the price is from its own 200-day average, and how far into the current leg it has travelled (up from the low, or back from the high) — so every asset orbits the centre with its own radius and nothing depends on who else is on screen.</p>
         <pre className="font-mono text-[10.5px] leading-relaxed text-gray-300 bg-black/30 rounded p-2 overflow-x-auto whitespace-pre">
 {`FinalScore = ( core + 0.10·AccelBoost + 0.30·DrawdownQuality ) · ClassWeight
 
@@ -301,7 +301,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
           trendR2: r?.trendR2 ?? null, trendR2Long: r?.trendR2Long ?? null, rsi: r?.rsi ?? null, macdHist: r?.macdHist ?? null,
           adx: r?.adx ?? null, adxSlope: r?.adxSlope ?? null, plusDI: r?.plusDI ?? null, minusDI: r?.minusDI ?? null,
           rvol5: r?.rvol5 ?? null, rvol20: r?.rvol20 ?? null, r20: r?.r20 ?? null, rangeExp: r?.rangeExp ?? null, median12m: r?.median12m ?? null, r5: r?.r5 ?? null, moneyFlow: r?.moneyFlow ?? null, downVolDry: r?.downVolDry ?? null,
-          rangePos: r?.rangePos ?? null, momentum: r?.momentum ?? null,
+          macroGap: r?.macroGap ?? null, momentum: r?.momentum ?? null,
         };
       });
       setStockItems(built);
@@ -433,7 +433,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
             trendR2: r.trendR2 ?? null, trendR2Long: r.trendR2Long ?? null, rsi: r.rsi ?? null, macdHist: r.macdHist ?? null,
             adx: r.adx ?? null, adxSlope: r.adxSlope ?? null, plusDI: r.plusDI ?? null, minusDI: r.minusDI ?? null,
             rvol5: r.rvol5 ?? null, rvol20: r.rvol20 ?? null, r20: r.r20 ?? null, rangeExp: r.rangeExp ?? null, median12m: r.median12m ?? null, r5: r.r5 ?? null, moneyFlow: r.moneyFlow ?? null, downVolDry: r.downVolDry ?? null,
-            rangePos: r.rangePos ?? null, momentum: r.momentum ?? null,
+            macroGap: r.macroGap ?? null, momentum: r.momentum ?? null,
             // Prefer the uniform 52W range from history; keep any quote value as fallback.
             high52w: r.high52w ?? item.high52w, low52w: r.low52w ?? item.low52w, pos52wRaw: r.pos52w ?? item.pos52wRaw,
           } : item;
@@ -506,7 +506,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
   };
 
   // Build quadrant chart data from the currently filtered view.
-  // X = where the price sits in its own 40-day range, Y = how far into the current
+  // X = how far the price is from its own 200-day average, Y = how far into the current
   // leg it has travelled. Both are the asset's own numbers and both are centred on
   // zero, so the quadrant is a cycle every asset travels, distance from the centre is
   // the size of the swing, and nothing depends on who else is on screen.
@@ -515,12 +515,12 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     const candidates = groupFiltered
       .map(item => ({ item, s: scoreMap.get(item.symbol) }))
       .filter((c): c is { item: RotationItem; s: ScoredItem<RotationItem> } =>
-        c.s != null && c.s.score > -1 && c.item.rangePos != null && c.item.momentum != null);
+        c.s != null && c.s.score > -1 && c.item.macroGap != null && c.item.momentum != null);
     return candidates.map(({ item }) => ({
       symbol: item.symbol,
       name: item.name,
       group: item.group as string,
-      rangePos: item.rangePos as number,
+      macroGap: item.macroGap as number,
       momentum: item.momentum as number,
       r3m: item.r3m,
       r1m: item.r1m,
@@ -538,7 +538,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
     for (const item of rows) {
       const s = scoreMap.get(item.symbol);
       if (!s || s.score <= -1) continue;
-      const p = classifyPhase(item.rangePos, item.momentum);
+      const p = classifyPhase(item.macroGap, item.momentum);
       if (p) m.set(item.symbol, p);
     }
     return m;
@@ -610,7 +610,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
       symbol: a.symbol,
       name: a.name,
       group: a.group,
-      rangePos: r1(a.rangePos)!,
+      macroGap: r1(a.macroGap)!,
       momentum: r1(a.momentum)!,
       r3m: r1(a.r3m),
       r1m: r1(a.r1m),
@@ -864,7 +864,7 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                   const isPinned   = pins.has(item.symbol);
                   const vs200d     = vsMa(item.price, item.ma200);
                   const vs200w     = vsMa(item.price, item.sma200w);
-                  const rangePos   = pos52w(item);
+                  const macroGap   = pos52w(item);
                   return (
                     <tr
                       key={item.symbol}
@@ -933,15 +933,15 @@ export function RotationSection({ onNavigate, onCompare }: { onNavigate?: (secti
                           title={item.high52w != null && item.low52w != null ? `52W range: ${item.low52w.toFixed(2)} – ${item.high52w.toFixed(2)}` : undefined}>
                         {rollingLoading ? (
                           <div className="text-right text-gray-700">…</div>
-                        ) : rangePos == null ? (
+                        ) : macroGap == null ? (
                           <div className="text-right text-gray-500">—</div>
                         ) : (
                           <div className="flex items-center gap-1.5 justify-end">
                             <div className="w-12 h-1.5 rounded-full bg-border overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${rangePos}%`, background: rangePos >= 66 ? '#4ade80' : rangePos >= 33 ? '#fbbf24' : '#f87171' }} />
+                              <div className="h-full rounded-full" style={{ width: `${macroGap}%`, background: macroGap >= 66 ? '#4ade80' : macroGap >= 33 ? '#fbbf24' : '#f87171' }} />
                             </div>
-                            <span className={clsx('text-xs tabular-nums w-8 text-right', sortBy === '52w' && 'font-bold', rangePos >= 66 ? 'text-green-400' : rangePos >= 33 ? 'text-amber-400' : 'text-red-400')}>
-                              {rangePos.toFixed(0)}%
+                            <span className={clsx('text-xs tabular-nums w-8 text-right', sortBy === '52w' && 'font-bold', macroGap >= 66 ? 'text-green-400' : macroGap >= 33 ? 'text-amber-400' : 'text-red-400')}>
+                              {macroGap.toFixed(0)}%
                             </span>
                           </div>
                         )}

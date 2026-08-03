@@ -47,14 +47,14 @@ async function load(extra: string[]): Promise<Map<string, RotationPhase>> {
     rvol5: r.rvol5 as number | null, r20: r.r20 as number | null, r5: r.r5 as number | null,
     rangeExp: r.rangeExp as number | null, median12m: r.median12m as number | null,
     moneyFlow: r.moneyFlow as number | null, downVolDry: r.downVolDry as number | null,
-    rangePos: r.rangePos as number | null, momentum: r.momentum as number | null,
+    macroGap: r.macroGap as number | null, momentum: r.momentum as number | null,
   }));
   const scored = scoreRotation(inputs).filter(s => s.score > -1);
   // No ranking: both quadrant coordinates are the asset's own, so the badge an
   // asset carries here is identical to the one Rotation shows, by construction.
   const map = new Map<string, RotationPhase>();
   for (const s of scored) {
-    const p = classifyPhase(s.item.rangePos, s.item.momentum);
+    const p = classifyPhase(s.item.macroGap, s.item.momentum);
     if (p) map.set(s.item.symbol, p);
   }
   return map;

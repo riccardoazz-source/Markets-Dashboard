@@ -46,7 +46,7 @@ export interface QuadrantPoint {
   symbol: string;
   name: string;
   group: string;
-  rangePos?: number; // x-axis: % from the middle of its own 40-day range
+  macroGap?: number; // x-axis: % above/below its own 200-day moving average
   momentum?: number; // y-axis: % into the current leg, signed by its direction
   r3m: number | null; // 3M return %, kept for the tooltip
   /** @deprecated X was the 3M return and Y the acceleration before the axes became

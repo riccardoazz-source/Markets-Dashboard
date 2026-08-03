@@ -205,7 +205,7 @@ function SavedQuadrant({ points, modelId, onAssetClick }: {
   const assets = useMemo<QuadrantAsset[]>(
     () => points.map(p => ({
       ...p,
-      rangePos: p.rangePos ?? (p.r3m != null ? paceMonthly(p.r3m, 3) : 0),
+      macroGap: p.macroGap ?? (p.r3m != null ? paceMonthly(p.r3m, 3) : 0),
       momentum: p.momentum ?? p.accel ?? 0,
       isSelected: p.isPinned ?? false,
     })),

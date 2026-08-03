@@ -136,27 +136,18 @@ const peaked = Array.from({length: 400}, (_, i) => (i <= 299 ? 100 + i : 399 - (
 const msh = I.computeMonthsSinceHigh(d400, peaked, 252);
 ok('months since the high ≈ elapsed months', near(msh[399], (400 - 300) / 30.44, 0.05), `${msh[399].toFixed(2)}`);
 
-console.log('\nQuadrant position — the point, not just the name');
-// Argument order is (X = gap to the 100-day trend, Y = momentum).
-ok('above trend and gaining is Trending',    Q.quadrantPosition(5, 0.5).phase === 'Trending');
-ok('below trend but gaining is Recovering',  Q.quadrantPosition(-5, 0.5).phase === 'Recovering');
-ok('above trend but losing is Fading',       Q.quadrantPosition(5, -0.5).phase === 'Fading');
-ok('below trend and losing is Lagging',      Q.quadrantPosition(-5, -0.5).phase === 'Lagging');
-ok('zero momentum continues the leg',
+console.log('\nQuadrant position — the macro decides the pair, the leg decides which');
+// Argument order is (X = distance from the 200-day average, Y = the leg).
+ok('above the average, advancing → Trending',    Q.quadrantPosition(5, 3).phase === 'Trending');
+ok('above the average, giving back → Recovering', Q.quadrantPosition(5, -3).phase === 'Recovering');
+ok('below the average, advancing → Fading',      Q.quadrantPosition(-5, 3).phase === 'Fading');
+ok('below the average, giving back → Lagging',   Q.quadrantPosition(-5, -3).phase === 'Lagging');
+ok('a still leg continues the pair',
    Q.quadrantPosition(5, 0).phase === 'Trending' && Q.quadrantPosition(-5, 0).phase === 'Lagging');
-// Radius is a real distance in one unit, so a 3-4-5 triangle comes out at 5.
-ok('radius is hypot(x, y)', near(Q.quadrantPosition(4, 3).radius, 5, 1e-9),
-   `${Q.quadrantPosition(4, 3).radius.toFixed(6)}`);
-// Amplitude survives: the same phase, ten times the swing, ten times the radius.
+ok('radius is hypot(x, y)', near(Q.quadrantPosition(4, 3).radius, 5, 1e-9));
 const small = Q.quadrantPosition(0.4, 0.3), big = Q.quadrantPosition(4, 3);
 ok('a bigger swing sits further out', near(big.radius, small.radius * 10, 1e-9),
    `${small.radius.toFixed(2)} vs ${big.radius.toFixed(2)}%`);
-// The cycle runs clockwise, so its angles fall in that order.
-const ang = (x, y) => Q.quadrantPosition(x, y).angle;
-ok('Recovering ~135°', near(ang(-1,  1), 135, 1e-9), `${ang(-1, 1).toFixed(1)}°`);
-ok('Trending ~45°',    near(ang( 1,  1), 45, 1e-9),  `${ang(1, 1).toFixed(1)}°`);
-ok('Fading ~315°',     near(ang( 1, -1), 315, 1e-9), `${ang(1, -1).toFixed(1)}°`);
-ok('Lagging ~225°',    near(ang(-1, -1), 225, 1e-9), `${ang(-1, -1).toFixed(1)}°`);
 ok('null when either coordinate is unknown', Q.quadrantPosition(null, 5) === null && Q.quadrantPosition(1, null) === null);
 
 console.log('\nQuadrant axes from a price history — answers fixed by arithmetic');
@@ -165,53 +156,47 @@ const mkSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
   date: new Date(Date.UTC(2016, 0, 4) + Math.floor(i / 5) * 7 * 86400000 + (i % 5) * 86400000).toISOString().slice(0, 10),
   close: f(i),
 }));
-// A price that only ever rises sits at the TOP of its own range, so X is half the
-// range's width above its middle — and it never reverses, so the leg is the whole gain.
+// A price that only ever rises is above its own average by half the average's lag, and
+// never reverses, so the leg is the whole gain.
 const steady = mkSeries(900, i => 100 * Math.pow(1.0008, i));
 const axSteady = Q.trendAxes(steady);
-const span = Math.round(Q.RANGE_SPAN * 1.035);          // weekday bars per 40 trading days
-const halfWidth = ((Math.pow(1.0008, span) - 1) / 2) * 100;
-ok('a constant riser sits in the top half of its range', axSteady.rangePos > 0, `${axSteady.rangePos.toFixed(3)}%`);
-ok('and by half the range width', near(axSteady.rangePos, halfWidth, halfWidth * 0.25),
-   `${axSteady.rangePos.toFixed(2)}% vs ${halfWidth.toFixed(2)}%`);
-ok('a constant riser is advancing in its leg', axSteady.momentum > 0, `+${axSteady.momentum.toFixed(1)}% off its low`);
+ok('a constant riser is above its average', axSteady.macroGap > 0, `${axSteady.macroGap.toFixed(2)}%`);
+ok('a constant riser is advancing', axSteady.momentum > 0, `+${axSteady.momentum.toFixed(1)}%`);
 ok('the leg measures the whole rise', near(axSteady.momentum, (Math.pow(1.0008, 899) - 1) * 100, 0.5));
-ok('a constant riser is Trending', Q.classifyPhase(axSteady.rangePos, axSteady.momentum) === 'Trending');
-// A flat price has no range and no leg, and must not pretend otherwise.
+ok('a constant riser is Trending', Q.classifyPhase(axSteady.macroGap, axSteady.momentum) === 'Trending');
+// A flat price is ON its average with no leg.
 const flat = mkSeries(900, () => 100);
 const axFlat = Q.trendAxes(flat);
-ok('a flat price sits in the middle of nothing', near(axFlat.rangePos, 0, 1e-9), `${axFlat.rangePos.toFixed(9)}`);
+ok('a flat price sits on its average', near(axFlat.macroGap, 0, 1e-9), `${axFlat.macroGap.toFixed(9)}`);
 ok('a flat price has a zero leg', near(axFlat.momentum, 0, 1e-9));
-// Rises for years, then gives back 12%: bottom half of the range, leg turned down.
-const topped = mkSeries(900, i => (i <= 820 ? 100 * Math.pow(1.0015, i) : 100 * Math.pow(1.0015, 820) * (1 - 0.12 * (i - 820) / 79)));
-const axTop = Q.trendAxes(topped);
-ok('a top that gives 12% back is Fading or Lagging',
-   ['Fading', 'Lagging'].includes(Q.classifyPhase(axTop.rangePos, axTop.momentum)),
-   `range ${axTop.rangePos.toFixed(2)}%, leg ${axTop.momentum.toFixed(1)}%`);
-ok('the leg reads the give-back, not the rise', axTop.momentum < 0, `${axTop.momentum.toFixed(1)}%`);
-// Crashes 30%, then takes 8% back: still low in its range, but the leg has turned up.
-const crashed = mkSeries(900, i => {
-  if (i <= 850) return 100 * Math.pow(1.0005, i);
-  const top = 100 * Math.pow(1.0005, 850);
-  if (i <= 880) return top * (1 - 0.30 * (i - 850) / 30);
-  return top * 0.70 * (1 + 0.08 * (i - 880) / 19);
+// THE CASE THAT DROVE THIS DESIGN: a long decline, then a 10% rally. The rally is real —
+// the leg has turned up — but the price is still under its 200-day average, so it is a
+// rally inside a downtrend, and the only honest label for it is Fading. Read off the
+// price's own recent range instead, this came out as Recovering or even Trending, which
+// is how the NASDAQ 100 got called Trending through 22% of 2022.
+const rallyInABear = mkSeries(1200, i => {
+  if (i <= 600) return 100;
+  if (i <= 1130) return 100 * Math.pow(0.9975, i - 600);
+  return 100 * Math.pow(0.9975, 530) * (1 + 0.10 * (i - 1130) / 69);
 });
-const axBot = Q.trendAxes(crashed);
-ok('a bounce off a crash is Recovering',
-   Q.classifyPhase(axBot.rangePos, axBot.momentum) === 'Recovering',
-   `range ${axBot.rangePos.toFixed(2)}%, leg ${axBot.momentum.toFixed(1)}%`);
-// A steady fall sits at the bottom of its range and is still giving ground.
+const axRally = Q.trendAxes(rallyInABear);
+ok('a rally inside a downtrend is Fading',
+   Q.classifyPhase(axRally.macroGap, axRally.momentum) === 'Fading',
+   `macro ${axRally.macroGap.toFixed(2)}%, leg +${axRally.momentum.toFixed(1)}%`);
+// And its mirror: a dip inside an uptrend is Recovering, not Lagging.
+const dipInABull = mkSeries(1200, i => {
+  if (i <= 1130) return 100 * Math.pow(1.003, i);          // a steep enough uptrend that
+  return 100 * Math.pow(1.003, 1130) * (1 - 0.08 * (i - 1130) / 69);   // the dip stays above
+});
+const axDip = Q.trendAxes(dipInABull);
+ok('a dip inside an uptrend is Recovering',
+   Q.classifyPhase(axDip.macroGap, axDip.momentum) === 'Recovering',
+   `macro +${axDip.macroGap.toFixed(2)}%, leg ${axDip.momentum.toFixed(1)}%`);
+// A steady fall is below its average and still giving ground.
 const falling = mkSeries(900, i => 100 * Math.pow(0.999, i));
 const axFall = Q.trendAxes(falling);
-ok('a steady fall is Lagging', Q.classifyPhase(axFall.rangePos, axFall.momentum) === 'Lagging',
-   `range ${axFall.rangePos.toFixed(2)}%, leg ${axFall.momentum.toFixed(1)}%`);
-// Disorder counts against the top half: the same rise, but agitated in its last weeks,
-// sits lower on the X axis than the calm one. This is the volatility signature — the one
-// thing the price axes cannot see — and without it the two would be identical.
-const agitated = mkSeries(900, i => 100 * Math.pow(1.0008, i) * (i > 830 ? (1 + 0.012 * (i % 2 ? 1 : -1)) : 1));
-const axAgit = Q.trendAxes(agitated);
-ok('disorder pushes the same rise down the X axis', axAgit.rangePos < axSteady.rangePos,
-   `${axAgit.rangePos.toFixed(2)}% vs ${axSteady.rangePos.toFixed(2)}% when calm`);
+ok('a steady fall is Lagging', Q.classifyPhase(axFall.macroGap, axFall.momentum) === 'Lagging',
+   `macro ${axFall.macroGap.toFixed(2)}%, leg ${axFall.momentum.toFixed(1)}%`);
 // The reversal threshold scales with the asset's own volatility: the SAME 5% fall ends a
 // leg on a calm series and does not on a wild one, with no per-asset tuning.
 const churn = (amp) => mkSeries(880, i => {
@@ -221,55 +206,35 @@ const churn = (amp) => mkSeries(880, i => {
 ok('a 5% fall ends a calm asset\'s leg', Q.trendAxes(churn(0.0015)).momentum < 0);
 ok('the same fall does not end a volatile one\'s', Q.trendAxes(churn(0.015)).momentum >= 0);
 
-// The top half has to be earned on BOTH horizons. A price that has fallen for a year and
-// is bouncing sits high in its 40-day range and low in its year-long one, and the lower
-// of the two is what counts — otherwise every bear-market rally would read as Trending.
-{
-  const rallyInABear = mkSeries(900, i => {
-    if (i <= 500) return 100;                          // a base to give the ranges something
-    if (i <= 830) return 100 * Math.pow(0.9975, i - 500);   // a long, deep decline
-    return 100 * Math.pow(0.9975, 330) * (1 + 0.10 * (i - 830) / 69);  // then a 10% rally
-  });
-  const ax = Q.trendAxes(rallyInABear);
-  ok('a rally inside a decline is not Trending',
-     Q.classifyPhase(ax.rangePos, ax.momentum) === 'Recovering',
-     `range ${ax.rangePos.toFixed(2)}%, leg ${ax.momentum.toFixed(1)}%`);
-}
-
-// Too little history is null, not a number computed from whatever is there.
-const need = Math.max(Q.RANGE_SPAN * 2.5, Q.RANGE_LONG) + Q.RANGE_SMOOTH;
-ok('null below the warm-up', Q.trendAxes(mkSeries(Math.round(need * 0.9), i => 100 + i)) === null);
-ok('a number above it', Q.trendAxes(mkSeries(Math.round(need * 1.3), i => 100 + i)) != null);
-ok('null on an empty history', Q.trendAxes([]) === null && Q.trendAxes(undefined) === null);
-// The whole-series pass and the single-date one must agree BAR FOR BAR. They are two
-// implementations of the same definition — one incremental, one direct — and the panel
-// draws from the first while the rotation table reads the second, so a divergence would
-// put two different models on screen at once.
+// The whole-series pass and the single-date one must agree BAR FOR BAR: the panel draws
+// from the first, the rotation table reads the second.
 {
   const series = Q.trendAxesSeries(steady);
   let worst = 0, checked = 0;
   for (let i = 700; i < steady.length; i += 37) {
     const one = Q.trendAxes(steady, steady[i].date);
     if (!one || !series[i]) continue;
-    worst = Math.max(worst, Math.abs(one.rangePos - series[i].rangePos), Math.abs(one.momentum - series[i].momentum));
+    worst = Math.max(worst, Math.abs(one.macroGap - series[i].macroGap), Math.abs(one.momentum - series[i].momentum));
     checked++;
   }
   ok('the one-pass series matches the per-date answer', checked > 3 && worst < 1e-9,
      `${checked} dates, worst difference ${worst.toExponential(1)}`);
-  const crashSeries = Q.trendAxesSeries(crashed);
-  const crashOne = Q.trendAxes(crashed, crashed[crashed.length - 1].date);
-  ok('…on a crashing series too',
-     crashSeries[crashSeries.length - 1] != null && crashOne != null
-     && Math.abs(crashSeries[crashSeries.length - 1].rangePos - crashOne.rangePos) < 1e-9);
-  ok('the series is null exactly where the single date is',
-     Q.trendAxesSeries(mkSeries(60, i => 100 + i)).every(v => v === null));
+  const bearSeries = Q.trendAxesSeries(rallyInABear);
+  const bearOne = Q.trendAxes(rallyInABear, rallyInABear[rallyInABear.length - 1].date);
+  ok('…through a decline and its rally too',
+     bearSeries[bearSeries.length - 1] != null && bearOne != null
+     && Math.abs(bearSeries[bearSeries.length - 1].macroGap - bearOne.macroGap) < 1e-9);
 }
 
+// Too little history is null, not a number computed from whatever is there.
+ok('null below the average\'s own span', Q.trendAxes(mkSeries(Math.round(Q.MACRO_SPAN * 0.9), i => 100 + i)) === null);
+ok('a number above it', Q.trendAxes(mkSeries(Math.round(Q.MACRO_SPAN * 1.4), i => 100 + i)) != null);
+ok('null on an empty history', Q.trendAxes([]) === null && Q.trendAxes(undefined) === null);
 // As-of dates never read forward.
 const cut = steady[700].date;
 const asOf = Q.trendAxes(steady, cut), truncated = Q.trendAxes(steady.slice(0, 701));
 ok('as-of reads no forward data',
-   near(asOf.rangePos, truncated.rangePos, 1e-12) && near(asOf.momentum, truncated.momentum, 1e-12));
+   near(asOf.macroGap, truncated.macroGap, 1e-12) && near(asOf.momentum, truncated.momentum, 1e-12));
 
 console.log('\nTradingView links — every configured asset must map, and map correctly');
 // Coverage: an asset added to config.ts with no mapping loses its button silently,

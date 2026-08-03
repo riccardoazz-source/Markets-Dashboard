@@ -100,7 +100,7 @@ export async function GET(req: Request) {
       if (dateStr <= firstDate) { prevPhase = null; continue; }
 
       const input = buildInputsAsOf([meta], histMap, d)[0];
-      const phase = input ? classifyPhase(input.rangePos, input.momentum) : null;
+      const phase = input ? classifyPhase(input.macroGap, input.momentum) : null;
       if (!phase) { prevPhase = null; continue; }
 
       if (prevPhase) stats.transitions[prevPhase][phase] += 1;

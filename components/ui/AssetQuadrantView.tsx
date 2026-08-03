@@ -20,9 +20,9 @@ import { PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 // price actually did next. The scores come from /api/asset-quadrant, which runs
 // the SAME pipeline as the live Rotation Quadrant; the formula lives in one place.
 
-interface QPoint { date: string; rangePos: number; momentum: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number }
+interface QPoint { date: string; macroGap: number; momentum: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number }
 /** A weekly sample carried forward onto every daily bar. */
-interface DPoint { date: string; rangePos: number | null; momentum: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null }
+interface DPoint { date: string; macroGap: number | null; momentum: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null }
 interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number }
 
 // Recharts hands a Customized layer the live pixel scales; only the parts used here.
@@ -201,7 +201,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
       while (i < points.length && points[i].date <= bar.date) cur = points[i++];
       return {
         date: bar.date,
-        rangePos: cur?.rangePos ?? null,
+        macroGap: cur?.macroGap ?? null,
         momentum: cur?.momentum ?? null,
         r3m: cur?.r3m ?? null,
         phase: cur?.phase ?? null,
@@ -316,7 +316,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         model_phase: p.phase,
         // Four decimals: the sign of these two columns decides the phase, and two
         // decimals can round a genuine +0.0031 down to 0.00.
-        model_x_range_pos_pct: p.rangePos,
+        model_x_range_pos_pct: p.macroGap,
         model_y_swing_pct: p.momentum,
         model_radius_pct_mo: p.radius,
         model_angle_deg: p.angle,
@@ -557,7 +557,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                     formatter={(v: number, _n: string, p: { payload?: DPoint }) => {
                       const pt = p?.payload;
                       const mom = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}% ${v >= 0 ? 'off the low' : 'off the high'}` : '—';
-                      const gap = pt?.rangePos != null ? `${pt.rangePos >= 0 ? '+' : ''}${pt.rangePos.toFixed(2)}%` : '—';
+                      const gap = pt?.macroGap != null ? `${pt.macroGap >= 0 ? '+' : ''}${pt.macroGap.toFixed(2)}%` : '—';
                       const r = pt?.radius != null ? ` · ${pt.radius.toFixed(2)} from centre` : '';
                       const run = pt ? runRetAt.get(pt.date) : undefined;
                       const runTxt = run?.ret != null ? ` · this call ${fmtRet(run.ret)} in ${run.days}d` : '';

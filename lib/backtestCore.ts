@@ -103,10 +103,10 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
     const upToAsOf = h.slice(Math.max(0, lo - HIST_TAIL), lo);  // daily OHLC, no look-ahead
     const closesAsOf = upToAsOf.map(p => p.close);
     const adxState = computeWeeklyADX(upToAsOf);              // weekly ADX as of this date (M26)
-    // Quadrant coordinates: where the price sits in its own 40-day range, and how far
-    // into its current leg it has travelled. Computed on the FULL history `h` (not the
-    // 400-bar tail) because the leg is a running state that has to be walked from the
-    // beginning, not guessed from a window.
+    // Quadrant coordinates: how far the price is from its own 200-day average, and how
+    // far into its current leg it has travelled. Computed on the FULL history `h` (not
+    // the 400-bar tail) because the leg is a running state that has to be walked from
+    // the beginning, not guessed from a window.
     const axes = trendAxes(h, asOf);
     return {
       symbol: m.symbol, name: m.name, group: m.group,
@@ -138,7 +138,7 @@ export function buildInputsAsOf(universe: BtMeta[], histMap: Map<string, Hist>, 
       adxSlope: adxState?.adxSlope ?? null,
       plusDI: adxState?.plusDI ?? null,
       minusDI: adxState?.minusDI ?? null,
-      rangePos: axes?.rangePos ?? null,
+      macroGap: axes?.macroGap ?? null,
       momentum: axes?.momentum ?? null,
     };
   });

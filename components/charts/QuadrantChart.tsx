@@ -19,15 +19,19 @@ import {
 //
 // Every asset is plotted as a dot (see lib/rotationPhase.ts for the definition and
 // the evidence behind it):
-//   X = RANGE POSITION — how far the price is from the middle of its own 40-day range (%)
+//   X = MACRO — how far the price is above or below its own 200-day moving average (%)
 //   Y = SWING     — % into the leg the price is travelling: above the low it started
 //                   from, or below the high it started from
 //
 // Both splits sit at zero:
-//   Top-right   → Trending:   in the upper half of its range and advancing
-//   Top-left    → Recovering: in the lower half but the leg has turned up — entry
-//   Bottom-right→ Fading:     in the upper half but the leg has turned down — exit
-//   Bottom-left → Lagging:    in the lower half and still giving ground back — wait
+//   Top-right   → Trending:   above the average and advancing
+//   Bottom-right→ Recovering: above the average but giving back — a dip in an uptrend
+//   Top-left    → Fading:     below the average but advancing — a rally that fades
+//   Bottom-left → Lagging:    below the average and still giving ground
+//
+// The corners are not a wheel: above the average an asset oscillates Trending ↔
+// Recovering, below it Lagging ↔ Fading, and it changes pairs only when the average is
+// crossed.
 //
 // Accelerating names (top-8 by score) and any clicked rows are drawn bigger and
 // labelled. Labels are placed by a dedicated layer that spaces them apart and
@@ -45,8 +49,8 @@ export interface QuadrantAsset {
   symbol: string;
   name: string;
   group: string;
-  /** x-axis: % from the middle of its own 40-day range, averaged. */
-  rangePos: number;
+  /** x-axis: % above or below its own 200-day moving average. */
+  macroGap: number;
   /** y-axis: % into the current leg, signed by its direction. Both axes are the
    *  asset's own absolute numbers and centred on zero, so distance from the centre
    *  is the SIZE of the swing — an index orbits small, a high-beta name wide — and
@@ -114,7 +118,7 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
   const p = payload[0].payload;
   const color = GROUP_COLORS[p.group] ?? '#6b7280';
   // Where the dot actually is, not just which box it fell in.
-  const pos = quadrantPosition(p.rangePos, p.momentum);
+  const pos = quadrantPosition(p.macroGap, p.momentum);
   return (
     <div className="rounded-lg border border-white/10 bg-[#1e293b] px-3 py-2 text-[11px] space-y-0.5 shadow-xl">
       <p className="font-semibold" style={{ color }}>{p.name}</p>
@@ -122,9 +126,9 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
       {p.r3m != null && <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>}
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">In its 40-day range:{' '}
-        <span className={p.rangePos >= 0 ? 'text-green-400' : 'text-red-400'}>
-          {p.rangePos >= 0 ? '+' : ''}{p.rangePos.toFixed(2)}%
+      <p className="text-gray-300">From its 200-day average:{' '}
+        <span className={p.macroGap >= 0 ? 'text-green-400' : 'text-red-400'}>
+          {p.macroGap >= 0 ? '+' : ''}{p.macroGap.toFixed(2)}%
         </span>
       </p>
       <p className="text-gray-300">Current leg:{' '}
@@ -162,7 +166,7 @@ export interface QuadrantTrail {
   name: string;
   group: string;
   /** The same two coordinates the live dots use, as of each past date. */
-  points: { date: string; rangePos: number; momentum: number }[];
+  points: { date: string; macroGap: number; momentum: number }[];
 }
 
 // Trail layer: draws each traced asset's journey as a fading tail, oldest segment
@@ -182,7 +186,7 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, clampEdgeY: 
     for (const t of trails) {
       const color = GROUP_COLORS[t.group] ?? '#6b7280';
       const pts = t.points.map(p => ({
-        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.rangePos))),
+        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.macroGap))),
         y: yScale(Math.max(-clampEdgeY, Math.min(clampEdgeY, p.momentum))),
         date: p.date,
       }));
@@ -393,10 +397,12 @@ function makeLabelLayer(labeled: PlotAsset[]) {
 
     return (
       <g>
-        {corner('Recovering', left + 6, top + 14, 'start', '#60a5fa')}
+{/* The macro gate puts the two "below the average" states on the LEFT and the two
+            above it on the right, so Fading and Recovering swap corners with it. */}
+        {corner('Fading', left + 6, top + 14, 'start', '#d97706')}
         {corner('Trending', right - 6, top + 14, 'end', '#22c55e')}
         {corner('Lagging', left + 6, bottom - 8, 'start', '#f87171')}
-        {corner('Fading', right - 6, bottom - 8, 'end', '#d97706')}
+        {corner('Recovering', right - 6, bottom - 8, 'end', '#60a5fa')}
         {nodes}
       </g>
     );
@@ -436,10 +442,10 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
     };
     // Both axes are in % of price, and they live on different scales: the position in a
-    // 40-day range runs to a few points, a whole leg to tens of them.
+    // 200-day average runs to a few points, a whole leg to tens of them.
     const M = halfRange(
-      assets.map(a => a.rangePos), 4, 1.5,
-      trails?.flatMap(t => t.points.map(p => p.rangePos)) ?? [],
+      assets.map(a => a.macroGap), 4, 1.5,
+      trails?.flatMap(t => t.points.map(p => p.macroGap)) ?? [],
     );
     const MY = halfRange(
       assets.map(a => a.momentum), 6, 2,
@@ -456,7 +462,7 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
 
     const plot: PlotAsset[] = assets.map(a => ({
       ...a,
-      xPlot: Math.max(-clampEdge, Math.min(clampEdge, a.rangePos)),
+      xPlot: Math.max(-clampEdge, Math.min(clampEdge, a.macroGap)),
       yPlot: Math.max(-clampEdgeY, Math.min(clampEdgeY, a.momentum)),
       dimmed: focusing && !focus.has(a.symbol),
     }));
@@ -540,13 +546,13 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
           <XAxis
             dataKey="xPlot"
             type="number"
-            name="Range position"
+            name="From its 200-day average"
             domain={[xMin, xMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}%`}
-            label={{ value: 'Position in its 40-day range (%)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
+            label={{ value: 'From its 200-day average (%)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
             dataKey="yPlot"

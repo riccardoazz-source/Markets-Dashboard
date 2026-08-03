@@ -109,7 +109,7 @@ export async function GET(req: Request) {
   const price = ownHist.filter(p => p.date >= startStr).map(p => ({ date: p.date, close: p.close }));
 
   type QPoint = {
-    date: string; rangePos: number; momentum: number; r3m: number | null;
+    date: string; macroGap: number; momentum: number; r3m: number | null;
     phase: string | null; close: number | null;
     /** Where the dot actually sits: distance from the centre and angle round it. */
     radius: number; angle: number;
@@ -133,7 +133,7 @@ export async function GET(req: Request) {
   for (let i = 0; i < ownHist.length; i++) {
     const ax = axes[i];
     if (!ax || ownHist[i].date < startStr) continue;
-    const pos = quadrantPosition(ax.rangePos, ax.momentum);
+    const pos = quadrantPosition(ax.macroGap, ax.momentum);
     if (!pos) continue;
     // The 3-month return is carried for the tooltip and the CSV only; it is not part of
     // the model. Walking back 90 calendar days per bar would be another quadratic pass,
@@ -146,7 +146,7 @@ export async function GET(req: Request) {
       // and a value like +0.0031 rounds to 0.00 — so at two decimals a reader recomputing
       // the phase from the exported columns gets the opposite answer, precisely on the
       // rows where the asset is crossing an axis.
-      rangePos: r4(pos.x),
+      macroGap: r4(pos.x),
       momentum: r4(pos.y),
       r3m: past && past > 0 ? Math.round((ownHist[i].close / past - 1) * 1e4) / 1e2 : null,
       phase: pos.phase,
