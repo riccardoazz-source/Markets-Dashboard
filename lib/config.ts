@@ -752,6 +752,9 @@ export const SECTORS: AssetConfig[] = [
   { symbol: 'AIQ',   name: 'AI & Machine Learning',   category: 'Tech',       type: 'sector' },
   { symbol: 'WCLD',  name: 'Cloud Computing',         category: 'Tech',       type: 'sector' },
   { symbol: 'CIBR',  name: 'Cybersecurity',           category: 'Tech',       type: 'sector' },
+  // Defiance Quantum ETF — listed 2018, the oldest and largest quantum fund, so it is
+  // the only one with enough history for the 200-day average the quadrant needs.
+  { symbol: 'QTUM',  name: 'Quantum Computing',       category: 'Tech',       type: 'sector' },
   { symbol: 'MAGS',  name: 'Magnificent Seven',       category: 'Tech',       type: 'sector' },
   { symbol: 'XLV',   name: 'Healthcare',              category: 'Health',     type: 'sector' },
   { symbol: 'XBI',   name: 'Biotech & Pharma',        category: 'Health',     type: 'sector' },
