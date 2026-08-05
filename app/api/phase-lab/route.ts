@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { INDEXES, COMMODITIES, CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS, SECTORS } from '@/lib/config';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { classifyPhase, ROTATION_PHASES } from '@/lib/rotationPhase';
-import { buildInputsAsOf, fmt, priceAsOf, type Hist, type BtMeta } from '@/lib/backtestCore';
+import { fmt, priceAsOf, type Hist, type BtMeta } from '@/lib/backtestCore';
+import { trendAxesSeries } from '@/lib/rotationPhase';
 import { subYears, addMonths } from 'date-fns';
 
 // Yahoo answers the edge network but blocks the Node serverless IPs.
@@ -14,8 +15,8 @@ export const maxDuration = 25;
 //
 // The labels claim a cycle: Recovering is the entry, Fading is the exit. That is a
 // testable claim, and until it is tested the four colours are decoration. This
-// endpoint walks history month by month, labels every asset with the SAME chain the
-// live app uses (buildInputsAsOf → trendAxes → classifyPhase) using only data
+// endpoint walks history day by day, labels every asset with the SAME chain the
+// live app uses (trendAxesSeries → classifyPhase) on every daily bar, using only data
 // available on that date, and then looks at what the price did over the following
 // 1, 3 and 6 months.
 //
@@ -46,7 +47,7 @@ export interface PhaseStats {
   perPhase: Record<string, Record<string, Bucket>>;
   /** phase → group → horizon → bucket, so a class can be read on its own */
   perGroup: Record<string, Record<string, Record<string, Bucket>>>;
-  /** from-phase → to-phase → count, at the next monthly step */
+  /** from-phase → to-phase → count, each time the call actually CHANGES */
   transitions: Record<string, Record<string, number>>;
   samples: number;
   symbolsDone: string[];
@@ -88,30 +89,40 @@ export async function GET(req: Request) {
     const histMap = new Map<string, Hist>([[symbol, hist]]);
     const firstDate = hist[0].date;
 
-    // Monthly steps. Finer sampling would multiply the work without adding
-    // independent observations — consecutive weeks of the same phase are the same
-    // observation counted several times, which flatters every number.
-    const start = subYears(now, years);
-    let prevPhase: string | null = null;
-    for (let d = new Date(start); d <= now; d = addMonths(d, 1)) {
-      const dateStr = fmt(d);
-      // A date before the asset's own history has no meaning; and a year of
-      // trailing bars is the minimum the inputs need.
-      if (dateStr <= firstDate) { prevPhase = null; continue; }
+    // The model is computed on EVERY daily bar — one pass, the same code the panel
+    // draws from. It used to be re-derived once a month, and with calls that last about
+    // seventeen days that meant most of them were never observed at all: the table was
+    // measuring the sampling as much as the model.
+    const axes = trendAxesSeries(hist);
+    const startStr = fmt(subYears(now, years));
 
-      const input = buildInputsAsOf([meta], histMap, d)[0];
-      const phase = input ? classifyPhase(input.macroGap, input.momentum) : null;
+    // Observations are taken WEEKLY. Daily would count the same call twenty times over
+    // and say nothing new; monthly skipped whole calls. And every CHANGE of call is
+    // counted, wherever it falls in the week — the transition matrix is about what the
+    // next call turns out to be, which is the question worth asking, and reading it off
+    // a monthly grid answered a different one.
+    let prevPhase: string | null = null;
+    let lastSampled = -Infinity;
+    for (let i = 0; i < hist.length; i++) {
+      const dateStr = hist[i].date;
+      if (dateStr < startStr || dateStr <= firstDate) continue;
+      const ax = axes[i];
+      const phase = ax ? classifyPhase(ax.macroGap, ax.momentum) : null;
       if (!phase) { prevPhase = null; continue; }
 
-      if (prevPhase) stats.transitions[prevPhase][phase] += 1;
+      if (prevPhase && phase !== prevPhase) stats.transitions[prevPhase][phase] += 1;
       prevPhase = phase;
 
-      const px0 = priceAsOf(hist, dateStr);
-      if (px0 == null || px0 <= 0) continue;
+      const t = Date.parse(`${dateStr}T00:00:00Z`);
+      if (t - lastSampled < 7 * 86_400_000) continue;
+      lastSampled = t;
+
+      const px0 = hist[i].close;
+      if (!(px0 > 0)) continue;
       stats.samples += 1;
 
       for (const h of HORIZONS) {
-        const fwdDate = fmt(addMonths(d, h));
+        const fwdDate = fmt(addMonths(new Date(t), h));
         // Only count a horizon that has actually elapsed — otherwise the most
         // recent months would contribute a truncated, flattering return.
         if (fwdDate > fmt(now)) continue;

@@ -109,7 +109,7 @@ export function PhaseLabPanel() {
       {open && (
         <div className="px-3 pb-3 space-y-3">
           <p className="text-[10px] text-gray-500 leading-snug">
-            Every asset is labelled month by month with the same chain the live app uses, on that date&apos;s data only,
+            Every asset is labelled EVERY DAY with the same chain the live app uses, on that date&apos;s data only, sampled weekly for the returns below,
             then measured against what the price did over the following 1, 3 and 6 months. A working cycle model shows{' '}
             <b className="text-gray-400">Recovering ≥ Trending &gt; Fading &gt; Lagging</b>, and a transition matrix that
             actually turns.
@@ -184,7 +184,7 @@ export function PhaseLabPanel() {
               {/* Transition matrix — a cycle has to turn */}
               <div className="overflow-x-auto">
                 <p className="text-[10px] text-gray-500 mb-1">
-                  Where each phase goes next month (row = from, % of that row)
+                  What the NEXT call turns out to be, each time the call changes (row = from, % of that row)
                 </p>
                 <table className="text-[11px] tabular-nums">
                   <thead>
