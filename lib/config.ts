@@ -756,6 +756,14 @@ export const SECTORS: AssetConfig[] = [
   // the only one with enough history for the 200-day average the quadrant needs.
   { symbol: 'QTUM',  name: 'Quantum Computing',       category: 'Tech',       type: 'sector' },
   { symbol: 'MAGS',  name: 'Magnificent Seven',       category: 'Tech',       type: 'sector' },
+  // Equal-weight twins of the two big indices. On their own they are just two more
+  // funds; divided by their cap-weighted parent (^GSPC, ^NDX) they are a breadth
+  // proxy — the ratio falls when a handful of large stocks are carrying the index
+  // and rises when the average member participates. That is the one thing the
+  // index's own price cannot show, and the thing that separates a bear-market
+  // rally from a real low. RSP goes back to 2003, QQQE to 2012.
+  { symbol: 'RSP',   name: 'S&P 500 Equal Weight',    category: 'Breadth',    type: 'sector' },
+  { symbol: 'QQQE',  name: 'NASDAQ 100 Equal Weight', category: 'Breadth',    type: 'sector' },
   { symbol: 'XLV',   name: 'Healthcare',              category: 'Health',     type: 'sector' },
   { symbol: 'XBI',   name: 'Biotech & Pharma',        category: 'Health',     type: 'sector' },
   { symbol: 'XLF',   name: 'Financials',              category: 'Finance',    type: 'sector' },
