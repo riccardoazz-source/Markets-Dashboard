@@ -46,8 +46,8 @@ export interface QuadrantPoint {
   symbol: string;
   name: string;
   group: string;
-  macroGap?: number; // x-axis: % above/below its own 200-day moving average
-  momentum?: number; // y-axis: % into the current leg, signed by its direction
+  macroGap?: number; // x-axis: cycle depth in monthly volatilities (≤ 0)
+  momentum?: number; // y-axis: the current leg, signed, in monthly volatilities
   r3m: number | null; // 3M return %, kept for the tooltip
   /** @deprecated X was the 3M return and Y the acceleration before the axes became
    *  the trend gap and momentum. Kept so older snapshots still load. */

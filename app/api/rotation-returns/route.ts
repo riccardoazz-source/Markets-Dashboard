@@ -41,8 +41,8 @@ interface RollingReturn {
   moneyFlow: number | null;// net buying pressure −1..1 (M31 v5 quiet-accumulation sleeve)
   downVolDry: number | null;// down-day volume dry-up 0..1 (M31 v8 recovery precision)
   // ── Rotation-quadrant coordinates (lib/rotationPhase.ts) ──
-  macroGap: number | null; // X: % above/below its own 200-day moving average
-  momentum: number | null; // Y: % into the current leg, signed by its direction
+  macroGap: number | null; // X: how deep this cycle has gone, in monthly volatilities (≤ 0)
+  momentum: number | null; // Y: the current leg, signed, in monthly volatilities
 }
 
 interface CacheEntry { data: RollingReturn[]; ts: number }
@@ -70,9 +70,10 @@ function rolling(history: { date: string; close: number }[], daysAgo: number): n
 }
 
 // How much history every row needs. The 200-day MA and the 252-day CYC R² want
-// ~325 trading days; the quadrant axes need their EMA warm-up and volatility window
-// (AXES_LOOKBACK_DAYS), and one day short of that they return null and every asset
-// loses its phase. Take the larger, with a holiday margin.
+// ~325 trading days; the quadrant axes need that average PLUS a year for their state
+// machine to establish which part of the cycle the asset is in (AXES_LOOKBACK_DAYS),
+// and one day short of that they return null and every asset loses its phase. Take the
+// larger, with a holiday margin.
 const FETCH_DAYS = Math.max(470, AXES_LOOKBACK_DAYS + 60);
 
 // 200-day simple moving average: average of the last 200 daily closes.
@@ -126,7 +127,7 @@ function buildRow(symbol: string, history: { date: string; close: number; volume
   const dalio = dalioVolumeRatios(history.map(p => p.volume));
   const r = range52w(history);
   const adxState = computeWeeklyADX(history); // live weekly ADX (M26 Gemini model)
-  const axes = trendAxes(history);            // quadrant X/Y as of the last bar
+  const axes = trendAxes(history);            // cycle depth / leg as of the last bar
   return {
     symbol,
     r1m: rolling(history, 30),

@@ -86,6 +86,8 @@ interface Run {
   phase: string | null;
   /** Price change over the run, %. Null when either end has no close. */
   ret: number | null;
+  /** Deepest fall from a running high INSIDE the run, %, ≤ 0. Null without closes. */
+  dd: number | null;
   /** Calendar days the call was in force. */
   days: number;
 }
@@ -226,7 +228,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     for (const p of dailyPoints) {
       const last = out[out.length - 1];
       if (last && last.phase === p.phase) { last.to = p.date; last.end = p.date; }
-      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, days: 0 });
+      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, dd: null, days: 0 });
     }
     // A phase holds until the next one starts, so each band is DRAWN to where the next
     // begins — otherwise a one-bar phase is a zero-width band that draws nothing. `end`
@@ -253,9 +255,26 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     // The flip day itself therefore belongs to neither band, and that is the honest
     // place for it: it is the day the model changed its mind because of what happened.
     const closeAt = new Map(dailyPoints.map(p => [p.date, p.close]));
+    // The net move alone hides what a stretch felt like. A Lagging band ends only once the
+    // bottom has been called, and every confirmation that avoids calling a bear-market
+    // rally lands ABOVE the low — so the rebound falls inside the band and the net reads
+    // mildly positive while the drawdown suffered inside it is the worst of the four.
+    // Both numbers are shown for exactly that reason.
+    const idx = new Map(dailyPoints.map((p, i) => [p.date, i]));
     for (const r of out) {
       const a = closeAt.get(r.from), b = closeAt.get(r.end);
       r.ret = a != null && b != null && a > 0 ? (b / a - 1) * 100 : null;
+      const i0 = idx.get(r.from), i1 = idx.get(r.end);
+      if (i0 != null && i1 != null) {
+        let peak = -Infinity, worst = 0;
+        for (let i = i0; i <= i1; i++) {
+          const c = dailyPoints[i].close;
+          if (c == null || !(c > 0)) continue;
+          if (c > peak) peak = c;
+          if (peak > 0) worst = Math.min(worst, (c / peak - 1) * 100);
+        }
+        r.dd = isFinite(worst) ? worst : null;
+      }
       r.days = Math.max(1, Math.round((Date.parse(r.end) - Date.parse(r.from)) / 86_400_000));
     }
     return out;
@@ -286,11 +305,13 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     const counts = new Map<string, number>();
     let total = 0;
     for (const p of dailyPoints) if (p.phase) { counts.set(p.phase, (counts.get(p.phase) ?? 0) + 1); total++; }
-    const stats = new Map<string, { avg: number | null; runs: number }>();
+    const stats = new Map<string, { avg: number | null; dd: number | null; runs: number }>();
     for (const ph of counts.keys()) {
       const rs = runs.filter(r => r.phase === ph && r.ret != null);
+      const ds = runs.filter(r => r.phase === ph && r.dd != null);
       stats.set(ph, {
         avg: rs.length ? rs.reduce((s, r) => s + (r.ret as number), 0) / rs.length : null,
+        dd: ds.length ? ds.reduce((s, r) => s + (r.dd as number), 0) / ds.length : null,
         runs: rs.length,
       });
     }
@@ -314,11 +335,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     for (const p of dailyPoints) {
       m.set(p.date, {
         model_phase: p.phase,
-        // Four decimals: the sign of these two columns decides the phase, and two
-        // decimals can round a genuine +0.0031 down to 0.00.
-        model_x_range_pos_pct: p.macroGap,
-        model_y_swing_pct: p.momentum,
-        model_radius_pct_mo: p.radius,
+        // Four decimals: these two columns decide the phase — x against the severity
+        // boundary and y against zero — and two decimals can round a genuine
+        // -1.9996 to the wrong side of it.
+        model_x_cycle_depth_sigma: p.macroGap,
+        model_y_leg_sigma: p.momentum,
+        model_radius_sigma: p.radius,
         model_angle_deg: p.angle,
         model_r3m_pct: p.r3m,
       });
@@ -330,6 +352,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     runs.forEach((r, i) => {
       if (!r.phase) return;
       const avg = summary.stats.get(r.phase)?.avg ?? null;
+      const avgDd = summary.stats.get(r.phase)?.dd ?? null;
       for (const p of dailyPoints) {
         if (p.date < r.from || p.date > r.end) continue;
         const row = m.get(p.date);
@@ -338,7 +361,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         row.model_run_start = r.from;
         row.model_run_days = r.days;
         row.model_run_return_pct = r2(r.ret);
+        row.model_run_worst_drawdown_pct = r2(r.dd);
         row.model_phase_avg_return_pct = r2(avg);
+        row.model_phase_avg_worst_drawdown_pct = r2(avgDd);
       }
     });
     return m;
@@ -347,11 +372,11 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   // The same figure the band is labelled with, reachable by date — a narrow band
   // carries no label, and the tooltip is where it can still be read.
   const runRetAt = useMemo(() => {
-    const m = new Map<string, { ret: number | null; days: number; phase: string | null }>();
+    const m = new Map<string, { ret: number | null; dd: number | null; days: number; phase: string | null }>();
     for (const r of runs) {
       for (const p of dailyPoints) {
         if (p.date < r.from || p.date > r.end) continue;
-        m.set(p.date, { ret: r.ret, days: r.days, phase: r.phase });
+        m.set(p.date, { ret: r.ret, dd: r.dd, days: r.days, phase: r.phase });
       }
     }
     return m;
@@ -556,12 +581,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                     contentStyle={{ backgroundColor: '#1a1d2e', border: '1px solid #252840', borderRadius: 6, color: '#e2e8f0', fontSize: 10, padding: '2px 6px', lineHeight: 1.35 }}
                     formatter={(v: number, _n: string, p: { payload?: DPoint }) => {
                       const pt = p?.payload;
-                      const mom = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(1)}% ${v >= 0 ? 'off the low' : 'off the high'}` : '—';
-                      const gap = pt?.macroGap != null ? `${pt.macroGap >= 0 ? '+' : ''}${pt.macroGap.toFixed(2)}%` : '—';
-                      const r = pt?.radius != null ? ` · ${pt.radius.toFixed(2)} from centre` : '';
+                      const mom = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}σ ${v >= 0 ? 'off the low' : 'off the high'}` : '—';
+                      const gap = pt?.macroGap != null ? `${pt.macroGap.toFixed(2)}σ below its high` : '—';
                       const run = pt ? runRetAt.get(pt.date) : undefined;
                       const runTxt = run?.ret != null ? ` · this call ${fmtRet(run.ret)} in ${run.days}d` : '';
-                      return [`range ${gap} · leg ${mom} · ${pt?.phase ?? '—'}${r}${runTxt}`, 'Model'];
+                      const ddTxt = run?.dd != null ? ` (worst ${fmtRet(run.dd)})` : '';
+                      return [`depth ${gap} · leg ${mom} · ${pt?.phase ?? '—'}${runTxt}${ddTxt}`, 'Model'];
                     }}
                   />
                 </ComposedChart>
@@ -571,8 +596,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               {summary.rows.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap pt-0.5">
                   <span className="text-[9px] text-gray-600 uppercase tracking-wider"
-                    title="Share of the visible window spent in each phase, and the average price move per stretch of that phase over this window">
-                    Time spent · avg move
+                    title="Share of the visible window spent in each phase, the average net move per stretch, and the average worst drawdown suffered inside a stretch">
+                    Time spent · avg move · worst inside
                   </span>
                   {summary.rows.map(([ph, n]) => (
                     <button
@@ -590,6 +615,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       {ph} {Math.round((n / Math.max(1, summary.total)) * 100)}%
                       {summary.stats.get(ph)?.avg != null && (
                         <span className="opacity-70"> · avg {fmtRet(summary.stats.get(ph)!.avg as number)}</span>
+                      )}
+                      {summary.stats.get(ph)?.dd != null && (
+                        <span className="opacity-50"> · worst {fmtRet(summary.stats.get(ph)!.dd as number)}</span>
                       )}
                     </button>
                   ))}

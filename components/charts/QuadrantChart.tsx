@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { quadrantPosition } from '@/lib/rotationPhase';
+import { quadrantPosition, SEVERE_SIGMA } from '@/lib/rotationPhase';
 import {
   ResponsiveContainer,
   ScatterChart,
@@ -19,19 +19,21 @@ import {
 //
 // Every asset is plotted as a dot (see lib/rotationPhase.ts for the definition and
 // the evidence behind it):
-//   X = MACRO — how far the price is above or below its own 200-day moving average (%)
-//   Y = SWING     — % into the leg the price is travelling: above the low it started
-//                   from, or below the high it started from
+//   X = DEPTH — how far this cycle has gone, in the asset's own monthly volatilities.
+//               Never positive: 0 is "at its high", and it only goes left.
+//   Y = LEG   — the move under way, signed: above the low it started from when rising,
+//               below the high it started from when falling. Also in volatilities.
 //
-// Both splits sit at zero:
-//   Top-right   → Trending:   above the average and advancing
-//   Bottom-right→ Recovering: above the average but giving back — a dip in an uptrend
-//   Top-left    → Fading:     below the average but advancing — a rally that fades
-//   Bottom-left → Lagging:    below the average and still giving ground
+// The horizontal split is at zero. The VERTICAL split is at −SEVERE_SIGMA, not at zero,
+// because that is where a give-back stops being a pause and becomes a correction:
+//   Top-right   → Trending:   shallow and rising — the trend is running
+//   Bottom-right→ Fading:     shallow and falling — a pause, not yet damage
+//   Bottom-left → Lagging:    deep and falling — the correction itself
+//   Top-left    → Recovering: deep and rising — the fall has stopped
 //
-// The corners are not a wheel: above the average an asset oscillates Trending ↔
-// Recovering, below it Lagging ↔ Fading, and it changes pairs only when the average is
-// crossed.
+// This one IS a cycle and it turns one way: right to left along the bottom as the fall
+// deepens, up the left side when the leg turns, then back toward the origin on the right
+// as the new trend repairs the damage.
 //
 // Accelerating names (top-8 by score) and any clicked rows are drawn bigger and
 // labelled. Labels are placed by a dedicated layer that spaces them apart and
@@ -49,12 +51,11 @@ export interface QuadrantAsset {
   symbol: string;
   name: string;
   group: string;
-  /** x-axis: % above or below its own 200-day moving average. */
+  /** x-axis: how deep this cycle has gone, in monthly volatilities (≤ 0). */
   macroGap: number;
-  /** y-axis: % into the current leg, signed by its direction. Both axes are the
-   *  asset's own absolute numbers and centred on zero, so distance from the centre
-   *  is the SIZE of the swing — an index orbits small, a high-beta name wide — and
-   *  every asset crosses all four quadrants. */
+  /** y-axis: the current leg, signed, in monthly volatilities. Both axes are scaled by
+   *  the asset's OWN volatility, so a broad index and a high-beta name are directly
+   *  comparable and the same distance means the same thing for both. */
   momentum: number;
   /** 3M return %, tooltip only — not a coordinate any more. */
   r3m: number | null;
@@ -126,20 +127,21 @@ function QuadrantTooltip({ active, payload }: { active?: boolean; payload?: Tool
       {p.r3m != null && <p className="text-gray-300">3M: <span className={p.r3m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r3m >= 0 ? '+' : ''}{p.r3m.toFixed(1)}%</span></p>}
       {p.r1m != null && <p className="text-gray-300">1M: <span className={p.r1m >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1m >= 0 ? '+' : ''}{p.r1m.toFixed(1)}%</span></p>}
       {p.r1y != null && <p className="text-gray-300">1Y: <span className={p.r1y >= 0 ? 'text-green-400' : 'text-red-400'}>{p.r1y >= 0 ? '+' : ''}{p.r1y.toFixed(1)}%</span></p>}
-      <p className="text-gray-300">From its 200-day average:{' '}
-        <span className={p.macroGap >= 0 ? 'text-green-400' : 'text-red-400'}>
-          {p.macroGap >= 0 ? '+' : ''}{p.macroGap.toFixed(2)}%
+      <p className="text-gray-300">Cycle depth:{' '}
+        <span className={p.macroGap > -SEVERE_SIGMA ? 'text-green-400' : 'text-red-400'}>
+          {p.macroGap.toFixed(2)}σ{' '}
+          {p.macroGap > -SEVERE_SIGMA ? 'below its high' : 'below its high — severe'}
         </span>
       </p>
       <p className="text-gray-300">Current leg:{' '}
         <span className={p.momentum >= 0 ? 'text-green-400' : 'text-red-400'}>
-          {p.momentum >= 0 ? '+' : ''}{p.momentum.toFixed(1)}%{' '}
+          {p.momentum >= 0 ? '+' : ''}{p.momentum.toFixed(2)}σ{' '}
           {p.momentum >= 0 ? 'off its low' : 'off its high'}
         </span>
       </p>
       {pos && (
         <p className="text-gray-500">
-          {pos.radius.toFixed(1)} %/mo from the centre · {pos.angle.toFixed(0)}°
+          σ = one month of this asset&apos;s own volatility · {pos.angle.toFixed(0)}°
         </p>
       )}
       {p.isAccel && <p className="text-green-400 font-semibold">🌱 Accelerating</p>}
@@ -173,7 +175,7 @@ export interface QuadrantTrail {
 // faintest, so direction is readable at a glance (down-left → up-right = an asset
 // climbing out of Lagging). Drawn under the dots, inside the chart so it can use
 // recharts' live pixel scales.
-function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, clampEdgeY: number, live: Map<string, PlotAsset>) {
+function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, xRight: number, clampEdgeY: number, live: Map<string, PlotAsset>) {
   return function TrailLayer(props: CustomizedProps) {
     const { xAxisMap, yAxisMap, offset } = props;
     if (!xAxisMap || !yAxisMap || !offset || trails.length === 0) return null;
@@ -186,7 +188,7 @@ function makeTrailLayer(trails: QuadrantTrail[], clampEdge: number, clampEdgeY: 
     for (const t of trails) {
       const color = GROUP_COLORS[t.group] ?? '#6b7280';
       const pts = t.points.map(p => ({
-        x: xScale(Math.max(-clampEdge, Math.min(clampEdge, p.macroGap))),
+        x: xScale(Math.max(-clampEdge, Math.min(xRight, p.macroGap))),
         y: yScale(Math.max(-clampEdgeY, Math.min(clampEdgeY, p.momentum))),
         date: p.date,
       }));
@@ -397,12 +399,13 @@ function makeLabelLayer(labeled: PlotAsset[]) {
 
     return (
       <g>
-{/* The macro gate puts the two "below the average" states on the LEFT and the two
-            above it on the right, so Fading and Recovering swap corners with it. */}
-        {corner('Fading', left + 6, top + 14, 'start', '#d97706')}
+{/* Deep is LEFT, rising is UP. Recovering sits top-left because it is the one
+            state that is both damaged and rising; Fading bottom-right because it is
+            falling but not yet damaged. */}
+        {corner('Recovering', left + 6, top + 14, 'start', '#60a5fa')}
         {corner('Trending', right - 6, top + 14, 'end', '#22c55e')}
         {corner('Lagging', left + 6, bottom - 8, 'start', '#f87171')}
-        {corner('Recovering', right - 6, bottom - 8, 'end', '#60a5fa')}
+        {corner('Fading', right - 6, bottom - 8, 'end', '#d97706')}
         {nodes}
       </g>
     );
@@ -420,16 +423,16 @@ interface Props {
 }
 
 export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymbols }: Props) {
-  // BOTH domains are symmetric around zero and outlier-clamped, so the crosshair
-  // of the quadrant sits in the middle and a lone extreme mover cannot squash
-  // everyone else onto the axes. Symmetry is what makes "distance from the centre"
-  // readable as the size of an asset's swing.
+  // The Y domain is symmetric around zero — a leg is as readable up as down. The X
+  // domain is NOT: depth is never positive, so it runs from the deepest asset up to a
+  // sliver past zero, with the severity boundary drawn inside it. Making X symmetric
+  // would waste half the plot on a region no asset can ever occupy.
   const { plot, normal, accel, labeled, xDomain, yDomain, clampEdge, clampEdgeY } = useMemo(() => {
     if (assets.length === 0) {
       return {
         plot: [] as PlotAsset[], normal: [] as PlotAsset[], accel: [] as PlotAsset[], labeled: [] as PlotAsset[],
-        xDomain: [-5, 5] as [number, number], yDomain: [-12, 12] as [number, number],
-        clampEdge: 4.93, clampEdgeY: 11.8,
+        xDomain: [-6, 0.3] as [number, number], yDomain: [-6, 6] as [number, number],
+        clampEdge: 5.9, clampEdgeY: 5.9,
       };
     }
     // Half-range for one axis: the 90th percentile of |value| padded out, but never
@@ -441,16 +444,19 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       const trailMax = trailVals.length ? Math.max(...trailVals.map(Math.abs)) : 0;
       return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
     };
-    // Both axes are in % of price, and they live on different scales: the position in a
-    // 200-day average runs to a few points, a whole leg to tens of them.
+    // Both axes are in the asset's own monthly volatilities, so they share a scale and a
+    // floor wide enough to keep the severity boundary comfortably inside the plot.
     const M = halfRange(
-      assets.map(a => a.macroGap), 4, 1.5,
+      assets.map(a => a.macroGap), SEVERE_SIGMA * 2, 0.8,
       trails?.flatMap(t => t.points.map(p => p.macroGap)) ?? [],
     );
     const MY = halfRange(
-      assets.map(a => a.momentum), 6, 2,
+      assets.map(a => a.momentum), SEVERE_SIGMA * 2, 0.8,
       trails?.flatMap(t => t.points.map(p => p.momentum)) ?? [],
     );
+    // Depth never goes right of zero, so the plot keeps only a sliver there for the dots
+    // of assets sitting exactly at their high.
+    const xRight = 0.06 * M;
     const clampEdge = M * 0.985;
     const clampEdgeY = MY * 0.985;
 
@@ -462,7 +468,7 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
 
     const plot: PlotAsset[] = assets.map(a => ({
       ...a,
-      xPlot: Math.max(-clampEdge, Math.min(clampEdge, a.macroGap)),
+      xPlot: Math.max(-clampEdge, Math.min(xRight, a.macroGap)),
       yPlot: Math.max(-clampEdgeY, Math.min(clampEdgeY, a.momentum)),
       dimmed: focusing && !focus.has(a.symbol),
     }));
@@ -473,7 +479,7 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       : plot.filter(a => a.isAccel || a.isSelected);
     return {
       plot, normal, accel, labeled,
-      xDomain: [-M, M] as [number, number], yDomain: [-MY, MY] as [number, number],
+      xDomain: [-M, xRight] as [number, number], yDomain: [-MY, MY] as [number, number],
       clampEdge, clampEdgeY,
     };
   }, [assets, trails, focusSymbols]);
@@ -498,7 +504,7 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
   const [yMin, yMax] = yDomain;
   const LabelLayer = makeLabelLayer(labeled);
   // Live dot positions, so each trail can terminate exactly on its asset's dot.
-  const TrailLayer = makeTrailLayer(trails ?? [], clampEdge, clampEdgeY, new Map(plot.map(a => [a.symbol, a])));
+  const TrailLayer = makeTrailLayer(trails ?? [], clampEdge, xDomain[1], clampEdgeY, new Map(plot.map(a => [a.symbol, a])));
 
   return (
     <div className="space-y-1">
@@ -546,28 +552,29 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
           <XAxis
             dataKey="xPlot"
             type="number"
-            name="From its 200-day average"
+            name="Cycle depth (σ)"
             domain={[xMin, xMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}%`}
-            label={{ value: 'From its 200-day average (%)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
+            label={{ value: 'How deep this cycle has gone (monthly σ below its high)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
             dataKey="yPlot"
             type="number"
-            name="Current leg"
+            name="Current leg (σ)"
             domain={[yMin, yMax]}
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}`}
-            label={{ value: 'Current leg (% off its low / high)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
+            label={{ value: 'Current leg (σ off its low / high)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
             width={36}
           />
 
-          <ReferenceLine x={0}  stroke="#334155" strokeWidth={1.5} />
+          {/* The severity boundary, NOT zero: left of it a give-back is a correction. */}
+          <ReferenceLine x={-SEVERE_SIGMA} stroke="#334155" strokeWidth={1.5} />
           <ReferenceLine y={0} stroke="#334155" strokeWidth={1.5} />
 
           <Tooltip content={<QuadrantTooltip />} cursor={{ strokeDasharray: '3 3', stroke: '#475569' }} />
