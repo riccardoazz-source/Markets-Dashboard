@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { PhaseBadge } from '@/components/ui/PhaseBadge';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { SECTORS } from '@/lib/config';
@@ -390,7 +391,10 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
           <PanelClose onClose={() => setSelected(null)} />
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-white">{selectedSector.name}</h3>
+              <h3 className="text-base font-bold text-white flex items-center gap-2 flex-wrap">
+                {selectedSector.name}
+                <PhaseBadge symbol={selectedSector.symbol} />
+              </h3>
               <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
                 {selectedSector.symbol} · {selectedSector.category}
                 {selectedSector.currency && (

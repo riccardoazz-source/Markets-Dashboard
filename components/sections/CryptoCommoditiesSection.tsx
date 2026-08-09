@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { PhaseBadge } from '@/components/ui/PhaseBadge';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { CRYPTO_IDS, CRYPTO_YAHOO_SYMBOLS } from '@/lib/config';
@@ -342,7 +343,10 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
           <PanelClose onClose={() => setSelected(null)} />
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-white">{selectedCrypto.name}</h3>
+              <h3 className="text-base font-bold text-white flex items-center gap-2 flex-wrap">
+                {selectedCrypto.name}
+                <PhaseBadge symbol={coinYahooSym(selectedCrypto)} />
+              </h3>
               <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
                 {selectedCrypto.symbol}
                 <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-500/20 text-gray-400 border border-gray-500/30 leading-none">

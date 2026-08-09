@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { PhaseBadge } from '@/components/ui/PhaseBadge';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { BarChart2 } from 'lucide-react';
@@ -80,7 +81,10 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
         <PanelClose onClose={onClose} />
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-white">{name}</h3>
+            <h3 className="text-base font-bold text-white flex items-center gap-2 flex-wrap">
+              {name}
+              <PhaseBadge symbol={symbol} />
+            </h3>
             <p className="text-xs text-gray-500 mt-0.5">{symbol} · {group}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-wrap justify-end pr-7 min-w-0">

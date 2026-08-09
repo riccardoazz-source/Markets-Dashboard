@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { PhaseBadge } from '@/components/ui/PhaseBadge';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { HistoricalPoint, Timeframe, QuoteData } from '@/lib/types';
@@ -1596,7 +1597,10 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
           <PanelClose onClose={() => setSelected(null)} />
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-white truncate">{selected.name}</h3>
+              <h3 className="text-base font-bold text-white flex items-center gap-2 flex-wrap">
+                <span className="truncate">{selected.name}</span>
+                <PhaseBadge symbol={selected.symbol} />
+              </h3>
               <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                 <span className="font-mono">{selected.symbol}</span>
                 {selected.exchange ? `· ${selected.exchange}` : ''}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { PhaseBadge } from '@/components/ui/PhaseBadge';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { COMMODITIES } from '@/lib/config';
@@ -273,7 +274,10 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
           <PanelClose onClose={() => setSelected(null)} />
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-white">{selectedConfig?.name}</h3>
+              <h3 className="text-base font-bold text-white flex items-center gap-2 flex-wrap">
+                {selectedConfig?.name}
+                <PhaseBadge symbol={selected} />
+              </h3>
               <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
                 {selected} · {selectedConfig?.category}
                 {selectedQuote?.currency && (

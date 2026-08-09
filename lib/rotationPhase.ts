@@ -34,7 +34,15 @@
 //
 // ── What this fixed, and what it did not ─────────────────────────────────────
 //
-// FIXED: the previous version gated on the 200-day average — above it a pullback was
+// FIXED, second pass: a stretch called Trending was holding falls of −4.3% (NASDAQ) and
+// −9.6% (gold). That number is not a mislabelling, it is PAUSE_SIGMA — a phase that ends
+// only when the price has given back X necessarily contains a give-back of X. Lowering it
+// to 1.0σ and widening the gap to SEVERE_SIGMA takes both to −2.3% and turns Fading, the
+// sell label, from +0.03σ to −0.10σ. The thresholds are also now measured against the
+// volatility in force at the high, not the live one — volatility rises ×1.21 twenty
+// sessions into a fall, so a live threshold widens exactly while the fall is happening.
+//
+// FIXED, first pass: the previous version gated on the 200-day average — above it a pullback was
 // Recovering, below it a rally was Fading. That reads a three-week 7% drop inside an
 // uptrend as Recovering for the whole descent, with a sliver of Lagging at the low. It is
 // the picture inverted. Under this model that same drop reads Fading, then Lagging through
@@ -57,9 +65,9 @@
 // Recovering (four bear-market rallies, all of them wrong) to 80% Lagging and 15%
 // Recovering. What it costs is real and is stated here rather than hidden: because every
 // reliable bottom confirmation lands ABOVE the low, the recovery that follows falls inside
-// the Lagging band, so Lagging's net move reads positive (+0.31σ) even though the drawdown
-// suffered inside it averages −1.46σ. That is arithmetic, not a bug — it is why the panel
-// shows both numbers.
+// the Lagging band, so Lagging's net move reads positive (+0.13σ) even though the drawdown
+// suffered inside it averages −0.97σ, the worst of the four. That is arithmetic, not a bug —
+// it is why the panel shows both numbers.
 //
 // PER-PHASE, measured on THIS implementation over twelve assets (NASDAQ 100 from 1985,
 // Healthcare from 1998, S&P 500, Micron, Microsoft, Bitcoin, Gold, Silver, Cloud, TSX and
@@ -67,12 +75,12 @@
 // monthly volatility:
 //
 //                % time   band length   net move   worst drawdown inside
-//     Trending      53%       47 days      +0.86σ         −0.75σ
-//     Recovering    11%       21 days      +0.17σ         −0.61σ
-//     Fading         8%        7 days      +0.03σ         −0.38σ
-//     Lagging       27%       51 days      +0.31σ         −1.46σ
+//     Trending      53%       24 days      +0.52σ         −0.40σ
+//     Recovering     6%       10 days      +0.13σ         −0.31σ
+//     Fading        20%        9 days      −0.10σ         −0.52σ
+//     Lagging       21%       35 days      +0.13σ         −0.97σ
 //
-// 2022 reads Lagging 80% on the NASDAQ 100 and 78% on the S&P 500 — a bear market that
+// 2022 reads Lagging 70% on the NASDAQ 100 and 73% on the S&P 500 — a bear market that
 // the model calls a bear market, which is the whole point of the macro gate.
 //
 // Looking FORWARD three months from each call: Trending +0.69σ, Fading +0.77σ, Recovering
@@ -92,10 +100,30 @@ export type RotationPhase = 'Recovering' | 'Trending' | 'Fading' | 'Lagging';
 
 export const ROTATION_PHASES: RotationPhase[] = ['Recovering', 'Trending', 'Fading', 'Lagging'];
 
-/** A rise has stalled once it gives back this many monthly volatilities: Trending → Fading. */
-export const PAUSE_SIGMA = 1.25;
-/** The give-back is severe past this many: Fading → Lagging. Also the quadrant's X boundary. */
-export const SEVERE_SIGMA = 2.0;
+/**
+ * A rise has stalled once it gives back this many monthly volatilities: Trending → Fading.
+ *
+ * This number IS the drawdown a Trending stretch is allowed to contain — a phase that ends
+ * only when the price has fallen X necessarily holds a fall of X, so the average worst
+ * drawdown inside Trending tracks it almost exactly. Measured across twelve assets:
+ * 1.25σ → −0.75σ of drawdown inside, 1.1σ → −0.46σ, 1.0σ → −0.40σ, 0.8σ → −0.31σ. Lower is
+ * a cleaner Trending and a choppier one: at 1.25σ a stretch runs 47 days and covers 53% of
+ * the time in 510 stretches, at 0.8σ it runs 17 days in 1,195. 1.0 halves the drawdown a
+ * Trending stretch can hold while keeping stretches long enough to read — on the NASDAQ's
+ * last year it takes "worst inside Trending" from −4.3% to −2.3%, and on gold, whose
+ * volatility is far higher, from −9.6% to −2.3%.
+ */
+export const PAUSE_SIGMA = 1.0;
+/**
+ * The give-back is severe past this many: Fading → Lagging. Also the quadrant's X boundary.
+ *
+ * The GAP between this and PAUSE_SIGMA decides Fading's sign. Narrow, and most Fading
+ * stretches end by rebounding, so Fading reads positive — a "sell" label on a rise. Wide,
+ * and most of them end by falling into Lagging, which is the honest reading of a stall that
+ * did not hold. At PAUSE 1.0 the gap to 1.5σ gives Fading +0.47%, to 2.0σ −0.26%, to 2.5σ
+ * −0.76%. 2.5 is the first that makes the sell label actually point down.
+ */
+export const SEVERE_SIGMA = 2.5;
 /** A mild pullback rejoins the trend on a rebound this big off its low: Fading → Trending. */
 export const RESUME_SIGMA = 0.6;
 /** A severe decline is called over on a rebound this big off the low: Lagging → Recovering. */
@@ -276,14 +304,23 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
   //   trough  the lowest close since the give-back began
   //   legLow  the low the current rising leg started from
   //   recHigh the best close since Recovering began
+  //   refSig  the volatility a fall is judged against — see below
   let phase: RotationPhase | null = null;
   let high = closes[0], trough = closes[0], legLow = closes[0], recHigh = closes[0];
+  let refSig: number | null = null;
 
   for (let i = 0; i < n; i++) {
     const c = closes[i];
     const m = ma[i];
     if (m == null || !(m > 0)) continue;
-    const sig = Math.max(VOL_FLOOR, vol[i] ?? volMedian);
+    const live = Math.max(VOL_FLOOR, vol[i] ?? volMedian);
+    // A fall is measured against the volatility the asset had BEFORE it started, not
+    // against the volatility the fall itself creates. Measured over 221 episodes, an
+    // asset's 63-day volatility is ×1.21 higher twenty sessions into a 5%+ fall than it
+    // was at the peak — so a live 1.25σ threshold is really 1.52σ of normal by then, and
+    // the bar for calling the decline rises exactly while the decline is happening.
+    // refSig is re-anchored whenever a new high is set, which is when a cycle restarts.
+    const sig = refSig ?? live;
     const drop = (1 - c / high) * 100;          // give-back from the cycle high, %
 
     if (phase == null) {
@@ -297,10 +334,10 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
         if (closes[k] > top) top = closes[k];
         if (closes[k] < bottom) bottom = closes[k];
       }
-      high = top; trough = bottom; legLow = bottom; recHigh = c;
-      phase = (1 - c / high) * 100 >= SEVERE_SIGMA * sig ? 'Lagging' : 'Trending';
+      high = top; trough = bottom; legLow = bottom; recHigh = c; refSig = live;
+      phase = (1 - c / high) * 100 >= SEVERE_SIGMA * live ? 'Lagging' : 'Trending';
     } else if (phase === 'Trending') {
-      if (c > high) { high = c; }
+      if (c > high) { high = c; refSig = live; }
       if ((1 - c / high) * 100 >= PAUSE_SIGMA * sig) { phase = 'Fading'; trough = c; }
     } else if (phase === 'Fading') {
       if (c < trough) trough = c;
@@ -321,7 +358,7 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
       else if ((c / trough - 1) * 100 >= CONFIRM_SIGMA * sig) {
         // The recovery is a trend now: the cycle restarts from here, so the damage the
         // old high still records stops being what the asset is measured against.
-        phase = 'Trending'; high = c; legLow = trough;
+        phase = 'Trending'; high = c; legLow = trough; refSig = live;
       } else if ((1 - c / recHigh) * 100 >= PAUSE_SIGMA * sig) {
         // A pullback inside a recovery that has not yet become a trend is still the
         // damaged half of the cycle, so it is Lagging, not Fading.
@@ -331,6 +368,8 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
 
     const severe = phase === 'Lagging' || phase === 'Recovering';
     const rising = phase === 'Trending' || phase === 'Recovering';
+    // X and Y are quoted in the SAME reference volatility the thresholds use, or a point
+    // could sit the wrong side of a boundary its own transition has not crossed.
     // X: frozen at the trough once severe, live otherwise — see the header.
     let x = -(severe ? (1 - trough / high) : Math.max(0, (1 - c / high))) * 100 / sig;
     // Y: the leg, from the low it rose from or the high it fell from.

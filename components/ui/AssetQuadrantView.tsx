@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { PhaseBadge } from '@/components/ui/PhaseBadge';
 import { PanelClose } from '@/components/ui/PanelClose';
 import clsx from 'clsx';
 import {
@@ -472,7 +473,10 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         <PanelClose onClose={onClose} />
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-white">{name}</h3>
+            <h3 className="text-base font-bold text-white flex items-center gap-2 flex-wrap">
+              {name}
+              <PhaseBadge symbol={symbol} />
+            </h3>
             <p className="text-xs text-gray-500 mt-0.5">
               {symbol}{group ? ` · ${group}` : ''} · price vs the model&apos;s quadrant call
             </p>
