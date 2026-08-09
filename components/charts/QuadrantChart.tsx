@@ -444,14 +444,14 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       const trailMax = trailVals.length ? Math.max(...trailVals.map(Math.abs)) : 0;
       return Math.max(floor, Math.min(Math.max(maxAbs, trailMax) + pad, Math.max(p90 * 1.3, trailMax * 1.05)));
     };
-    // Both axes are in the asset's own monthly volatilities, so they share a scale and a
-    // floor wide enough to keep the severity boundary comfortably inside the plot.
-    const M = halfRange(
-      assets.map(a => a.macroGap), SEVERE_SIGMA * 2, 0.8,
-      trails?.flatMap(t => t.points.map(p => p.macroGap)) ?? [],
-    );
+    // The X domain is PINNED so the severity boundary lands in the middle of the plot and
+    // the four boxes stay roughly the same size. Left of it is unbounded — one asset deep
+    // in a bear market would otherwise stretch the axis until the healthy half was a
+    // sliver and every other dot piled into it, which is what "the quadrant looks
+    // deformed" actually is. The deepest asset is clamped to the edge instead.
+    const M = SEVERE_SIGMA * 2;
     const MY = halfRange(
-      assets.map(a => a.momentum), SEVERE_SIGMA * 2, 0.8,
+      assets.map(a => a.momentum), SEVERE_SIGMA, 0.5,
       trails?.flatMap(t => t.points.map(p => p.momentum)) ?? [],
     );
     // Depth never goes right of zero, so the plot keeps only a sliver there for the dots
@@ -508,8 +508,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
 
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between text-[10px] text-gray-600 px-1">
-        <span>X = 3-month return · Y = model score vs universe (0–100)</span>
+      <div className="flex items-center justify-between gap-2 text-[10px] text-gray-600 px-1">
+        <span className="hidden sm:inline">X = depth of this cycle · Y = the leg under way · both in monthly σ</span>
         <div className="flex items-center gap-3">
           {Object.entries(GROUP_COLORS).map(([g, c]) => (
             <span key={g} className="flex items-center gap-1">
@@ -543,10 +543,12 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 16, right: 16, bottom: 24, left: 8 }}>
           {/* Quadrant background tints — both splits now sit at zero. */}
-          <ReferenceArea x1={0} x2={xMax} y1={0} y2={yMax} fill="#16a34a" fillOpacity={0.05} />
-          <ReferenceArea x1={xMin} x2={0} y1={0} y2={yMax} fill="#3b82f6" fillOpacity={0.05} />
-          <ReferenceArea x1={0} x2={xMax} y1={yMin} y2={0} fill="#f59e0b" fillOpacity={0.035} />
-          <ReferenceArea x1={xMin} x2={0} y1={yMin} y2={0} fill="#ef4444" fillOpacity={0.035} />
+          {/* The shaded regions split where the PHASES split — at the severity boundary,
+              not at zero. Left of it is the damaged half. */}
+          <ReferenceArea x1={-SEVERE_SIGMA} x2={xMax} y1={0} y2={yMax} fill="#16a34a" fillOpacity={0.05} />
+          <ReferenceArea x1={xMin} x2={-SEVERE_SIGMA} y1={0} y2={yMax} fill="#3b82f6" fillOpacity={0.05} />
+          <ReferenceArea x1={-SEVERE_SIGMA} x2={xMax} y1={yMin} y2={0} fill="#f59e0b" fillOpacity={0.035} />
+          <ReferenceArea x1={xMin} x2={-SEVERE_SIGMA} y1={yMin} y2={0} fill="#ef4444" fillOpacity={0.035} />
 
           <CartesianGrid stroke="#1e293b" strokeDasharray="0" />
           <XAxis
@@ -557,8 +559,8 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}%`}
-            label={{ value: 'How deep this cycle has gone (monthly σ below its high)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
+            tickFormatter={v => `${(v as number).toFixed(1)}σ`}
+            label={{ value: 'How deep this cycle has gone (σ below its high)', position: 'insideBottom', offset: -12, fill: '#4b5563', fontSize: 10 }}
           />
           <YAxis
             dataKey="yPlot"
@@ -568,7 +570,7 @@ export function QuadrantChart({ assets, loading, onAssetClick, trails, focusSymb
             tick={{ fill: '#6b7280', fontSize: 10 }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}`}
+            tickFormatter={v => `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(1)}σ`}
             label={{ value: 'Current leg (σ off its low / high)', angle: -90, position: 'insideLeft', fill: '#4b5563', fontSize: 10 }}
             width={36}
           />

@@ -24,13 +24,26 @@
 //       The live drawdown from the high the cycle started at while the trend is
 //       intact; FROZEN at the trough once the fall turns severe, so a rebound does
 //       not slide the point back into the healthy half before it is a trend again.
-//   Y = the current leg, signed. Rising: how far above the low it started from.
-//       Falling: how far below the high it started from. Also in volatilities.
+//   Y = the leg under way, signed and read over ONE MONTH: rising, how far above its
+//       lowest close of the last month; falling, how far below its highest. Also in
+//       volatilities.
 //
-// The quadrant boundaries are X = −SEVERE (vertical) and Y = 0 (horizontal), and the
-// state machine below is clamped so a point ALWAYS lands in the quadrant its own label
-// names. Unclamped it agrees 93–97% of the time, and the disagreements are exactly the
-// near-zero cases that look like a mislabelled dot on the chart.
+// Y is deliberately a one-month window and not "the whole leg since it began". Measured
+// from the leg's own start, a falling asset's Y is its drawdown from the cycle high —
+// which is X. The two were the same number for every falling asset, so half the universe
+// sat exactly on the diagonal y = x and the chart drew a line instead of a cloud. Over a
+// month they answer different questions: X is how much damage this cycle has done, Y is
+// what the price is doing right now. A market that has fallen a long way and then gone
+// quiet reads deep on X and near zero on Y, which is the truth about it.
+//
+// The quadrant boundaries are X = −SEVERE (vertical) and Y = 0 (horizontal), and both
+// coordinates are clamped so a point ALWAYS lands in the quadrant its own label names —
+// 100% over 44,664 labelled days. Without the clamp the misses are all the near-zero
+// cases, which are exactly the ones that read as a dot in the wrong colour.
+//
+// X and Y now correlate 0.52 overall and 0.21 among falling days; 15% of falling days
+// still sit exactly on the diagonal, and those are the honest ones — a fresh pullback
+// whose one-month high IS the high the cycle is measured from.
 //
 // ── What this fixed, and what it did not ─────────────────────────────────────
 //
@@ -281,6 +294,19 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
   const span = W(MACRO_SPAN);
   const slopeSpan = W(MACRO_SLOPE_SPAN);
 
+  // Rolling one-month extremes, for Y. Small window, so the naive scan is cheap and
+  // there is no deque to get wrong.
+  const legWin = W(21);
+  const winMin = new Array<number>(n), winMax = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    let lo2 = closes[i], hi2 = closes[i];
+    for (let k = Math.max(0, i - legWin + 1); k <= i; k++) {
+      if (closes[k] < lo2) lo2 = closes[k];
+      if (closes[k] > hi2) hi2 = closes[k];
+    }
+    winMin[i] = lo2; winMax[i] = hi2;
+  }
+
   const vol = rollingVol(closes, W(VOL_SPAN));
   const known = vol.filter((v): v is number => v != null);
   if (!known.length) return out;
@@ -302,7 +328,8 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
   // ── the cycle, carried forward bar by bar ──
   //   high    the high this cycle is measured down from
   //   trough  the lowest close since the give-back began
-  //   legLow  the low the current rising leg started from
+  //   legLow  the low the current rising leg started from (state bookkeeping only —
+  //           Y is read over a one-month window, see below)
   //   recHigh the best close since Recovering began
   //   refSig  the volatility a fall is judged against — see below
   let phase: RotationPhase | null = null;
@@ -372,8 +399,11 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
     // could sit the wrong side of a boundary its own transition has not crossed.
     // X: frozen at the trough once severe, live otherwise — see the header.
     let x = -(severe ? (1 - trough / high) : Math.max(0, (1 - c / high))) * 100 / sig;
-    // Y: the leg, from the low it rose from or the high it fell from.
-    let y = rising ? ((c / legLow - 1) * 100) / sig : -Math.max(0, drop) / sig;
+    // Y: the leg over the last month — above its lowest close when rising, below its
+    // highest when falling. Both are the right sign by construction.
+    let y = rising
+      ? ((c / winMin[i] - 1) * 100) / sig
+      : -((1 - c / winMax[i]) * 100) / sig;
     // Clamp into the region the label names, so a point never contradicts its own colour.
     x = severe ? Math.min(x, -SEVERE_SIGMA) : Math.max(x, -SEVERE_SIGMA + MILD);
     y = rising ? Math.max(y, MILD) : Math.min(y, -MILD);
