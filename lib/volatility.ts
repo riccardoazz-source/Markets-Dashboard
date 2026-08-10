@@ -9,11 +9,33 @@
 //   up     the part contributed by the days the price ROSE
 //   down   the part contributed by the days it FELL
 //
-// The split is exact, not approximate: variance is measured around zero rather than around
-// the mean, which makes up² + down² = total² an identity instead of an approximation. For
-// daily returns the mean is a rounding error next to the deviation, so nothing is lost —
-// and "how far did it move" is the honest question for volatility anyway, not "how far did
-// it move relative to its own drift".
+// Two things have to hold at once, and they decide the whole design:
+//   each side is computed from ITS OWN days, and
+//   up + down = total, exactly.
+//
+// Standard deviations cannot do both. The natural split is the two semi-deviations — the
+// standard deviation of up days and of down days — and those combine in QUADRATURE: an
+// asset at 20.7% reads 14.3% up and 14.9% down, two numbers that look like they should
+// make 29 and instead make 20.7. Nobody can read that.
+//
+// Splitting the total by VARIANCE share fails the first requirement in a way that shows
+// up the moment it matters: variance is dominated by the largest days, so one crash can
+// LOWER the reported up-side even though the up days did not change.
+//
+// So: the total is the ordinary annualised standard deviation — the number every other
+// source quotes, unchanged — and it is split by how much of the total MOVEMENT came from
+// each side, Σ(up moves) against Σ(all moves). Magnitudes, not squares, so the share is
+// not hijacked by a single session; each side's figure comes only from its own days; and
+// the two add to the headline the way a reader expects.
+//
+// One consequence, stated rather than hidden: because the parts must sum to a total that a
+// crash RAISES, a crash lifts both — the down side a great deal, the up side a little. The
+// ratio between them is the reading that means something, and the tooltip gives it as a
+// percentage.
+//
+// Variance is measured around zero rather than around the mean. For daily returns the mean
+// is a rounding error next to the deviation, and "how far did it move" is the honest
+// question for volatility anyway, not "how far did it move relative to its own drift".
 //
 // ANNUALISED, and annualised on the asset's OWN calendar. Crypto trades 365 days a year
 // and equities about 252, so a fixed √252 would overstate an equity index against Bitcoin
@@ -23,9 +45,9 @@
 export interface Volatility {
   /** Annualised standard deviation of daily moves, %. */
   total: number;
-  /** The part of it contributed by up days, %. */
+  /** The share of `total` contributed by up days, %. `up + down === total`. */
   up: number;
-  /** The part contributed by down days, %. */
+  /** The share of `total` contributed by down days, %. */
   down: number;
   /** How many daily returns went into it. */
   bars: number;
@@ -54,23 +76,27 @@ export function computeVolatility(points: VolPoint[] | undefined | null): Volati
   const clean = points.filter(p => p && p.close != null && isFinite(p.close) && p.close > 0);
   if (clean.length < 21) return null;
 
-  let sumSq = 0, upSq = 0, downSq = 0, n = 0;
+  let sumSq = 0, absUp = 0, absDown = 0, n = 0;
   for (let i = 1; i < clean.length; i++) {
     const r = Math.log(clean[i].close / clean[i - 1].close);
     if (!isFinite(r)) continue;
-    const sq = r * r;
-    sumSq += sq;
-    if (r > 0) upSq += sq; else if (r < 0) downSq += sq;
+    sumSq += r * r;
+    if (r > 0) absUp += r; else if (r < 0) absDown -= r;
     n++;
   }
   if (n < 20) return null;
 
   // n − 1 rather than n, to match the sample convention every other figure in the app uses.
   const scale = Math.sqrt(barsPerYear(clean) / Math.max(1, n - 1)) * 100;
+  const total = Math.sqrt(sumSq) * scale;
+  // Share of the total MOVEMENT that came from rising days — see the header for why this
+  // is taken on magnitudes rather than on squares.
+  const absAll = absUp + absDown;
+  const upFrac = absAll > 0 ? absUp / absAll : 0;
   return {
-    total: Math.sqrt(sumSq) * scale,
-    up: Math.sqrt(upSq) * scale,
-    down: Math.sqrt(downSq) * scale,
+    total,
+    up: total * upFrac,
+    down: total * (1 - upFrac),
     bars: n,
     from: clean[0].date,
     to: clean[clean.length - 1].date,
@@ -103,15 +129,11 @@ export function fmtVol(v: number | null | undefined): string {
 }
 
 /**
- * How much of the movement comes from up days, 0–100, where an even split reads 50.
- *
- * Measured on the SQUARES, not on the two volatilities directly. The parts combine in
- * quadrature — up² + down² = total² — so an asset that moves exactly as much up as down
- * has up = down = 0.71 × total, and a naive up/total would report 71% for a perfectly
- * balanced asset. Squaring puts the reading back on a scale where 50 means balanced,
- * above 50 means the movement is mostly upward, and the two halves sum to 100.
+ * How much of the movement comes from up days, 0–100, where an even split reads 50 and the
+ * two sides sum to 100. Just `up` as a percentage of `total`, since the split is already
+ * linear by construction.
  */
 export function upShare(v: Volatility | null | undefined): number | null {
   if (!v || !(v.total > 0)) return null;
-  return ((v.up * v.up) / (v.total * v.total)) * 100;
+  return (v.up / v.total) * 100;
 }

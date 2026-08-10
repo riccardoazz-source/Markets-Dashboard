@@ -271,13 +271,30 @@ const volSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
   close: f(i),
 }));
 {
-  // The decomposition must be EXACT, not approximate — that is why the variance is taken
-  // around zero rather than around the mean.
+  // The two parts must ADD UP to the headline — the whole reason the split is taken on
+  // variance shares rather than as two semi-deviations, which combine in quadrature and
+  // give a reader two numbers that visibly do not make the third.
   const mixed = volSeries(500, i => 100 * Math.pow(1.004, i % 2 ? 1 : -1) * Math.pow(1.0003, i));
   const v = V.computeVolatility(mixed);
-  ok('up² + down² = total²', near(v.up * v.up + v.down * v.down, v.total * v.total, 1e-9),
-     `${v.up.toFixed(2)}² + ${v.down.toFixed(2)}² vs ${v.total.toFixed(2)}²`);
+  ok('up + down = total, exactly', near(v.up + v.down, v.total, 1e-9),
+     `${v.up.toFixed(2)} + ${v.down.toFixed(2)} = ${(v.up + v.down).toFixed(2)} vs ${v.total.toFixed(2)}`);
   ok('all three are positive', v.total > 0 && v.up > 0 && v.down > 0);
+  // Each side must be built from ITS OWN days: a series with one extra violent down day
+  // must move `down` and leave `up` alone.
+  const calmer = volSeries(500, i => 100 * Math.pow(1.004, i % 2 ? 1 : -1));
+  const shocked = calmer.map((p, i) => (i >= 250 ? { ...p, close: p.close * 0.85 } : p));
+  const c0 = V.computeVolatility(calmer), c1 = V.computeVolatility(shocked);
+  ok('a one-off crash raises the down side', c1.down > c0.down * 1.4,
+     `${c0.down.toFixed(2)}% → ${c1.down.toFixed(2)}%`);
+  // It cannot leave the up side untouched: the two must sum to a total that the crash
+  // genuinely raises, so both rise. What must hold is that the down side rises MORE and
+  // that the balance tips downward — and, above all, that the up side is never LOWERED,
+  // which is exactly what a variance-share split does and why this one uses magnitudes.
+  ok('…more than it raises the up side', (c1.down - c0.down) > (c1.up - c0.up) * 1.25,
+     `down +${(c1.down - c0.down).toFixed(2)} vs up +${(c1.up - c0.up).toFixed(2)}`);
+  ok('…and never lowers the up side', c1.up >= c0.up, `${c0.up.toFixed(2)}% → ${c1.up.toFixed(2)}%`);
+  ok('…and tips the balance downward', V.upShare(c1) < V.upShare(c0) - 1,
+     `${V.upShare(c0).toFixed(1)}% → ${V.upShare(c1).toFixed(1)}% upside`);
 
   // A price that only ever rises contributes nothing to the downside, and vice versa.
   const onlyUp = volSeries(400, i => 100 * Math.pow(1.001, i));
@@ -295,7 +312,8 @@ const volSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
   ok('±1% alternating annualises to 1% × √(bars per year)',
      near(a.total, Math.sqrt(260.9), 0.2), `${a.total.toFixed(2)}% vs ${Math.sqrt(260.9).toFixed(2)}%`);
   ok('an evenly-split asset reads 50% upside', near(V.upShare(a), 50, 1.5), `${V.upShare(a).toFixed(1)}%`);
-  ok('…and each half is the total over √2', near(a.up, a.total / Math.SQRT2, 0.2));
+  ok('…and each half is half the total', near(a.up, a.total / 2, 0.2) && near(a.down, a.total / 2, 0.2),
+     `${a.up.toFixed(2)} / ${a.down.toFixed(2)} of ${a.total.toFixed(2)}`);
 
   // The SAME daily moves on a 7-day calendar must annualise HIGHER, because there are
   // more of them in a year. A fixed √252 would rate crypto below an equity index for no

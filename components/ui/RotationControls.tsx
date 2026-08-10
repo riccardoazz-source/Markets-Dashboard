@@ -101,11 +101,13 @@ export function VolatilityLine({ vol }: { vol: Volatility | null | undefined }) 
   return (
     <p
       className="text-[9px] leading-[1.35] tabular-nums mt-0.5"
-      title={`Annualised volatility over the asset's whole history (${vol.from} → ${vol.to}, ${vol.bars.toLocaleString('en-US')} days).\nUp ${fmtVol(vol.up)} is the part contributed by rising days, down ${fmtVol(vol.down)} the part from falling ones; they combine in quadrature to the total.\n${share == null ? '' : `${share.toFixed(0)}% of the movement is upward — 50% would be perfectly balanced.`}`}
+      title={`Annualised volatility over the asset's whole history (${vol.from} → ${vol.to}, ${vol.bars.toLocaleString('en-US')} days).\n${fmtVol(vol.up)} of it comes from the days the price rose and ${fmtVol(vol.down)} from the days it fell — the two add up to the total.\n${share == null ? '' : `${share.toFixed(0)}% of the movement is upward — 50% would be perfectly balanced.`}`}
     >
       <span className="text-gray-500">Vol:</span>{' '}
       <span className="text-gray-300">{fmtVol(vol.total)}</span>{' '}
-      <span className="text-emerald-400">↑{fmtVol(vol.up)}</span>{' '}
+      <span className="text-gray-600">=</span>{' '}
+      <span className="text-emerald-400">↑{fmtVol(vol.up)}</span>
+      <span className="text-gray-600"> + </span>
       <span className="text-red-400">↓{fmtVol(vol.down)}</span>
     </p>
   );
@@ -155,12 +157,13 @@ export function PeriodVolatility({ points, label }: {
   return (
     <div
       className="shrink-0 rounded-lg border border-border bg-bg-card/60 px-2 py-1 leading-tight"
-      title={`Annualised volatility over the ${label} window on screen (${vol.from} → ${vol.to}, ${vol.bars.toLocaleString('en-US')} days).\nUp is the part contributed by rising days, down the part from falling ones; they combine in quadrature to the total.\n${share == null ? '' : `${share.toFixed(0)}% of the movement is upward — 50% would be perfectly balanced.`}\nThe figure on the card is the same measure over the asset's whole history.`}
+      title={`Annualised volatility over the ${label} window on screen (${vol.from} → ${vol.to}, ${vol.bars.toLocaleString('en-US')} days).\nThe two parts are the share coming from rising days and from falling days, and they add up to the total.\n${share == null ? '' : `${share.toFixed(0)}% of the movement is upward — 50% would be perfectly balanced.`}\nThe figure on the card is the same measure over the asset's whole history.`}
     >
       <p className="text-[8px] uppercase tracking-wider text-gray-600">Volatility · {label}</p>
       <p className="text-xs font-bold text-gray-100 tabular-nums">{fmtVol(vol.total)}</p>
       <p className="text-[9px] tabular-nums">
-        <span className="text-emerald-400">↑{fmtVol(vol.up)}</span>{' '}
+        <span className="text-emerald-400">↑{fmtVol(vol.up)}</span>
+        <span className="text-gray-600"> + </span>
         <span className="text-red-400">↓{fmtVol(vol.down)}</span>
       </p>
     </div>
