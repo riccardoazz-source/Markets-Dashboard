@@ -20,7 +20,9 @@ import { Sma200wLine, Ma200dLine, MaSpreadLine } from '@/components/ui/Sma200wLi
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { useGistData, usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA, VolatilityLine, VolFilterChips, VolFilter, PeriodVolatility } from '@/components/ui/RotationControls';
+import { useVolatility } from '@/lib/useVolatility';
+import { volBand } from '@/lib/volatility';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods, computeMomentum,
@@ -1058,6 +1060,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
   const [watchlistCategory, setWatchlistCategory] = useState('Watchlist');
   const [watchlistSort, setWatchlistSort] = useState<StockSortKey>('changePercent');
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [volFilter, setVolFilter] = useState<VolFilter>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [below200d, setBelow200d] = useState(false);
   const [below200w, setBelow200w] = useState(false);
@@ -1182,6 +1185,10 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
 
   const avgYearlyMap = useAvgYearly(watchlistSymbols);
   const phases = useRotationPhases(watchlistSymbols);
+  // Whole-history volatility for the watchlist, for the card line and the band filter.
+  // Cached hard — a figure built from thousands of bars does not move when one more
+  // arrives — so adding a ticker costs one request for that ticker, not for the list.
+  const vols = useVolatility(watchlistSymbols);
 
   // Watchlist sorted by the active sort key (Day / MTD / YTD); symbols whose
   // quote hasn't loaded yet sink to the bottom.
@@ -1214,7 +1221,8 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
     return (phaseFilter === 'all' || phases.get(sym) === phaseFilter)
       && (!pinnedOnly || pins.has(sym))
       && (!below200d || isBelowMA(q?.price, q?.sma200d))
-      && (!below200w || isBelowMA(q?.price, q?.sma200w));
+      && (!below200w || isBelowMA(q?.price, q?.sma200w))
+      && (volFilter === 'all' || volBand(vols.get(sym)?.total) === volFilter);
   });
 
   useEffect(() => {
@@ -1475,6 +1483,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   </button>
                 ))}
                 <MAFilterChips below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
+                <VolFilterChips value={volFilter} setValue={setVolFilter} />
               </div>
             )}
           </div>
@@ -1562,6 +1571,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                         <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />
                         <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                         <MaSpreadLine sma200d={q.sma200d} sma200w={q.sma200w} />
+                        <VolatilityLine vol={vols.get(sym)} />
                       </>
                     ) : (
                       <div className="mt-2 space-y-1.5">
@@ -1611,6 +1621,7 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                 )}
               </p>
             </div>
+            <PeriodVolatility points={prices} label={customRange ? 'Custom' : timeframe} />
             <div className="flex items-center gap-1.5 flex-wrap justify-end pr-7 min-w-0">
               {onCompare && (
                 <button
