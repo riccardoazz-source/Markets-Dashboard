@@ -26,7 +26,9 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA, VolatilityLine, VolFilterChips, VolFilter, PeriodVolatility } from '@/components/ui/RotationControls';
+import { useVolatility } from '@/lib/useVolatility';
+import { volBand } from '@/lib/volatility';
 
 type SortKey = 'changePercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 
@@ -51,11 +53,15 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [volFilter, setVolFilter] = useState<VolFilter>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [below200d, setBelow200d] = useState(false);
   const [below200w, setBelow200w] = useState(false);
   const { pins, togglePin } = usePins();
   const phases = useRotationPhases();
+  // Whole-history volatility, for the card line and the band filter. Cached hard —
+  // a figure built from thousands of bars does not move when one more arrives.
+  const vols = useVolatility(COMMODITIES.map(c => c.symbol));
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
@@ -133,7 +139,8 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
       && (phaseFilter === 'all' || phases.get(c.symbol) === phaseFilter)
       && (!pinnedOnly || pins.has(c.symbol))
       && (!below200d || isBelowMA(q?.price, q?.sma200d))
-      && (!below200w || isBelowMA(q?.price, q?.sma200w));
+      && (!below200w || isBelowMA(q?.price, q?.sma200w))
+      && (volFilter === 'all' || volBand(vols.get(c.symbol)?.total) === volFilter);
   });
 
   const sorted = [...filteredCommodities].sort((a, b) => {
@@ -168,6 +175,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
               </button>
             ))}
             <MAFilterChips below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
+          <VolFilterChips value={volFilter} setValue={setVolFilter} />
           </div>
           {lastUpdate && (
             <div className="flex items-center gap-1 text-[10px] text-gray-600">
@@ -258,6 +266,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                     <Ma200dLine price={q.price} sma200d={q.sma200d} currency={q.currency} />
                     <Sma200wLine price={q.price} sma200w={q.sma200w} currency={q.currency} />
                     <MaSpreadLine sma200d={q.sma200d} sma200w={q.sma200w} />
+                    <VolatilityLine vol={vols.get(com.symbol)} />
                   </>
                 ) : (
                   <p className="text-xs text-gray-600">Loading…</p>
@@ -287,6 +296,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                 )}
               </p>
             </div>
+            <PeriodVolatility points={historical} label={customRange ? 'Custom' : timeframe} />
             <div className="flex items-center gap-1.5 flex-wrap justify-end pr-7 min-w-0">
               {onCompare && (
                 <button

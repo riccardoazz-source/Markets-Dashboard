@@ -26,7 +26,9 @@ import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
-import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA } from '@/components/ui/RotationControls';
+import { PhaseChip, PinButton, RotationFilterBar, MAFilterChips, PhaseFilter, isBelowMA, VolatilityLine, VolFilterChips, VolFilter, PeriodVolatility } from '@/components/ui/RotationControls';
+import { useVolatility } from '@/lib/useVolatility';
+import { volBand } from '@/lib/volatility';
 
 type SortKey = 'change24hPercent' | 'oneMonthChangePercent' | 'threeMonthChangePercent' | 'sixMonthChangePercent' | 'mtdChangePercent' | 'ytdChangePercent' | 'fiveYearChangePercent' | 'fiveYearCagrPercent' | 'avgYearly';
 const coinYahooSym = (c: { id: string; symbol: string }) => CRYPTO_YAHOO_SYMBOLS[c.id] ?? `${c.symbol}-USD`;
@@ -53,11 +55,15 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
   const [sortBy, setSortBy] = useState<SortKey>('change24hPercent');
   const [selectedCat, setSelectedCat] = useState('All');
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [volFilter, setVolFilter] = useState<VolFilter>('all');
   const [pinnedOnly, setPinnedOnly] = useState(false);
   const [below200d, setBelow200d] = useState(false);
   const [below200w, setBelow200w] = useState(false);
   const { pins, togglePin } = usePins();
   const phases = useRotationPhases();
+  // Whole-history volatility, for the card line and the band filter. Cached hard —
+  // a figure built from thousands of bars does not move when one more arrives.
+  const vols = useVolatility(CRYPTO_IDS.map(coinYahooSym));
   const [selected, setSelected] = useState<string | null>(null);
   const [historical, setHistorical] = useState<HistoricalPoint[]>([]);
   const [histLoading, setHistLoading] = useState(false);
@@ -213,6 +219,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
     && (!pinnedOnly || pins.has(coinYahooSym(c)))
     && (!below200d || isBelowMA(c.price, c.sma200d))
     && (!below200w || isBelowMA(c.price, c.sma200w))
+    && (volFilter === 'all' || volBand(vols.get(coinYahooSym(c))?.total) === volFilter)
   );
   const avgYearlyMap = useAvgYearly(CRYPTO_IDS.map(coinYahooSym));
   const sorted = [...catFiltered].sort((a, b) => {
@@ -243,6 +250,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
               </button>
             ))}
             <MAFilterChips below200d={below200d} setBelow200d={setBelow200d} below200w={below200w} setBelow200w={setBelow200w} />
+          <VolFilterChips value={volFilter} setValue={setVolFilter} />
           </div>
           {lastUpdate && (
             <div className="flex items-center gap-1 text-[10px] text-gray-600">
@@ -331,6 +339,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 <Ma200dLine price={coin.price} sma200d={coin.sma200d} />
                 <Sma200wLine price={coin.price} sma200w={coin.sma200w} />
                 <MaSpreadLine sma200d={coin.sma200d} sma200w={coin.sma200w} />
+                <VolatilityLine vol={vols.get(coinYahooSym(coin))} />
               </button>
             );
           })}
@@ -354,6 +363,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 </span>
               </p>
             </div>
+            <PeriodVolatility points={historical} label={customRange ? 'Custom' : timeframe} />
             <div className="flex items-center gap-1.5 flex-wrap justify-end pr-7 min-w-0">
               {onCompare && (
                 <button

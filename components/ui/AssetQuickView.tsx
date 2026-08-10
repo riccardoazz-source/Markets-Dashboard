@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { PhaseBadge } from '@/components/ui/PhaseBadge';
+import { PeriodVolatility } from '@/components/ui/RotationControls';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { BarChart2 } from 'lucide-react';
@@ -87,6 +88,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">{symbol} · {group}</p>
           </div>
+          <PeriodVolatility points={historical} label={tfLabel} />
           <div className="flex items-center gap-1.5 flex-wrap justify-end pr-7 min-w-0">
             {onCompare && (
               <button onClick={() => onCompare(symbol)}

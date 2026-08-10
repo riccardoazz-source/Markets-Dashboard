@@ -15,13 +15,15 @@ import { join } from 'node:path';
 
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
-  'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts', '--outDir', out,
+  'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
+  'lib/volatility.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 const I = await import(join(out, 'indicators.js'));
 const Q = await import(join(out, 'rotationPhase.js'));
 const TV = await import(join(out, 'tradingview.js'));
 const CFG = await import(join(out, 'config.js'));
+const V = await import(join(out, 'volatility.js'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, note = '') => {
@@ -261,6 +263,66 @@ const cut = steady[700].date;
 const asOf = Q.trendAxes(steady, cut), truncated = Q.trendAxes(steady.slice(0, 701));
 ok('as-of reads no forward data',
    near(asOf.macroGap, truncated.macroGap, 1e-12) && near(asOf.momentum, truncated.momentum, 1e-12));
+
+console.log('\nVolatility — the up/down split, answers fixed by arithmetic');
+// Weekday bars, so the calendar scaling sees ~252 a year.
+const volSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
+  date: new Date(Date.UTC(2016, 0, 4) + Math.floor(i / 5) * 7 * 86400000 + (i % 5) * 86400000).toISOString().slice(0, 10),
+  close: f(i),
+}));
+{
+  // The decomposition must be EXACT, not approximate — that is why the variance is taken
+  // around zero rather than around the mean.
+  const mixed = volSeries(500, i => 100 * Math.pow(1.004, i % 2 ? 1 : -1) * Math.pow(1.0003, i));
+  const v = V.computeVolatility(mixed);
+  ok('up² + down² = total²', near(v.up * v.up + v.down * v.down, v.total * v.total, 1e-9),
+     `${v.up.toFixed(2)}² + ${v.down.toFixed(2)}² vs ${v.total.toFixed(2)}²`);
+  ok('all three are positive', v.total > 0 && v.up > 0 && v.down > 0);
+
+  // A price that only ever rises contributes nothing to the downside, and vice versa.
+  const onlyUp = volSeries(400, i => 100 * Math.pow(1.001, i));
+  const onlyDown = volSeries(400, i => 100 * Math.pow(0.999, i));
+  ok('a series that only rises has no downside vol', V.computeVolatility(onlyUp).down === 0);
+  ok('…and its up equals its total', near(V.computeVolatility(onlyUp).up, V.computeVolatility(onlyUp).total, 1e-9));
+  ok('a series that only falls has no upside vol', V.computeVolatility(onlyDown).up === 0);
+
+  // A move of ±1% on alternate days: |r| = 1% exactly, so the annualised figure is
+  // 1% × √(bars per year). This generator is weekdays with NO holidays, which is
+  // 5 × 52.18 = 260.9 bars a year, not the 252 a real exchange trades — and the whole
+  // point of measuring the calendar instead of hardcoding it is that it notices.
+  const alt = volSeries(500, i => (i % 2 ? 100 : 100 * Math.exp(-0.01)));
+  const a = V.computeVolatility(alt);
+  ok('±1% alternating annualises to 1% × √(bars per year)',
+     near(a.total, Math.sqrt(260.9), 0.2), `${a.total.toFixed(2)}% vs ${Math.sqrt(260.9).toFixed(2)}%`);
+  ok('an evenly-split asset reads 50% upside', near(V.upShare(a), 50, 1.5), `${V.upShare(a).toFixed(1)}%`);
+  ok('…and each half is the total over √2', near(a.up, a.total / Math.SQRT2, 0.2));
+
+  // The SAME daily moves on a 7-day calendar must annualise HIGHER, because there are
+  // more of them in a year. A fixed √252 would rate crypto below an equity index for no
+  // reason but the calendar.
+  const everyDay = Array.from({ length: 500 }, (_, i) => ({
+    date: new Date(Date.UTC(2016, 0, 4) + i * 86400000).toISOString().slice(0, 10),
+    close: i % 2 ? 100 : 100 * Math.exp(-0.01),
+  }));
+  const e = V.computeVolatility(everyDay);
+  ok('a 365-day calendar annualises higher than a weekday one', e.total > a.total * 1.15,
+     `${e.total.toFixed(1)}% vs ${a.total.toFixed(1)}%`);
+  ok('…by about √(365/261)', near(e.total / a.total, Math.sqrt(365.25 / 260.9), 0.05),
+     `×${(e.total / a.total).toFixed(3)}`);
+
+  // Too little history is null, not a number computed from three points.
+  ok('null below 21 bars', V.computeVolatility(volSeries(15, () => 100)) === null);
+  ok('null on nothing at all', V.computeVolatility([]) === null && V.computeVolatility(undefined) === null);
+  // A flat price has no volatility at all, and that must not be null.
+  const flatV = V.computeVolatility(volSeries(300, () => 100));
+  ok('a flat price has zero volatility', flatV != null && flatV.total === 0 && flatV.up === 0);
+  ok('…and no upside share to report', V.upShare(flatV) === null);
+
+  // The bands the filter uses.
+  ok('bands split at 15 and 30', V.volBand(14.9) === 'calm' && V.volBand(15) === 'normal'
+     && V.volBand(30) === 'normal' && V.volBand(30.1) === 'wild');
+  ok('an unknown volatility has no band', V.volBand(null) === null && V.volBand(NaN) === null);
+}
 
 console.log('\nTradingView links — every configured asset must map, and map correctly');
 // Coverage: an asset added to config.ts with no mapping loses its button silently,
