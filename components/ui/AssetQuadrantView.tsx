@@ -85,8 +85,14 @@ interface Run {
   /** Last day this call was actually in force — what the return is measured to. */
   end: string;
   phase: string | null;
-  /** Price change over the run, %. Null when either end has no close. */
+  /**
+   * Price change over the run FROM THE DAY THE LIVE CALL ARRIVED, %. For every phase but
+   * a redrawn Recovering that is the band's own start, so nothing changes; for those, it
+   * is what acting on the label could actually have earned.
+   */
   ret: number | null;
+  /** The whole band including the redrawn part — tooltip only, and labelled as hindsight. */
+  retFull: number | null;
   /** Deepest fall from a running high INSIDE the run, %, ≤ 0. Null without closes. */
   dd: number | null;
   /**
@@ -236,7 +242,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     for (const p of dailyPoints) {
       const last = out[out.length - 1];
       if (last && last.phase === p.phase) { last.to = p.date; last.end = p.date; }
-      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, dd: null, confirmed: null, days: 0 });
+      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, retFull: null, dd: null, confirmed: null, days: 0 });
     }
     // A phase holds until the next one starts, so each band is DRAWN to where the next
     // begins — otherwise a one-bar phase is a zero-width band that draws nothing. `end`
@@ -270,26 +276,32 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     // Both numbers are shown for exactly that reason.
     const idx = new Map(dailyPoints.map((p, i) => [p.date, i]));
     for (const r of out) {
-      const a = closeAt.get(r.from), b = closeAt.get(r.end);
-      r.ret = a != null && b != null && a > 0 ? (b / a - 1) * 100 : null;
       const i0 = idx.get(r.from), i1 = idx.get(r.end);
-      if (i0 != null && i1 != null) {
-        let peak = -Infinity, worst = 0;
-        for (let i = i0; i <= i1; i++) {
-          const c = dailyPoints[i].close;
-          if (c == null || !(c > 0)) continue;
-          if (c > peak) peak = c;
-          if (peak > 0) worst = Math.min(worst, (c / peak - 1) * 100);
-        }
-        r.dd = isFinite(worst) ? worst : null;
-      }
       r.days = Math.max(1, Math.round((Date.parse(r.end) - Date.parse(r.from)) / 86_400_000));
-      // First day of the run the model was not reading backwards on.
-      if (i0 != null && i1 != null) {
-        r.confirmed = null;
-        for (let i = i0; i <= i1; i++) if (!dailyPoints[i].revised) { r.confirmed = dailyPoints[i].date; break; }
-        if (r.confirmed === r.from) r.confirmed = null;   // nothing was redrawn
+      if (i0 == null || i1 == null) continue;
+      // Where the LIVE call arrived inside this band. For everything except a Recovering
+      // band drawn back to its low, that is the band's own first day.
+      r.confirmed = null;
+      for (let i = i0; i <= i1; i++) if (!dailyPoints[i].revised) { r.confirmed = dailyPoints[i].date; break; }
+      if (r.confirmed === r.from) r.confirmed = null;
+      const iLive = r.confirmed != null ? (idx.get(r.confirmed) ?? i0) : i0;
+
+      const full = closeAt.get(r.from), live = dailyPoints[iLive].close, end = closeAt.get(r.end);
+      r.retFull = full != null && end != null && full > 0 ? (end / full - 1) * 100 : null;
+      // THE figure the chips and the band labels quote. Measured from the live call, not
+      // from the low: over twelve assets a Recovering band moves +14.8% but only +0.5% of
+      // it lands after the model has said so. Quoting the whole band would advertise a
+      // buy signal that is 97% hindsight.
+      r.ret = live != null && end != null && live > 0 ? (end / live - 1) * 100 : null;
+      // The drawdown likewise runs from the live call — the pain you would actually take.
+      let peak = -Infinity, worst = 0;
+      for (let i = iLive; i <= i1; i++) {
+        const c = dailyPoints[i].close;
+        if (c == null || !(c > 0)) continue;
+        if (c > peak) peak = c;
+        if (peak > 0) worst = Math.min(worst, (c / peak - 1) * 100);
       }
+      r.dd = isFinite(worst) ? worst : null;
     }
     return out;
   }, [dailyPoints]);
@@ -373,8 +385,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         if (!row) continue;
         row.model_run_id = i + 1;
         row.model_run_start = r.from;
+        // Where the LIVE call arrived. Equal to the start for every band but a Recovering
+        // one drawn back to its low, and the date the return below is measured from.
+        row.model_run_live_call = r.confirmed ?? r.from;
         row.model_run_days = r.days;
         row.model_run_return_pct = r2(r.ret);
+        row.model_run_return_from_low_pct = r2(r.retFull);
         row.model_run_worst_drawdown_pct = r2(r.dd);
         row.model_phase_avg_return_pct = r2(avg);
         row.model_phase_avg_worst_drawdown_pct = r2(avgDd);
@@ -386,11 +402,11 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   // The same figure the band is labelled with, reachable by date — a narrow band
   // carries no label, and the tooltip is where it can still be read.
   const runRetAt = useMemo(() => {
-    const m = new Map<string, { ret: number | null; dd: number | null; days: number; phase: string | null }>();
+    const m = new Map<string, { ret: number | null; retFull: number | null; dd: number | null; days: number; phase: string | null; confirmed: string | null }>();
     for (const r of runs) {
       for (const p of dailyPoints) {
         if (p.date < r.from || p.date > r.end) continue;
-        m.set(p.date, { ret: r.ret, dd: r.dd, days: r.days, phase: r.phase });
+        m.set(p.date, { ret: r.ret, retFull: r.retFull, dd: r.dd, days: r.days, phase: r.phase, confirmed: r.confirmed });
       }
     }
     return m;
@@ -622,9 +638,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       const run = pt ? runRetAt.get(pt.date) : undefined;
                       const runTxt = run?.ret != null ? ` · this call ${fmtRet(run.ret)} in ${run.days}d` : '';
                       const ddTxt = run?.dd != null ? ` (worst ${fmtRet(run.dd)})` : '';
+                      // The whole band, said separately and named as what it is.
+                      const fullTxt = run?.confirmed && run.retFull != null
+                        ? ` · band from the low ${fmtRet(run.retFull)}, of which ${fmtRet(run.ret ?? 0)} after the call` : '';
                       // Say so on the exact days that are hindsight, not only in a caption.
                       const provTxt = pt?.revised ? ' · in hindsight — the live call that day was Lagging' : '';
-                      return [`depth ${gap} · leg ${mom} · ${pt?.phase ?? '—'}${runTxt}${ddTxt}${provTxt}`, 'Model'];
+                      return [`depth ${gap} · leg ${mom} · ${pt?.phase ?? '—'}${runTxt}${ddTxt}${fullTxt}${provTxt}`, 'Model'];
                     }}
                   />
                 </ComposedChart>
@@ -634,7 +653,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               {summary.rows.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap pt-0.5">
                   <span className="text-[9px] text-gray-600 uppercase tracking-wider"
-                    title="Share of the visible window spent in each phase, the average net move per stretch, and the average worst drawdown suffered inside a stretch.&#10;A Recovering band is drawn from the low the price actually turned at. The model only worked that out later — 36 sessions later on average — so the dimmed part of the band, up to the tick, is hindsight: the live call those days was Lagging.">
+                    title="Share of the visible window spent in each phase, the average net move per stretch, and the average worst drawdown suffered inside a stretch.&#10;A Recovering band is drawn from the low the price actually turned at, but the figures are measured from the tick — the day the live call arrived, 36 sessions later on average. The dimmed stretch before it was labelled Lagging at the time, and over twelve assets it carries 14.3 of the 14.8 points such a band shows.">
                     Time spent · avg move · worst inside
                   </span>
                   {summary.rows.map(([ph, n]) => (
