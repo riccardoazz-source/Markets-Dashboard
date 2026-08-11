@@ -88,12 +88,12 @@
 // monthly volatility:
 //
 //                % time   band length   net move   worst drawdown inside
-//     Trending      53%       24 days      +0.52σ         −0.40σ
-//     Recovering     6%       10 days      +0.13σ         −0.31σ
-//     Fading        20%        9 days      −0.10σ         −0.52σ
-//     Lagging       21%       35 days      +0.13σ         −0.97σ
+//     Trending      51%       24 days      +0.52σ         −0.40σ
+//     Recovering     4%        9 days      +0.07σ         −0.26σ
+//     Fading        19%        9 days      −0.11σ         −0.51σ
+//     Lagging       26%       67 days      +0.60σ         −1.80σ
 //
-// 2022 reads Lagging 70% on the NASDAQ 100 and 73% on the S&P 500 — a bear market that
+// 2022 reads Lagging 78% on the NASDAQ 100 and 78% on the S&P 500 — a bear market that
 // the model calls a bear market, which is the whole point of the macro gate.
 //
 // Looking FORWARD three months from each call: Trending +0.69σ, Fading +0.77σ, Recovering
@@ -148,6 +148,8 @@ export const CONFIRM_SIGMA = 2.5;
 export const MACRO_SPAN = 200;
 /** Bars over which that average's slope is read. */
 export const MACRO_SLOPE_SPAN = 21;
+/** The faster average the price has to reclaim before a bottom may be called. */
+export const RECLAIM_SPAN = 50;
 /** Window for the monthly volatility every threshold is scaled by, in trading days. */
 export const VOL_SPAN = 63;
 /** Floor on that volatility, %, so a near-motionless series still needs a real move. */
@@ -324,6 +326,15 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
     if (i >= span) sum -= closes[i - span];
     if (i >= span - 1) ma[i] = sum / span;
   }
+  // The faster average, for the reclaim test — see the Lagging branch.
+  const fastSpan = W(RECLAIM_SPAN);
+  const maFast = new Array<number | null>(n).fill(null);
+  let fsum = 0;
+  for (let i = 0; i < n; i++) {
+    fsum += closes[i];
+    if (i >= fastSpan) fsum -= closes[i - fastSpan];
+    if (i >= fastSpan - 1) maFast[i] = fsum / fastSpan;
+  }
 
   // ── the cycle, carried forward bar by bar ──
   //   high    the high this cycle is measured down from
@@ -374,9 +385,28 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
       if (c < trough) trough = c;
       // The macro gate. A rebound alone calls four bottoms in a bear market and gets all
       // four wrong; requiring the 200-day average to have stopped falling calls one.
+      // The macro gate, in two parts, and each is there because the other alone fails.
+      //
+      // The 200-day average must not be falling. A rebound alone calls four bottoms in a
+      // bear market and gets all four wrong.
+      //
+      // AND the price must be back above its 50-day average. On its own the first test is
+      // worthless after a parabolic rise: gold ran up through 2025, then fell 24% from
+      // March 2026, and its 200-day average kept RISING the whole way down — +5.0% per
+      // 21 sessions at the top of the fall, still +0.8% near the bottom. The gate stood
+      // wide open for the entire collapse, and the model called Recovering on 18% of the
+      // year at an average of −3.6% a stretch. A slow average that is still catching up to
+      // an old rally says nothing about whether the fall has stopped; the price being back
+      // above its own faster average does.
+      //
+      // With both, that same fall reads as a single Lagging stretch of −6.4% holding an
+      // 18% drawdown, no Recovering at all, and the three bear markets in the data are
+      // covered better than before, not worse: 86% of their days read Fading or Lagging
+      // against 82% with the slow test alone.
       const prior = ma[i - slopeSpan];
-      const settled = prior != null && prior > 0 && ma[i]! >= prior;
-      if ((c / trough - 1) * 100 >= REBOUND_SIGMA * sig && settled) {
+      const slowSettled = prior != null && prior > 0 && ma[i]! >= prior;
+      const reclaimed = maFast[i] != null && c > maFast[i]!;
+      if ((c / trough - 1) * 100 >= REBOUND_SIGMA * sig && slowSettled && reclaimed) {
         phase = 'Recovering'; legLow = trough; recHigh = c;
       }
     } else {

@@ -203,6 +203,33 @@ ok('the deep part of the descent is Lagging', phaseAt(dipInABull, 1139) === 'Lag
     if (ax[i] === 'Recovering' && ax[i - 1] && ax[i - 1] !== 'Recovering' && ax[i - 1] !== 'Lagging') bad = i;
   ok('Recovering is entered only from Lagging', bad === null, bad ? `at bar ${bad}` : '');
 }
+// THE GOLD CASE. A long parabolic rise, then a deep fall. The 200-day average is still
+// RISING for months into that fall — it is catching up to the old rally — so a gate that
+// only asks "has the slow average stopped falling" stands wide open through the whole
+// collapse. On real gold that produced Recovering on 18% of a year at −3.6% a stretch.
+// Nothing may be called Recovering while the price is under its own faster average.
+{
+  const parabola = mkSeries(1500, i => (i <= 1200
+    ? 100 * Math.pow(1.0022, i)                                   // three years of rise
+    : 100 * Math.pow(1.0022, 1200) * Math.pow(0.9975, i - 1200))); // then a long fall
+  const ax = Q.trendAxesSeries(parabola);
+  const lab = ax.map(a => (a ? Q.classifyPhase(a.macroGap, a.momentum) : null));
+  // The slow average must genuinely still be rising well into the fall, or the case is
+  // not the one being guarded against and the test proves nothing.
+  const closes = parabola.map(p => p.close);
+  const slowAt = k => closes.slice(k - Q.MACRO_SPAN + 1, k + 1).reduce((s, v) => s + v, 0) / Q.MACRO_SPAN;
+  ok('the 200-day average is still rising 60 days into the fall', slowAt(1260) > slowAt(1239),
+     `${slowAt(1239).toFixed(1)} → ${slowAt(1260).toFixed(1)}`);
+  const fastAt = k => closes.slice(k - Q.RECLAIM_SPAN + 1, k + 1).reduce((s, v) => s + v, 0) / Q.RECLAIM_SPAN;
+  let called = null;
+  for (let i = 1230; i < 1500; i++) if (lab[i] === 'Recovering' && closes[i] < fastAt(i)) called = i;
+  ok('no bottom is called while the price is under its 50-day average', called === null,
+     called ? `at bar ${called}` : '');
+  ok('the fall itself reads Lagging',
+     lab.slice(1300, 1490).filter(p => p === 'Lagging').length > 150,
+     `${lab.slice(1300, 1490).filter(p => p === 'Lagging').length} of 190 days`);
+}
+
 // A steady fall is the correction itself.
 const falling = mkSeries(900, i => 100 * Math.pow(0.999, i));
 const axFall = Q.trendAxes(falling);
