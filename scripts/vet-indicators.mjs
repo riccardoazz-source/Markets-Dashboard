@@ -230,6 +230,39 @@ ok('the deep part of the descent is Lagging', phaseAt(dipInABull, 1139) === 'Lag
      `${lab.slice(1300, 1490).filter(p => p === 'Lagging').length} of 190 days`);
 }
 
+// The revised view: it may only ever turn Lagging into Recovering, only on bars BEFORE
+// the confirmation, and it must never touch the last bar — the live call. That last part
+// is what keeps the rotation table and the badges honest while the chart reads as a cycle.
+{
+  const cyc = mkSeries(1400, i => (i <= 900 ? 100 * Math.pow(1.0015, i)
+    : i <= 1050 ? 100 * Math.pow(1.0015, 900) * Math.pow(0.995, i - 900)
+    : 100 * Math.pow(1.0015, 900) * Math.pow(0.995, 150) * Math.pow(1.004, i - 1050)));
+  const live = Q.trendAxesSeries(cyc);
+  const drawn = Q.trendAxesSeries(cyc, { revised: true });
+  const ph = a => (a ? Q.classifyPhase(a.macroGap, a.momentum) : null);
+  let changed = 0, illegal = 0;
+  for (let i = 0; i < cyc.length; i++) {
+    const a = ph(live[i]), b = ph(drawn[i]);
+    if (a === b) continue;
+    changed++;
+    if (!(a === 'Lagging' && b === 'Recovering')) illegal++;
+  }
+  ok('the redraw moves some bars', changed > 5, `${changed} bars`);
+  ok('…and only ever Lagging → Recovering', illegal === 0, `${illegal} illegal`);
+  ok('…and flags every one it moved',
+     drawn.filter((a, i) => a && ph(a) !== ph(live[i])).every(a => a.revised === true));
+  ok('…and flags nothing it did not', drawn.filter((a, i) => a?.revised && ph(a) === ph(live[i])).length === 0);
+  const last = cyc.length - 1;
+  ok('the last bar is never redrawn — the live call is untouched',
+     ph(drawn[last]) === ph(live[last]) && !drawn[last]?.revised);
+  // trendAxes() is the live answer and must ignore the option entirely.
+  const asOf = Q.trendAxes(cyc, cyc[1100].date);
+  ok('the as-of answer matches the unrevised series', asOf != null
+     && Math.abs(asOf.macroGap - live[1100].macroGap) < 1e-9
+     && Math.abs(asOf.momentum - live[1100].momentum) < 1e-9);
+  ok('the default is the live view', Q.trendAxesSeries(cyc).every((a, i) => ph(a) === ph(live[i])));
+}
+
 // A steady fall is the correction itself.
 const falling = mkSeries(900, i => 100 * Math.pow(0.999, i));
 const axFall = Q.trendAxes(falling);

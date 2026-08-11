@@ -21,9 +21,9 @@ import { PHASE_META, RotationPhase } from '@/lib/rotationPhase';
 // price actually did next. The scores come from /api/asset-quadrant, which runs
 // the SAME pipeline as the live Rotation Quadrant; the formula lives in one place.
 
-interface QPoint { date: string; macroGap: number; momentum: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number }
+interface QPoint { date: string; macroGap: number; momentum: number; r3m: number | null; phase: string | null; close: number | null; radius: number; angle: number; revised?: boolean }
 /** A weekly sample carried forward onto every daily bar. */
-interface DPoint { date: string; macroGap: number | null; momentum: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null }
+interface DPoint { date: string; macroGap: number | null; momentum: number | null; r3m: number | null; phase: string | null; close: number | null; radius: number | null; angle: number | null; revised?: boolean }
 interface Payload { price: HistoricalPoint[]; points: QPoint[]; stepDays: number; universeSize: number }
 
 // Recharts hands a Customized layer the live pixel scales; only the parts used here.
@@ -89,6 +89,12 @@ interface Run {
   ret: number | null;
   /** Deepest fall from a running high INSIDE the run, %, ≤ 0. Null without closes. */
   dd: number | null;
+  /**
+   * For a Recovering band drawn back to the low: the day the LIVE call actually arrived.
+   * Everything before it was labelled Lagging at the time and is only Recovering with
+   * hindsight, so the band is dimmed up to here and a tick marks the spot.
+   */
+  confirmed: string | null;
   /** Calendar days the call was in force. */
   days: number;
 }
@@ -210,6 +216,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         phase: cur?.phase ?? null,
         radius: cur?.radius ?? null,
         angle: cur?.angle ?? null,
+        revised: cur?.revised,
         close: bar.close,
       };
     });
@@ -229,7 +236,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     for (const p of dailyPoints) {
       const last = out[out.length - 1];
       if (last && last.phase === p.phase) { last.to = p.date; last.end = p.date; }
-      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, dd: null, days: 0 });
+      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, dd: null, confirmed: null, days: 0 });
     }
     // A phase holds until the next one starts, so each band is DRAWN to where the next
     // begins — otherwise a one-bar phase is a zero-width band that draws nothing. `end`
@@ -277,6 +284,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
         r.dd = isFinite(worst) ? worst : null;
       }
       r.days = Math.max(1, Math.round((Date.parse(r.end) - Date.parse(r.from)) / 86_400_000));
+      // First day of the run the model was not reading backwards on.
+      if (i0 != null && i1 != null) {
+        r.confirmed = null;
+        for (let i = i0; i <= i1; i++) if (!dailyPoints[i].revised) { r.confirmed = dailyPoints[i].date; break; }
+        if (r.confirmed === r.from) r.confirmed = null;   // nothing was redrawn
+      }
     }
     return out;
   }, [dailyPoints]);
@@ -554,6 +567,25 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       fill={phaseColor(r.phase)} fillOpacity={focused(r.phase) ? 0.95 : 0.12} stroke="none"
                     />
                   ))}
+                  {/* The part of a Recovering band that only exists in hindsight: the
+                      price had turned, but the model went on saying Lagging for another
+                      36 sessions on average. Drawn faint, with a tick where the live call
+                      actually arrived, so the band reads as a cycle without claiming the
+                      whole of it was callable. */}
+                  {runs.filter(r => r.confirmed).map((r, i) => (
+                    <ReferenceArea
+                      key={`prov-${i}-${r.from}`} x1={r.from} x2={r.confirmed as string}
+                      y1={momentumDomain[0]} y2={ribbonTop}
+                      fill="#0b1020" fillOpacity={focused(r.phase) ? 0.55 : 0.1} stroke="none"
+                    />
+                  ))}
+                  {runs.filter(r => r.confirmed).map(r => (
+                    <ReferenceLine
+                      key={`conf-${r.confirmed}`} x={r.confirmed as string}
+                      stroke={phaseColor(r.phase)} strokeWidth={1.5}
+                      strokeOpacity={focused(r.phase) ? 0.9 : 0.2}
+                    />
+                  ))}
                   {/* What the price did during each call, over its own band. */}
                   <Customized component={makeRunLabelLayer(runs, focused)} />
                   {/* Dashed line at every phase change — read straight up to the price. */}
@@ -590,7 +622,9 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       const run = pt ? runRetAt.get(pt.date) : undefined;
                       const runTxt = run?.ret != null ? ` · this call ${fmtRet(run.ret)} in ${run.days}d` : '';
                       const ddTxt = run?.dd != null ? ` (worst ${fmtRet(run.dd)})` : '';
-                      return [`depth ${gap} · leg ${mom} · ${pt?.phase ?? '—'}${runTxt}${ddTxt}`, 'Model'];
+                      // Say so on the exact days that are hindsight, not only in a caption.
+                      const provTxt = pt?.revised ? ' · in hindsight — the live call that day was Lagging' : '';
+                      return [`depth ${gap} · leg ${mom} · ${pt?.phase ?? '—'}${runTxt}${ddTxt}${provTxt}`, 'Model'];
                     }}
                   />
                 </ComposedChart>
@@ -600,7 +634,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               {summary.rows.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap pt-0.5">
                   <span className="text-[9px] text-gray-600 uppercase tracking-wider"
-                    title="Share of the visible window spent in each phase, the average net move per stretch, and the average worst drawdown suffered inside a stretch">
+                    title="Share of the visible window spent in each phase, the average net move per stretch, and the average worst drawdown suffered inside a stretch.&#10;A Recovering band is drawn from the low the price actually turned at. The model only worked that out later — 36 sessions later on average — so the dimmed part of the band, up to the tick, is hindsight: the live call those days was Lagging.">
                     Time spent · avg move · worst inside
                   </span>
                   {summary.rows.map(([ph, n]) => (

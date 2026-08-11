@@ -93,6 +93,20 @@
 //     Fading        19%        9 days      −0.11σ         −0.51σ
 //     Lagging       26%       67 days      +0.60σ         −1.80σ
 //
+// Those are the LIVE labels. Lagging reads positive there for the reason above — its band
+// runs to the confirmation, so it swallows the first month of the recovery, and on some
+// assets it ends up returning as much as Trending. The chart therefore draws the REVISED
+// view (AxesOptions.revised), which moves that stretch into the Recovering band it really
+// belongs to and leaves the four reading as a cycle:
+//
+//     Trending      51%       24 days      +0.52σ         −0.41σ
+//     Recovering    17%       51 days      +1.71σ         −0.69σ
+//     Fading        20%        9 days      −0.11σ         −0.52σ
+//     Lagging       12%       36 days      −1.53σ         −1.93σ
+//
+// and 2022 still reads Lagging 75% on the NASDAQ, because the redraw moves a boundary
+// rather than making a call the model never made.
+//
 // 2022 reads Lagging 78% on the NASDAQ 100 and 78% on the S&P 500 — a bear market that
 // the model calls a bear market, which is the whole point of the macro gate.
 //
@@ -269,6 +283,33 @@ export interface TrendAxes {
   macroGap: number;
   /** Y: the current leg, signed, in monthly volatilities. */
   momentum: number;
+  /**
+   * Only ever set in the revised view: this bar was Lagging when it happened and was
+   * redrawn as Recovering later, once the low it turned out to be held. Nobody could have
+   * acted on it — the live call that day was Lagging — and the panel says so.
+   */
+  revised?: boolean;
+}
+
+export interface AxesOptions {
+  /**
+   * Redraw the last leg of a finished decline once its low is confirmed, so a Recovering
+   * band starts where the price actually turned instead of where the model worked it out.
+   *
+   * OFF by default, and it must stay off anywhere a figure is measured FORWARD from a
+   * call — the phase lab, the backtest — because on those bars the label is hindsight and
+   * would flatter every statistic built on it. It is on for the chart, where the question
+   * is "where were the phases" rather than "what did you know that day", and where reading
+   * the four bands as a cycle is the entire point.
+   *
+   * The live call is untouched either way: trendAxes(), which is what the rotation table
+   * and every asset badge read, always answers with what was knowable on the day.
+   *
+   * What it costs, in one number: the redraw covers 36 days on average and 228 at its
+   * longest, over the 162 bottoms in the reference set. That is how long the model went on
+   * saying Lagging after the low was in.
+   */
+  revised?: boolean;
 }
 
 /** Keeps a point strictly inside the region its own label names. */
@@ -284,7 +325,7 @@ const MILD = 1e-6;
  * and ended up to a week late, so a Lagging stretch collected a week of the rebound that
  * ended it. Here the rolling parts are kept incrementally and every bar gets a label.
  */
-export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | null)[] {
+export function trendAxesSeries(hist: PricePoint[] | undefined, opts?: AxesOptions): (TrendAxes | null)[] {
   if (!hist || hist.length < 2) return hist ? hist.map(() => null) : [];
   const n = hist.length;
   const closes = new Array<number>(n);
@@ -345,6 +386,7 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
   //   refSig  the volatility a fall is judged against — see below
   let phase: RotationPhase | null = null;
   let high = closes[0], trough = closes[0], legLow = closes[0], recHigh = closes[0];
+  let troughAt = 0;
   let refSig: number | null = null;
 
   for (let i = 0; i < n; i++) {
@@ -372,17 +414,17 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
         if (closes[k] > top) top = closes[k];
         if (closes[k] < bottom) bottom = closes[k];
       }
-      high = top; trough = bottom; legLow = bottom; recHigh = c; refSig = live;
+      high = top; trough = bottom; legLow = bottom; recHigh = c; refSig = live; troughAt = i;
       phase = (1 - c / high) * 100 >= SEVERE_SIGMA * live ? 'Lagging' : 'Trending';
     } else if (phase === 'Trending') {
       if (c > high) { high = c; refSig = live; }
-      if ((1 - c / high) * 100 >= PAUSE_SIGMA * sig) { phase = 'Fading'; trough = c; }
+      if ((1 - c / high) * 100 >= PAUSE_SIGMA * sig) { phase = 'Fading'; trough = c; troughAt = i; }
     } else if (phase === 'Fading') {
-      if (c < trough) trough = c;
+      if (c < trough) { trough = c; troughAt = i; }
       if ((1 - c / high) * 100 >= SEVERE_SIGMA * sig) phase = 'Lagging';
       else if ((c / trough - 1) * 100 >= RESUME_SIGMA * sig) { phase = 'Trending'; legLow = trough; }
     } else if (phase === 'Lagging') {
-      if (c < trough) trough = c;
+      if (c < trough) { trough = c; troughAt = i; }
       // The macro gate. A rebound alone calls four bottoms in a bear market and gets all
       // four wrong; requiring the 200-day average to have stopped falling calls one.
       // The macro gate, in two parts, and each is there because the other alone fails.
@@ -408,10 +450,19 @@ export function trendAxesSeries(hist: PricePoint[] | undefined): (TrendAxes | nu
       const reclaimed = maFast[i] != null && c > maFast[i]!;
       if ((c / trough - 1) * 100 >= REBOUND_SIGMA * sig && slowSettled && reclaimed) {
         phase = 'Recovering'; legLow = trough; recHigh = c;
+        // The low held. On the chart the recovery began there, not here — see AxesOptions.
+        if (opts?.revised) {
+          for (let k = troughAt + 1; k < i; k++) {
+            const prev = out[k];
+            if (!prev || prev.momentum > 0) continue;
+            const yUp = Math.max(MILD, ((closes[k] / winMin[k] - 1) * 100) / sig);
+            out[k] = { macroGap: prev.macroGap, momentum: yUp, revised: true };
+          }
+        }
       }
     } else {
       if (c > recHigh) recHigh = c;
-      if (c < trough) { phase = 'Lagging'; trough = c; }
+      if (c < trough) { phase = 'Lagging'; trough = c; troughAt = i; }
       else if ((c / trough - 1) * 100 >= CONFIRM_SIGMA * sig) {
         // The recovery is a trend now: the cycle restarts from here, so the damage the
         // old high still records stops being what the asset is measured against.

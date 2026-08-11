@@ -109,7 +109,7 @@ export async function GET(req: Request) {
   const price = ownHist.filter(p => p.date >= startStr).map(p => ({ date: p.date, close: p.close }));
 
   type QPoint = {
-    date: string; macroGap: number; momentum: number; r3m: number | null;
+    date: string; macroGap: number; momentum: number; r3m: number | null; revised?: boolean;
     phase: string | null; close: number | null;
     /** Where the dot actually sits: distance from the centre and angle round it. */
     radius: number; angle: number;
@@ -127,7 +127,14 @@ export async function GET(req: Request) {
   //
   // trendAxesSeries computes the same definition incrementally, so the whole history
   // costs one pass and every trading day gets its own call.
-  const axes = trendAxesSeries(ownHist);
+  //
+  // `revised: true` — this endpoint feeds the CHART, where the question is "where were
+  // the phases", so a Recovering band is drawn from the low the price actually turned at
+  // rather than from the day the model worked it out, on average 36 sessions later. Each
+  // such bar is flagged, and the panel dims it and marks where the live call arrived. The
+  // phase lab and the backtest deliberately do NOT pass this: there the label has to be
+  // what was knowable that day or every forward statistic flatters itself.
+  const axes = trendAxesSeries(ownHist, { revised: true });
   const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
   const points: QPoint[] = [];
   for (let i = 0; i < ownHist.length; i++) {
@@ -152,6 +159,7 @@ export async function GET(req: Request) {
       phase: pos.phase,
       radius: r4(pos.radius),
       angle: Math.round(pos.angle * 100) / 100,
+      revised: ax.revised ? true : undefined,
       close: ownHist[i].close,
     });
   }
