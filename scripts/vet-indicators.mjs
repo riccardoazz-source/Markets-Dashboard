@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 const I = await import(join(out, 'indicators.js'));
@@ -31,6 +31,7 @@ const Q = await import(join(out, 'rotationPhase.js'));
 const TV = await import(join(out, 'tradingview.js'));
 const CFG = await import(join(out, 'config.js'));
 const V = await import(join(out, 'volatility.js'));
+const R = await import(join(out, 'phaseRuns.js'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, note = '') => {
@@ -480,6 +481,88 @@ const volSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
   ok('bands split at 15 and 30', V.volBand(14.9) === 'calm' && V.volBand(15) === 'normal'
      && V.volBand(30) === 'normal' && V.volBand(30.1) === 'wild');
   ok('an unknown volatility has no band', V.volBand(null) === null && V.volBand(NaN) === null);
+}
+
+console.log('\nPhase bands — the arithmetic that has been wrong most often');
+{
+  const day = n => new Date(Date.UTC(2024, 0, 1 + n)).toISOString().slice(0, 10);
+  const pts = (spec) => spec.map(([phase, close, revised], i) =>
+    ({ date: day(i), close, phase, ...(revised ? { revised: true } : {}) }));
+
+  // THE FLIP DAY BELONGS TO NEITHER BAND. Trending runs bars 0-2 rising 100→120, then
+  // Lagging from bar 3. Trending must be +20%, measured to its OWN last day — not to
+  // bar 3, whose fall is what broke it.
+  const flip = R.buildPhaseRuns(pts([
+    ['Trending', 100], ['Trending', 110], ['Trending', 120],
+    ['Lagging', 90], ['Lagging', 80],
+  ]));
+  ok('two bands', flip.length === 2);
+  ok('a band is measured to its own last day, not the flip', near(flip[0].ret, 20, 1e-9),
+     `${flip[0].ret.toFixed(4)}%`);
+  ok('…and the flip day is not credited backwards', !near(flip[0].ret, -10, 1e-9));
+  ok('the next band starts ON the flip day', flip[1].from === day(3) && near(flip[1].ret, -11.111111, 1e-5));
+  ok('bands touch for drawing', flip[0].to === flip[1].from);
+
+  // MEASURED FROM THE LIVE CALL. A Recovering band drawn back to its low: bars 0-2 are
+  // hindsight, the call arrives at bar 3. The band moves +100% in total but only +25%
+  // after the call, and +25% is the figure that may be quoted.
+  const rev = R.buildPhaseRuns(pts([
+    ['Recovering', 50, true], ['Recovering', 70, true], ['Recovering', 80, true],
+    ['Recovering', 80], ['Recovering', 100],
+    ['Trending', 105],
+  ]));
+  ok('the whole drawn band is reported separately', near(rev[0].retFull, 100, 1e-9), `${rev[0].retFull}%`);
+  ok('the quoted figure starts at the live call', near(rev[0].ret, 25, 1e-9), `${rev[0].ret}%`);
+  ok('…and the call date is carried', rev[0].confirmed === day(3));
+  ok('a band with no hindsight has no confirmed date', rev[1].confirmed === null);
+
+  // THE DRAWDOWN ALSO STARTS AT THE LIVE CALL: the −60% before it is not the holder's.
+  const dd = R.buildPhaseRuns(pts([
+    ['Recovering', 100, true], ['Recovering', 40, true],
+    ['Recovering', 100], ['Recovering', 90], ['Recovering', 95],
+    ['Trending', 96],
+  ]));
+  ok('the drawdown is measured from the call, not the low', near(dd[0].dd, -10, 1e-9), `${dd[0].dd}%`);
+
+  // THE RUNNING STRETCH is flagged and left out of the averages — the one thing that can
+  // put a positive number on a phase that describes a fall.
+  const open = R.buildPhaseRuns(pts([
+    ['Lagging', 100], ['Lagging', 50], ['Trending', 60],
+    ['Lagging', 50], ['Lagging', 90],
+  ]));
+  ok('only the last stretch is open', open.filter(r => r.open).length === 1 && open[open.length - 1].open);
+  const stats = R.phaseAverages(open);
+  ok('the open stretch is excluded from its average', near(stats.get('Lagging').avg, -50, 1e-9),
+     `${stats.get('Lagging').avg}% (the open one is +80%)`);
+  ok('…and from the run count', stats.get('Lagging').runs === 1);
+  // In that fixture Trending's one stretch is CLOSED — it is not the last — so it does
+  // have an average. The null case needs the open stretch to be the phase's only one,
+  // which is the KOSPI shape: Lagging all the way and then a fresh Trending.
+  ok('a closed stretch still averages', stats.get('Trending').avg != null);
+  const onlyOpen = R.phaseAverages(R.buildPhaseRuns(pts([
+    ['Lagging', 100], ['Lagging', 80], ['Lagging', 60], ['Trending', 70],
+  ])));
+  ok('a phase whose only stretch is open averages to null', onlyOpen.get('Trending').avg === null);
+  ok('…and still reports zero finished runs', onlyOpen.get('Trending').runs === 0);
+
+  // DRAWING vs MEASURING. A one-day final band is widened for drawing only; widening
+  // `from` itself would hand it a day belonging to the phase before.
+  const oneDay = R.buildPhaseRuns(pts([
+    ['Trending', 100], ['Trending', 200], ['Lagging', 100],
+  ]));
+  const lastRun = oneDay[oneDay.length - 1];
+  ok('a one-day band gets a wider left edge to draw', lastRun.drawFrom === day(1) && lastRun.from === day(2));
+  ok('…but its return still starts on its own first day', near(lastRun.ret, 0, 1e-9),
+     `${lastRun.ret}% — it would be −50% if the draw edge were used`);
+
+  // Missing closes must not become zero.
+  const gappy = R.buildPhaseRuns([
+    { date: day(0), close: 100, phase: 'Trending' },
+    { date: day(1), close: null, phase: 'Trending' },
+    { date: day(2), close: 110, phase: 'Trending' },
+  ]);
+  ok('a missing close is skipped, not read as zero', near(gappy[0].ret, 10, 1e-9), `${gappy[0].ret}%`);
+  ok('no bands from nothing', R.buildPhaseRuns([]).length === 0);
 }
 
 console.log('\nTradingView links — every configured asset must map, and map correctly');

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { PhaseBadge } from '@/components/ui/PhaseBadge';
+import { buildPhaseRuns, phaseAverages, type PhaseRun as Run } from '@/lib/phaseRuns';
 import { PanelClose } from '@/components/ui/PanelClose';
 import clsx from 'clsx';
 import {
@@ -53,7 +54,7 @@ function makeRunLabelLayer(runs: Run[], lit: (p: string | null | undefined) => b
     const nodes: React.ReactNode[] = [];
     for (const r of runs) {
       if (!r.phase || r.ret == null) continue;
-      const x1 = xScale(r.from), x2 = xScale(r.to);
+      const x1 = xScale(r.drawFrom), x2 = xScale(r.to);
       if (x1 == null || x2 == null || !isFinite(x1) || !isFinite(x2)) continue;
       const w = Math.abs(x2 - x1);
       // A running stretch says so, so its figure is not read as a finished one.
@@ -78,39 +79,6 @@ function makeRunLabelLayer(runs: Run[], lit: (p: string | null | undefined) => b
   };
 }
 
-/** One stretch of chart where the model held the same call, and what the price did. */
-interface Run {
-  from: string;
-  /** Right edge for DRAWING: the day the next call starts, so bands touch. */
-  to: string;
-  /** Last day this call was actually in force — what the return is measured to. */
-  end: string;
-  phase: string | null;
-  /**
-   * Price change over the run FROM THE DAY THE LIVE CALL ARRIVED, %. For every phase but
-   * a redrawn Recovering that is the band's own start, so nothing changes; for those, it
-   * is what acting on the label could actually have earned.
-   */
-  ret: number | null;
-  /** The whole band including the redrawn part — tooltip only, and labelled as hindsight. */
-  retFull: number | null;
-  /** Deepest fall from a running high INSIDE the run, %, ≤ 0. Null without closes. */
-  dd: number | null;
-  /**
-   * For a Recovering band drawn back to the low: the day the LIVE call actually arrived.
-   * Everything before it was labelled Lagging at the time and is only Recovering with
-   * hindsight, so the band is dimmed up to here and a tick marks the spot.
-   */
-  confirmed: string | null;
-  /** Calendar days the call was in force. */
-  days: number;
-  /**
-   * The stretch has not finished — it is the call in force right now. Its figures are
-   * whatever the price happens to have done so far and will be different tomorrow, so it
-   * is drawn and labelled but kept OUT of the phase averages.
-   */
-  open: boolean;
-}
 
 const phaseColor = (p: string | null | undefined): string =>
   p && PHASE_META[p as RotationPhase] ? PHASE_META[p as RotationPhase].dot : '#6b7280';
@@ -244,76 +212,11 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   // holiday, or before the first bar, is not among the plotted categories, and
   // Recharts silently drops a reference area whose edge it cannot place — which is
   // why some stretches came out uncoloured.
-  const runs = useMemo(() => {
-    const out: Run[] = [];
-    for (const p of dailyPoints) {
-      const last = out[out.length - 1];
-      if (last && last.phase === p.phase) { last.to = p.date; last.end = p.date; }
-      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, retFull: null, dd: null, confirmed: null, days: 0, open: false });
-    }
-    // A phase holds until the next one starts, so each band is DRAWN to where the next
-    // begins — otherwise a one-bar phase is a zero-width band that draws nothing. `end`
-    // keeps the run's own last day, which is what the return is measured to.
-    for (let i = 0; i < out.length - 1; i++) out[i].to = out[i + 1].from;
-    const last = out[out.length - 1];
-    if (last && last.from === last.to && dailyPoints.length >= 2) {
-      last.from = dailyPoints[dailyPoints.length - 2].date;
-    }
-    // What the PRICE did while each call was showing: from the close at which the call
-    // appeared to the close at which it changed.
-    //
-    // Not to the day the NEXT call starts, which is what this used to do. That day is
-    // the one whose move broke the phase, so every band was inheriting the first day of
-    // the opposite regime — Trending gave up its first day down, Lagging collected its
-    // first day of rebound. Measured across ten assets it inverted the whole picture:
-    // Lagging came out at +1.25% on average and Trending at +2.14%, where the same bands
-    // measured to their own last day give Trending +4.83% and Lagging −1.55%.
-    //
-    // Nor from the day BEFORE the call appeared, which would be worse still: the phase
-    // changed BECAUSE of that day's move, so crediting the move to the new phase would
-    // let every phase confirm itself.
-    //
-    // The flip day itself therefore belongs to neither band, and that is the honest
-    // place for it: it is the day the model changed its mind because of what happened.
-    // The last stretch is still running.
-    if (out.length) out[out.length - 1].open = true;
-    const closeAt = new Map(dailyPoints.map(p => [p.date, p.close]));
-    // The net move alone hides what a stretch felt like. A Lagging band ends only once the
-    // bottom has been called, and every confirmation that avoids calling a bear-market
-    // rally lands ABOVE the low — so the rebound falls inside the band and the net reads
-    // mildly positive while the drawdown suffered inside it is the worst of the four.
-    // Both numbers are shown for exactly that reason.
-    const idx = new Map(dailyPoints.map((p, i) => [p.date, i]));
-    for (const r of out) {
-      const i0 = idx.get(r.from), i1 = idx.get(r.end);
-      r.days = Math.max(1, Math.round((Date.parse(r.end) - Date.parse(r.from)) / 86_400_000));
-      if (i0 == null || i1 == null) continue;
-      // Where the LIVE call arrived inside this band. For everything except a Recovering
-      // band drawn back to its low, that is the band's own first day.
-      r.confirmed = null;
-      for (let i = i0; i <= i1; i++) if (!dailyPoints[i].revised) { r.confirmed = dailyPoints[i].date; break; }
-      if (r.confirmed === r.from) r.confirmed = null;
-      const iLive = r.confirmed != null ? (idx.get(r.confirmed) ?? i0) : i0;
-
-      const full = closeAt.get(r.from), live = dailyPoints[iLive].close, end = closeAt.get(r.end);
-      r.retFull = full != null && end != null && full > 0 ? (end / full - 1) * 100 : null;
-      // THE figure the chips and the band labels quote. Measured from the live call, not
-      // from the low: over twelve assets a Recovering band moves +14.8% but only +0.5% of
-      // it lands after the model has said so. Quoting the whole band would advertise a
-      // buy signal that is 97% hindsight.
-      r.ret = live != null && end != null && live > 0 ? (end / live - 1) * 100 : null;
-      // The drawdown likewise runs from the live call — the pain you would actually take.
-      let peak = -Infinity, worst = 0;
-      for (let i = iLive; i <= i1; i++) {
-        const c = dailyPoints[i].close;
-        if (c == null || !(c > 0)) continue;
-        if (c > peak) peak = c;
-        if (peak > 0) worst = Math.min(worst, (c / peak - 1) * 100);
-      }
-      r.dd = isFinite(worst) ? worst : null;
-    }
-    return out;
-  }, [dailyPoints]);
+  // Bands and their figures come from lib/phaseRuns — see that file for why each rule
+  // is there. It lives outside this component so `npm run vet` can pin it: this is the
+  // arithmetic that has been wrong most often, and inside a component nothing could
+  // test it.
+  const runs = useMemo(() => buildPhaseRuns(dailyPoints), [dailyPoints]);
   const transitions = runs.slice(1).filter(r => r.phase).map(r => r.from);
 
   // Symmetric domain: zero has to sit in the MIDDLE, or "above the line" and
@@ -340,22 +243,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     const counts = new Map<string, number>();
     let total = 0;
     for (const p of dailyPoints) if (p.phase) { counts.set(p.phase, (counts.get(p.phase) ?? 0) + 1); total++; }
-    const stats = new Map<string, { avg: number | null; dd: number | null; runs: number }>();
-    for (const ph of counts.keys()) {
-      // FINISHED stretches only. The one still running is measured to wherever the price
-      // happens to be today, which is not comparable with stretches measured to where
-      // their phase actually ended — and it is the single thing that can put a positive
-      // number on Lagging. Across eight assets every closed Lagging band is negative;
-      // the one exception in the data is an open one showing +26% mid-decline.
-      const rs = runs.filter(r => r.phase === ph && r.ret != null && !r.open);
-      const ds = runs.filter(r => r.phase === ph && r.dd != null && !r.open);
-      stats.set(ph, {
-        avg: rs.length ? rs.reduce((s, r) => s + (r.ret as number), 0) / rs.length : null,
-        dd: ds.length ? ds.reduce((s, r) => s + (r.dd as number), 0) / ds.length : null,
-        runs: rs.length,
-      });
-    }
-    return { rows: [...counts.entries()].sort((a, b) => b[1] - a[1]), total, stats };
+    // Averages over FINISHED stretches only — lib/phaseRuns says why.
+    return { rows: [...counts.entries()].sort((a, b) => b[1] - a[1]), total, stats: phaseAverages(runs) };
   }, [dailyPoints, runs]);
 
   // Clicking a phase in "time spent" isolates it: everything else fades on the
@@ -587,13 +476,13 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       The wash alone was too pale to tell the four phases apart. */}
                   {runs.filter(r => r.phase).map((r, i) => (
                     <ReferenceArea
-                      key={`wash-${i}-${r.from}`} x1={r.from} x2={r.to}
+                      key={`wash-${i}-${r.from}`} x1={r.drawFrom} x2={r.to}
                       fill={phaseColor(r.phase)} fillOpacity={focused(r.phase) ? 0.1 : 0.02} stroke="none"
                     />
                   ))}
                   {runs.filter(r => r.phase).map((r, i) => (
                     <ReferenceArea
-                      key={`ribbon-${i}-${r.from}`} x1={r.from} x2={r.to} y1={momentumDomain[0]} y2={ribbonTop}
+                      key={`ribbon-${i}-${r.from}`} x1={r.drawFrom} x2={r.to} y1={momentumDomain[0]} y2={ribbonTop}
                       fill={phaseColor(r.phase)} fillOpacity={focused(r.phase) ? 0.95 : 0.12} stroke="none"
                     />
                   ))}
@@ -604,7 +493,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       whole of it was callable. */}
                   {runs.filter(r => r.confirmed).map((r, i) => (
                     <ReferenceArea
-                      key={`prov-${i}-${r.from}`} x1={r.from} x2={r.confirmed as string}
+                      key={`prov-${i}-${r.from}`} x1={r.drawFrom} x2={r.confirmed as string}
                       y1={momentumDomain[0]} y2={ribbonTop}
                       fill="#0b1020" fillOpacity={focused(r.phase) ? 0.55 : 0.1} stroke="none"
                     />
