@@ -691,6 +691,12 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       {summary.stats.get(ph)?.dd != null && (
                         <span className="opacity-50"> · worst {fmtRet(summary.stats.get(ph)!.dd as number)}</span>
                       )}
+                      {/* A phase whose only appearance in this window is the stretch still
+                          running has nothing finished to average. Saying so beats a chip
+                          that just stops after the percentage and reads as broken. */}
+                      {summary.stats.get(ph)?.runs === 0 && (
+                        <span className="opacity-60 italic"> · still running, nothing finished yet</span>
+                      )}
                     </button>
                   ))}
                   {focusPhases.size > 0 && (
