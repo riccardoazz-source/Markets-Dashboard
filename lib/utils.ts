@@ -1,3 +1,4 @@
+import type { MacroUnit } from '@/lib/config';
 import { Timeframe, HistoricalPoint, CAGRData } from './types';
 import { format, subDays, subWeeks, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 
@@ -579,4 +580,27 @@ export function dataAvailabilityMessage(
   const d = new Date(actualStart + 'T12:00:00Z');
   const label = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
   return `Data available from ${label}`;
+}
+
+// One macro number, formatted. Shared with the Dashboard tiles so a rate reads the same
+// on the landing page as it does on the Macro tab — two copies of this drifted apart
+// the moment either was touched.
+export function formatMacroValue(value: number, unit: MacroUnit): string {
+  if (unit === '%') return `${value.toFixed(2)}%`;
+  if (unit === 'B$') {
+    if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}T`;
+    return `$${value.toFixed(0)}B`;
+  }
+  if (unit === 'K') {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}B`;
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}M`;
+    return `${value.toLocaleString()}K`;
+  }
+  if (unit === '$') {
+    if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+    if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+    return `$${value.toFixed(0)}`;
+  }
+  if (unit === 'EH/s') return `${value >= 1 ? value.toFixed(1) : value.toFixed(4)} EH/s`;
+  return value.toFixed(1);
 }

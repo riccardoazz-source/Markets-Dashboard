@@ -1,15 +1,16 @@
 'use client';
 
-import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe } from 'lucide-react';
+import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe, LayoutDashboard } from 'lucide-react';
 import { ForwardRefExoticComponent, RefAttributes } from 'react';
 import clsx from 'clsx';
 import { MACRO_WORLD_ENABLED } from '@/lib/imfConfig';
 
-export type Section = 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'macroworld' | 'stock' | 'compare' | 'rotation' | 'sources';
+export type Section = 'dashboard' | 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'macroworld' | 'stock' | 'compare' | 'rotation' | 'sources';
 
 type LucideIcon = ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>>;
 
 const SECTIONS: { id: Section; label: string; short: string; Icon: LucideIcon }[] = [
+  { id: 'dashboard',   label: 'Dashboard',   short: 'Home',  Icon: LayoutDashboard },
   { id: 'indexes',     label: 'Indexes',     short: 'Idx',   Icon: BarChart2  },
   { id: 'currencies',  label: 'Currencies',  short: 'FX',    Icon: DollarSign },
   { id: 'crypto',      label: 'Crypto',      short: 'Crypto',Icon: Bitcoin    },

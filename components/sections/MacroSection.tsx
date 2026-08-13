@@ -5,7 +5,7 @@ import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
 import { MACRO_INDICATORS, MacroUnit, RECESSION_SERIES, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, BTC_HALVING_DATES, EVENT_INDICATOR_CATEGORY, MARKET_EVENTS, MARKET_EVENT_COLORS, MarketEventCategory } from '@/lib/config';
 import { HistoricalPoint, Timeframe } from '@/lib/types';
-import { getTimeframeStart, calculateCAGR, formatPercent, extendToToday, dataAvailabilityMessage } from '@/lib/utils';
+import { getTimeframeStart, calculateCAGR, formatPercent, extendToToday, dataAvailabilityMessage , formatMacroValue} from '@/lib/utils';
 import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { HalvingChart } from '@/components/charts/HalvingChart';
@@ -45,26 +45,6 @@ interface UnifiedIndicator {
   unit: MacroUnit;
   isBuiltin: boolean;
   fetchUrl: string | null;  // null → /api/macro (full FRED fallback chain); string → /api/scrape
-}
-
-function formatMacroValue(value: number, unit: MacroUnit): string {
-  if (unit === '%') return `${value.toFixed(2)}%`;
-  if (unit === 'B$') {
-    if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}T`;
-    return `$${value.toFixed(0)}B`;
-  }
-  if (unit === 'K') {
-    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}B`;
-    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}M`;
-    return `${value.toLocaleString()}K`;
-  }
-  if (unit === '$') {
-    if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-    if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
-    return `$${value.toFixed(0)}`;
-  }
-  if (unit === 'EH/s') return `${value >= 1 ? value.toFixed(1) : value.toFixed(4)} EH/s`;
-  return value.toFixed(1);
 }
 
 function formatMacroChange(change: number, unit: MacroUnit): string {
