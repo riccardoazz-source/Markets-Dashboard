@@ -6,7 +6,14 @@
 //
 // Reference values come from StockChart's worked RSI example, and from cases whose
 // answer is fixed by arithmetic (a flat series, a series with a known population σ).
-// Nothing here compares the code to itself.
+//
+// A check that only restates the implementation proves nothing: "the histogram equals
+// macd minus signal" is true by construction and cannot fail however wrong the two EMAs
+// are. So the indicators are also pinned to their CLOSED FORMS on inputs where algebra
+// gives the answer — an exponential average lags a straight line by exactly s·(n−1)/2,
+// so MACD on any ramp is exactly 7·slope and its histogram is exactly zero. Those catch
+// a wrong smoothing constant, a wrong seed or an off-by-one in a span; the identity
+// check cannot.
 
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -69,6 +76,79 @@ for (let i=0;i<noisy.length;i++) if (m.hist[i]!=null) {
 ok('histogram equals macd − signal everywhere', maxErr < 1e-12);
 ok('macd starts at bar 25 (slow EMA 26)', m.macd[24] === null && m.macd[25] !== null);
 ok('histogram starts at bar 33 (+ signal 9)', firstHist === 33);
+
+// ── Analytic identities ─────────────────────────────────────────────────────
+// The checks above this point are either published reference values (RSI, Bollinger) or
+// they compare the code to itself — "the histogram equals macd minus signal" is TRUE BY
+// CONSTRUCTION and cannot fail however wrong the EMAs are. These are the independent
+// ones: on a straight-line price the answers are fixed by algebra, so a wrong smoothing
+// constant, a wrong seed or an off-by-one in the span all show up here.
+console.log('\nEMA and MACD against their closed forms on a straight line');
+{
+  // For x(t) = a + s·t the exponential average settles at x(t) − s·(n−1)/2: it lags the
+  // price by half the span, exactly. Derived from k = 2/(n+1), not from this code.
+  const SLOPE = 0.7;
+  const line = Array.from({ length: 400 }, (_, i) => 50 + SLOPE * i);
+  for (const n of [12, 20, 26, 50]) {
+    const e = I.computeEMA(line, n);
+    const want = line[399] - SLOPE * (n - 1) / 2;
+    ok(`EMA ${n} lags a ramp by s·(n−1)/2`, near(e[399], want, 1e-6),
+       `${e[399].toFixed(4)} vs ${want.toFixed(4)}`);
+  }
+  // Therefore MACD = EMA12 − EMA26 = s·(26−12)/2 = 7s, the signal line settles on the
+  // same constant, and the histogram is zero. A trend of any slope, no matter how steep,
+  // has a FLAT histogram — which is the whole reason the histogram means acceleration.
+  const m = I.computeMACD(line, 12, 26, 9);
+  ok('MACD on a ramp equals 7·slope', near(m.macd[399], 7 * SLOPE, 1e-6),
+     `${m.macd[399].toFixed(4)} vs ${(7 * SLOPE).toFixed(4)}`);
+  ok('…its signal settles on the same value', near(m.signal[399], 7 * SLOPE, 1e-6));
+  ok('…so a steady trend has a flat histogram', near(m.hist[399], 0, 1e-6),
+     `${m.hist[399].toExponential(1)}`);
+  // Sanity in the other direction: a DECELERATING rise must show a negative histogram
+  // and an accelerating one a positive one. This is what the pane is read for.
+  const accel = Array.from({ length: 400 }, (_, i) => 50 + 0.002 * i * i);
+  const decel = Array.from({ length: 400 }, (_, i) => 50 + 40 * Math.sqrt(i));
+  ok('an accelerating rise has a positive histogram', I.computeMACD(accel).hist[399] > 0);
+  ok('a decelerating rise has a negative histogram', I.computeMACD(decel).hist[399] < 0);
+  // A flat price: every average equals it, MACD is zero.
+  const flatLine = Array(300).fill(123.45);
+  ok('EMA of a constant is that constant', near(I.computeEMA(flatLine, 26)[299], 123.45, 1e-9));
+  ok('MACD of a constant is zero', near(I.computeMACD(flatLine).macd[299], 0, 1e-9));
+}
+
+console.log('\nRSI, momentum and drawdown at their limits');
+{
+  const up = Array.from({ length: 200 }, (_, i) => 10 + i);
+  const down = Array.from({ length: 200 }, (_, i) => 300 - i);
+  // Wilder's RSI is 100·gain/(gain+loss). With no losses it is exactly 100, with no
+  // gains exactly 0 — the two values the formula can only reach at its limits.
+  ok('RSI of a series that only rises is 100', near(I.computeRSI(up)[199], 100, 1e-9));
+  ok('RSI of a series that only falls is 0', near(I.computeRSI(down)[199], 0, 1e-9));
+  // RSI = 50 when the smoothed gain equals the smoothed loss. That needs the two to be
+  // ALTERNATING, not a rise followed by an equal fall: Wilder's average decays at 1/14 a
+  // bar, so a hundred falling bars leave the earlier rise weighted (13/14)^100 ≈ 0.0007
+  // and the answer is 0, not 50. Written the wrong way round the first time — the check
+  // failed and the code was right.
+  //
+  // And it is the PAIR that centres on 50, not each bar: Wilder gives the newest move a
+  // full 1/14 weight, so on a +1 bar the reading is 51.8519 and on the −1 bar that
+  // follows it is 48.1481. They sum to 100 to nine decimals. Asserting 50 on a single
+  // bar failed too — the second wrong expectation in this block, and again the code was
+  // right. A test that keeps failing against correct code is a test worth reading twice.
+  const zigzag = Array.from({ length: 300 }, (_, i) => 100 + (i % 2));
+  const rz = I.computeRSI(zigzag);
+  ok('…and a consecutive pair straddles 50 exactly', near(rz[299] + rz[298], 100, 1e-6),
+     `${rz[298].toFixed(4)} and ${rz[299].toFixed(4)}`);
+  // Drawdown: a peak of 200 down to 150 is exactly −25%. (The first version of this
+  // check built a series peaking at 199 and asserted −25% — again the check was wrong
+  // and the code was right, at −24.62%.)
+  const peaked = [...Array.from({ length: 100 }, (_, i) => 101 + i), 150];
+  ok('drawdown is exact', near(I.computeDrawdown(peaked, 252)[100], -25, 1e-9),
+     `${I.computeDrawdown(peaked, 252)[100].toFixed(6)}%`);
+  ok('drawdown is 0 while making new highs', near(I.computeDrawdown(up, 252)[199], 0, 1e-12));
+  // Momentum over n bars is the plain percentage change over n bars, nothing smoothed.
+  ok('momentum matches the raw change', near(I.computeMomentum(up, 10)[199], (209 / 199 - 1) * 100, 1e-9));
+}
 
 console.log('\nWeekly resampling — and the look-ahead it could hide');
 const dates = ['2024-01-01','2024-01-02','2024-01-03','2024-01-04','2024-01-05','2024-01-08','2024-01-09','2024-01-10'];
