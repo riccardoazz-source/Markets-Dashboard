@@ -1634,6 +1634,24 @@ async function fetchMacroSeries(
     return fetchMultpl(src.slug, fromDate);
   }
   if (src?.type === 'computed') {
+    // Inflation as a RATE. The underlying series are index levels, so the twelve-month
+    // change is taken here — from the same points the index chart draws, so the two can
+    // never disagree. The window is dropped for the fetch and re-applied after, or the
+    // first twelve months of any view would have no prior year to compare against and
+    // would come back empty.
+    if (fredId === 'CPI_YOY' || fredId === 'CORE_CPI_YOY') {
+      const base = await fetchMacroSeries(fredId === 'CPI_YOY' ? 'CPIAUCSL' : 'CPILFESL');
+      const out: Pts = [];
+      for (let i = 12; i < base.length; i++) {
+        const prev = base[i - 12];
+        // CPI is monthly and complete, but a gap would silently compare the wrong two
+        // months, so the pair is checked to be about a year apart before it is used.
+        const months = (Date.parse(base[i].date) - Date.parse(prev.date)) / 86_400_000 / 30.44;
+        if (!(months > 11 && months < 13) || !(prev.value > 0)) continue;
+        out.push({ date: base[i].date, value: (base[i].value / prev.value - 1) * 100 });
+      }
+      return fromDate ? out.filter(p => p.date >= fromDate) : out;
+    }
     if (fredId === 'BTC_HALVING')          return getBitcoinHalvings(fromDate);
     if (fredId === 'BTC_RSI')              return fetchBitcoinMonthlyRSI(fromDate);
     if (fredId === 'BTC_MINED_MONTHLY')    return getBitcoinMinedMonthly(fromDate);

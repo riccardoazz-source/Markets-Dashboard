@@ -2,16 +2,16 @@
 
 // Dashboard — the landing page.
 //
-// Five numbers that set the weather for everything else, and then whatever the user has
-// pinned. Nothing here is new data: the tiles read the same endpoints the Macro and
+// The handful of numbers that set the weather for everything else, and then whatever the
+// user has pinned. Nothing here is new data: the tiles read the same endpoints the Macro and
 // Currencies tabs read, and the pinned strip reads the same gist-backed pin set every
 // other section writes to. The point is not more information, it is the five things worth
 // seeing before the rest.
 //
-// Why these five. The dollar and the policy rate are the price of money; the VIX is what
-// the market is paying to insure against the next month; unemployment is the half of the
-// Fed's mandate that turns first. Between them they explain most of what the index cards
-// on the next tab are doing.
+// Why these. The dollar and the policy rate are the price of money; the VIX is what the
+// market is paying to insure against the next month; inflation and unemployment are the
+// two halves of the Fed's mandate and therefore what that rate is set against. Between
+// them they explain most of what the index cards on the next tab are doing.
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import clsx from 'clsx';
@@ -44,6 +44,8 @@ const TILES: TileSpec[] = [
     hint: 'What the option market is charging to insure the S&P 500 over the next month. Rises when the market is frightened, so a rise is shown in red.' },
   { kind: 'macro', id: 'UNRATE', label: 'US unemployment', invertColour: true,
     hint: 'US unemployment rate. Half the Federal Reserve’s mandate, and the half that usually turns first.' },
+  { kind: 'macro', id: 'CPI_YOY', label: 'US inflation', invertColour: true,
+    hint: 'US inflation — the change in the CPI over the last twelve months. The other half of the Federal Reserve’s mandate, and what the interest rate above is set against. Rising is shown in red.' },
 ];
 
 /** What /api/currencies?mode=latest actually returns — not the CurrencyRate shape. */
@@ -99,7 +101,7 @@ export function DashboardSection({ onNavigate }: {
   const [open, setOpen] = useState<{ symbol: string; name: string; group: string } | null>(null);
   const phases = useRotationPhases(pinned);
 
-  // ── the five tiles ──
+  // ── the tiles ──
   const load = useCallback(async () => {
     const macroIds = TILES.filter(t => t.kind === 'macro').map(t => (t as { id: string }).id);
     const from = new Date();
@@ -113,7 +115,7 @@ export function DashboardSection({ onNavigate }: {
 
     await Promise.allSettled([
       // Latest + previous for every macro tile in ONE call — the endpoint already
-      // batches ids, so five tiles cost one request rather than five.
+      // batches ids, so the whole row costs one request rather than one each.
       (async () => {
         const res = await fetch(`/api/macro?mode=list&ids=${macroIds.join(',')}`);
         const rows = await res.json() as MacroLatest[];
@@ -198,7 +200,7 @@ export function DashboardSection({ onNavigate }: {
 
   return (
     <div className="space-y-4">
-      {/* ── The five ── */}
+      {/* ── The tiles ── */}
       {loading ? (
         <div className="h-28 flex items-center justify-center"><LoadingSpinner /></div>
       ) : (

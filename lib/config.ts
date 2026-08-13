@@ -317,6 +317,16 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'CPILFESL', name: 'Core CPI',               category: 'Inflation',   unit: 'idx',
     source: { type: 'bls',     label: 'BLS',
               url: 'https://www.bls.gov/cpi/' } },
+  // The RATE, not the level. CPIAUCSL and CPILFESL are index numbers — "324.6" — and
+  // the number everyone quotes as "inflation" is their change over twelve months.
+  // Derived from those same series rather than fetched separately, so the rate can
+  // never disagree with the index it is computed from.
+  { id: 'CPI_YOY',  name: 'US Inflation Rate (YoY)', category: 'Inflation',  unit: '%',
+    source: { type: 'computed', label: 'BLS — year-on-year change in CPI',
+              url: 'https://www.bls.gov/cpi/' } },
+  { id: 'CORE_CPI_YOY', name: 'Core Inflation Rate (YoY)', category: 'Inflation', unit: '%',
+    source: { type: 'computed', label: 'BLS — year-on-year change in Core CPI',
+              url: 'https://www.bls.gov/cpi/' } },
   // Growth
   { id: 'GDP',      name: 'Nominal GDP',            category: 'Growth',      unit: 'B$',
     source: { type: 'fred',    label: 'FRED',

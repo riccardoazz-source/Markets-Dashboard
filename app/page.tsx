@@ -35,7 +35,7 @@ const SECTION_LABELS: Record<Section, string> = {
 };
 
 const SECTION_DESCRIPTIONS: Record<Section, string> = {
-  dashboard:   'The dollar, the policy rate, the VIX and unemployment — the five numbers that set the weather — and everything you have pinned',
+  dashboard:   'The dollar, the policy rate, the VIX, inflation and unemployment — the numbers that set the weather — and everything you have pinned',
   indexes:     'Live prices and performance for major global indexes and ETFs',
   currencies:  'Real-time currency conversion rates with historical charts',
   crypto:      'Live cryptocurrency prices with CAGR and return analysis',
