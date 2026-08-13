@@ -56,7 +56,8 @@ function makeRunLabelLayer(runs: Run[], lit: (p: string | null | undefined) => b
       const x1 = xScale(r.from), x2 = xScale(r.to);
       if (x1 == null || x2 == null || !isFinite(x1) || !isFinite(x2)) continue;
       const w = Math.abs(x2 - x1);
-      const text = fmtRet(r.ret);
+      // A running stretch says so, so its figure is not read as a finished one.
+      const text = r.open ? `${fmtRet(r.ret)} so far` : fmtRet(r.ret);
       if (w < text.length * 5.2 + 6) continue;
       nodes.push(
         <text
@@ -103,6 +104,12 @@ interface Run {
   confirmed: string | null;
   /** Calendar days the call was in force. */
   days: number;
+  /**
+   * The stretch has not finished — it is the call in force right now. Its figures are
+   * whatever the price happens to have done so far and will be different tomorrow, so it
+   * is drawn and labelled but kept OUT of the phase averages.
+   */
+  open: boolean;
 }
 
 const phaseColor = (p: string | null | undefined): string =>
@@ -242,7 +249,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     for (const p of dailyPoints) {
       const last = out[out.length - 1];
       if (last && last.phase === p.phase) { last.to = p.date; last.end = p.date; }
-      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, retFull: null, dd: null, confirmed: null, days: 0 });
+      else out.push({ from: p.date, to: p.date, end: p.date, phase: p.phase, ret: null, retFull: null, dd: null, confirmed: null, days: 0, open: false });
     }
     // A phase holds until the next one starts, so each band is DRAWN to where the next
     // begins — otherwise a one-bar phase is a zero-width band that draws nothing. `end`
@@ -268,6 +275,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     //
     // The flip day itself therefore belongs to neither band, and that is the honest
     // place for it: it is the day the model changed its mind because of what happened.
+    // The last stretch is still running.
+    if (out.length) out[out.length - 1].open = true;
     const closeAt = new Map(dailyPoints.map(p => [p.date, p.close]));
     // The net move alone hides what a stretch felt like. A Lagging band ends only once the
     // bottom has been called, and every confirmation that avoids calling a bear-market
@@ -333,8 +342,13 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
     for (const p of dailyPoints) if (p.phase) { counts.set(p.phase, (counts.get(p.phase) ?? 0) + 1); total++; }
     const stats = new Map<string, { avg: number | null; dd: number | null; runs: number }>();
     for (const ph of counts.keys()) {
-      const rs = runs.filter(r => r.phase === ph && r.ret != null);
-      const ds = runs.filter(r => r.phase === ph && r.dd != null);
+      // FINISHED stretches only. The one still running is measured to wherever the price
+      // happens to be today, which is not comparable with stretches measured to where
+      // their phase actually ended — and it is the single thing that can put a positive
+      // number on Lagging. Across eight assets every closed Lagging band is negative;
+      // the one exception in the data is an open one showing +26% mid-decline.
+      const rs = runs.filter(r => r.phase === ph && r.ret != null && !r.open);
+      const ds = runs.filter(r => r.phase === ph && r.dd != null && !r.open);
       stats.set(ph, {
         avg: rs.length ? rs.reduce((s, r) => s + (r.ret as number), 0) / rs.length : null,
         dd: ds.length ? ds.reduce((s, r) => s + (r.dd as number), 0) / ds.length : null,
@@ -402,11 +416,11 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
   // The same figure the band is labelled with, reachable by date — a narrow band
   // carries no label, and the tooltip is where it can still be read.
   const runRetAt = useMemo(() => {
-    const m = new Map<string, { ret: number | null; retFull: number | null; dd: number | null; days: number; phase: string | null; confirmed: string | null }>();
+    const m = new Map<string, { ret: number | null; retFull: number | null; dd: number | null; days: number; phase: string | null; confirmed: string | null; open: boolean }>();
     for (const r of runs) {
       for (const p of dailyPoints) {
         if (p.date < r.from || p.date > r.end) continue;
-        m.set(p.date, { ret: r.ret, retFull: r.retFull, dd: r.dd, days: r.days, phase: r.phase, confirmed: r.confirmed });
+        m.set(p.date, { ret: r.ret, retFull: r.retFull, dd: r.dd, days: r.days, phase: r.phase, confirmed: r.confirmed, open: r.open });
       }
     }
     return m;
@@ -636,7 +650,8 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
                       const mom = v != null ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}σ ${v >= 0 ? 'off the low' : 'off the high'}` : '—';
                       const gap = pt?.macroGap != null ? `${pt.macroGap.toFixed(2)}σ below its high` : '—';
                       const run = pt ? runRetAt.get(pt.date) : undefined;
-                      const runTxt = run?.ret != null ? ` · this call ${fmtRet(run.ret)} in ${run.days}d` : '';
+                      const runTxt = run?.ret != null
+                        ? ` · this call ${fmtRet(run.ret)} in ${run.days}d${run.open ? ' so far — still running, not in the averages' : ''}` : '';
                       const ddTxt = run?.dd != null ? ` (worst ${fmtRet(run.dd)})` : '';
                       // The whole band, said separately and named as what it is.
                       const fullTxt = run?.confirmed && run.retFull != null
@@ -653,7 +668,7 @@ export function AssetQuadrantView({ symbol, name, group, stocks, onClose }: {
               {summary.rows.length > 0 && (
                 <div className="flex items-center gap-2 flex-wrap pt-0.5">
                   <span className="text-[9px] text-gray-600 uppercase tracking-wider"
-                    title="Share of the visible window spent in each phase, the average net move per stretch, and the average worst drawdown suffered inside a stretch.&#10;A Recovering band is drawn from the low the price actually turned at, but the figures are measured from the tick — the day the live call arrived, 36 sessions later on average. The dimmed stretch before it was labelled Lagging at the time, and over twelve assets it carries 14.3 of the 14.8 points such a band shows.">
+                    title="Share of the visible window spent in each phase, the average net move per FINISHED stretch, and the average worst drawdown suffered inside one. The stretch still running is excluded — it is measured to today rather than to where its phase ended, and it is the one thing that can put a positive number on Lagging.&#10;A Recovering band is drawn from the low the price actually turned at, but the figures are measured from the tick — the day the live call arrived, 36 sessions later on average. The dimmed stretch before it was labelled Lagging at the time, and over twelve assets it carries 14.3 of the 14.8 points such a band shows.">
                     Time spent · avg move · worst inside
                   </span>
                   {summary.rows.map(([ph, n]) => (
