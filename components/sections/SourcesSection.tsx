@@ -406,6 +406,10 @@ export function SourcesSection() {
       fomc: 'bg-orange-900/60 text-orange-300',
       yahoo_price: 'bg-red-900/60 text-red-300', yahoo_ratio: 'bg-red-900/60 text-red-300',
       multpl: 'bg-pink-900/60 text-pink-300', url: 'bg-gray-700/60 text-gray-300',
+      // Series the app derives rather than fetches — the inflation rates, the Bitcoin
+      // ones. Without an entry these fell through to the same grey as a plain URL and
+      // were indistinguishable from an unrecognised source.
+      computed: 'bg-teal-900/60 text-teal-300',
     };
     return map[t] ?? 'bg-gray-700/60 text-gray-300';
   };
