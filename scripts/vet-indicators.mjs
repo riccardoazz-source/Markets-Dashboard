@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 const I = await import(join(out, 'indicators.js'));
@@ -32,6 +32,7 @@ const TV = await import(join(out, 'tradingview.js'));
 const CFG = await import(join(out, 'config.js'));
 const V = await import(join(out, 'volatility.js'));
 const R = await import(join(out, 'phaseRuns.js'));
+const D = await import(join(out, 'macroDerived.js'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, note = '') => {
@@ -482,6 +483,56 @@ const volSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
      && V.volBand(30) === 'normal' && V.volBand(30.1) === 'wild');
   ok('an unknown volatility has no band', V.volBand(null) === null && V.volBand(NaN) === null);
 }
+
+console.log('\nYear-on-year — the inflation rate derived from the CPI index');
+{
+  const month = n => new Date(Date.UTC(2020, n, 1)).toISOString().slice(0, 10);
+  // An index rising exactly 3% a year, monthly. Every reading must be 3.00%, and the
+  // first twelve months produce nothing because they have no prior year.
+  const compounding = Array.from({ length: 60 }, (_, i) =>
+    ({ date: month(i), value: 100 * Math.pow(1.03, i / 12) }));
+  const yoy = D.yearOverYear(compounding);
+  ok('the first twelve months yield nothing', yoy.length === 60 - 12);
+  ok('a 3%/year index reads 3.00% throughout',
+     yoy.every(p => near(p.value, 3, 1e-9)), `${yoy[0].value.toFixed(6)}%`);
+  ok('it starts at month 12, not 11 or 13', yoy[0].date === month(12));
+  // A doubling in a year is +100%, and a halving −50%.
+  const jump = [...Array.from({ length: 12 }, (_, i) => ({ date: month(i), value: 100 })),
+                { date: month(12), value: 200 }, { date: month(13), value: 50 }];
+  ok('a double over the year is +100%', near(D.yearOverYear(jump)[0].value, 100, 1e-9));
+  ok('a halving is −50%', near(D.yearOverYear(jump)[1].value, -50, 1e-9));
+
+  // THE WINDOW IS APPLIED AFTER. Filtering first would leave the first year of any view
+  // with nothing to compare against, and a two-year request would come back with one.
+  const windowed = D.yearOverYear(compounding, month(24));
+  ok('a window keeps every month inside it', windowed.length === 60 - 24, `${windowed.length} points`);
+  ok('…and none before it', windowed[0].date === month(24));
+
+  // A GAP MUST NOT BE COMPARED AS IF IT WERE A YEAR. Drop three months from the middle:
+  // the readings that would straddle the hole are dropped, the rest survive.
+  const gapped = compounding.filter((_, i) => i < 20 || i > 22);
+  const g = D.yearOverYear(gapped);
+  ok('readings that straddle a gap are dropped', g.length < 60 - 12 - 3 + 1);
+  ok('…and every surviving reading is still exactly 3%',
+     g.every(p => near(p.value, 3, 1e-9)));
+  // Without the guard the pair either side of the hole would be 15 months apart and
+  // report ~3.8% as if it were a year.
+  ok('…so no reading is inflated by the gap', g.every(p => p.value < 3.0001));
+
+  ok('nothing from a series shorter than a year', D.yearOverYear(compounding.slice(0, 12)).length === 0);
+  ok('nothing from nothing', D.yearOverYear([]).length === 0);
+  // A zero or negative base would divide by zero and produce Infinity on the chart.
+  ok('a zero prior value is skipped, not divided by',
+     D.yearOverYear([...Array.from({ length: 12 }, (_, i) => ({ date: month(i), value: 0 })),
+                     { date: month(12), value: 100 }]).length === 0);
+}
+
+console.log('\nMacro value formatting — shared by the dashboard and the Macro tab');
+ok('a percent keeps two decimals', D.formatMacroValue(4.5, '%') === '4.50%');
+ok('billions above a thousand become trillions', D.formatMacroValue(1500, 'B$') === '$1.5T');
+ok('…and stay billions below it', D.formatMacroValue(900, 'B$') === '$900B');
+ok('thousands roll up to millions', D.formatMacroValue(1500, 'K') === '1.5M');
+ok('…and to billions', D.formatMacroValue(1_500_000, 'K') === '1.5B');
 
 console.log('\nPhase bands — the arithmetic that has been wrong most often');
 {

@@ -23,7 +23,7 @@ import { useRotationPhases } from '@/lib/useRotationPhases';
 import { PhaseChip } from '@/components/ui/RotationControls';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
-import { formatMacroValue } from '@/lib/utils';
+import { formatMacroValue } from '@/lib/macroDerived';
 import { QuoteData } from '@/lib/types';
 
 // ── What the five tiles are ─────────────────────────────────────────────────

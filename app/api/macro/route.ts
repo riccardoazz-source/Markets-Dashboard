@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { yearOverYear } from '@/lib/macroDerived';
 import { MACRO_INDICATORS, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, MarketEventCategory } from '@/lib/config';
 import { BCADPS_SERIES } from '@/lib/bcadpsData';
 
@@ -1640,17 +1641,10 @@ async function fetchMacroSeries(
     // first twelve months of any view would have no prior year to compare against and
     // would come back empty.
     if (fredId === 'CPI_YOY' || fredId === 'CORE_CPI_YOY') {
+      // Fetched WITHOUT the window and filtered after — see lib/macroDerived for why,
+      // and for the checks that pin it.
       const base = await fetchMacroSeries(fredId === 'CPI_YOY' ? 'CPIAUCSL' : 'CPILFESL');
-      const out: Pts = [];
-      for (let i = 12; i < base.length; i++) {
-        const prev = base[i - 12];
-        // CPI is monthly and complete, but a gap would silently compare the wrong two
-        // months, so the pair is checked to be about a year apart before it is used.
-        const months = (Date.parse(base[i].date) - Date.parse(prev.date)) / 86_400_000 / 30.44;
-        if (!(months > 11 && months < 13) || !(prev.value > 0)) continue;
-        out.push({ date: base[i].date, value: (base[i].value / prev.value - 1) * 100 });
-      }
-      return fromDate ? out.filter(p => p.date >= fromDate) : out;
+      return yearOverYear(base, fromDate);
     }
     if (fredId === 'BTC_HALVING')          return getBitcoinHalvings(fromDate);
     if (fredId === 'BTC_RSI')              return fetchBitcoinMonthlyRSI(fromDate);
