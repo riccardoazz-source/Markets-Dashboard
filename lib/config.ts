@@ -321,12 +321,18 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   // the number everyone quotes as "inflation" is their change over twelve months.
   // Derived from those same series rather than fetched separately, so the rate can
   // never disagree with the index it is computed from.
+  // Naming the source honestly: these are derived from the CPI series above, and THAT
+  // series answers from whichever of FRED / DBnomics / BLS is reachable — FRED is tried
+  // first but is blocked from most Vercel IPs, so in practice it is often one of the
+  // other two. It matters less here than it would for the index itself: seasonal
+  // adjustment is what separates the FRED and BLS variants, and a twelve-month change
+  // is very nearly the same either way.
   { id: 'CPI_YOY',  name: 'US Inflation Rate (YoY)', category: 'Inflation',  unit: '%',
-    source: { type: 'computed', label: 'BLS — year-on-year change in CPI',
-              url: 'https://www.bls.gov/cpi/' } },
+    source: { type: 'computed', label: 'Derived — 12-month change in CPI (FRED / DBnomics / BLS)',
+              url: 'https://fred.stlouisfed.org/series/CPIAUCSL' } },
   { id: 'CORE_CPI_YOY', name: 'Core Inflation Rate (YoY)', category: 'Inflation', unit: '%',
-    source: { type: 'computed', label: 'BLS — year-on-year change in Core CPI',
-              url: 'https://www.bls.gov/cpi/' } },
+    source: { type: 'computed', label: 'Derived — 12-month change in Core CPI (FRED / DBnomics / BLS)',
+              url: 'https://fred.stlouisfed.org/series/CPILFESL' } },
   // Growth
   { id: 'GDP',      name: 'Nominal GDP',            category: 'Growth',      unit: 'B$',
     source: { type: 'fred',    label: 'FRED',
