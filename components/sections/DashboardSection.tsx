@@ -66,8 +66,11 @@ interface TileData {
 const NAME_OF = new Map(ALL_COMPARABLE_ASSETS.map(a => [a.symbol, a.name]));
 const GROUP_OF = new Map(ALL_COMPARABLE_ASSETS.map(a => [a.symbol, a.group]));
 
-function Sparkline({ points, up }: { points: { date: string; v: number }[]; up: boolean }) {
+function Sparkline({ points, good }: { points: { date: string; v: number }[]; good: boolean | null }) {
   if (points.length < 3) return <div className="h-8" />;
+  // Coloured by whether the move was GOOD, not by whether the line went up — otherwise
+  // the VIX draws a green line under a red number, which is the reading inverted.
+  const stroke = good == null ? '#64748b' : good ? '#22c55e' : '#f87171';
   // The domain is the series' own range, not zero-based: these are levels, and a rate
   // moving from 4.25 to 4.50 is invisible on an axis that starts at zero.
   return (
@@ -75,15 +78,19 @@ function Sparkline({ points, up }: { points: { date: string; v: number }[]; up: 
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={points} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
           <YAxis hide domain={['dataMin', 'dataMax']} />
-          <Area type="monotone" dataKey="v" stroke={up ? '#22c55e' : '#f87171'} strokeWidth={1.4}
-            fill={up ? '#22c55e' : '#f87171'} fillOpacity={0.12} dot={false} isAnimationActive={false} />
+          <Area type="monotone" dataKey="v" stroke={stroke} strokeWidth={1.4}
+            fill={stroke} fillOpacity={0.12} dot={false} isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
-export function DashboardSection({ onNavigate }: { onNavigate?: (section: string) => void }) {
+export function DashboardSection({ onNavigate }: {
+  /** Jump to another tab, optionally opening one thing there — the same (section, id)
+   *  contract the Rotation tab already uses to hand an asset over. */
+  onNavigate?: (section: string, id?: string) => void;
+}) {
   const [tiles, setTiles] = useState<Record<string, TileData>>({});
   const [loading, setLoading] = useState(true);
   const { pins } = usePins();
@@ -130,6 +137,16 @@ export function DashboardSection({ onNavigate }: { onNavigate?: (section: string
           const pts = (Array.isArray(json) ? json : []) as { date: string; close: number }[];
           sparks[id] = pts.filter(p => p && isFinite(p.close)).map(p => ({ date: p.date, v: p.close }));
         } catch { /* a missing sparkline is a blank strip, not a broken tile */ }
+      }),
+      // A year of the FX rate too, so the tile is not the one blank strip in the row.
+      ...TILES.filter(t => t.kind === 'fx').map(async t => {
+        const [a, b] = (t as { pair: string }).pair.split('/');
+        try {
+          const res = await fetch(`/api/currencies?mode=historical&from=${a}&to=${b}&timeframe=1Y`);
+          const json = await res.json() as { points?: { date: string; rate: number }[] };
+          sparks[(t as { pair: string }).pair] = (json.points ?? [])
+            .filter(p => p && isFinite(p.rate)).map(p => ({ date: p.date, v: p.rate }));
+        } catch { /* blank strip, not a broken tile */ }
       }),
       // The one FX rate, from the same endpoint the Currencies tab uses.
       (async () => {
@@ -193,11 +210,19 @@ export function DashboardSection({ onNavigate }: { onNavigate?: (section: string
             const pct = change != null && d?.prev ? (change / Math.abs(d.prev)) * 100 : null;
             // For the VIX and unemployment a RISE is the bad news, so the colour is
             // flipped. Showing "up = green" on unemployment would be actively wrong.
-            const good = change == null ? null
+            // A rate that did not move is neither good news nor bad. Reading `change > 0`
+            // painted an unchanged policy rate red.
+            const good = change == null || change === 0 ? null
               : (t.kind === 'macro' && t.invertColour ? change < 0 : change > 0);
+            // Each tile hands over to the tab that OWNS the series, with the thing to
+            // open — the Macro tab already takes an indicator id and Currencies a pair,
+            // so nothing new had to be built on either side to receive it.
+            const go = () => onNavigate?.(t.kind === 'macro' ? 'macro' : 'currencies', key);
             return (
-              <div key={key} title={t.hint}
-                className="rounded-xl border border-border bg-bg-card p-3 flex flex-col gap-1">
+              <button key={key} title={`${t.hint}\n\nOpen it in ${t.kind === 'macro' ? 'Macro' : 'Currencies'}.`}
+                onClick={go}
+                className="rounded-xl border border-border bg-bg-card p-3 flex flex-col gap-1 text-left
+                           hover:border-accent/50 transition-colors">
                 <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none">{t.label}</p>
                 <p className="text-xl font-bold text-white tabular-nums leading-tight">
                   {d?.value == null ? '—'
@@ -206,18 +231,22 @@ export function DashboardSection({ onNavigate }: { onNavigate?: (section: string
                 </p>
                 <p className={clsx('text-[11px] font-semibold tabular-nums leading-none',
                   good == null ? 'text-gray-600' : good ? 'text-up-text' : 'text-down-text')}>
-                  {change == null ? '—' : (
+                  {change == null ? '—' : change === 0 ? 'unchanged' : (
                     <>
                       {change >= 0 ? '+' : ''}{Math.abs(change) < 1 ? change.toFixed(3) : change.toFixed(2)}
+                      {/* Below 0.05% a single decimal renders "-0.0%", which reads as a
+                          direction the number does not actually have. */}
                       {pct != null && isFinite(pct) && (
-                        <span className="opacity-70"> ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)</span>
+                        <span className="opacity-70">
+                          {' '}({Math.abs(pct) < 0.05 ? '~0%' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`})
+                        </span>
                       )}
                     </>
                   )}
                 </p>
-                {d && <Sparkline points={d.spark} up={(change ?? 0) >= 0} />}
+                {d && <Sparkline points={d.spark} good={good} />}
                 {d?.asOf && <p className="text-[9px] text-gray-600 leading-none">as of {d.asOf}</p>}
-              </div>
+              </button>
             );
           })}
         </div>

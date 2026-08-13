@@ -86,7 +86,9 @@ export default function Home() {
           )}
         </div>
 
-        {section === 'dashboard'   && <DashboardSection onNavigate={s => handleSectionSelect(s as Section)} />}
+        {section === 'dashboard'   && (
+          <DashboardSection onNavigate={(s, id) => { setSection(s as Section); setJumpTarget(id ?? null); }} />
+        )}
         {section === 'indexes'     && <IndexesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'currencies'  && <CurrenciesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'crypto'      && <CryptoCommoditiesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
