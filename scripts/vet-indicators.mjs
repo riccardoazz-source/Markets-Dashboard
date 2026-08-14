@@ -16,16 +16,25 @@
 // check cannot.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
+// tsc emits the module specifiers exactly as written, and TypeScript writes them without
+// an extension. Node's ESM loader will not resolve those, so the one file here that
+// imports another (eventCalendar → config) fails at load. Adding the extension in the
+// emitted copy keeps the SOURCE written the way the rest of the app writes it.
+for (const f of readdirSync(out).filter(n => n.endsWith('.js'))) {
+  const p = join(out, f);
+  writeFileSync(p, readFileSync(p, 'utf8').replace(/from '(\.\/[^']+?)'/g, (m, spec) =>
+    spec.endsWith('.js') ? m : `from '${spec}.js'`));
+}
 const I = await import(join(out, 'indicators.js'));
 const Q = await import(join(out, 'rotationPhase.js'));
 const TV = await import(join(out, 'tradingview.js'));
@@ -33,6 +42,8 @@ const CFG = await import(join(out, 'config.js'));
 const V = await import(join(out, 'volatility.js'));
 const R = await import(join(out, 'phaseRuns.js'));
 const D = await import(join(out, 'macroDerived.js'));
+const EC = await import(join(out, 'eventCalendar.js'));
+const ED = await import(join(out, 'eventCalendarData.js'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, note = '') => {
@@ -482,6 +493,103 @@ const volSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
   ok('bands split at 15 and 30', V.volBand(14.9) === 'calm' && V.volBand(15) === 'normal'
      && V.volBand(30) === 'normal' && V.volBand(30.1) === 'wild');
   ok('an unknown volatility has no band', V.volBand(null) === null && V.volBand(NaN) === null);
+}
+
+console.log('\nForward calendar — the window, and the daylight-saving trap');
+{
+  // 2pm in New York is NOT a fixed UTC offset. September is EDT (UTC−4) and December is
+  // EST (UTC−5), so the same wall-clock FOMC statement is 18:00Z then 19:00Z. Storing a
+  // fixed offset gets one of the two wrong every single year.
+  ok('2pm New York in September is 18:00Z',
+     EC.zonedTimeToUtc('2026-09-16', 14, 0, 'America/New_York') === '2026-09-16T18:00:00.000Z',
+     EC.zonedTimeToUtc('2026-09-16', 14, 0, 'America/New_York'));
+  ok('…and in December it is 19:00Z',
+     EC.zonedTimeToUtc('2026-12-09', 14, 0, 'America/New_York') === '2026-12-09T19:00:00.000Z',
+     EC.zonedTimeToUtc('2026-12-09', 14, 0, 'America/New_York'));
+  // The day either side of the US changeover, which is where a naive conversion breaks.
+  ok('the day before the autumn changeover is still EDT',
+     EC.zonedTimeToUtc('2026-10-31', 14, 0, 'America/New_York') === '2026-10-31T18:00:00.000Z');
+  ok('…and the day after is EST',
+     EC.zonedTimeToUtc('2026-11-02', 14, 0, 'America/New_York') === '2026-11-02T19:00:00.000Z');
+  // Europe changes over on a different weekend from the US, so a zone that is normally
+  // six hours from New York briefly is not — the reason both sides are resolved per date.
+  ok('Rome is +2 in summer', EC.zonedTimeToUtc('2026-07-01', 14, 30, 'Europe/Rome') === '2026-07-01T12:30:00.000Z');
+  ok('…and +1 in winter',    EC.zonedTimeToUtc('2026-01-15', 14, 30, 'Europe/Rome') === '2026-01-15T13:30:00.000Z');
+
+  const now = new Date('2026-08-14T12:00:00Z');
+  const ev = (id, date) => ({ id, title: id, category: 'geopolitical', region: 'G', flag: '🌍', date, timeKnown: false });
+  const all = [
+    ev('past', '2026-08-13T12:00:00Z'),
+    ev('today', '2026-08-14T18:00:00Z'),
+    ev('soon', '2026-09-16T18:00:00Z'),
+    ev('edge-in', '2026-12-14T00:00:00Z'),
+    ev('edge-out', '2027-03-01T00:00:00Z'),
+  ];
+  const win = EC.upcomingEvents(all, now, 6);
+  ok('the window drops what has passed', !win.some(e => e.id === 'past'));
+  ok('…keeps what is still ahead today', win.some(e => e.id === 'today'));
+  ok('…keeps the far edge inside six months', win.some(e => e.id === 'edge-in'));
+  ok('…and excludes what is beyond it', !win.some(e => e.id === 'edge-out'));
+  ok('…sorted soonest first', win.map(e => e.id).join(',') === 'today,soon,edge-in', win.map(e => e.id).join(','));
+
+  ok('countdown says today', EC.countdown('2026-08-14T20:00:00Z', now) === 'today');
+  ok('…tomorrow', EC.countdown('2026-08-15T12:00:00Z', now) === 'tomorrow');
+  ok('…days, then weeks, then months',
+     EC.countdown('2026-08-19T12:00:00Z', now) === 'in 5 days'
+     && EC.countdown('2026-09-04T12:00:00Z', now) === 'in 3 weeks'
+     && EC.countdown('2026-12-09T12:00:00Z', now) === 'in 4 months',
+     `${EC.countdown('2026-09-04T12:00:00Z', now)} / ${EC.countdown('2026-12-09T12:00:00Z', now)}`);
+
+  // Grouping is by the day in the READER'S zone: an event at 23:00 UTC is already the
+  // next day in Rome, and the card must sit under the date they would call it.
+  const g = EC.groupByDay([ev('late', '2026-09-16T23:00:00Z')], 'Europe/Rome');
+  ok('grouped by the day in the reader\'s zone', g[0].day === '2026-09-17', g[0].day);
+
+  // ── EVERY BUNDLED INSTANT, against the wall-clock time it stands for ──
+  //
+  // The UTC offsets in the data file are written by hand and change mid-calendar: the
+  // October FOMC is 18:00Z and the December one 19:00Z, the November CPI is 13:30Z and
+  // the October one 12:30Z. One wrong hour is invisible on the page and wrong forever.
+  // Each entry is reconstructed from its published local time and must match exactly.
+  const WALL = [
+    ['FOMC Rate Decision',            14, 0,  'America/New_York'],
+    ['ECB Monetary Policy',           14, 15, 'Europe/Berlin'],
+    ['Bank of England Rate Decision', 12, 0,  'Europe/London'],
+    ['US CPI Inflation Report',       8,  30, 'America/New_York'],
+    ['US Non-Farm Payrolls',          8,  30, 'America/New_York'],
+  ];
+  let checked = 0, wrong = [];
+  for (const e of ED.CALENDAR_EVENTS) {
+    const rule = WALL.find(([t]) => e.title.startsWith(t));
+    if (!rule) continue;                       // BoJ publishes no fixed hour
+    const [, h, mi, tz] = rule;
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(new Date(e.date));
+    const want = EC.zonedTimeToUtc(day, h, mi, tz);
+    checked++;
+    if (Date.parse(want) !== Date.parse(e.date)) wrong.push(`${e.title.slice(0, 18)} ${e.date} should be ${want}`);
+  }
+  ok(`every bundled release matches its published local time (${checked} checked)`,
+     wrong.length === 0, wrong.slice(0, 3).join(' | '));
+
+  // Payrolls are published on the first Friday of the month. Anything else is either a
+  // typo or one of the genuine exceptions, and both are worth being told about.
+  const notFriday = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('US Non-Farm'))
+    .filter(e => new Date(e.date).getUTCDay() !== 5);
+  ok('every payrolls date is a Friday', notFriday.length === 0, notFriday.map(e => e.date).join(', '));
+
+  // Nothing bundled may be missing the fields the card renders.
+  const bad = ED.BUNDLED_EVENTS.filter(e => !e.id || !e.title || !e.flag || !e.region || !isFinite(Date.parse(e.date)));
+  ok('every bundled event is complete', bad.length === 0, bad.map(e => e.id).join(', '));
+  ok('ids are unique', new Set(ED.BUNDLED_EVENTS.map(e => e.id)).size === ED.BUNDLED_EVENTS.length);
+  ok('the US releases are flagged tentative',
+     ED.CALENDAR_EVENTS.filter(e => e.category === 'economic-data').every(e => e.tentative === true));
+  ok('the central-bank dates are NOT', 
+     ED.CALENDAR_EVENTS.filter(e => e.category === 'central-bank').every(e => !e.tentative));
+
+  const built = EC.upcomingEvents(ED.BUNDLED_EVENTS, now, 6);
+  ok('the bundled set fills the window', built.length > 10, `${built.length} events in six months`);
+  ok('…every one of them in the future', built.every(e => Date.parse(e.date) >= now.getTime()));
 }
 
 console.log('\nYear-on-year — the inflation rate derived from the CPI index');

@@ -1,116 +1,109 @@
 'use client';
 
-// Major events, on the landing page — what is coming and what just happened.
+// The next six months, on the landing page.
 //
-// Reads getMergedMarketEvents(), the SAME list the Events chart and the Compare overlay
-// draw from, so an event added by hand in Sources appears here too and nothing has to be
-// kept in step. The colours are MARKET_EVENT_COLORS, shared for the same reason.
+// Same shape as the Macro Event app it is ported from: grouped by day, soonest first,
+// a live countdown on every card, times in the viewer's own zone. Past entries drop off
+// on their own because the window is computed against the clock rather than stored.
 //
-// Ordering is by DISTANCE FROM TODAY, not by date: the next thing due and the thing that
-// just happened both matter on a landing page, and a plain chronological list buries
-// whichever side of today has fewer entries. Upcoming ones come first because they are
-// the ones that can still be acted on.
+// Times are shown in the READER'S zone, not hardcoded to Rome. The stored instant is
+// UTC, so Intl does the conversion and it stays right in any zone and on either side of
+// a daylight-saving changeover — which matters here, because the FOMC's 2pm in New York
+// is an hour apart in UTC between the September and December meetings.
 
-import { useMemo, useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { CalendarClock, ExternalLink } from 'lucide-react';
-import { MARKET_EVENT_COLORS, type MarketEventCategory } from '@/lib/config';
-import { getMergedMarketEvents, notifySourcesChanged, type MarketEvent } from '@/lib/userSources';
+import { CalendarClock, Clock } from 'lucide-react';
+import {
+  upcomingEvents, groupByDay, countdown,
+  CALENDAR_COLORS, CALENDAR_LABELS, type CalendarEvent,
+} from '@/lib/eventCalendar';
+import { BUNDLED_EVENTS } from '@/lib/eventCalendarData';
 
-/** Whole days between two dates, positive when `date` is in the future. */
-function daysFromToday(date: string, todayMs: number): number {
-  return Math.round((Date.parse(`${date}T00:00:00Z`) - todayMs) / 86_400_000);
-}
+const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-function whenLabel(days: number): string {
-  if (days === 0) return 'today';
-  const n = Math.abs(days);
-  const unit =
-    n < 31 ? `${n} day${n === 1 ? '' : 's'}` :
-    n < 365 ? `${Math.round(n / 30.44)} month${Math.round(n / 30.44) === 1 ? '' : 's'}` :
-    `${(n / 365.25).toFixed(n < 730 ? 1 : 0)} year${n < 730 ? '' : 's'}`;
-  return days > 0 ? `in ${unit}` : `${unit} ago`;
-}
-
-export function MajorEventsStrip({ upcoming = 3, recent = 5 }: { upcoming?: number; recent?: number }) {
-  // The merged list reads localStorage, so it can only be built after mount — rendering
-  // it during SSR would hydrate with a different list the moment a custom event exists.
-  const [events, setEvents] = useState<MarketEvent[] | null>(null);
-  useEffect(() => {
-    const read = () => setEvents(getMergedMarketEvents());
-    read();
-    window.addEventListener('mkt-sources-changed', read);
-    return () => window.removeEventListener('mkt-sources-changed', read);
-  }, []);
-
-  const shown = useMemo(() => {
-    if (!events) return [];
-    // Midnight UTC today, so every card's "in N days" is stable through the session
-    // instead of shifting by one as the clock passes a boundary mid-render.
-    const today = new Date();
-    const todayMs = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-    const withDays = events.map(e => ({ ...e, days: daysFromToday(e.date, todayMs) }));
-    const ahead = withDays.filter(e => e.days >= 0).sort((a, b) => a.days - b.days).slice(0, upcoming);
-    const behind = withDays.filter(e => e.days < 0).sort((a, b) => b.days - a.days).slice(0, recent);
-    return [...ahead, ...behind];
-  }, [events, upcoming, recent]);
-
-  if (!events) return null;          // pre-mount: nothing rather than a flash of the wrong list
-  if (!shown.length) return null;
-
+function EventCard({ e, now }: { e: CalendarEvent; now: Date }) {
+  const color = CALENDAR_COLORS[e.category];
+  const time = e.timeKnown
+    ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(e.date))
+    : null;
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <CalendarClock size={13} className="text-gray-500" />
-        <h2 className="text-sm font-semibold text-gray-200">Major events</h2>
-        <span className="text-[10px] text-gray-600">what is coming, and what just happened</span>
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
-        {shown.map(e => {
-          const color = MARKET_EVENT_COLORS[e.category as MarketEventCategory] ?? '#6b7280';
-          const future = e.days >= 0;
-          return (
-            <div
-              key={`${e.date}-${e.label}`}
-              title={e.description}
-              className={clsx(
-                'shrink-0 w-[190px] rounded-xl border bg-bg-card p-2.5 space-y-1',
-                // The ones still ahead are the ones that can be acted on, so they carry
-                // their category's colour on the border; past ones sit back.
-                future ? 'border-transparent' : 'border-border',
-              )}
-              style={future ? { borderColor: `${color}66` } : undefined}
-            >
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                <span className="text-[9px] uppercase tracking-wider text-gray-500 leading-none">{e.category}</span>
-                {future && (
-                  <span className="ml-auto text-[8px] font-bold uppercase tracking-wider px-1 py-0.5 rounded"
-                    style={{ backgroundColor: `${color}22`, color }}>
-                    ahead
-                  </span>
-                )}
-              </div>
-              <p className="text-xs font-semibold text-gray-100 leading-snug line-clamp-2">{e.label}</p>
-              <p className="text-[10px] text-gray-500 tabular-nums">
-                {e.date} · <span className={future ? 'text-gray-300' : ''}>{whenLabel(e.days)}</span>
-              </p>
-              <p className="text-[10px] text-gray-600 leading-snug line-clamp-2">{e.description}</p>
-              {e.source && (
-                <a href={e.source} target="_blank" rel="noopener noreferrer"
-                  onClick={ev => ev.stopPropagation()}
-                  className="inline-flex items-center gap-0.5 text-[9px] text-gray-600 hover:text-accent">
-                  source <ExternalLink size={9} />
-                </a>
-              )}
-            </div>
-          );
-        })}
+    <div className="rounded-xl border border-border bg-bg-card overflow-hidden flex">
+      {/* The category as a colour bar rather than a second badge — it reads at a glance
+          down a list without spending a line of text on every card. */}
+      <span className="w-1 shrink-0" style={{ backgroundColor: color }} />
+      <div className="flex-1 min-w-0 p-2.5 space-y-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+            style={{ backgroundColor: `${color}1f`, color }}>
+            <span>{e.flag}</span>{CALENDAR_LABELS[e.category]}
+          </span>
+          <span className="ml-auto text-[10px] text-gray-400 border border-border rounded-full px-2 py-0.5 whitespace-nowrap">
+            {countdown(e.date, now)}
+          </span>
+        </div>
+        <p className="text-sm font-semibold text-gray-100 leading-snug">{e.title}</p>
+        {e.description && <p className="text-[11px] text-gray-500 leading-snug line-clamp-2">{e.description}</p>}
+        <div className="flex items-center gap-2 flex-wrap text-[10px]">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 text-gray-300 tabular-nums">
+            <Clock size={10} />{time ?? 'All day'}
+          </span>
+          <span className="text-gray-600">{e.region}</span>
+          {e.tentative && (
+            <span className="px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-400">tentative</span>
+          )}
+          {e.source && <span className="ml-auto text-gray-700">{e.source}</span>}
+        </div>
       </div>
     </div>
   );
 }
 
-// Re-exported so a caller that adds an event can refresh every mounted strip.
-export { notifySourcesChanged };
+export function MajorEventsStrip({ months = 6, max = 8 }: { months?: number; max?: number }) {
+  // The window depends on the clock, so it is resolved after mount: rendering it on the
+  // server would bake in the build machine's "now" and hydrate against a different list.
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    // Re-read hourly so a countdown cannot sit at "in 2 days" for a week on a tab left
+    // open, and so an event that has just passed drops off without a reload.
+    const t = setInterval(() => setNow(new Date()), 3_600_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const days = useMemo(() => {
+    if (!now) return [];
+    const list = upcomingEvents(BUNDLED_EVENTS, now, months).slice(0, max);
+    return groupByDay(list, zone());
+  }, [now, months, max]);
+
+  if (!now || !days.length) return null;
+
+  const dayLabel = (d: string) =>
+    new Intl.DateTimeFormat(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+      .format(new Date(`${d}T12:00:00Z`)).toUpperCase();
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <CalendarClock size={13} className="text-gray-500" />
+        <h2 className="text-sm font-semibold text-gray-200">What&apos;s ahead</h2>
+        <span className="text-[10px] text-gray-600">next {months} months · times in {zone()}</span>
+      </div>
+
+      <div className="space-y-3">
+        {days.map(({ day, events }) => (
+          <div key={day} className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold tracking-wider text-gray-500">{dayLabel(day)}</span>
+              <span className="flex-1 h-px bg-border" />
+            </div>
+            <div className={clsx('grid gap-2', events.length > 1 && 'md:grid-cols-2')}>
+              {events.map(e => <EventCard key={e.id} e={e} now={now} />)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
