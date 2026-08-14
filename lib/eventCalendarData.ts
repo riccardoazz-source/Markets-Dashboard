@@ -84,7 +84,9 @@ const cpi = (date: string) =>
   });
 const nfp = (date: string) =>
   make(US, 'US Non-Farm Payrolls (Jobs Report)', 'economic-data', date, {
-    description: 'Monthly US employment report.',
+    // Named explicitly: the unemployment rate is published INSIDE this release, and
+    // looking for it under its own name is the obvious way to conclude it is missing.
+    description: 'Monthly US employment report — payrolls, the unemployment rate and average hourly earnings.',
     source: 'bls.gov',
     tentative: true,
   });

@@ -78,6 +78,22 @@ export interface GistData {
   rotationStockLists?: string[]; // Stock watchlist categories activated in Rotation
   strategyLinks?: Record<string, string[]>; // My Strategy: statement id → linked "Strategy" note ids
   strategyCustom?: { id: string; label: string }[]; // My Strategy: user-added statements
+  /**
+   * Personal entries on the forward calendar — an earnings call, a meeting, anything
+   * dated. They live here rather than in localStorage so they follow the same personal
+   * code every other saved thing does: one sync, not two.
+   */
+  calendarEvents?: PersonalCalendarEvent[];
+}
+
+/** A user-added calendar entry. `date` is an absolute instant, ISO 8601 in UTC. */
+export interface PersonalCalendarEvent {
+  id: string;
+  title: string;
+  date: string;
+  /** False → shown as "All day" rather than at a time nobody set. */
+  timeKnown: boolean;
+  description?: string;
 }
 
 /**
@@ -310,6 +326,22 @@ export function useGistData() {
 // Shared pin store — the SAME gist-backed set the Rotation tab uses, so pinning an
 // asset anywhere (Rotation or its own section) reflects everywhere. Returns the set
 // of pinned symbols + a toggle.
+/**
+ * The user's own calendar entries, on the shared gist — the same store the pins use, so
+ * an event added on one device shows up on the others without a second sync to set up.
+ * Past entries are NOT deleted: the calendar's window hides them, and silently destroying
+ * something the user typed because a date went by would be the wrong trade.
+ */
+export function useCalendarEvents() {
+  const { data, update } = useGistData();
+  const events = data.calendarEvents ?? [];
+  const addEvent = (e: Omit<PersonalCalendarEvent, 'id'>) =>
+    update({ calendarEvents: [...events, { ...e, id: `own_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` }] });
+  const removeEvent = (id: string) =>
+    update({ calendarEvents: events.filter(x => x.id !== id) });
+  return { events, addEvent, removeEvent };
+}
+
 export function usePins() {
   const { data, update } = useGistData();
   const pins = new Set<string>(data.pins ?? []);
