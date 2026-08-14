@@ -23,6 +23,7 @@ import { useRotationPhases } from '@/lib/useRotationPhases';
 import { PhaseChip } from '@/components/ui/RotationControls';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
+import { MajorEventsStrip } from '@/components/ui/MajorEventsStrip';
 import { formatMacroValue } from '@/lib/macroDerived';
 import { QuoteData } from '@/lib/types';
 
@@ -253,6 +254,9 @@ export function DashboardSection({ onNavigate }: {
           })}
         </div>
       )}
+
+      {/* ── Major events — before the pinned strip, because they are context for it ── */}
+      <MajorEventsStrip />
 
       {/* ── Pinned ── */}
       <div className="space-y-2">
