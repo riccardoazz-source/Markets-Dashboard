@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -44,6 +44,7 @@ const R = await import(join(out, 'phaseRuns.js'));
 const D = await import(join(out, 'macroDerived.js'));
 const EC = await import(join(out, 'eventCalendar.js'));
 const ED = await import(join(out, 'eventCalendarData.js'));
+const GM = await import(join(out, 'gistMerge.js'));
 
 let pass = 0, fail = 0;
 const ok = (name, cond, note = '') => {
@@ -493,6 +494,36 @@ const volSeries = (n, f) => Array.from({ length: n }, (_, i) => ({
   ok('bands split at 15 and 30', V.volBand(14.9) === 'calm' && V.volBand(15) === 'normal'
      && V.volBand(30) === 'normal' && V.volBand(30.1) === 'wild');
   ok('an unknown volatility has no band', V.volBand(null) === null && V.volBand(NaN) === null);
+}
+
+console.log('\nSaved-data patching — the silent-drop bug');
+{
+  // THE BUG THIS REPLACED: the merge was a key-by-key allow-list, so a field nobody
+  // remembered to add was dropped from the local cache while the server stored it fine.
+  // Adding a personal calendar event did nothing on screen and the data was really there.
+  const cur = { pins: ['AAPL'], notes: { a: [1] } };
+  const out1 = GM.mergePatch(cur, { calendarEvents: [{ id: 'x' }] });
+  ok('a key the merge has never heard of survives',
+     out1.calendarEvents?.[0]?.id === 'x', JSON.stringify(out1.calendarEvents));
+  ok('…and the existing keys are untouched', out1.pins[0] === 'AAPL' && out1.notes.a[0] === 1);
+
+  // notes MERGE — a note saved against one chart must not wipe another chart's.
+  const out2 = GM.mergePatch({ notes: { a: [1], b: [2] } }, { notes: { b: [9] } });
+  ok('notes merge per chart', out2.notes.a[0] === 1 && out2.notes.b[0] === 9,
+     JSON.stringify(out2.notes));
+
+  // Everything else REPLACES: a pin list of two must not silently union with the old one,
+  // or unpinning would never take effect.
+  const out3 = GM.mergePatch({ pins: ['A', 'B', 'C'] }, { pins: ['A'] });
+  ok('an array replaces rather than unions', out3.pins.length === 1 && out3.pins[0] === 'A',
+     JSON.stringify(out3.pins));
+
+  // undefined means "not in this patch", not "delete it".
+  const out4 = GM.mergePatch({ pins: ['A'], analyses: [1] }, { pins: undefined, analyses: [2] });
+  ok('an undefined field is left alone', out4.pins[0] === 'A' && out4.analyses[0] === 2);
+
+  ok('an empty patch changes nothing', JSON.stringify(GM.mergePatch(cur, {})) === JSON.stringify(cur));
+  ok('a key can be emptied deliberately', GM.mergePatch({ pins: ['A'] }, { pins: [] }).pins.length === 0);
 }
 
 console.log('\nForward calendar — the window, and the daylight-saving trap');

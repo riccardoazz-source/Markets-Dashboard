@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { mergePatch } from './gistMerge';
 
 // Snapshot of the chart view captured when a note is created, so clicking "restore"
 // returns to exactly the same setup (active tools + toggles, timeframe, custom range).
@@ -260,18 +261,10 @@ export async function refreshGistData(): Promise<GistData> {
 
 export async function updateGistData(patch: Partial<GistData>): Promise<GistData> {
   const cur = _cache ?? loadLocal();
-  const merged: GistData = {
-    ...cur,
-    ...(patch.notes !== undefined
-      ? { notes: { ...(cur.notes ?? {}), ...patch.notes } }
-      : {}),
-    ...(patch.analyses !== undefined ? { analyses: patch.analyses } : {}),
-    ...(patch.sentiments !== undefined ? { sentiments: patch.sentiments } : {}),
-    ...(patch.pins !== undefined ? { pins: patch.pins } : {}),
-    ...(patch.rotationStockLists !== undefined ? { rotationStockLists: patch.rotationStockLists } : {}),
-    ...(patch.strategyLinks !== undefined ? { strategyLinks: patch.strategyLinks } : {}),
-    ...(patch.strategyCustom !== undefined ? { strategyCustom: patch.strategyCustom } : {}),
-  };
+  // Generic, not a key-by-key allow-list. The allow-list dropped any field nobody
+  // remembered to add to it — silently, and only on the client, so the server held the
+  // right data while the screen showed the old. See lib/gistMerge.
+  const merged = mergePatch(cur, patch);
   _cache = merged;
   saveLocal(merged);
   notify(merged);
