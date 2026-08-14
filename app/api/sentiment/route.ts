@@ -26,7 +26,7 @@ const CLASS_FIELDS = ['indexes_note', 'crypto_note', 'commodities_note', 'sector
 const FIELDS = [
   'headline', 'drivers', 'regime_now', 'regime_next', 'macro_note', 'macro_backdrop',
   'outlook_note', 'rotation_note', 'risk_note', 'confidence', 'fear_greed',
-  'catalysts', 'no_live_search',
+  'catalysts', 'no_live_search', 'no_live_search_reason',
   ...CLASS_FIELDS,
 ];
 
@@ -211,10 +211,13 @@ export async function POST(req: Request) {
     contents: [{ role: 'user', parts: [{ text: userMessage }] }],
     ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
     // Thinking tokens are drawn from THIS budget before a single word of the brief
-    // is written, and five grounded searches think a lot. 3500 left runs finishing
-    // at MAX_TOKENS with an empty answer ("Could not read sentiment"), so keep a
-    // wide margin — the brief itself is only a few hundred tokens.
-    generationConfig: { maxOutputTokens: 8000, temperature: 0.2 },
+    // is written, and five grounded searches think a lot. 3500 ran out at MAX_TOKENS
+    // with an empty answer; 8000 still did, often enough that briefs were regularly
+    // landing on the ungrounded fallback. The brief itself is only a few hundred
+    // tokens, so the ceiling costs nothing when it is not reached — only tokens
+    // actually generated are billed — and the ungrounded call, which barely thinks,
+    // keeps the tighter one.
+    generationConfig: { maxOutputTokens: withSearch ? 24000 : 8000, temperature: 0.2 },
   });
   const callGemini = (withSearch: boolean) => fetch(url, {
     signal: ctrl.signal,
@@ -253,6 +256,11 @@ export async function POST(req: Request) {
     // would be recalled from training data — which is how invented event dates got
     // through. Flag it, and drop the catalysts rather than publish guesses.
     if (!parsed.regime_now && !parsed.headline) {
+      // Why the grounded run came back empty, recorded on the brief itself. Without
+      // it the fallback is invisible: the page says "no live search" and nothing says
+      // whether the budget ran out, the search failed, or the model simply refused.
+      const whyFailed = json.candidates?.[0]?.finishReason ?? 'empty';
+      const thought = json.usageMetadata?.thoughtsTokenCount ?? null;
       const retry = await callGemini(false);
       if (retry.ok) {
         const j2 = await retry.json() as GeminiResp;
@@ -260,8 +268,17 @@ export async function POST(req: Request) {
         const p2 = parseKV(t2);
         if (p2.regime_now || p2.headline) {
           json = j2; text = t2; parsed = p2; grounded = false;
+          // Every field that comes FROM THE SEARCH goes. `drivers` is defined in the
+          // prompt as "the real news/events moving markets today", so without web
+          // access it is recalled from training data — which is exactly how a brief
+          // came to assert a Bank of Korea rate cut and a CPI print it had never
+          // read. `catalysts` is forward-looking and just as invented. What survives
+          // is what the table itself supports: the regime call, the movers, the
+          // class notes and the price levels, all of which are in the prompt.
           delete p2.catalysts;
+          delete p2.drivers;
           p2.no_live_search = '1'; // surfaced in the UI and kept in history
+          p2.no_live_search_reason = `${whyFailed}${thought != null ? ` after ${thought} thinking tokens` : ''}`;
         }
       }
     }
@@ -281,7 +298,12 @@ export async function POST(req: Request) {
     if (fgScore != null) {
       parsed.fear_greed_score = String(fgScore);
       parsed.fear_greed_label = fgLabel;
-    } else if (parsed.fear_greed && parsed.fear_greed.toLowerCase() !== 'n/a') {
+    } else if (grounded && parsed.fear_greed && parsed.fear_greed.toLowerCase() !== 'n/a') {
+      // `grounded` matters: the direct CNN fetch failing is normal (it blocks
+      // datacenter IPs), and the grounded run READS the number off the web. The
+      // ungrounded one cannot, so its figure would be a remembered one presented as
+      // today's — a specific number is the most convincing thing on the card and the
+      // easiest to believe without checking.
       const m = parsed.fear_greed.match(/(\d{1,3})\s*[—–\-]?\s*(.*)/);
       if (m && Number(m[1]) >= 0 && Number(m[1]) <= 100) {
         parsed.fear_greed_score = String(Number(m[1]));

@@ -36,6 +36,8 @@ interface SentimentData {
   catalysts?: string;
   /** '1' when the brief was produced WITHOUT live web search (fallback run). */
   no_live_search?: string;
+  /** How the grounded run ended — 'MAX_TOKENS after 7,900 thinking tokens' and the like. */
+  no_live_search_reason?: string;
   confidence?: string;
   // Per-asset-class notes
   indexes_note?: string;
@@ -103,9 +105,16 @@ function SentimentBody({ d, compact }: { d: SentimentData; compact?: boolean }) 
           access, so nothing here reflects today's news. Say so — an unmarked
           ungrounded brief is what produced invented event dates. */}
       {d.no_live_search === '1' && (
-        <p className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5">
-          ⚠ Written without live web search — treat as a read of the table only, not of today&apos;s news.
-        </p>
+        <div className="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-1.5 space-y-0.5">
+          <p>
+            ⚠ The grounded run came back empty, so this was written <b>without live web search</b>.
+            Today&apos;s causes and the forward catalysts are left out rather than guessed — what
+            remains is read from the table on screen.
+          </p>
+          {d.no_live_search_reason && (
+            <p className="opacity-70">Grounded run ended: {d.no_live_search_reason}.</p>
+          )}
+        </div>
       )}
       {d.headline && (
         <p className={clsx('font-semibold text-gray-100 leading-snug', compact ? 'text-xs' : 'text-sm')}>{d.headline}</p>
