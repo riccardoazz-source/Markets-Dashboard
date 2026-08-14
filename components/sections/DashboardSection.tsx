@@ -24,6 +24,7 @@ import { PhaseChip } from '@/components/ui/RotationControls';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { AssetQuickView } from '@/components/ui/AssetQuickView';
 import { MajorEventsStrip } from '@/components/ui/MajorEventsStrip';
+import { MacroQuickView, type QuickViewTarget } from '@/components/ui/MacroQuickView';
 import { formatMacroValue } from '@/lib/macroDerived';
 import { QuoteData } from '@/lib/types';
 
@@ -100,6 +101,7 @@ export function DashboardSection({ onNavigate }: {
   const pinned = useMemo(() => [...pins], [pins]);
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [open, setOpen] = useState<{ symbol: string; name: string; group: string } | null>(null);
+  const [tile, setTile] = useState<QuickViewTarget | null>(null);
   const phases = useRotationPhases(pinned);
 
   // ── the tiles ──
@@ -217,12 +219,13 @@ export function DashboardSection({ onNavigate }: {
             // painted an unchanged policy rate red.
             const good = change == null || change === 0 ? null
               : (t.kind === 'macro' && t.invertColour ? change < 0 : change > 0);
-            // Each tile hands over to the tab that OWNS the series, with the thing to
-            // open — the Macro tab already takes an indicator id and Currencies a pair,
-            // so nothing new had to be built on either side to receive it.
-            const go = () => onNavigate?.(t.kind === 'macro' ? 'macro' : 'currencies', key);
+            // Opens OVER this page rather than handing over to another tab: closing the
+            // detail should return you where you started, and being relocated to Macro
+            // because you glanced at the dollar is the wrong outcome. The full tab is
+            // still one click away from inside the panel.
+            const go = () => setTile({ kind: t.kind, key, label: t.label });
             return (
-              <button key={key} title={`${t.hint}\n\nOpen it in ${t.kind === 'macro' ? 'Macro' : 'Currencies'}.`}
+              <button key={key} title={`${t.hint}\n\nClick for the chart.`}
                 onClick={go}
                 className="rounded-xl border border-border bg-bg-card p-3 flex flex-col gap-1 text-left
                            hover:border-accent/50 transition-colors">
@@ -324,6 +327,18 @@ export function DashboardSection({ onNavigate }: {
       {open && (
         <AssetQuickView symbol={open.symbol} name={open.name} group={open.group}
           onClose={() => setOpen(null)} />
+      )}
+
+      {tile && (
+        <MacroQuickView
+          target={tile}
+          onClose={() => setTile(null)}
+          onOpenFull={() => {
+            const t = tile;
+            setTile(null);
+            onNavigate?.(t.kind === 'macro' ? 'macro' : 'currencies', t.key);
+          }}
+        />
       )}
     </div>
   );
