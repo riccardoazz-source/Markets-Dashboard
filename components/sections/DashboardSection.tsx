@@ -34,8 +34,17 @@ import { QuoteData } from '@/lib/types';
 // ── What the tiles are ───────────────────────────────────────────────────────
 // `macro` ids resolve against MACRO_INDICATORS, so the unit and the display name come
 // from the same place the Macro tab uses and cannot drift apart from it.
+// ── One colour rule for every tile: green when the number rose, red when it fell ─────
+//
+// Unemployment and inflation used to be inverted, on the reasoning that a RISE in either
+// is bad news. Read one tile at a time that is defensible; read as a page it is not. Nine
+// tiles said "green means the line went up" and two said the opposite, so the two looked
+// like a bug rather than a judgement — and the sparkline sits right there contradicting
+// its own colour. Whether a rise is welcome is a question about the reader's position,
+// not about the series, and this page does not know the reader's position. Direction is
+// what the tile actually knows, so direction is what it shows.
 type TileSpec =
-  | { kind: 'macro'; id: string; label: string; hint: string; invertColour?: boolean;
+  | { kind: 'macro'; id: string; label: string; hint: string;
       /** Series that can cross zero, where a percentage change is meaningless. */
       absoluteOnly?: boolean }
   | { kind: 'fx'; pair: string; label: string; hint: string };
@@ -72,10 +81,10 @@ const GROUPS: TileGroup[] = [
     title: 'Employment and Inflation', icon: Users,
     blurb: 'The two halves of the Fed’s mandate — what the rates above are set against',
     tiles: [
-      { kind: 'macro', id: 'UNRATE', label: 'US unemployment', invertColour: true,
-        hint: 'US unemployment rate. Half the Federal Reserve’s mandate, and the half that usually turns first. Rising is shown in red.' },
-      { kind: 'macro', id: 'CPI_YOY', label: 'US inflation', invertColour: true,
-        hint: 'US inflation — the change in the CPI over the last twelve months. The other half of the Federal Reserve’s mandate. Rising is shown in red.' },
+      { kind: 'macro', id: 'UNRATE', label: 'US unemployment',
+        hint: 'US unemployment rate. Half the Federal Reserve’s mandate, and the half that usually turns first.' },
+      { kind: 'macro', id: 'CPI_YOY', label: 'US inflation',
+        hint: 'US inflation — the change in the CPI over the last twelve months. The other half of the Federal Reserve’s mandate.' },
     ],
   },
   {
@@ -160,12 +169,9 @@ function MacroTile({ spec, data, onOpen }: {
   const change = d?.value != null && d?.ref != null ? d.value - d.ref : null;
   const pct = change != null && d?.ref && !(spec.kind === 'macro' && spec.absoluteOnly)
     ? (change / Math.abs(d.ref)) * 100 : null;
-  // For unemployment and inflation a RISE is the bad news, so the colour is flipped.
-  // Showing "up = green" on unemployment would be actively wrong.
-  // A rate that did not move is neither good news nor bad. Reading `change > 0` painted
-  // an unchanged policy rate red.
-  const good = change == null || change === 0 ? null
-    : (spec.kind === 'macro' && spec.invertColour ? change < 0 : change > 0);
+  // A series that did not move has no direction at all — it is grey, not red. Reading
+  // `change > 0` painted an unchanged policy rate red.
+  const up = change == null || change === 0 ? null : change > 0;
   const ref = d?.refDate
     ? `\n\nThe change is over one year, measured against ${d.refDate}.`
     : '';
@@ -184,7 +190,7 @@ function MacroTile({ spec, data, onOpen }: {
           annotates. */}
       <div className="flex items-baseline justify-between gap-1 leading-none">
         <p className={clsx('text-[10px] font-semibold tabular-nums truncate',
-          good == null ? 'text-gray-600' : good ? 'text-up-text' : 'text-down-text')}>
+          up == null ? 'text-gray-600' : up ? 'text-up-text' : 'text-down-text')}>
           {change == null ? '—' : change === 0 ? 'unchanged' : (
             <>
               {change >= 0 ? '+' : ''}{Math.abs(change) < 1 ? change.toFixed(3) : change.toFixed(2)}
@@ -203,16 +209,16 @@ function MacroTile({ spec, data, onOpen }: {
         </p>
         {d?.asOf && <span className="text-[9px] text-gray-600 shrink-0">{d.asOf}</span>}
       </div>
-      {d && <Sparkline points={d.spark} good={good} />}
+      {d && <Sparkline points={d.spark} up={up} />}
     </button>
   );
 }
 
-function Sparkline({ points, good }: { points: { date: string; v: number }[]; good: boolean | null }) {
+function Sparkline({ points, up }: { points: { date: string; v: number }[]; up: boolean | null }) {
   if (points.length < 3) return <div className="h-6" />;
-  // Coloured by whether the move was GOOD, not by whether the line went up — otherwise
-  // unemployment draws a green line under a red number, which is the reading inverted.
-  const stroke = good == null ? '#64748b' : good ? '#22c55e' : '#f87171';
+  // Takes the tile's colour rather than deciding its own, so the line and the number
+  // above it can never disagree. Both mean the same thing: the direction over the year.
+  const stroke = up == null ? '#64748b' : up ? '#22c55e' : '#f87171';
   // The domain is the series' own range, not zero-based: these are levels, and a rate
   // moving from 4.25 to 4.50 is invisible on an axis that starts at zero.
   return (
