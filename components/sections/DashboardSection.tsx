@@ -70,6 +70,17 @@ interface TileData {
 const NAME_OF = new Map(ALL_COMPARABLE_ASSETS.map(a => [a.symbol, a.name]));
 const GROUP_OF = new Map(ALL_COMPARABLE_ASSETS.map(a => [a.symbol, a.group]));
 
+// The order the pinned cards appear in. Fixed rather than by when each was pinned: the
+// point of a landing page is that the same thing is always in the same place, and an
+// order that shuffles as things are pinned and unpinned means reading the labels every
+// time instead of reaching for a position. Anything whose group is not listed — a stock,
+// which is not in the comparable-asset table — sorts after the named ones.
+const PIN_GROUP_ORDER = ['Commodities', 'Indexes', 'Crypto', 'Sectors', 'Stocks'];
+const groupRank = (sym: string) => {
+  const i = PIN_GROUP_ORDER.indexOf(GROUP_OF.get(sym) ?? 'Stocks');
+  return i < 0 ? PIN_GROUP_ORDER.length : i;
+};
+
 function Sparkline({ points, good }: { points: { date: string; v: number }[]; good: boolean | null }) {
   if (points.length < 3) return <div className="h-8" />;
   // Coloured by whether the move was GOOD, not by whether the line went up — otherwise
@@ -98,7 +109,14 @@ export function DashboardSection({ onNavigate }: {
   const [tiles, setTiles] = useState<Record<string, TileData>>({});
   const [loading, setLoading] = useState(true);
   const { pins } = usePins();
-  const pinned = useMemo(() => [...pins], [pins]);
+  const pinned = useMemo(
+    // Grouped in a fixed order, then alphabetically inside each group so the same pins
+    // always render in the same sequence.
+    () => [...pins].sort((a, b) =>
+      groupRank(a) - groupRank(b) ||
+      (NAME_OF.get(a) ?? a).localeCompare(NAME_OF.get(b) ?? b)),
+    [pins],
+  );
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [open, setOpen] = useState<{ symbol: string; name: string; group: string } | null>(null);
   const [tile, setTile] = useState<QuickViewTarget | null>(null);
