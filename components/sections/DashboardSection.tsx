@@ -171,47 +171,52 @@ function MacroTile({ spec, data, onOpen }: {
     : '';
   return (
     <button title={`${spec.hint}${ref}\n\nClick for the chart.`} onClick={onOpen}
-      className="rounded-xl border border-border bg-bg-card p-3 flex flex-col gap-1 text-left
+      className="rounded-lg border border-border bg-bg-card px-2.5 py-2 flex flex-col gap-0.5 text-left
                  hover:border-accent/50 transition-colors">
-      <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none">{spec.label}</p>
-      <p className="text-xl font-bold text-white tabular-nums leading-tight">
+      <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none truncate">{spec.label}</p>
+      <p className="text-lg font-bold text-white tabular-nums leading-tight">
         {d?.value == null ? '—'
           : spec.kind === 'fx' ? d.value.toFixed(4)
           : formatMacroValue(d.value, d.unit)}
       </p>
-      <p className={clsx('text-[11px] font-semibold tabular-nums leading-none',
-        good == null ? 'text-gray-600' : good ? 'text-up-text' : 'text-down-text')}>
-        {change == null ? '—' : change === 0 ? 'unchanged' : (
-          <>
-            {change >= 0 ? '+' : ''}{Math.abs(change) < 1 ? change.toFixed(3) : change.toFixed(2)}
-            {/* Below 0.05% a single decimal renders "-0.0%", which reads as a direction
-                the number does not actually have. */}
-            {pct != null && isFinite(pct) && (
-              <span className="opacity-70">
-                {' '}({Math.abs(pct) < 0.05 ? '~0%' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`})
-              </span>
-            )}
-          </>
-        )}
-        {/* Named on every tile: an unlabelled change is read as "today", and this one is
-            not. It is the same window the sparkline beside it draws. */}
-        <span className="text-gray-600 font-normal"> 1Y</span>
-      </p>
+      {/* The change and the as-of date share a line. They were two rows, and the date is
+          a footnote — giving it a row of its own cost as much height as the number it
+          annotates. */}
+      <div className="flex items-baseline justify-between gap-1 leading-none">
+        <p className={clsx('text-[10px] font-semibold tabular-nums truncate',
+          good == null ? 'text-gray-600' : good ? 'text-up-text' : 'text-down-text')}>
+          {change == null ? '—' : change === 0 ? 'unchanged' : (
+            <>
+              {change >= 0 ? '+' : ''}{Math.abs(change) < 1 ? change.toFixed(3) : change.toFixed(2)}
+              {/* Below 0.05% a single decimal renders "-0.0%", which reads as a direction
+                  the number does not actually have. */}
+              {pct != null && isFinite(pct) && (
+                <span className="opacity-70">
+                  {' '}({Math.abs(pct) < 0.05 ? '~0%' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`})
+                </span>
+              )}
+            </>
+          )}
+          {/* Named on every tile: an unlabelled change is read as "today", and this one
+              is not. It is the same window the sparkline below it draws. */}
+          <span className="text-gray-600 font-normal"> 1Y</span>
+        </p>
+        {d?.asOf && <span className="text-[9px] text-gray-600 shrink-0">{d.asOf}</span>}
+      </div>
       {d && <Sparkline points={d.spark} good={good} />}
-      {d?.asOf && <p className="text-[9px] text-gray-600 leading-none">as of {d.asOf}</p>}
     </button>
   );
 }
 
 function Sparkline({ points, good }: { points: { date: string; v: number }[]; good: boolean | null }) {
-  if (points.length < 3) return <div className="h-8" />;
+  if (points.length < 3) return <div className="h-6" />;
   // Coloured by whether the move was GOOD, not by whether the line went up — otherwise
   // unemployment draws a green line under a red number, which is the reading inverted.
   const stroke = good == null ? '#64748b' : good ? '#22c55e' : '#f87171';
   // The domain is the series' own range, not zero-based: these are levels, and a rate
   // moving from 4.25 to 4.50 is invisible on an axis that starts at zero.
   return (
-    <div className="h-8 -mx-1">
+    <div className="h-6 -mx-1">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={points} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
           <YAxis hide domain={['dataMin', 'dataMax']} />
@@ -345,24 +350,27 @@ export function DashboardSection({ onNavigate }: {
   const tileValue = (t: TileSpec) => tiles[t.kind === 'macro' ? t.id : t.pair];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* ── The tiles, in labelled groups ── */}
       {loading ? (
         <div className="h-28 flex items-center justify-center"><LoadingSpinner /></div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {GROUPS.map(g => (
-            <div key={g.title} className="space-y-1.5">
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="flex items-center gap-1.5">
-                  <g.icon size={13} className="text-accent shrink-0" />
-                  <h2 className="text-sm font-semibold text-gray-200">{g.title}</h2>
+            <div key={g.title} className="space-y-1">
+              {/* The blurb sits on the SAME line as the title and is dropped below `sm`.
+                  It is a one-time explanation; on a phone it was costing a line of height
+                  on every group, permanently, to say something the reader learns once. */}
+              <div className="flex items-baseline gap-2">
+                <span className="flex items-center gap-1.5 shrink-0">
+                  <g.icon size={12} className="text-accent shrink-0" />
+                  <h2 className="text-[13px] font-semibold text-gray-200 leading-none">{g.title}</h2>
                 </span>
-                <span className="text-[10px] text-gray-600">{g.blurb}</span>
+                <span className="hidden sm:block text-[10px] text-gray-600 truncate">{g.blurb}</span>
               </div>
               {/* The same column count for every group, so a tile is the same width
                   whether its group holds two of them or four. */}
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-1.5">
                 {g.tiles.map(t => {
                   const key = t.kind === 'macro' ? t.id : t.pair;
                   return (
@@ -384,15 +392,15 @@ export function DashboardSection({ onNavigate }: {
       <MajorEventsStrip />
 
       {/* ── Pinned ── */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Star size={13} className="text-amber-300 fill-amber-300" />
-          <h2 className="text-sm font-semibold text-gray-200">Pinned</h2>
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5">
+          <Star size={12} className="text-amber-300 fill-amber-300" />
+          <h2 className="text-[13px] font-semibold text-gray-200 leading-none">Pinned</h2>
           <span className="text-[10px] text-gray-600">{pinned.length || 'none yet'}</span>
         </div>
 
         {pinned.length === 0 ? (
-          <div className="rounded-xl border border-border bg-bg-card p-6 text-center space-y-2">
+          <div className="rounded-lg border border-border bg-bg-card p-5 text-center space-y-1.5">
             <p className="text-sm text-gray-400">Nothing pinned.</p>
             <p className="text-[11px] text-gray-600">
               The ★ on any card — in Indexes, Commodities, Sectors, Crypto or Stocks — puts it here.
@@ -405,7 +413,7 @@ export function DashboardSection({ onNavigate }: {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-1.5">
             {pinned.map(sym => {
               const q = quotes[sym];
               const name = NAME_OF.get(sym) ?? q?.name ?? sym;
@@ -413,18 +421,22 @@ export function DashboardSection({ onNavigate }: {
               return (
                 <button key={sym}
                   onClick={() => setOpen({ symbol: sym, name, group })}
-                  className="rounded-xl border border-border bg-bg-card p-3 text-left hover:border-accent/50 transition-colors">
-                  <div className="flex items-start justify-between gap-1 mb-1">
-                    <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none">{group}</p>
+                  className="rounded-lg border border-border bg-bg-card px-2.5 py-2 text-left hover:border-accent/50 transition-colors">
+                  <div className="flex items-start justify-between gap-1">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none truncate">{group}</p>
                     <PhaseChip phase={phases.get(sym)} />
                   </div>
-                  <p className="text-sm font-semibold text-gray-100 leading-snug truncate">{name}</p>
+                  <p className="text-[13px] font-semibold text-gray-100 leading-tight truncate mt-0.5">{name}</p>
                   {q ? (
                     <>
-                      <p className="text-lg font-bold text-white tabular-nums mt-0.5">
+                      <p className="text-base font-bold text-white tabular-nums leading-tight">
                         {q.price?.toLocaleString('en-US', { maximumFractionDigits: 2 })}
                       </p>
-                      <div className="grid grid-cols-2 gap-x-2 mt-1">
+                      {/* Wrapping row rather than a fixed two-column grid: three figures
+                          in a 2×2 grid always leave one cell empty, so the card carried a
+                          blank half-row. Wrapped, they take one line where there is room
+                          and two where there is not. */}
+                      <div className="flex flex-wrap gap-x-2 leading-tight">
                         {([['Day', q.changePercent], ['YTD', q.ytdChangePercent],
                            ['1Y', q.fiftyTwoWeekChangePercent]] as [string, number | null | undefined][])
                           .filter(([, v]) => v != null)
@@ -437,7 +449,7 @@ export function DashboardSection({ onNavigate }: {
                       </div>
                     </>
                   ) : (
-                    <p className="text-xs text-gray-600 mt-1">Loading…</p>
+                    <p className="text-xs text-gray-600 mt-0.5">Loading…</p>
                   )}
                 </button>
               );

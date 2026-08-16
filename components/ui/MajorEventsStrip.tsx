@@ -146,10 +146,10 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
   if (!now) return null;
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <CalendarClock size={13} className="text-gray-500" />
-        <h2 className="text-sm font-semibold text-gray-200">What&apos;s ahead</h2>
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <CalendarClock size={12} className="text-gray-500" />
+        <h2 className="text-[13px] font-semibold text-gray-200 leading-none">What&apos;s ahead</h2>
         <span className="text-[10px] text-gray-600 hidden sm:inline">
           next {months} months · {zone()}
         </span>
