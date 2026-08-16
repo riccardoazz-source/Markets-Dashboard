@@ -8,17 +8,18 @@
 // other section writes to. The point is not more information, it is the things worth
 // seeing before the rest.
 //
-// The tiles are GROUPED rather than laid out in one undifferentiated row, because eleven
+// The tiles are GROUPED rather than laid out in one undifferentiated row, because a dozen
 // numbers side by side is a wall: the dollar belongs with the euro, the three policy rates
 // belong with each other, and the Fed's balance sheet belongs with the yields it moves.
 // Grouped, each row is one question — what is the dollar doing, what is the price of
-// money, what is the Fed's mandate doing, where is liquidity — and the tiles inside it are
-// the answer. Where a group's members read against each other (three policy rates, two
-// yields and their spread) that comparison is the whole point of putting them on one line.
+// money, what is the Fed's mandate doing, where is liquidity, what is the market itself
+// paying — and the tiles inside it are the answer. Where a group's members read against
+// each other (three policy rates, two yields and their spread) that comparison is the
+// whole point of putting them on one line.
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import clsx from 'clsx';
-import { Star, ArrowRight, DollarSign, Percent, Users, Landmark, type LucideIcon } from 'lucide-react';
+import { Star, ArrowRight, DollarSign, Percent, Users, Landmark, Activity, type LucideIcon } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 import { MACRO_INDICATORS, ALL_COMPARABLE_ASSETS, type MacroUnit } from '@/lib/config';
 import { usePins } from '@/lib/gist';
@@ -105,6 +106,19 @@ const GROUPS: TileGroup[] = [
       // sign at all. The move in percentage points is the whole story here.
       { kind: 'macro', id: 'T10Y2Y', label: '10Y–2Y Spread', absoluteOnly: true,
         hint: 'The ten-year yield minus the two-year. Below zero the curve is inverted — the market is pricing lower rates ahead, which has historically preceded recessions.' },
+    ],
+  },
+  {
+    title: 'Market', icon: Activity,
+    // Last, because it is the only group that is the market's own opinion rather than a
+    // measurement of the economy: what it is paying to insure itself, and what it is
+    // paying for a decade of earnings. Both read against the four groups above them.
+    blurb: 'What the market charges for risk, and pays for earnings',
+    tiles: [
+      { kind: 'macro', id: 'VIX', label: 'VIX',
+        hint: 'What the option market is charging to insure the S&P 500 over the next month. It rises when the market is frightened.' },
+      { kind: 'macro', id: 'SHILLER_CAPE', label: 'S&P 500 Shiller CAPE',
+        hint: 'Cyclically adjusted P/E — the S&P 500 price over ten years of inflation-adjusted earnings, so a single good or bad year cannot flatter it. High readings say the index is expensive against its own long-run earnings. Monthly.' },
     ],
   },
 ];
