@@ -5,17 +5,20 @@
 // The handful of numbers that set the weather for everything else, and then whatever the
 // user has pinned. Nothing here is new data: the tiles read the same endpoints the Macro and
 // Currencies tabs read, and the pinned strip reads the same gist-backed pin set every
-// other section writes to. The point is not more information, it is the five things worth
+// other section writes to. The point is not more information, it is the things worth
 // seeing before the rest.
 //
-// Why these. The dollar and the policy rate are the price of money; the VIX is what the
-// market is paying to insure against the next month; inflation and unemployment are the
-// two halves of the Fed's mandate and therefore what that rate is set against. Between
-// them they explain most of what the index cards on the next tab are doing.
+// The tiles are GROUPED rather than laid out in one undifferentiated row, because eleven
+// numbers side by side is a wall: the dollar belongs with the euro, the three policy rates
+// belong with each other, and the Fed's balance sheet belongs with the yields it moves.
+// Grouped, each row is one question — what is the dollar doing, what is the price of
+// money, what is the Fed's mandate doing, where is liquidity — and the tiles inside it are
+// the answer. Where a group's members read against each other (three policy rates, two
+// yields and their spread) that comparison is the whole point of putting them on one line.
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import clsx from 'clsx';
-import { Star, ArrowRight } from 'lucide-react';
+import { Star, ArrowRight, DollarSign, Percent, Users, Landmark, type LucideIcon } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 import { MACRO_INDICATORS, ALL_COMPARABLE_ASSETS, type MacroUnit } from '@/lib/config';
 import { usePins } from '@/lib/gist';
@@ -28,27 +31,71 @@ import { MacroQuickView, type QuickViewTarget } from '@/components/ui/MacroQuick
 import { formatMacroValue } from '@/lib/macroDerived';
 import { QuoteData } from '@/lib/types';
 
-// ── What the five tiles are ─────────────────────────────────────────────────
+// ── What the tiles are ───────────────────────────────────────────────────────
 // `macro` ids resolve against MACRO_INDICATORS, so the unit and the display name come
 // from the same place the Macro tab uses and cannot drift apart from it.
 type TileSpec =
   | { kind: 'macro'; id: string; label: string; hint: string; invertColour?: boolean }
   | { kind: 'fx'; pair: string; label: string; hint: string };
 
-const TILES: TileSpec[] = [
-  { kind: 'macro', id: 'DXY', label: 'US Dollar (DXY)',
-    hint: 'ICE US Dollar Index — the dollar against a basket of six currencies. It moves against almost everything else priced in dollars.' },
-  { kind: 'fx', pair: 'USD/EUR', label: 'USD / EUR',
-    hint: 'How many euro one dollar buys.' },
-  { kind: 'macro', id: 'DFEDTARU', label: 'US interest rate',
-    hint: 'The Federal Reserve’s target rate, upper bound. The price of money everything else is discounted against.' },
-  { kind: 'macro', id: 'VIX', label: 'VIX', invertColour: true,
-    hint: 'What the option market is charging to insure the S&P 500 over the next month. Rises when the market is frightened, so a rise is shown in red.' },
-  { kind: 'macro', id: 'UNRATE', label: 'US unemployment', invertColour: true,
-    hint: 'US unemployment rate. Half the Federal Reserve’s mandate, and the half that usually turns first.' },
-  { kind: 'macro', id: 'CPI_YOY', label: 'US inflation', invertColour: true,
-    hint: 'US inflation — the change in the CPI over the last twelve months. The other half of the Federal Reserve’s mandate, and what the interest rate above is set against. Rising is shown in red.' },
+interface TileGroup { title: string; icon: LucideIcon; blurb: string; tiles: TileSpec[] }
+
+const GROUPS: TileGroup[] = [
+  {
+    title: 'Currency', icon: DollarSign,
+    blurb: 'What the dollar is worth',
+    tiles: [
+      { kind: 'macro', id: 'DXY', label: 'US Dollar (DXY)',
+        hint: 'ICE US Dollar Index — the dollar against a basket of six currencies. It moves against almost everything else priced in dollars.' },
+      { kind: 'fx', pair: 'USD/EUR', label: 'USD / EUR',
+        hint: 'How many euro one dollar buys.' },
+    ],
+  },
+  {
+    title: 'Interest rate', icon: Percent,
+    // Three policy rates on one line so the GAPS between them are visible: the spread
+    // between what the Fed pays and what the ECB and the BoJ pay is most of the reason
+    // the dollar tile above moves at all.
+    blurb: 'What each central bank charges for money',
+    tiles: [
+      { kind: 'macro', id: 'DFEDTARU', label: 'US interest rate',
+        hint: 'The Federal Reserve’s target rate, upper bound. The price of money everything else is discounted against.' },
+      { kind: 'macro', id: 'ECBDFR', label: 'EU interest rate',
+        hint: 'The ECB deposit facility rate — the euro-area policy rate.' },
+      { kind: 'macro', id: 'IRSTCI01JPM156N', label: 'Japan interest rate',
+        hint: 'Japan’s overnight call rate, the Bank of Japan’s policy rate in practice. Published monthly, so it updates later than the other two.' },
+    ],
+  },
+  {
+    title: 'Employment and Inflation', icon: Users,
+    blurb: 'The two halves of the Fed’s mandate — what the rates above are set against',
+    tiles: [
+      { kind: 'macro', id: 'UNRATE', label: 'US unemployment', invertColour: true,
+        hint: 'US unemployment rate. Half the Federal Reserve’s mandate, and the half that usually turns first. Rising is shown in red.' },
+      { kind: 'macro', id: 'CPI_YOY', label: 'US inflation', invertColour: true,
+        hint: 'US inflation — the change in the CPI over the last twelve months. The other half of the Federal Reserve’s mandate. Rising is shown in red.' },
+    ],
+  },
+  {
+    title: 'Money and rates', icon: Landmark,
+    blurb: 'How much money there is, and what the market charges for it over time',
+    tiles: [
+      { kind: 'macro', id: 'WALCL', label: 'Fed Balance Sheet',
+        hint: 'Total assets held by the Federal Reserve. It grows when the Fed is adding liquidity and shrinks when it is draining it.' },
+      { kind: 'macro', id: 'DGS2', label: 'US 2Y Yield',
+        hint: 'Two-year Treasury yield — the market’s view of the policy rate over the next two years, so it moves before the Fed does.' },
+      { kind: 'macro', id: 'DGS10', label: 'US 10Y Yield',
+        hint: 'Ten-year Treasury yield — the long rate most other assets are discounted against.' },
+      // Placed last deliberately: it is the two tiles to its left subtracted, so it reads
+      // as their conclusion rather than as a fourth independent number.
+      { kind: 'macro', id: 'T10Y2Y', label: '10Y–2Y Spread',
+        hint: 'The ten-year yield minus the two-year. Below zero the curve is inverted — the market is pricing lower rates ahead, which has historically preceded recessions.' },
+    ],
+  },
 ];
+
+/** Flat list, for the loader — it fetches per tile and does not care about grouping. */
+const TILES: TileSpec[] = GROUPS.flatMap(g => g.tiles);
 
 /** What /api/currencies?mode=latest actually returns — not the CurrencyRate shape. */
 interface FxRow { from: string; to: string; rate: number | null; change1d: number | null }
@@ -81,10 +128,55 @@ const groupRank = (sym: string) => {
   return i < 0 ? PIN_GROUP_ORDER.length : i;
 };
 
+function MacroTile({ spec, data, onOpen }: {
+  spec: TileSpec;
+  data: TileData | undefined;
+  onOpen: () => void;
+}) {
+  const d = data;
+  const change = d?.value != null && d?.prev != null ? d.value - d.prev : null;
+  const pct = change != null && d?.prev ? (change / Math.abs(d.prev)) * 100 : null;
+  // For unemployment and inflation a RISE is the bad news, so the colour is flipped.
+  // Showing "up = green" on unemployment would be actively wrong.
+  // A rate that did not move is neither good news nor bad. Reading `change > 0` painted
+  // an unchanged policy rate red.
+  const good = change == null || change === 0 ? null
+    : (spec.kind === 'macro' && spec.invertColour ? change < 0 : change > 0);
+  return (
+    <button title={`${spec.hint}\n\nClick for the chart.`} onClick={onOpen}
+      className="rounded-xl border border-border bg-bg-card p-3 flex flex-col gap-1 text-left
+                 hover:border-accent/50 transition-colors">
+      <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none">{spec.label}</p>
+      <p className="text-xl font-bold text-white tabular-nums leading-tight">
+        {d?.value == null ? '—'
+          : spec.kind === 'fx' ? d.value.toFixed(4)
+          : formatMacroValue(d.value, d.unit)}
+      </p>
+      <p className={clsx('text-[11px] font-semibold tabular-nums leading-none',
+        good == null ? 'text-gray-600' : good ? 'text-up-text' : 'text-down-text')}>
+        {change == null ? '—' : change === 0 ? 'unchanged' : (
+          <>
+            {change >= 0 ? '+' : ''}{Math.abs(change) < 1 ? change.toFixed(3) : change.toFixed(2)}
+            {/* Below 0.05% a single decimal renders "-0.0%", which reads as a direction
+                the number does not actually have. */}
+            {pct != null && isFinite(pct) && (
+              <span className="opacity-70">
+                {' '}({Math.abs(pct) < 0.05 ? '~0%' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`})
+              </span>
+            )}
+          </>
+        )}
+      </p>
+      {d && <Sparkline points={d.spark} good={good} />}
+      {d?.asOf && <p className="text-[9px] text-gray-600 leading-none">as of {d.asOf}</p>}
+    </button>
+  );
+}
+
 function Sparkline({ points, good }: { points: { date: string; v: number }[]; good: boolean | null }) {
   if (points.length < 3) return <div className="h-8" />;
   // Coloured by whether the move was GOOD, not by whether the line went up — otherwise
-  // the VIX draws a green line under a red number, which is the reading inverted.
+  // unemployment draws a green line under a red number, which is the reading inverted.
   const stroke = good == null ? '#64748b' : good ? '#22c55e' : '#f87171';
   // The domain is the series' own range, not zero-based: these are levels, and a rate
   // moving from 4.25 to 4.50 is invisible on an axis that starts at zero.
@@ -221,58 +313,37 @@ export function DashboardSection({ onNavigate }: {
 
   return (
     <div className="space-y-4">
-      {/* ── The tiles ── */}
+      {/* ── The tiles, in labelled groups ── */}
       {loading ? (
         <div className="h-28 flex items-center justify-center"><LoadingSpinner /></div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-          {TILES.map(t => {
-            const d = tileValue(t);
-            const key = t.kind === 'macro' ? t.id : t.pair;
-            const change = d?.value != null && d?.prev != null ? d.value - d.prev : null;
-            const pct = change != null && d?.prev ? (change / Math.abs(d.prev)) * 100 : null;
-            // For the VIX and unemployment a RISE is the bad news, so the colour is
-            // flipped. Showing "up = green" on unemployment would be actively wrong.
-            // A rate that did not move is neither good news nor bad. Reading `change > 0`
-            // painted an unchanged policy rate red.
-            const good = change == null || change === 0 ? null
-              : (t.kind === 'macro' && t.invertColour ? change < 0 : change > 0);
-            // Opens OVER this page rather than handing over to another tab: closing the
-            // detail should return you where you started, and being relocated to Macro
-            // because you glanced at the dollar is the wrong outcome. The full tab is
-            // still one click away from inside the panel.
-            const go = () => setTile({ kind: t.kind, key, label: t.label });
-            return (
-              <button key={key} title={`${t.hint}\n\nClick for the chart.`}
-                onClick={go}
-                className="rounded-xl border border-border bg-bg-card p-3 flex flex-col gap-1 text-left
-                           hover:border-accent/50 transition-colors">
-                <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none">{t.label}</p>
-                <p className="text-xl font-bold text-white tabular-nums leading-tight">
-                  {d?.value == null ? '—'
-                    : t.kind === 'fx' ? d.value.toFixed(4)
-                    : formatMacroValue(d.value, d.unit)}
-                </p>
-                <p className={clsx('text-[11px] font-semibold tabular-nums leading-none',
-                  good == null ? 'text-gray-600' : good ? 'text-up-text' : 'text-down-text')}>
-                  {change == null ? '—' : change === 0 ? 'unchanged' : (
-                    <>
-                      {change >= 0 ? '+' : ''}{Math.abs(change) < 1 ? change.toFixed(3) : change.toFixed(2)}
-                      {/* Below 0.05% a single decimal renders "-0.0%", which reads as a
-                          direction the number does not actually have. */}
-                      {pct != null && isFinite(pct) && (
-                        <span className="opacity-70">
-                          {' '}({Math.abs(pct) < 0.05 ? '~0%' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`})
-                        </span>
-                      )}
-                    </>
-                  )}
-                </p>
-                {d && <Sparkline points={d.spark} good={good} />}
-                {d?.asOf && <p className="text-[9px] text-gray-600 leading-none">as of {d.asOf}</p>}
-              </button>
-            );
-          })}
+        <div className="space-y-3">
+          {GROUPS.map(g => (
+            <div key={g.title} className="space-y-1.5">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="flex items-center gap-1.5">
+                  <g.icon size={13} className="text-accent shrink-0" />
+                  <h2 className="text-sm font-semibold text-gray-200">{g.title}</h2>
+                </span>
+                <span className="text-[10px] text-gray-600">{g.blurb}</span>
+              </div>
+              {/* The same column count for every group, so a tile is the same width
+                  whether its group holds two of them or four. */}
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+                {g.tiles.map(t => {
+                  const key = t.kind === 'macro' ? t.id : t.pair;
+                  return (
+                    <MacroTile key={key} spec={t} data={tileValue(t)}
+                      // Opens OVER this page rather than handing over to another tab:
+                      // closing the detail should return you where you started, and being
+                      // relocated to Macro because you glanced at the dollar is the wrong
+                      // outcome. The full tab is still one click away from inside the panel.
+                      onOpen={() => setTile({ kind: t.kind, key, label: t.label })} />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
