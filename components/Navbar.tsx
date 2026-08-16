@@ -9,20 +9,45 @@ export type Section = 'dashboard' | 'indexes' | 'currencies' | 'crypto' | 'commo
 
 type LucideIcon = ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>>;
 
-const SECTIONS: { id: Section; label: string; short: string; Icon: LucideIcon }[] = [
-  { id: 'dashboard',   label: 'Dashboard',   short: 'Home',  Icon: LayoutDashboard },
-  { id: 'indexes',     label: 'Indexes',     short: 'Idx',   Icon: BarChart2  },
-  { id: 'currencies',  label: 'Currencies',  short: 'FX',    Icon: DollarSign },
-  { id: 'crypto',      label: 'Crypto',      short: 'Crypto',Icon: Bitcoin    },
-  { id: 'commodities', label: 'Commodities', short: 'Cmdty', Icon: Gem        },
-  { id: 'sectors',     label: 'Sectors',     short: 'Sec',   Icon: Grid2X2    },
-  { id: 'macro',       label: 'Macro',       short: 'Macro', Icon: Activity   },
+/**
+ * The icon that stands for each section, everywhere in the app.
+ *
+ * Exported because the Dashboard labels its pinned subsections with these same marks, and
+ * a second copy of "commodities means a gem" would eventually disagree with this one —
+ * at which point the icon stops being a shorthand for the tab and becomes decoration.
+ */
+export const SECTION_ICONS: Record<Section, LucideIcon> = {
+  dashboard:   LayoutDashboard,
+  commodities: Gem,
+  indexes:     BarChart2,
+  currencies:  DollarSign,
+  crypto:      Bitcoin,
+  sectors:     Grid2X2,
+  macro:       Activity,
+  macroworld:  Globe,
+  stock:       Briefcase,
+  compare:     GitCompare,
+  rotation:    RefreshCw,
+  sources:     BookOpen,
+};
+
+// Commodities sits ahead of Indexes, matching the order the Dashboard lists pinned
+// assets in. One order for the whole app: the tab bar and the landing page disagreeing
+// about where commodities belong is a small thing that has to be re-learned every time.
+const SECTIONS: { id: Section; label: string; short: string }[] = [
+  { id: 'dashboard',   label: 'Dashboard',   short: 'Home'   },
+  { id: 'commodities', label: 'Commodities', short: 'Cmdty'  },
+  { id: 'indexes',     label: 'Indexes',     short: 'Idx'    },
+  { id: 'currencies',  label: 'Currencies',  short: 'FX'     },
+  { id: 'crypto',      label: 'Crypto',      short: 'Crypto' },
+  { id: 'sectors',     label: 'Sectors',     short: 'Sec'    },
+  { id: 'macro',       label: 'Macro',       short: 'Macro'  },
   // Macro World (IMF) — only shown when the feature flag is on.
-  ...(MACRO_WORLD_ENABLED ? [{ id: 'macroworld' as Section, label: 'Macro World', short: 'World', Icon: Globe }] : []),
-  { id: 'stock',       label: 'Stocks',      short: 'Stocks',Icon: Briefcase  },
-  { id: 'compare',     label: 'Compare',     short: 'vs.',   Icon: GitCompare },
-  { id: 'rotation',    label: 'Rotation',    short: 'RRG',   Icon: RefreshCw  },
-  { id: 'sources',     label: 'Sources',     short: 'Src',   Icon: BookOpen   },
+  ...(MACRO_WORLD_ENABLED ? [{ id: 'macroworld' as Section, label: 'Macro World', short: 'World' }] : []),
+  { id: 'stock',       label: 'Stocks',      short: 'Stocks' },
+  { id: 'compare',     label: 'Compare',     short: 'vs.'    },
+  { id: 'rotation',    label: 'Rotation',    short: 'RRG'    },
+  { id: 'sources',     label: 'Sources',     short: 'Src'    },
 ];
 
 interface Props {
@@ -67,19 +92,22 @@ export function Navbar({ active, onSelect }: Props) {
       {/* Mobile bottom tab bar — visible only on mobile */}
       <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-50 bg-bg border-t border-border">
         <div className="flex items-stretch h-14">
-          {SECTIONS.map(s => (
-            <button
-              key={s.id}
-              onClick={() => onSelect(s.id)}
-              className={clsx(
-                'flex-1 flex flex-col items-center justify-center gap-0.5 transition-all duration-150',
-                active === s.id ? 'text-accent' : 'text-gray-500'
-              )}
-            >
-              <s.Icon size={20} className={active === s.id ? 'text-accent' : 'text-gray-500'} />
-              <span className="text-[10px] font-medium">{s.short}</span>
-            </button>
-          ))}
+          {SECTIONS.map(s => {
+            const Icon = SECTION_ICONS[s.id];
+            return (
+              <button
+                key={s.id}
+                onClick={() => onSelect(s.id)}
+                className={clsx(
+                  'flex-1 flex flex-col items-center justify-center gap-0.5 transition-all duration-150',
+                  active === s.id ? 'text-accent' : 'text-gray-500'
+                )}
+              >
+                <Icon size={20} className={active === s.id ? 'text-accent' : 'text-gray-500'} />
+                <span className="text-[10px] font-medium">{s.short}</span>
+              </button>
+            );
+          })}
         </div>
       </nav>
     </>

@@ -22,6 +22,7 @@ import clsx from 'clsx';
 import { Star, ArrowRight, DollarSign, Percent, Users, Landmark, Activity, type LucideIcon } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
 import { MACRO_INDICATORS, ALL_COMPARABLE_ASSETS, type MacroUnit } from '@/lib/config';
+import { SECTION_ICONS, type Section } from '@/components/Navbar';
 import { usePins } from '@/lib/gist';
 import { useRotationPhases } from '@/lib/useRotationPhases';
 import { PhaseChip } from '@/components/ui/RotationControls';
@@ -163,14 +164,34 @@ interface TileData {
 const NAME_OF = new Map(ALL_COMPARABLE_ASSETS.map(a => [a.symbol, a.name]));
 const GROUP_OF = new Map(ALL_COMPARABLE_ASSETS.map(a => [a.symbol, a.group]));
 
-// The order the pinned cards appear in. Fixed rather than by when each was pinned: the
-// point of a landing page is that the same thing is always in the same place, and an
-// order that shuffles as things are pinned and unpinned means reading the labels every
-// time instead of reaching for a position. Anything whose group is not listed — a stock,
-// which is not in the comparable-asset table — sorts after the named ones.
+// ── How the pinned cards are organised ───────────────────────────────────────
+//
+// By kind, in a fixed order, under a heading each. Fixed rather than by when each was
+// pinned: the point of a landing page is that the same thing is always in the same place,
+// and an order that shuffles as things are pinned and unpinned means reading the labels
+// every time instead of reaching for a position.
+//
+// Each heading carries the icon of the tab that asset came from — the same mark, from
+// SECTION_ICONS, so the heading is recognisable before it is read.
 const PIN_GROUP_ORDER = ['Commodities', 'Indexes', 'Crypto', 'Sectors', 'Stocks'];
-const groupRank = (sym: string) => {
-  const i = PIN_GROUP_ORDER.indexOf(GROUP_OF.get(sym) ?? 'Stocks');
+
+// `group` on a comparable asset, mapped to the tab it belongs to. Stocks are not in that
+// table at all, so a symbol with no entry is a stock. Macro and FX cannot currently be
+// pinned — no section offers the ★ on them — but they are mapped rather than assumed
+// away, so pinning one later produces a labelled section instead of a stray card.
+const GROUP_SECTION: Record<string, Section> = {
+  Commodities: 'commodities',
+  Indexes: 'indexes',
+  Crypto: 'crypto',
+  Sectors: 'sectors',
+  Stocks: 'stock',
+  Macro: 'macro',
+  FX: 'currencies',
+};
+
+const groupOfPin = (sym: string) => GROUP_OF.get(sym) ?? 'Stocks';
+const groupRank = (g: string) => {
+  const i = PIN_GROUP_ORDER.indexOf(g);
   return i < 0 ? PIN_GROUP_ORDER.length : i;
 };
 
@@ -260,10 +281,21 @@ export function DashboardSection({ onNavigate }: {
     // Grouped in a fixed order, then alphabetically inside each group so the same pins
     // always render in the same sequence.
     () => [...pins].sort((a, b) =>
-      groupRank(a) - groupRank(b) ||
+      groupRank(groupOfPin(a)) - groupRank(groupOfPin(b)) ||
       (NAME_OF.get(a) ?? a).localeCompare(NAME_OF.get(b) ?? b)),
     [pins],
   );
+  // The same list cut into its sections. Derived from `pinned` rather than sorted again,
+  // so the two can never disagree about order — and empty sections never appear, because
+  // a heading over nothing is worse than no heading.
+  const pinSections = useMemo(() => {
+    const by = new Map<string, string[]>();
+    for (const sym of pinned) {
+      const g = groupOfPin(sym);
+      (by.get(g) ?? by.set(g, []).get(g)!).push(sym);
+    }
+    return [...by.entries()].map(([group, symbols]) => ({ group, symbols }));
+  }, [pinned]);
   const [quotes, setQuotes] = useState<Record<string, QuoteData>>({});
   const [open, setOpen] = useState<{ symbol: string; name: string; group: string } | null>(null);
   const [tile, setTile] = useState<QuickViewTarget | null>(null);
@@ -432,21 +464,33 @@ export function DashboardSection({ onNavigate }: {
               </button>
             )}
           </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-1.5">
-            {pinned.map(sym => {
+        ) : pinSections.map(({ group, symbols }) => {
+          const Icon = SECTION_ICONS[GROUP_SECTION[group] ?? 'stock'];
+          return (
+          <div key={group} className="space-y-1 pt-1">
+            <div className="flex items-center gap-1.5">
+              <Icon size={11} className="text-gray-500 shrink-0" />
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 leading-none">{group}</h3>
+              <span className="text-[10px] text-gray-600">{symbols.length}</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-1.5">
+            {symbols.map(sym => {
               const q = quotes[sym];
               const name = NAME_OF.get(sym) ?? q?.name ?? sym;
-              const group = GROUP_OF.get(sym) ?? 'Stocks';
               return (
                 <button key={sym}
                   onClick={() => setOpen({ symbol: sym, name, group })}
                   className="rounded-lg border border-border bg-bg-card px-2.5 py-2 text-left hover:border-accent/50 transition-colors">
+                  {/* No group label on the card any more — the heading above says it, and
+                      repeating it once per card spent a row to state what the reader has
+                      just read. The phase chip takes that row instead. */}
                   <div className="flex items-start justify-between gap-1">
-                    <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none truncate">{group}</p>
+                    {/* min-w-0: the name is a flex child now, and a flex item will not
+                        shrink below its content width without it, so `truncate` would
+                        never engage and a long name would push the chip off the card. */}
+                    <p className="min-w-0 text-[13px] font-semibold text-gray-100 leading-tight truncate">{name}</p>
                     <PhaseChip phase={phases.get(sym)} />
                   </div>
-                  <p className="text-[13px] font-semibold text-gray-100 leading-tight truncate mt-0.5">{name}</p>
                   {q ? (
                     <>
                       <p className="text-base font-bold text-white tabular-nums leading-tight">
@@ -474,8 +518,10 @@ export function DashboardSection({ onNavigate }: {
                 </button>
               );
             })}
+            </div>
           </div>
-        )}
+          );
+        })}
       </div>
 
       {open && (
