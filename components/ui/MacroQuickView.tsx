@@ -63,13 +63,22 @@ export function MacroQuickView({ target, onClose, onOpenFull }: {
 
   useEffect(() => { load(); }, [load]);
 
+  // "Previous" is the START of the selected window, not the observation before last.
+  //
+  // The tiles on the Dashboard compare against a year ago, and opening one has to show
+  // the same comparison or the panel contradicts the card that opened it. The
+  // previous-observation reading was also the less useful of the two here: on a monthly
+  // series it is last month, and on a policy rate it is almost always the identical
+  // number, so the panel opened on "unchanged" for a rate that had moved 75bp over the
+  // window its own chart was drawing.
   const first = data[0]?.close ?? null;
+  const firstDate = data[0]?.date ?? null;
   const last = data[data.length - 1]?.close ?? null;
-  const prev = data.length > 1 ? data[data.length - 2].close : null;
   const fmt = (v: number | null) =>
     v == null ? '—' : target.kind === 'fx' ? v.toFixed(4) : formatMacroValue(v, unit);
-  const change = last != null && prev != null ? last - prev : null;
+  const change = last != null && first != null ? last - first : null;
   const overPeriod = last != null && first != null && first !== 0 ? (last / first - 1) * 100 : null;
+  const windowLabel = customRange ? 'Custom' : timeframe;
 
   return (
     <DetailModal onClose={onClose}>
@@ -103,11 +112,15 @@ export function MacroQuickView({ target, onClose, onOpenFull }: {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
           <Stat label="Latest" value={fmt(last)} />
-          <Stat label="Previous" value={fmt(prev)} />
-          <Stat label="Change"
+          {/* The date is spelled out rather than left as "previous": on a monthly or
+              quarterly series the start of a 1Y window is not exactly a year back, and
+              the reader should see which observation the change is against. */}
+          <Stat label={firstDate ? `Previous (${firstDate})` : `Previous (${windowLabel} ago)`}
+            value={fmt(first)} />
+          <Stat label={`Change (${windowLabel})`}
             value={change == null ? '—' : `${change >= 0 ? '+' : ''}${Math.abs(change) < 1 ? change.toFixed(3) : change.toFixed(2)}`}
             color={change == null ? undefined : change >= 0 ? 'text-up-text' : 'text-down-text'} />
-          <Stat label={`Change (${customRange ? 'Custom' : timeframe})`}
+          <Stat label={`Change % (${windowLabel})`}
             value={overPeriod == null ? '—' : `${overPeriod >= 0 ? '+' : ''}${overPeriod.toFixed(2)}%`}
             color={overPeriod == null ? undefined : overPeriod >= 0 ? 'text-up-text' : 'text-down-text'} />
         </div>

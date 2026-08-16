@@ -35,7 +35,9 @@ import { QuoteData } from '@/lib/types';
 // `macro` ids resolve against MACRO_INDICATORS, so the unit and the display name come
 // from the same place the Macro tab uses and cannot drift apart from it.
 type TileSpec =
-  | { kind: 'macro'; id: string; label: string; hint: string; invertColour?: boolean }
+  | { kind: 'macro'; id: string; label: string; hint: string; invertColour?: boolean;
+      /** Series that can cross zero, where a percentage change is meaningless. */
+      absoluteOnly?: boolean }
   | { kind: 'fx'; pair: string; label: string; hint: string };
 
 interface TileGroup { title: string; icon: LucideIcon; blurb: string; tiles: TileSpec[] }
@@ -88,7 +90,11 @@ const GROUPS: TileGroup[] = [
         hint: 'Ten-year Treasury yield — the long rate most other assets are discounted against.' },
       // Placed last deliberately: it is the two tiles to its left subtracted, so it reads
       // as their conclusion rather than as a fourth independent number.
-      { kind: 'macro', id: 'T10Y2Y', label: '10Y–2Y Spread',
+      // absoluteOnly: this one is a DIFFERENCE and sits near zero, so a percentage
+      // change is arithmetic without meaning — 0.05 to 0.51 is "+920%", and a window
+      // that starts on the other side of zero produces a number with no defensible
+      // sign at all. The move in percentage points is the whole story here.
+      { kind: 'macro', id: 'T10Y2Y', label: '10Y–2Y Spread', absoluteOnly: true,
         hint: 'The ten-year yield minus the two-year. Below zero the curve is inverted — the market is pricing lower rates ahead, which has historically preceded recessions.' },
     ],
   },
@@ -106,9 +112,26 @@ interface MacroLatest {
   prev?: { date: string; value: number } | null;
 }
 
+// ── What a tile compares itself against ──────────────────────────────────────
+// One year, always — not the previous observation.
+//
+// The daily change was the wrong reference for this page. Half of these series are
+// monthly or set by committee, so "yesterday" is almost always the same number: the
+// policy-rate tiles read "unchanged" on nearly every day of the year, which says nothing,
+// while the Fed actually moved 75bp over the window the sparkline underneath was drawing.
+// It also made the number and the picture disagree — a tile could print a red −0.3% over a
+// sparkline that rose all year, and the eye believes the picture.
+//
+// So the comparison is the first point of the same one-year series the sparkline draws.
+// The number, the percentage and the colour of the line then all describe the same move,
+// and `refDate` records which observation it actually was — for a monthly series the
+// earliest point in the window is not exactly 365 days back, and the tooltip says so
+// rather than implying a precision the data does not have.
 interface TileData {
   value: number | null;
-  prev: number | null;
+  /** Value one year ago — the first point of the 1Y series. */
+  ref: number | null;
+  refDate: string | null;
   asOf: string | null;
   unit: MacroUnit;
   spark: { date: string; v: number }[];
@@ -134,16 +157,20 @@ function MacroTile({ spec, data, onOpen }: {
   onOpen: () => void;
 }) {
   const d = data;
-  const change = d?.value != null && d?.prev != null ? d.value - d.prev : null;
-  const pct = change != null && d?.prev ? (change / Math.abs(d.prev)) * 100 : null;
+  const change = d?.value != null && d?.ref != null ? d.value - d.ref : null;
+  const pct = change != null && d?.ref && !(spec.kind === 'macro' && spec.absoluteOnly)
+    ? (change / Math.abs(d.ref)) * 100 : null;
   // For unemployment and inflation a RISE is the bad news, so the colour is flipped.
   // Showing "up = green" on unemployment would be actively wrong.
   // A rate that did not move is neither good news nor bad. Reading `change > 0` painted
   // an unchanged policy rate red.
   const good = change == null || change === 0 ? null
     : (spec.kind === 'macro' && spec.invertColour ? change < 0 : change > 0);
+  const ref = d?.refDate
+    ? `\n\nThe change is over one year, measured against ${d.refDate}.`
+    : '';
   return (
-    <button title={`${spec.hint}\n\nClick for the chart.`} onClick={onOpen}
+    <button title={`${spec.hint}${ref}\n\nClick for the chart.`} onClick={onOpen}
       className="rounded-xl border border-border bg-bg-card p-3 flex flex-col gap-1 text-left
                  hover:border-accent/50 transition-colors">
       <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none">{spec.label}</p>
@@ -166,6 +193,9 @@ function MacroTile({ spec, data, onOpen }: {
             )}
           </>
         )}
+        {/* Named on every tile: an unlabelled change is read as "today", and this one is
+            not. It is the same window the sparkline beside it draws. */}
+        <span className="text-gray-600 font-normal"> 1Y</span>
       </p>
       {d && <Sparkline points={d.spark} good={good} />}
       {d?.asOf && <p className="text-[9px] text-gray-600 leading-none">as of {d.asOf}</p>}
@@ -223,7 +253,7 @@ export function DashboardSection({ onNavigate }: {
     // Two shards write here, so they write to SEPARATE maps and are merged at the end.
     // Sharing one object let whichever finished last clobber the other's fields — the
     // sparklines would appear or not depending on which request won the race.
-    const level: Record<string, Omit<TileData, 'spark'>> = {};
+    const level: Record<string, Omit<TileData, 'spark' | 'ref' | 'refDate'>> = {};
     const sparks: Record<string, { date: string; v: number }[]> = {};
 
     await Promise.allSettled([
@@ -236,7 +266,6 @@ export function DashboardSection({ onNavigate }: {
           const ind = MACRO_INDICATORS.find(m => m.id === r.id);
           level[r.id] = {
             value: r.latest?.value ?? null,
-            prev: r.prev?.value ?? null,
             asOf: r.latest?.date ?? null,
             unit: ind?.unit ?? 'idx',
           };
@@ -266,28 +295,32 @@ export function DashboardSection({ onNavigate }: {
       // The one FX rate, from the same endpoint the Currencies tab uses.
       (async () => {
         const res = await fetch('/api/currencies?mode=latest');
-        // The endpoint carries both directions of every pair, and reports the daily
-        // move as a PERCENT (`change1d`) rather than an absolute one — so the previous
-        // level is backed out of it, and every tile then computes its arrow the same way.
+        // The endpoint carries both directions of every pair. Only the level is taken
+        // from it: the comparison every tile draws comes from the one-year series, so
+        // `change1d` is not read here at all.
         const rows = await res.json() as FxRow[];
         for (const t of TILES) {
           if (t.kind !== 'fx') continue;
           const [a, b] = t.pair.split('/');
           const hit = (Array.isArray(rows) ? rows : []).find(r => r.from === a && r.to === b);
           if (!hit || hit.rate == null) continue;
-          level[t.pair] = {
-            value: hit.rate,
-            prev: hit.change1d != null ? hit.rate / (1 + hit.change1d / 100) : null,
-            asOf: null, unit: 'idx',
-          };
+          level[t.pair] = { value: hit.rate, asOf: null, unit: 'idx' };
         }
       })(),
     ]);
     const next: Record<string, TileData> = {};
     for (const key of new Set([...Object.keys(level), ...Object.keys(sparks)])) {
+      const spark = sparks[key] ?? [];
       next[key] = {
-        ...(level[key] ?? { value: null, prev: null, asOf: null, unit: 'idx' as MacroUnit }),
-        spark: sparks[key] ?? [],
+        ...(level[key] ?? { value: null, asOf: null, unit: 'idx' as MacroUnit }),
+        spark,
+        // The oldest point in the one-year window. Deliberately taken from the SAME
+        // series the sparkline draws rather than from a second request, so the number
+        // and the line can never describe different windows. If the history call failed
+        // there is no reference and the tile shows a level with no change, which is
+        // honest — better than falling back to a daily change under a "1Y" label.
+        ref: spark[0]?.v ?? null,
+        refDate: spark[0]?.date ?? null,
       };
     }
     setTiles(next);
