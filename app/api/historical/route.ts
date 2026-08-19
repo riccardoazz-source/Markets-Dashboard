@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchYahooChart } from '@/lib/yahoo';
 import { fetchStooqDaily } from '@/lib/stooq';
 import { subDays, subWeeks, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
+import { LEAD_IN_DAYS, calendarBoundary, anchorSeries } from '@/lib/windows';
 
 export const runtime = 'edge';
 
@@ -57,7 +58,14 @@ export async function GET(req: NextRequest) {
   const cached = getCached(key);
   if (cached) return NextResponse.json(cached);
 
-  const from = isCustom ? new Date(fromParam!) : getStartDate(timeframe);
+  // YTD and MTD are measured from the last close BEFORE the period began, so a lead-in is
+  // fetched and the series trimmed back to that close (see lib/windows.ts). A custom range
+  // is left alone: the user named its start, and quietly reaching behind it would return a
+  // different range from the one they asked for.
+  const boundary = isCustom ? null : calendarBoundary(timeframe, new Date());
+  const from = isCustom ? new Date(fromParam!)
+    : boundary ? subDays(getStartDate(timeframe), LEAD_IN_DAYS)
+    : getStartDate(timeframe);
   const to   = isCustom ? new Date(toParam!) : new Date();
   // Always daily — never reduce or thin data for any timeframe or custom range.
   const interval: '1d' | '1wk' | '1mo' = '1d';
@@ -67,6 +75,8 @@ export async function GET(req: NextRequest) {
   // last 2 daily bars for 1D so the chart doesn't span several days.
   const trim1D = (d: { date: string; close: number }[]) =>
     timeframe === '1D' && !isCustom && d.length > 2 ? d.slice(-2) : d;
+  const clipWindow = (d: { date: string; close: number }[]) =>
+    trim1D(boundary ? anchorSeries(d, boundary) : d);
 
   try {
     let data = await fetchYahooChart(symbol, from, to, interval);
@@ -76,14 +86,14 @@ export async function GET(req: NextRequest) {
       data = await fetchStooqDaily(symbol, from, to, toStooqInterval(interval));
     }
 
-    data = trim1D(data);
+    data = clipWindow(data);
     cache.set(key, { data, ts: Date.now() });
     return NextResponse.json(data);
   } catch (err) {
     console.error('historical error', symbol, err);
     // Last-resort Stooq attempt even on exception
     try {
-      const data = trim1D(await fetchStooqDaily(symbol, from, to, toStooqInterval(interval)));
+      const data = clipWindow(await fetchStooqDaily(symbol, from, to, toStooqInterval(interval)));
       cache.set(key, { data, ts: Date.now() });
       return NextResponse.json(data);
     } catch {

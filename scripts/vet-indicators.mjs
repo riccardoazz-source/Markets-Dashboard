@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -789,6 +789,65 @@ ok('an unmappable symbol yields no link',
    TV.tradingViewSymbol('^UNKNOWNIDX') === null && TV.tradingViewUrl('^UNKNOWNIDX') === null);
 ok('the URL carries the encoded symbol',
    TV.tradingViewUrl('^GSPC') === 'https://www.tradingview.com/chart/?symbol=TVC%3ASPX');
+
+// ── Period windows: where a YTD/MTD series must begin ────────────────────────
+// The bug these guard against was live: the quote card measured YTD from the last close
+// of the previous year and the chart measured it from the first close of January, so one
+// panel showed two different YTD figures for the same asset on the same day.
+const W = await import(join(out, 'windows.js'));
+
+ok('YTD starts at January 1st of the current year',
+   W.calendarBoundary('YTD', new Date('2026-08-19T09:00:00Z')) === '2026-01-01');
+ok('MTD starts at the 1st of the current month',
+   W.calendarBoundary('MTD', new Date('2026-08-19T09:00:00Z')) === '2026-08-01');
+ok('a single-digit month is zero-padded, or the string compares wrong',
+   W.calendarBoundary('MTD', new Date('2026-03-04T09:00:00Z')) === '2026-03-01');
+// Rolling windows are explicitly out of scope; returning a boundary for them would make
+// the routes trim a window whose quote-side anchor is time-of-day dependent.
+ok('rolling windows are not calendar periods',
+   W.calendarBoundary('1M', new Date()) === null && W.calendarBoundary('MAX', new Date()) === null);
+
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const days = (...ds) => ds.map(d => ({ date: d, close: 1 }));
+
+// The equity case: the last session of the old year is December 31st.
+ok('an equity series begins on the previous year\'s last close',
+   eq(W.anchorSeries(days('2025-12-30', '2025-12-31', '2026-01-02', '2026-01-05'), '2026-01-01'),
+      days('2025-12-31', '2026-01-02', '2026-01-05')));
+// The crypto case: January 1st IS a trading day, and using it as the baseline would throw
+// away that day's move — which is the whole defect.
+ok('a January 1st bar is inside the period, not the baseline for it',
+   eq(W.anchorSeries(days('2025-12-31', '2026-01-01', '2026-01-02'), '2026-01-01'),
+      days('2025-12-31', '2026-01-01', '2026-01-02')));
+// New Year over a weekend: the last session can be several days back.
+ok('a long closure still finds the anchor',
+   eq(W.anchorSeries(days('2025-12-28', '2025-12-29', '2026-01-02'), '2026-01-01'),
+      days('2025-12-29', '2026-01-02')));
+ok('the lead-in is trimmed off, not left on the front',
+   W.anchorSeries(days('2025-12-20', '2025-12-24', '2025-12-31', '2026-01-02'), '2026-01-01').length === 2);
+// An asset that listed inside the window has no earlier close; its own first point is the
+// only baseline there is, and dropping the series would be worse than an imprecise one.
+ok('an asset that began inside the window keeps every point',
+   eq(W.anchorSeries(days('2026-02-10', '2026-02-11'), '2026-01-01'),
+      days('2026-02-10', '2026-02-11')));
+ok('an empty series survives', eq(W.anchorSeries([], '2026-01-01'), []));
+ok('a series entirely before the boundary keeps only its last point',
+   eq(W.anchorSeries(days('2025-11-01', '2025-12-31'), '2026-01-01'), days('2025-12-31')));
+// The arithmetic the fix exists to make agree: both figures now divide by the same close.
+{
+  const series = [
+    { date: '2025-12-31', close: 87514 },
+    { date: '2026-01-01', close: 88731 },
+    { date: '2026-08-18', close: 64410.12 },
+  ];
+  const anchored = W.anchorSeries(series, '2026-01-01');
+  const chartYtd = (anchored[anchored.length - 1].close / anchored[0].close - 1) * 100;
+  const quoteYtd = (64410.12 / 87514 - 1) * 100;
+  ok('chart return and quote return now agree', Math.abs(chartYtd - quoteYtd) < 1e-9);
+  // Same numbers under the OLD rule, to show the check would have caught it.
+  const oldYtd = (64410.12 / 88731 - 1) * 100;
+  ok('and they disagreed by over a point before', Math.abs(oldYtd - quoteYtd) > 1);
+}
 
 rmSync(out, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed\n`);

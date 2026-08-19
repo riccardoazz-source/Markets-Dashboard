@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchYahooData, fetchYahooEarnings, type YahooEarnings } from '@/lib/yahoo';
 import { fetchSecEarnings } from '@/lib/sec';
 import { subDays, subWeeks, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
+import { LEAD_IN_DAYS, calendarBoundary, anchorSeries } from '@/lib/windows';
 
 export const runtime = 'edge';
 
@@ -177,7 +178,14 @@ export async function GET(req: NextRequest) {
   const cached = getCached(key, FRESH);
   if (cached) return NextResponse.json(cached);
 
-  const from = isCustom ? new Date(fromParam!) : getStartDate(timeframe);
+  // YTD and MTD are measured from the last close BEFORE the period began, so a lead-in is
+  // fetched and the series trimmed back to that close (see lib/windows.ts). A custom range
+  // is left alone: the user named its start, and quietly reaching behind it would return a
+  // different range from the one they asked for.
+  const boundary = isCustom ? null : calendarBoundary(timeframe, new Date());
+  const from = isCustom ? new Date(fromParam!)
+    : boundary ? subDays(getStartDate(timeframe), LEAD_IN_DAYS)
+    : getStartDate(timeframe);
   const to   = isCustom ? new Date(toParam!) : new Date();
   // Always daily — never reduce or thin data for any timeframe or custom range.
   const interval: '1d' | '1wk' | '1mo' = '1d';
@@ -188,13 +196,16 @@ export async function GET(req: NextRequest) {
     // but it should SHOW only the most recent day's move (previous close → latest)
     // — otherwise the chart spans several days and misleads. Keep the last 2 daily
     // bars for 1D. (Live intraday would need an intraday data feed.)
-    const trimTo1D = (pts: typeof data.points) =>
+    const trimTo1D = <T extends { date: string }>(pts: T[]) =>
       timeframe === '1D' && !isCustom && pts.length > 2 ? pts.slice(-2) : pts;
+    // Both series are trimmed by the same rule; adjusted closes are the same days.
+    const clipWindow = <T extends { date: string }>(pts: T[]) =>
+      trimTo1D(boundary ? anchorSeries(pts, boundary) : pts);
     const payload = {
       symbol,
       meta: data.meta,
-      prices: trimTo1D(data.points),
-      adjPrices: trimTo1D(data.adjPoints ?? []),
+      prices: clipWindow(data.points),
+      adjPrices: clipWindow(data.adjPoints ?? []),
       dividends: data.dividends ?? [],
     };
     if (data.points.length > 0) {
