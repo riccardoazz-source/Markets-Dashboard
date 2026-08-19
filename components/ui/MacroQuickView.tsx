@@ -9,7 +9,7 @@
 // page you were on. The full tab is still one click away for anything more.
 
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, BarChart2 } from 'lucide-react';
 import { DetailModal } from './DetailModal';
 import { PanelClose } from './PanelClose';
 import { TimeframeSelector } from './TimeframeSelector';
@@ -28,10 +28,13 @@ export interface QuickViewTarget {
   label: string;
 }
 
-export function MacroQuickView({ target, onClose, onOpenFull }: {
+export function MacroQuickView({ target, onClose, onOpenFull, onCompare }: {
   target: QuickViewTarget;
   onClose: () => void;
   onOpenFull?: () => void;
+  /** Load this series into the Compare tab — the same control the Macro and Currencies
+   *  tabs offer on their own detail panels. */
+  onCompare?: (symbol: string) => void;
 }) {
   const [timeframe, setTimeframe] = useState<Timeframe>('1Y');
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null);
@@ -93,12 +96,24 @@ export function MacroQuickView({ target, onClose, onOpenFull }: {
                 : `${target.key} · Currencies`}
             </p>
           </div>
-          {onOpenFull && (
-            <button onClick={onOpenFull}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] font-medium">
-              Open in {target.kind === 'macro' ? 'Macro' : 'Currencies'} <ArrowUpRight size={12} />
-            </button>
-          )}
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            {onCompare && (
+              // The Compare symbol is not the tile key: Compare addresses macro series by
+              // indicator id but currencies by their Yahoo pair ticker, which is how the
+              // Currencies tab hands one over.
+              <button onClick={() => onCompare(
+                target.kind === 'macro' ? target.key : `${target.key.replace('/', '')}=X`)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] font-medium">
+                <BarChart2 size={12} /> Compare
+              </button>
+            )}
+            {onOpenFull && (
+              <button onClick={onOpenFull}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] font-medium">
+                Open in {target.kind === 'macro' ? 'Macro' : 'Currencies'} <ArrowUpRight size={12} />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="overflow-x-auto scrollbar-hide -mx-1 px-1">

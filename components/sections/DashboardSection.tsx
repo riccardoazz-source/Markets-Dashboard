@@ -269,10 +269,14 @@ function Sparkline({ points, up }: { points: { date: string; v: number }[]; up: 
   );
 }
 
-export function DashboardSection({ onNavigate }: {
+export function DashboardSection({ onNavigate, onCompare }: {
   /** Jump to another tab, optionally opening one thing there — the same (section, id)
    *  contract the Rotation tab already uses to hand an asset over. */
   onNavigate?: (section: string, id?: string) => void;
+  /** Load a symbol into the Compare tab. Passed straight through to the panels that
+   *  open over this page, so a card opened from here carries the same controls it would
+   *  have carried opened from its own tab. */
+  onCompare?: (symbol: string) => void;
 }) {
   const [tiles, setTiles] = useState<Record<string, TileData>>({});
   const [loading, setLoading] = useState(true);
@@ -526,13 +530,20 @@ export function DashboardSection({ onNavigate }: {
 
       {open && (
         <AssetQuickView symbol={open.symbol} name={open.name} group={open.group}
-          onClose={() => setOpen(null)} />
+          onClose={() => setOpen(null)}
+          // Compare hides itself when it has nowhere to send the symbol, so without this
+          // the button simply was not there — a card opened from the landing page had
+          // fewer controls than the same card opened from its own tab, for no reason the
+          // reader could see. Leaving the panel is the point of this one, so it closes
+          // first rather than leaving a modal stranded over the Compare tab.
+          onCompare={onCompare && (sym => { setOpen(null); onCompare(sym); })} />
       )}
 
       {tile && (
         <MacroQuickView
           target={tile}
           onClose={() => setTile(null)}
+          onCompare={onCompare && (sym => { setTile(null); onCompare(sym); })}
           onOpenFull={() => {
             const t = tile;
             setTile(null);
