@@ -2,7 +2,7 @@ import type { ActiveTools } from '@/components/ui/ChartTools';
 import { HistoricalPoint } from './types';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD, computeBollingerBands, computeMomentum,
-  computeSma200wLatest, computeRsiResampledDaily, computeMacdResampledDaily, computeTrendLine,
+  computeSma200wLatest, computeEma55wLatest, computeRsiResampledDaily, computeMacdResampledDaily, computeTrendLine,
   avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from './indicators';
 
@@ -39,6 +39,7 @@ export function summarizeTools(t: ActiveTools, points: HistoricalPoint[]): strin
   if (t.sma50)  n >= 50  ? withVal('SMA 50',  lastOf(computeSMA(closes, 50)))  : out.push('SMA 50');
   if (t.sma200) n >= 200 ? withVal('SMA 200', lastOf(computeSMA(closes, 200))) : out.push('SMA 200');
   if (t.sma200w) withVal('SMA 200W', computeSma200wLatest(dates, rawCloses));
+  if (t.ema55w) withVal('EMA 55W', computeEma55wLatest(dates, rawCloses));
   if (t.ema20)  n >= 20  ? withVal('EMA 20',  lastOf(computeEMA(closes, 20)))  : out.push('EMA 20');
   if (t.ema100) n >= 100 ? withVal('EMA 100', lastOf(computeEMA(closes, 100))) : out.push('EMA 100');
   if (t.bollinger && n >= P.boll.period) {

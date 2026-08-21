@@ -790,6 +790,50 @@ ok('an unmappable symbol yields no link',
 ok('the URL carries the encoded symbol',
    TV.tradingViewUrl('^GSPC') === 'https://www.tradingview.com/chart/?symbol=TVC%3ASPX');
 
+// ── 55-week EMA ──────────────────────────────────────────────────────────────
+// Weekly closes, not 385 daily bars. An EMA weights recent points more heavily, so the
+// two are different averages — and on crypto (7 bars/wk) versus equities (5) the daily
+// version would give the same named indicator a different memory on each.
+{
+  // 120 Mondays of a known ramp: one bar per week means the weekly resample is the
+  // identity, so the result must equal a plain EMA(55) of the same numbers.
+  const d = [], c = [];
+  for (let i = 0; i < 120; i++) {
+    const t = new Date(Date.UTC(2024, 0, 1) + i * 7 * 86400000);
+    d.push(t.toISOString().slice(0, 10));
+    c.push(100 + i);
+  }
+  const direct = I.computeEMA(c, 55);
+  const weekly = I.computeEma55wDaily(d, c);
+  ok('on one-bar-per-week data the weekly EMA is the plain EMA',
+     Math.abs(weekly[119] - direct[119]) < 1e-9);
+  ok('it is null before 55 weekly closes exist',
+     weekly[53] === null && weekly[54] != null);
+  ok('the latest helper reports the last value',
+     Math.abs(I.computeEma55wLatest(d, c) - weekly[119]) < 1e-9);
+}
+{
+  // Daily bars, seven a week: the resample must collapse them to one close per week, so
+  // 55 weeks of DAILY data is enough — an EMA over 55 daily bars would need only 55 days
+  // and would be a different line entirely.
+  const d = [], c = [];
+  for (let i = 0; i < 80 * 7; i++) {
+    const t = new Date(Date.UTC(2024, 0, 1) + i * 86400000);
+    d.push(t.toISOString().slice(0, 10));
+    c.push(100 + i * 0.1);
+  }
+  const s55 = I.computeEma55wDaily(d, c);
+  ok('55 daily bars are NOT 55 weeks', s55[54] === null);
+  ok('55 weeks of daily bars are', s55[55 * 7] != null);
+  // Held forward: within a week the value must not move, since no new weekly close landed.
+  const i0 = 60 * 7 + 1, i1 = 60 * 7 + 4;
+  ok('the weekly value is held flat across the days inside its week', s55[i0] === s55[i1]);
+  // A rising series: the average must trail the price, never lead it.
+  ok('the average lags a rising price', s55[79 * 7] < c[79 * 7]);
+}
+ok('too little history yields all nulls, not a short average',
+   I.computeEma55wDaily(['2026-01-05', '2026-01-12'], [10, 11]).every(v => v === null));
+
 // ── Period windows: where a YTD/MTD series must begin ────────────────────────
 // The bug these guard against was live: the quote card measured YTD from the last close
 // of the previous year and the chart measured it from the first close of January, so one

@@ -7,7 +7,7 @@ import clsx from 'clsx';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeSma200wLatest, computeRsiResampledDaily, computeMacdResampledDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wLatest, computeEma55wLatest, computeRsiResampledDaily, computeMacdResampledDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
 
@@ -19,6 +19,7 @@ export interface ActiveTools {
   sma50: boolean;
   sma200: boolean;
   sma200w: boolean;
+  ema55w: boolean;   // 55-WEEK EMA, on weekly closes — not 385 daily bars
   ema20: boolean;
   ema100: boolean;
   bollinger: boolean;
@@ -47,7 +48,7 @@ export interface ActiveTools {
 
 export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
-  sma20: false, sma50: false, sma200: false, sma200w: false, ema20: false, ema100: false,
+  sma20: false, sma50: false, sma200: false, sma200w: false, ema55w: false, ema20: false, ema100: false,
   bollinger: false, fib: false,
   rsi: false, rsiWeekly: false, rsiMonthly: false,
   macd: false, macdWeekly: false, macdMonthly: false,
@@ -64,7 +65,7 @@ export const DEFAULT_TOOLS: ActiveTools = {
 // trend. When any is active the chart fetches MAX history and computes on it, projecting onto
 // the visible bars.
 export function needsFullHistory(t: ActiveTools): boolean {
-  return t.sma20 || t.sma50 || t.sma200 || t.sma200w || t.ema20 || t.ema100 ||
+  return t.sma20 || t.sma50 || t.sma200 || t.sma200w || t.ema55w || t.ema20 || t.ema100 ||
     (t.trend && t.trendFull) ||
     // Every grain, not only weekly/monthly: RSI and MACD carry memory, so they have
     // to be warmed up on all available history or the same date reads differently
@@ -173,6 +174,9 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     const sma200wVal = fullHist
       ? computeSma200wLatest(fullHist.map(d => d.date), fullHist.map(d => d.close))
       : computeSma200wLatest(data.map(d => d.date), data.map(d => d.close));
+    const ema55wVal  = fullHist
+      ? computeEma55wLatest(fullHist.map(d => d.date), fullHist.map(d => d.close))
+      : computeEma55wLatest(data.map(d => d.date), data.map(d => d.close));
     const sma50val   = sma50arr  ? last(sma50arr)  : null;
     const sma200val  = sma200arr ? last(sma200arr) : null;
     const bbands     = P.boll.ok && n >= P.boll.period ? computeBollingerBands(closes, P.boll.period, 2) : null;
@@ -189,6 +193,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
       sma50:   sma50val,
       sma200:  sma200val,
       sma200w: sma200wVal,
+      ema55w:  ema55wVal,
       cross:   sma50val != null && sma200val != null
                  ? (sma50val > sma200val ? 'golden' : 'death') as 'golden' | 'death'
                  : null,
@@ -275,6 +280,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                 <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={!PL.sma50.ok   || nL < PL.sma50.period}   />
                 <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={!PL.sma200.ok  || nL < PL.sma200.period}  />
                 <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={!PL.sma200w.ok || nL < PL.sma200w.period} title={!PL.sma200w.ok || nL < PL.sma200w.period ? 'Needs ~4y of data (not enough price history for this asset)' : undefined} />
+                <ToolChip active={activeTools.ema55w}  onToggle={() => toggle('ema55w')}  label="EMA 55W"  color="lime"   disabled={!PL.ema55w.ok  || nL < PL.ema55w.period}  title={!PL.ema55w.ok || nL < PL.ema55w.period ? 'Needs ~1y of data (not enough price history for this asset)' : undefined} />
                 <Divider />
                 <ToolChip active={activeTools.trend}  onToggle={() => toggle('trend')}  label="Trend" color="green" disabled={n < 2} />
                 {activeTools.trend && (
@@ -385,6 +391,9 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                   )}
                   {activeTools.sma200 && iv.sma200 != null && (
                     <Res label="SMA 200" value={iv.sma200.toFixed(decimals)} color="text-purple-400" />
+                  )}
+                  {activeTools.ema55w && iv.ema55w != null && (
+                    <Res label="EMA 55W" value={iv.ema55w.toFixed(decimals)} color="text-lime-400" />
                   )}
                   {activeTools.sma200w && iv.sma200w != null && (
                     <Res label="SMA 200W" value={iv.sma200w.toFixed(decimals)} color="text-yellow-400" />
@@ -527,6 +536,7 @@ const COLOR_MAP = {
   rose:   { border: 'border-rose-400/60',   bg: 'bg-rose-400/10',   text: 'text-rose-400'   },
   teal:   { border: 'border-teal-400/60',   bg: 'bg-teal-400/10',   text: 'text-teal-400'   },
   yellow: { border: 'border-yellow-400/60', bg: 'bg-yellow-400/10', text: 'text-yellow-400' },
+  lime:   { border: 'border-lime-400/60',   bg: 'bg-lime-400/10',   text: 'text-lime-400'   },
   slate:  { border: 'border-slate-300/60',  bg: 'bg-slate-300/10',  text: 'text-slate-300'  },
 } as const;
 

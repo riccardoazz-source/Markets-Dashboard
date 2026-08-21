@@ -67,6 +67,7 @@ export function computeIndicatorPeriods(avgDPB: number) {
     sma50:    lit(50,   3),
     sma200:   lit(200,  3),
     sma200w:  cal(1400, 3),   // 200 calendar weeks → bars for this data's cadence
+    ema55w:   cal(385,  3),   // 55 calendar weeks, likewise
     ema20:    lit(20,   3),
     ema100:   lit(100,  3),
     boll:     lit(20,   10),  // 20-period Bollinger; min 10 for meaningful variance
@@ -140,6 +141,30 @@ export function computeSma200wDaily(dates: string[], closes: (number | null)[]):
 /** Latest 200-week SMA value (TradingView-style weekly closes), or null if <200 weeks. */
 export function computeSma200wLatest(dates: string[], closes: (number | null)[]): number | null {
   const series = computeSma200wDaily(dates, closes);
+  for (let i = series.length - 1; i >= 0; i--) if (series[i] != null) return series[i];
+  return null;
+}
+
+/**
+ * 55-week EMA, computed the same way: resample to weekly closes, take EMA(55) of those, and
+ * hold each weekly value forward onto the daily dates. Aligned 1:1 with `dates`, null until
+ * 55 weekly closes exist.
+ *
+ * WEEKLY closes, not 385 daily bars. The two are not the same average, and the difference is
+ * not academic: an EMA weights recent observations more heavily, so feeding it seven bars a
+ * week for crypto and five for equities would give the same nominal indicator a different
+ * memory on each — and neither would match the line a chart package draws on the weekly
+ * timeframe, which is where anybody quoting "the 55-week" is reading it.
+ */
+export function computeEma55wDaily(dates: string[], closes: (number | null)[]): (number | null)[] {
+  const w = resampleWeekly(dates, closes);
+  if (w.closes.length < 55) return new Array(dates.length).fill(null);
+  return projectBucketsToDaily(dates, w.dates, computeEMA(w.closes, 55));
+}
+
+/** Latest 55-week EMA value, or null if under 55 weekly closes. */
+export function computeEma55wLatest(dates: string[], closes: (number | null)[]): number | null {
+  const series = computeEma55wDaily(dates, closes);
   for (let i = series.length - 1; i >= 0; i--) if (series[i] != null) return series[i];
   return null;
 }
