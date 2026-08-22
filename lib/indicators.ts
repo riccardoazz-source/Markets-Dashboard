@@ -67,8 +67,6 @@ export function computeIndicatorPeriods(avgDPB: number) {
     sma50:    lit(50,   3),
     sma200:   lit(200,  3),
     sma200w:  cal(1400, 3),   // 200 calendar weeks → bars for this data's cadence
-    emaW50:   cal(350,  3),   // 50 calendar weeks, likewise
-    emaW55:   cal(385,  3),   // and 55, the Fibonacci alternative
     ema20:    lit(20,   3),
     ema100:   lit(100,  3),
     boll:     lit(20,   10),  // 20-period Bollinger; min 10 for meaningful variance
@@ -114,6 +112,20 @@ export function resampleWeekly(dates: string[], closes: (number | null)[]): { da
   return resampleBy(dates, closes, mondayKey);
 }
 
+/**
+ * How many weekly closes a daily series actually yields.
+ *
+ * This is the REAL precondition for every weekly-timeframe indicator, and it is not the
+ * same test as "enough daily bars". A thinly traded listing can span five calendar years
+ * and still skip whole weeks, so it clears any bar-count estimate while the weekly
+ * resample hands back fewer buckets than the indicator needs — and the tool then draws
+ * nothing, from an enabled chip, with no explanation. Guarding on this number instead
+ * means a chip is offered exactly when a line can be drawn.
+ */
+export function weeklyCloseCount(dates: string[], closes: (number | null)[]): number {
+  return resampleWeekly(dates, closes).closes.length;
+}
+
 /** Resample a daily series to monthly closes — the last valid close of each calendar month. */
 export function resampleMonthly(dates: string[], closes: (number | null)[]): { dates: string[]; closes: number[] } {
   return resampleBy(dates, closes, iso => iso.slice(0, 7)); // YYYY-MM
@@ -157,12 +169,10 @@ export function computeSma200wLatest(dates: string[], closes: (number | null)[])
  * different memory on each — and neither would match the line a chart package draws on the
  * weekly timeframe, which is where anybody quoting "the 50-week" is reading it.
  *
- * The period is a parameter because there are two live conventions and they disagree. 50 is
- * the round-number school — the same family as the 50- and 200-day averages, and the more
- * widely watched of the two. 55 is the Fibonacci school (8, 13, 21, 34, 55, 89…), of which
- * the 21-week EMA is the genuinely famous member in crypto. Neither is "the" right answer,
- * they draw nearly the same line, and picking one in code would just be this file having an
- * opinion it is not entitled to.
+ * The period stays a parameter even though only 50 weeks is offered today: 50 is the
+ * round-number convention (the family of the 50- and 200-day averages) and 55 the
+ * Fibonacci one, they draw nearly the same line, and the difference between them is a
+ * caller's choice rather than something this function should decide.
  */
 export function computeEmaWeeklyDaily(
   dates: string[], closes: (number | null)[], weeks: number,

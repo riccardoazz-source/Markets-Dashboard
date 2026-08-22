@@ -7,9 +7,12 @@ import clsx from 'clsx';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeSma200wLatest, computeEmaWeeklyLatest, computeRsiResampledDaily, computeMacdResampledDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
+  computeSma200wLatest, computeEmaWeeklyLatest, weeklyCloseCount, computeRsiResampledDaily, computeMacdResampledDaily, avgCalendarDaysPerBar, computeIndicatorPeriods,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
+
+/** The weekly EMA's period, in weekly closes. One convention, named once. */
+export const EMA_WEEKS = 50;
 
 export interface ActiveTools {
   avg: boolean;
@@ -19,11 +22,10 @@ export interface ActiveTools {
   sma50: boolean;
   sma200: boolean;
   sma200w: boolean;
-  // Long EMA on WEEKLY closes. The period is a toggle, not a constant: 50 is the
-  // round-number convention and 55 the Fibonacci one, both are in real use, and they draw
-  // nearly the same line — so the chart offers the choice instead of taking a side.
+  // 50-week EMA, on WEEKLY closes. 50 rather than 55: the round-number convention (the
+  // family of the 50- and 200-day averages) is the more widely watched of the two, and
+  // the Fibonacci 55 draws very nearly the same line.
   emaWeekly: boolean;
-  emaWeekly55: boolean;   // modifier: true = 55 weeks, false = 50
   ema20: boolean;
   ema100: boolean;
   bollinger: boolean;
@@ -52,7 +54,7 @@ export interface ActiveTools {
 
 export const DEFAULT_TOOLS: ActiveTools = {
   avg: false, stdDev: false, minMax: false,
-  sma20: false, sma50: false, sma200: false, sma200w: false, emaWeekly: false, emaWeekly55: false, ema20: false, ema100: false,
+  sma20: false, sma50: false, sma200: false, sma200w: false, emaWeekly: false, ema20: false, ema100: false,
   bollinger: false, fib: false,
   rsi: false, rsiWeekly: false, rsiMonthly: false,
   macd: false, macdWeekly: false, macdMonthly: false,
@@ -169,9 +171,20 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     [fullHist, P],
   );
 
-  // Which of the two weekly-EMA conventions is selected, and the history guard for it.
-  const emaWeeks = activeTools.emaWeekly55 ? 55 : 50;
-  const emaWP = activeTools.emaWeekly55 ? PL.emaW55 : PL.emaW50;
+  // How many weekly closes the data actually yields — the REAL precondition for the two
+  // weekly-timeframe averages, and not the same test as "enough daily bars". A thinly
+  // traded listing can span five years and still skip whole weeks: it clears any bar-count
+  // estimate while the weekly resample returns fewer buckets than the indicator needs, and
+  // the tool then draws nothing from a chip that looked available. Counting the buckets
+  // means the chip is offered exactly when a line can be drawn, and says what is missing
+  // when it cannot.
+  const weeksSrc = fullHist ?? data;
+  const weeksAvail = useMemo(
+    () => weeklyCloseCount(weeksSrc.map(d => d.date), weeksSrc.map(d => d.close)),
+    [weeksSrc],
+  );
+  const weeksShort = (need: number) =>
+    weeksAvail < need ? `Needs ${need} weekly closes — this asset has ${weeksAvail}` : undefined;
 
   // Pre-compute all indicator current values once per data change
   const iv = useMemo(() => {
@@ -182,8 +195,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
     const sma200wVal = fullHist
       ? computeSma200wLatest(fullHist.map(d => d.date), fullHist.map(d => d.close))
       : computeSma200wLatest(data.map(d => d.date), data.map(d => d.close));
-    const emaWSrc    = fullHist ?? data;
-    const emaWVal    = computeEmaWeeklyLatest(emaWSrc.map(d => d.date), emaWSrc.map(d => d.close), emaWeeks);
+    const emaWVal    = computeEmaWeeklyLatest(weeksSrc.map(d => d.date), weeksSrc.map(d => d.close), EMA_WEEKS);
     const sma50val   = sma50arr  ? last(sma50arr)  : null;
     const sma200val  = sma200arr ? last(sma200arr) : null;
     const bbands     = P.boll.ok && n >= P.boll.period ? computeBollingerBands(closes, P.boll.period, 2) : null;
@@ -217,7 +229,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
       momentumWeekly:  n >= P.momWeek.period  ? last(computeMomentum(closes, P.momWeek.period))  : null,
       momentumMonthly: n >= P.momMonth.period ? last(computeMomentum(closes, P.momMonth.period)) : null,
     };
-  }, [closes, longCloses, n, nL, P, PL, fullHist, data, emaWeeks,
+  }, [closes, longCloses, n, nL, P, PL, fullHist, data, weeksSrc,
       activeTools.rsiWeekly, activeTools.rsiMonthly, activeTools.macdWeekly, activeTools.macdMonthly]);
 
   const toggle = (key: keyof ActiveTools) =>
@@ -225,7 +237,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
 
   // trendFull / rsiWeekly / macdWeekly are modifiers of the Trend / RSI / MACD tools, not tools
   // of their own — exclude them so the badge doesn't count a tool that isn't active.
-  const MODIFIER_KEYS: (keyof ActiveTools)[] = ['trendFull', 'rsiWeekly', 'rsiMonthly', 'macdWeekly', 'macdMonthly', 'emaWeekly55'];
+  const MODIFIER_KEYS: (keyof ActiveTools)[] = ['trendFull', 'rsiWeekly', 'rsiMonthly', 'macdWeekly', 'macdMonthly'];
   const activeCount = (Object.keys(activeTools) as (keyof ActiveTools)[])
     .filter(k => !MODIFIER_KEYS.includes(k) && activeTools[k]).length;
   const showResults = activeCount > 0 && stats != null && iv != null;
@@ -286,17 +298,8 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                 <ToolChip active={activeTools.ema100}  onToggle={() => toggle('ema100')}  label="EMA 100"  color="rose"   disabled={!PL.ema100.ok  || nL < PL.ema100.period}  />
                 <ToolChip active={activeTools.sma50}   onToggle={() => toggle('sma50')}   label="SMA 50"   color="orange" disabled={!PL.sma50.ok   || nL < PL.sma50.period}   />
                 <ToolChip active={activeTools.sma200}  onToggle={() => toggle('sma200')}  label="SMA 200"  color="purple" disabled={!PL.sma200.ok  || nL < PL.sma200.period}  />
-                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={!PL.sma200w.ok || nL < PL.sma200w.period} title={!PL.sma200w.ok || nL < PL.sma200w.period ? 'Needs ~4y of data (not enough price history for this asset)' : undefined} />
-                <ToolChip active={activeTools.emaWeekly} onToggle={() => toggle('emaWeekly')} label={`EMA ${emaWeeks}W`} color="lime" disabled={!emaWP.ok || nL < emaWP.period} title={!emaWP.ok || nL < emaWP.period ? `Needs ~${emaWeeks} weeks of data (not enough price history for this asset)` : undefined} />
-                {activeTools.emaWeekly && (
-                  <button
-                    onClick={() => onChange({ ...activeTools, emaWeekly55: !activeTools.emaWeekly55 })}
-                    className="text-[10px] px-2 py-0.5 rounded-md border border-lime-500/40 text-lime-300 hover:bg-lime-500/10 transition-colors"
-                    title="50 weeks is the round-number convention; 55 is the Fibonacci one. Both are in use and they draw nearly the same line."
-                  >
-                    {emaWeeks} wk
-                  </button>
-                )}
+                <ToolChip active={activeTools.emaWeekly} onToggle={() => toggle('emaWeekly')} label={`EMA ${EMA_WEEKS}W`} color="lime" disabled={weeksAvail < EMA_WEEKS} title={weeksShort(EMA_WEEKS)} />
+                <ToolChip active={activeTools.sma200w} onToggle={() => toggle('sma200w')} label="SMA 200W" color="yellow" disabled={weeksAvail < 200} title={weeksShort(200)} />
                 <Divider />
                 <ToolChip active={activeTools.trend}  onToggle={() => toggle('trend')}  label="Trend" color="green" disabled={n < 2} />
                 {activeTools.trend && (
@@ -409,7 +412,7 @@ export function ChartTools({ data, activeTools, onChange, decimals = 2, symbol }
                     <Res label="SMA 200" value={iv.sma200.toFixed(decimals)} color="text-purple-400" />
                   )}
                   {activeTools.emaWeekly && iv.emaWeekly != null && (
-                    <Res label={`EMA ${emaWeeks}W`} value={iv.emaWeekly.toFixed(decimals)} color="text-lime-400" />
+                    <Res label={`EMA ${EMA_WEEKS}W`} value={iv.emaWeekly.toFixed(decimals)} color="text-lime-400" />
                   )}
                   {activeTools.sma200w && iv.sma200w != null && (
                     <Res label="SMA 200W" value={iv.sma200w.toFixed(decimals)} color="text-yellow-400" />

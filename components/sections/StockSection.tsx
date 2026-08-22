@@ -15,7 +15,7 @@ import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ChartDataTable } from '@/components/ui/ChartDataTable';
 import { ChartNotes } from '@/components/ui/ChartNotes';
-import { ChartTools, ActiveTools, DEFAULT_TOOLS } from '@/components/ui/ChartTools';
+import { ChartTools, ActiveTools, DEFAULT_TOOLS, EMA_WEEKS } from '@/components/ui/ChartTools';
 import { Sma200wLine, Ma200dLine, MaSpreadLine } from '@/components/ui/Sma200wLine';
 import { useChartDragSelect, valueAtOrAfter, valueAtOrBefore, rangeDurationLabel } from '@/lib/useChartDragSelect';
 import { useGistData, usePins } from '@/lib/gist';
@@ -26,7 +26,7 @@ import { volBand } from '@/lib/volatility';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   avgCalendarDaysPerBar, computeIndicatorPeriods, computeMomentum,
-  computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily, computeRsiResampledDaily, computeMacdResampledDaily,
+  computeBollingerBands, computeFibLevels, computeTrendLine, computeSma200wDaily, computeEmaWeeklyDaily, computeRsiResampledDaily, computeMacdResampledDaily,
   barsForCalDays, computeStretchSigma, computeMaSlope, computeRegimeMonths, computeDrawdown, computeMonthsSinceHigh,
 } from '@/lib/indicators';
 import { useFullHistory } from '@/lib/useFullHistory';
@@ -223,6 +223,7 @@ interface DualChartToolsOverlay {
   fib?: boolean;
   spyRatio?: boolean;
   sma200w?: boolean;
+  emaWeekly?: boolean;
   trend?: boolean;
   trendFull?: boolean;
 }
@@ -255,7 +256,7 @@ function DualChart({
   // Full daily history so every moving average + the full-history trend line render on short
   // windows (a MA is a fixed number today, independent of the view period).
   const wantsFullMA = !!(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
-    toolsOverlay?.sma200w || toolsOverlay?.ema20 || toolsOverlay?.ema100);
+    toolsOverlay?.sma200w || toolsOverlay?.emaWeekly || toolsOverlay?.ema20 || toolsOverlay?.ema100);
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
   const fullHist = useFullHistory(symbol, wantsFullMA || wantsFullTrend);
   if (!prices.length) return null;
@@ -372,6 +373,12 @@ function DualChart({
         ? projectFull(computeSma200wDaily(fullDates, fullCloses))
         : computeSma200wDaily(prices.map(p => p.date), prices.map(p => p.close)))
     : null;
+  // Weekly EMA — the same weekly-close treatment as the 200-week SMA above it.
+  const emaWVals   = toolsOverlay?.emaWeekly
+    ? (useFull
+        ? projectFull(computeEmaWeeklyDaily(fullDates, fullCloses, EMA_WEEKS))
+        : computeEmaWeeklyDaily(prices.map(p => p.date), prices.map(p => p.close), EMA_WEEKS))
+    : null;
   const ema20Vals  = toolsOverlay?.ema20
     ? (useFull && PFull.ema20.ok    ? projectFull(computeEMA(fullCloses, PFull.ema20.period))   : (P.ema20.ok   ? computeEMA(toolCloses, P.ema20.period)   : null))
     : null;
@@ -406,15 +413,16 @@ function DualChart({
   const trendColor = trendUp ? '#10b981' : '#ef4444';
   const overlayByDate = new Map<string, {
     sma20: number | null; sma50: number | null; sma200: number | null; sma200w: number | null;
-    ema20: number | null; ema100: number | null; bbRange: [number, number] | null;
+    emaw: number | null; ema20: number | null; ema100: number | null; bbRange: [number, number] | null;
   }>();
-  if (sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema20Vals || ema100Vals || bands) {
+  if (sma20Vals || sma50Vals || sma200Vals || sma200wVals || emaWVals || ema20Vals || ema100Vals || bands) {
     prices.forEach((p, i) => {
       overlayByDate.set(p.date, {
         sma20:   sma20Vals?.[i]   ?? null,
         sma50:   sma50Vals?.[i]   ?? null,
         sma200:  sma200Vals?.[i]  ?? null,
         sma200w: sma200wVals?.[i] ?? null,
+        emaw:    emaWVals?.[i]    ?? null,
         ema20:   ema20Vals?.[i]   ?? null,
         ema100:  ema100Vals?.[i]  ?? null,
         bbRange: bands && bands.lower[i] != null && bands.upper[i] != null
@@ -449,6 +457,7 @@ function DualChart({
     sma50:   overlayByDate.get(date)?.sma50   ?? null,
     sma200:  overlayByDate.get(date)?.sma200  ?? null,
     sma200w: overlayByDate.get(date)?.sma200w ?? null,
+    emaw:    overlayByDate.get(date)?.emaw    ?? null,
     ema20:  overlayByDate.get(date)?.ema20  ?? null,
     ema100: overlayByDate.get(date)?.ema100 ?? null,
     bbRange: overlayByDate.get(date)?.bbRange ?? null,
@@ -535,7 +544,7 @@ function DualChart({
         </div>
       )}
       {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w ||
-        toolsOverlay?.ema20 || toolsOverlay?.ema100 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy || showTrend) && (
+        toolsOverlay?.emaWeekly || toolsOverlay?.ema20 || toolsOverlay?.ema100 || toolsOverlay?.bollinger || toolsOverlay?.fib || showSpy || showTrend) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
           {showTrend && (
             <span className="flex items-center gap-1 text-[10px]" style={{ color: trendColor }}>
@@ -566,6 +575,11 @@ function DualChart({
           {toolsOverlay?.sma200w && (
             <span className="flex items-center gap-1 text-[10px] text-yellow-500">
               <span className="inline-block w-5 border-t-2 border-yellow-500" />SMA 200W
+            </span>
+          )}
+          {toolsOverlay?.emaWeekly && (
+            <span className="flex items-center gap-1 text-[10px] text-lime-400">
+              <span className="inline-block w-5 border-t-2 border-lime-400" />EMA {EMA_WEEKS}W
             </span>
           )}
           {toolsOverlay?.ema20 && (
@@ -641,6 +655,7 @@ function DualChart({
             if (name === 'sma50')   return [value != null ? formatPrice(value, currency) : '—', 'SMA 50'];
             if (name === 'sma200')  return [value != null ? formatPrice(value, currency) : '—', 'SMA 200'];
             if (name === 'sma200w') return [value != null ? formatPrice(value, currency) : '—', 'SMA 200W'];
+            if (name === 'emaw')    return [value != null ? formatPrice(value, currency) : '—', `EMA ${EMA_WEEKS}W`];
             if (name === 'ema20')  return [value != null ? formatPrice(value, currency) : '—', 'EMA 20'];
             if (name === 'ema100') return [value != null ? formatPrice(value, currency) : '—', 'EMA 100'];
             if (name === 'spy')    return [value != null ? formatPrice(value, currency) : '—', 'vs SPY (benchmark)'];
@@ -705,6 +720,10 @@ function DualChart({
         {toolsOverlay?.sma200w && (
           <Line yAxisId="price" type="monotone" dataKey="sma200w" stroke="#d97706"
             strokeWidth={2} dot={false} activeDot={false} connectNulls={false} name="sma200w" />
+        )}
+        {toolsOverlay?.emaWeekly && (
+          <Line yAxisId="price" type="monotone" dataKey="emaw" stroke="#a3e635"
+            strokeWidth={2} dot={false} activeDot={false} connectNulls={false} name="emaw" />
         )}
         {toolsOverlay?.ema20 && (
           <Line yAxisId="price" type="monotone" dataKey="ema20" stroke="#f472b6"

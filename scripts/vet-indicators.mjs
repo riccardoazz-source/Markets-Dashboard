@@ -797,7 +797,7 @@ ok('the URL carries the encoded symbol',
 //
 // The period is a parameter because both conventions are in real use: 50 is the
 // round-number family (50-day, 200-day), 55 the Fibonacci one (21, 34, 55, 89).
-for (const weeks of [50, 55]) {
+for (const weeks of [50]) {
   // `weeks + 65` Mondays of a known ramp: one bar per week means the weekly resample is
   // the identity, so the result must equal a plain EMA(weeks) of the same numbers.
   const d = [], c = [];
@@ -834,18 +834,33 @@ for (const weeks of [50, 55]) {
      s50[60 * 7 + 1] === s50[60 * 7 + 4]);
   // A rising series: the average must trail the price, never lead it.
   ok('the average lags a rising price', s50[79 * 7] < c[79 * 7]);
-  // The two conventions differ, but only slightly — which is the whole reason the choice
-  // is offered rather than argued about.
-  const s55 = I.computeEmaWeeklyDaily(d, c, 55);
-  ok('55 weeks is slower than 50 on a rising series', s55[79 * 7] < s50[79 * 7]);
-  // Exactly how much slower, in closed form. On a ramp an EMA(n) lags by slope*(n-1)/2, so
-  // the gap between the two conventions is slope*(55-50)/2 — 2.5 weekly steps, and nothing
-  // about the asset. The weekly step here is 0.7 (0.1/day, last close of each week).
-  ok('the gap between the two is exactly 2.5 weekly steps',
-     Math.abs((s50[79 * 7] - s55[79 * 7]) - 2.5 * 0.7) < 1e-9);
+  // The weekly bucket count is the REAL precondition, and it is what the chips are now
+  // guarded on. Seven bars a week collapse to one close per week, so the count is the
+  // number of calendar weeks touched, not the number of bars.
+  ok('weeklyCloseCount counts weeks, not bars', I.weeklyCloseCount(d, c) === 80);
 }
 ok('too little history yields all nulls, not a short average',
    I.computeEmaWeeklyDaily(['2026-01-05', '2026-01-12'], [10, 11], 50).every(v => v === null));
+
+// The guard the chips use has to agree with what the indicator can actually produce, or a
+// chip is offered and then draws nothing. This is the case that breaks a bar-count
+// estimate: a thinly traded listing spanning four calendar years that SKIPS whole weeks —
+// plenty of elapsed time, plenty of bars by some measures, but not 200 weekly closes.
+{
+  const d = [], c = [];
+  for (let w = 0; w < 210; w++) {
+    if (w % 3 === 0) continue;               // no trade at all in every third week
+    const t = new Date(Date.UTC(2022, 0, 3) + w * 7 * 86400000);
+    d.push(t.toISOString().slice(0, 10));
+    c.push(50 + w * 0.2);
+  }
+  const weeks = I.weeklyCloseCount(d, c);
+  ok('a gappy listing yields fewer weekly closes than weeks elapsed', weeks === 140);
+  ok('…so the 200-week SMA cannot be drawn, and the count says so',
+     weeks < 200 && I.computeSma200wDaily(d, c).every(v => v === null));
+  ok('…while the 50-week EMA can be, and is', weeks >= 50 &&
+     I.computeEmaWeeklyDaily(d, c, 50).some(v => v != null));
+}
 
 // ── Period windows: where a YTD/MTD series must begin ────────────────────────
 // The bug these guard against was live: the quote card measured YTD from the last close
