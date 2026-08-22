@@ -67,7 +67,8 @@ export function computeIndicatorPeriods(avgDPB: number) {
     sma50:    lit(50,   3),
     sma200:   lit(200,  3),
     sma200w:  cal(1400, 3),   // 200 calendar weeks → bars for this data's cadence
-    ema55w:   cal(385,  3),   // 55 calendar weeks, likewise
+    emaW50:   cal(350,  3),   // 50 calendar weeks, likewise
+    emaW55:   cal(385,  3),   // and 55, the Fibonacci alternative
     ema20:    lit(20,   3),
     ema100:   lit(100,  3),
     boll:     lit(20,   10),  // 20-period Bollinger; min 10 for meaningful variance
@@ -146,25 +147,36 @@ export function computeSma200wLatest(dates: string[], closes: (number | null)[])
 }
 
 /**
- * 55-week EMA, computed the same way: resample to weekly closes, take EMA(55) of those, and
- * hold each weekly value forward onto the daily dates. Aligned 1:1 with `dates`, null until
- * 55 weekly closes exist.
+ * Long EMA on WEEKLY closes: resample to weekly closes, take EMA(`weeks`) of those, and hold
+ * each weekly value forward onto the daily dates. Aligned 1:1 with `dates`, null until
+ * `weeks` weekly closes exist.
  *
- * WEEKLY closes, not 385 daily bars. The two are not the same average, and the difference is
- * not academic: an EMA weights recent observations more heavily, so feeding it seven bars a
- * week for crypto and five for equities would give the same nominal indicator a different
- * memory on each — and neither would match the line a chart package draws on the weekly
- * timeframe, which is where anybody quoting "the 55-week" is reading it.
+ * WEEKLY closes, not `weeks × 7` daily bars. The two are not the same average, and the
+ * difference is not academic: an EMA weights recent observations more heavily, so feeding it
+ * seven bars a week for crypto and five for equities would give the same nominal indicator a
+ * different memory on each — and neither would match the line a chart package draws on the
+ * weekly timeframe, which is where anybody quoting "the 50-week" is reading it.
+ *
+ * The period is a parameter because there are two live conventions and they disagree. 50 is
+ * the round-number school — the same family as the 50- and 200-day averages, and the more
+ * widely watched of the two. 55 is the Fibonacci school (8, 13, 21, 34, 55, 89…), of which
+ * the 21-week EMA is the genuinely famous member in crypto. Neither is "the" right answer,
+ * they draw nearly the same line, and picking one in code would just be this file having an
+ * opinion it is not entitled to.
  */
-export function computeEma55wDaily(dates: string[], closes: (number | null)[]): (number | null)[] {
+export function computeEmaWeeklyDaily(
+  dates: string[], closes: (number | null)[], weeks: number,
+): (number | null)[] {
   const w = resampleWeekly(dates, closes);
-  if (w.closes.length < 55) return new Array(dates.length).fill(null);
-  return projectBucketsToDaily(dates, w.dates, computeEMA(w.closes, 55));
+  if (w.closes.length < weeks) return new Array(dates.length).fill(null);
+  return projectBucketsToDaily(dates, w.dates, computeEMA(w.closes, weeks));
 }
 
-/** Latest 55-week EMA value, or null if under 55 weekly closes. */
-export function computeEma55wLatest(dates: string[], closes: (number | null)[]): number | null {
-  const series = computeEma55wDaily(dates, closes);
+/** Latest weekly-EMA value, or null if under `weeks` weekly closes. */
+export function computeEmaWeeklyLatest(
+  dates: string[], closes: (number | null)[], weeks: number,
+): number | null {
+  const series = computeEmaWeeklyDaily(dates, closes, weeks);
   for (let i = series.length - 1; i >= 0; i--) if (series[i] != null) return series[i];
   return null;
 }

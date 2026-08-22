@@ -16,7 +16,7 @@ import { useFullHistory } from '@/lib/useFullHistory';
 import {
   computeSMA, computeEMA, computeRSI, computeMACD,
   computeBollingerBands, computeFibLevels, computeMomentum,
-  computeTrendLine, computeSma200wDaily, computeEma55wDaily, computeRsiResampledDaily, computeMacdResampledDaily,
+  computeTrendLine, computeSma200wDaily, computeEmaWeeklyDaily, computeRsiResampledDaily, computeMacdResampledDaily,
   avgCalendarDaysPerBar, computeIndicatorPeriods, barsForCalDays,
   computeStretchSigma, computeMaSlope, computeRegimeMonths, computeDrawdown, computeMonthsSinceHigh,
 } from '@/lib/indicators';
@@ -49,7 +49,8 @@ interface ToolsOverlay {
   drawdown?: boolean;
   spyRatio?: boolean;
   sma200w?: boolean;
-  ema55w?: boolean;
+  emaWeekly?: boolean;
+  emaWeekly55?: boolean;
   trend?: boolean;
   /** true = fit the trend on full history (shown over the visible window); false = visible period only. */
   trendFull?: boolean;
@@ -466,7 +467,7 @@ export function PriceChart({
   // WHOLE series and drawn even when the selected window is short (a MA is a fixed number
   // today, independent of the view period).
   const wantsFullMA = !!(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 ||
-    toolsOverlay?.sma200w || toolsOverlay?.ema55w || toolsOverlay?.ema20 || toolsOverlay?.ema100);
+    toolsOverlay?.sma200w || toolsOverlay?.emaWeekly || toolsOverlay?.ema20 || toolsOverlay?.ema100);
   const wantsFullTrend = !!(toolsOverlay?.trend && toolsOverlay?.trendFull);
   const rsiGrain = toolsOverlay?.rsiMonthly ? 'monthly' : toolsOverlay?.rsiWeekly ? 'weekly' : null;
   const macdGrain = toolsOverlay?.macdMonthly ? 'monthly' : toolsOverlay?.macdWeekly ? 'weekly' : null;
@@ -575,10 +576,11 @@ export function PriceChart({
   // Same weekly-close treatment as the 200-week SMA: an EMA over 385 daily bars is a
   // different average from an EMA over 55 weekly closes, and the weekly one is what a
   // chart package draws.
-  const ema55wVals  = toolsOverlay?.ema55w
+  const emaWeeks    = toolsOverlay?.emaWeekly55 ? 55 : 50;
+  const emaWVals    = toolsOverlay?.emaWeekly
     ? (useFull
-        ? projectToVisible(fullDates, computeEma55wDaily(fullDates, fullCloses), visDates)
-        : computeEma55wDaily(data.map(d => d.date), data.map(d => d.close)))
+        ? projectToVisible(fullDates, computeEmaWeeklyDaily(fullDates, fullCloses, emaWeeks), visDates)
+        : computeEmaWeeklyDaily(data.map(d => d.date), data.map(d => d.close), emaWeeks))
     : null;
   const ema20Vals   = toolsOverlay?.ema20
     ? (useFull && PFull.ema20.ok    ? fullEMA(PFull.ema20.period)   : (P.ema20.ok   ? computeEMA(closes, P.ema20.period)   : null))
@@ -644,7 +646,7 @@ export function PriceChart({
   const yMax = domMax + pad;
 
   // Extend data with overlay columns (SMA/EMA lines + Bollinger band range + SPY + trend + TR)
-  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || sma200wVals || ema55wVals || ema20Vals || ema100Vals || bands || spyLine || trendVals || trLine;
+  const hasSeriesOverlay = sma20Vals || sma50Vals || sma200Vals || sma200wVals || emaWVals || ema20Vals || ema100Vals || bands || spyLine || trendVals || trLine;
   const chartData = hasSeriesOverlay
     ? data.map((d, i) => ({
         ...d,
@@ -652,7 +654,7 @@ export function PriceChart({
         sma50:   sma50Vals?.[i]   ?? null,
         sma200:  sma200Vals?.[i]  ?? null,
         sma200w: sma200wVals?.[i] ?? null,
-        ema55w:  ema55wVals?.[i]  ?? null,
+        emaw:    emaWVals?.[i]    ?? null,
         ema20:   ema20Vals?.[i]   ?? null,
         ema100:  ema100Vals?.[i]  ?? null,
         spy:    spyLine?.[i]     ?? null,
@@ -779,7 +781,7 @@ export function PriceChart({
       if (sma50Vals)   row.sma50   = sma50Vals[i];
       if (sma200Vals)  row.sma200  = sma200Vals[i];
       if (sma200wVals) row.sma200w = sma200wVals[i];
-      if (ema55wVals)  row.ema55w  = ema55wVals[i];
+      if (emaWVals)    row.emaw    = emaWVals[i];
       if (ema20Vals)   row.ema20   = ema20Vals[i];
       if (ema100Vals)  row.ema100  = ema100Vals[i];
       if (bands) { row.bb_lower = bands.lower[i] ?? null; row.bb_upper = bands.upper[i] ?? null; }
@@ -879,7 +881,7 @@ export function PriceChart({
       )}
 
       {/* Overlay legend when active */}
-      {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w || toolsOverlay?.ema55w ||
+      {(toolsOverlay?.sma20 || toolsOverlay?.sma50 || toolsOverlay?.sma200 || toolsOverlay?.sma200w || toolsOverlay?.emaWeekly ||
         toolsOverlay?.ema20 || toolsOverlay?.ema100 || toolsOverlay?.bollinger || toolsOverlay?.fib ||
         spyLine || trendVals || trLine) && (
         <div className="flex items-center gap-3 mb-1 px-1 flex-wrap">
@@ -921,9 +923,9 @@ export function PriceChart({
               <span className="inline-block w-5 border-t-2 border-yellow-500" />SMA 200W
             </span>
           )}
-          {toolsOverlay?.ema55w && (
+          {toolsOverlay?.emaWeekly && (
             <span className="flex items-center gap-1 text-[10px] text-lime-400">
-              <span className="inline-block w-5 border-t-2 border-lime-400" />EMA 55W
+              <span className="inline-block w-5 border-t-2 border-lime-400" />EMA {emaWeeks}W
             </span>
           )}
           {toolsOverlay?.ema20 && (
@@ -1003,7 +1005,7 @@ export function PriceChart({
               if (name === 'sma50')   return [value != null ? value.toFixed(decimals) : '—', 'SMA 50'];
               if (name === 'sma200')  return [value != null ? value.toFixed(decimals) : '—', 'SMA 200'];
               if (name === 'sma200w') return [value != null ? value.toFixed(decimals) : '—', 'SMA 200W'];
-              if (name === 'ema55w')  return [value != null ? value.toFixed(decimals) : '—', 'EMA 55W'];
+              if (name === 'emaw')    return [value != null ? value.toFixed(decimals) : '—', `EMA ${emaWeeks}W`];
               if (name === 'ema20')  return [value != null ? value.toFixed(decimals) : '—', 'EMA 20'];
               if (name === 'ema100') return [value != null ? value.toFixed(decimals) : '—', 'EMA 100'];
               if (name === 'spy')    return [value != null ? value.toFixed(decimals) : '—', 'vs SPY (benchmark)'];
@@ -1084,10 +1086,10 @@ export function PriceChart({
             <Line type="monotone" dataKey="sma200w" stroke="#d97706" strokeWidth={2}
               dot={false} activeDot={false} connectNulls={false} name="sma200w" />
           )}
-          {/* EMA 55W — 55 weekly closes, held forward onto the daily dates */}
-          {toolsOverlay?.ema55w && (
-            <Line type="monotone" dataKey="ema55w" stroke="#a3e635" strokeWidth={2}
-              dot={false} activeDot={false} connectNulls={false} name="ema55w" />
+          {/* Weekly EMA (50 or 55 weekly closes), held forward onto the daily dates */}
+          {toolsOverlay?.emaWeekly && (
+            <Line type="monotone" dataKey="emaw" stroke="#a3e635" strokeWidth={2}
+              dot={false} activeDot={false} connectNulls={false} name="emaw" />
           )}
           {/* EMA 20 */}
           {toolsOverlay?.ema20 && (
