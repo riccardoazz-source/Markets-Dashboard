@@ -22,6 +22,22 @@ export type SeriesPoint = { date: string; value: number };
  * compare (say) August with the previous September and report it as a year — a wrong
  * number that looks entirely plausible.
  */
+/**
+ * Which index each derived "(YoY)" rate is computed from.
+ *
+ * It lives here, beside the arithmetic, rather than inside the API route, because the two
+ * halves have to agree and nothing was checking that they did: declaring a new `*_YOY`
+ * indicator in lib/config.ts without adding its base here produces a series that fetches
+ * cleanly and comes back empty — a blank card with no error anywhere. `npm run vet` now
+ * asserts the two lists match.
+ */
+export const YOY_BASE_SERIES: Record<string, string> = {
+  CPI_YOY: 'CPIAUCSL',
+  CORE_CPI_YOY: 'CPILFESL',
+  PCE_YOY: 'PCEPI',
+  CORE_PCE_YOY: 'PCEPILFE',
+};
+
 export function yearOverYear(base: SeriesPoint[], from?: string): SeriesPoint[] {
   const out: SeriesPoint[] = [];
   for (let i = 12; i < base.length; i++) {

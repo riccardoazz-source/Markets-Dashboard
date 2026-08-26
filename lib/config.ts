@@ -345,9 +345,19 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   // Published by the BEA at the END of the month, four weeks after the reference month,
   // while the CPI lands mid-month — which is why the app could show a July CPI and no
   // sign of the July PCE released the same week.
+  // Headline and core, mirroring the CPI pair above — index and rate for each, so the two
+  // measures can be read against each other at the same level of detail. Headline is not
+  // the redundant one: the FOMC's 2% objective is defined on the HEADLINE PCE index, and
+  // core is what it watches to judge where headline is heading.
+  { id: 'PCEPI',    name: 'PCE Price Index',            category: 'Inflation',   unit: 'idx',
+    source: { type: 'fred',     label: 'FRED / BEA',
+              url: 'https://fred.stlouisfed.org/series/PCEPI' } },
   { id: 'PCEPILFE', name: 'Core PCE Price Index',       category: 'Inflation',   unit: 'idx',
     source: { type: 'fred',     label: 'FRED / BEA',
               url: 'https://fred.stlouisfed.org/series/PCEPILFE' } },
+  { id: 'PCE_YOY',  name: 'PCE Inflation Rate (YoY)',   category: 'Inflation',   unit: '%',
+    source: { type: 'computed', label: 'Derived — 12-month change in the PCE price index (FRED / DBnomics)',
+              url: 'https://fred.stlouisfed.org/series/PCEPI' } },
   { id: 'CORE_PCE_YOY', name: 'Core PCE Inflation Rate (YoY)', category: 'Inflation', unit: '%',
     source: { type: 'computed', label: 'Derived — 12-month change in the Core PCE price index (FRED / DBnomics)',
               url: 'https://fred.stlouisfed.org/series/PCEPILFE' } },

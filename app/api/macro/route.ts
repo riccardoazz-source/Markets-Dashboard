@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { yearOverYear } from '@/lib/macroDerived';
+import { yearOverYear, YOY_BASE_SERIES } from '@/lib/macroDerived';
 import { MACRO_INDICATORS, FOMC_MEETING_DATES, FED_CHAIR_CHANGES, MARKET_EVENTS, MarketEventCategory } from '@/lib/config';
 import { BCADPS_SERIES } from '@/lib/bcadpsData';
 
@@ -1640,17 +1640,13 @@ async function fetchMacroSeries(
     // never disagree. The window is dropped for the fetch and re-applied after, or the
     // first twelve months of any view would have no prior year to compare against and
     // would come back empty.
-    // Core PCE joins the two CPI rates here rather than getting its own branch: it is the
-    // same arithmetic on a different index, and the Fed's gauge deserves no special case.
-    const YOY_BASE: Record<string, string> = {
-      CPI_YOY: 'CPIAUCSL',
-      CORE_CPI_YOY: 'CPILFESL',
-      CORE_PCE_YOY: 'PCEPILFE',
-    };
-    if (YOY_BASE[fredId]) {
+    // Which index each rate comes from lives in lib/macroDerived, beside the arithmetic
+    // and where `npm run vet` can check it against the indicators declared in config —
+    // a rate whose base was never registered fetches cleanly and returns nothing.
+    if (YOY_BASE_SERIES[fredId]) {
       // Fetched WITHOUT the window and filtered after — see lib/macroDerived for why,
       // and for the checks that pin it.
-      const base = await fetchMacroSeries(YOY_BASE[fredId]);
+      const base = await fetchMacroSeries(YOY_BASE_SERIES[fredId]);
       return yearOverYear(base, fromDate);
     }
     if (fredId === 'BTC_HALVING')          return getBitcoinHalvings(fromDate);

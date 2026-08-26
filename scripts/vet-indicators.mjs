@@ -801,6 +801,31 @@ ok('an unmappable symbol yields no link',
 ok('the URL carries the encoded symbol',
    TV.tradingViewUrl('^GSPC') === 'https://www.tradingview.com/chart/?symbol=TVC%3ASPX');
 
+// ── Derived inflation rates: config and the base-series map must agree ───────
+// A "(YoY)" indicator declared in config with no base registered here fetches cleanly and
+// returns an empty series — a blank card, no error, nothing in the logs. Both directions
+// are checked, because a stale base entry for an indicator that was renamed is the same
+// failure seen from the other end.
+{
+  const rates = CFG.MACRO_INDICATORS.filter(m => m.id.endsWith('_YOY'));
+  const missing = rates.filter(m => !D.YOY_BASE_SERIES[m.id]);
+  ok(`every derived (YoY) rate has a base series (${rates.length} rates)`,
+     missing.length === 0, missing.map(m => m.id).join(', '));
+  const orphan = Object.keys(D.YOY_BASE_SERIES).filter(id => !rates.some(m => m.id === id));
+  ok('…and no base entry points at a rate that no longer exists',
+     orphan.length === 0, orphan.join(', '));
+  const ids = new Set(CFG.MACRO_INDICATORS.map(m => m.id));
+  const noIndex = Object.entries(D.YOY_BASE_SERIES).filter(([, base]) => !ids.has(base));
+  ok('…and every base index is itself a declared indicator',
+     noIndex.length === 0, noIndex.map(([r, b]) => `${r}<-${b}`).join(', '));
+  // The Fed's gauge and the news's gauge must both be present and must be distinct
+  // series: swapping one for the other is the mistake this whole change exists to fix.
+  ok('CPI and PCE are both carried, headline and core',
+     ['CPI_YOY', 'CORE_CPI_YOY', 'PCE_YOY', 'CORE_PCE_YOY'].every(id => ids.has(id)));
+  ok('…and each reads a different index',
+     new Set(Object.values(D.YOY_BASE_SERIES)).size === Object.keys(D.YOY_BASE_SERIES).length);
+}
+
 // ── Long EMA on weekly closes (50 or 55 weeks) ───────────────────────────────
 // Weekly closes, not weeks x 7 daily bars. An EMA weights recent points more heavily, so
 // the two are different averages — and on crypto (7 bars/wk) versus equities (5) the daily
