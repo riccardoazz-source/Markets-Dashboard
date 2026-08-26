@@ -588,6 +588,7 @@ console.log('\nForward calendar — the window, and the daylight-saving trap');
     ['Bank of England Rate Decision', 12, 0,  'Europe/London'],
     ['US CPI Inflation Report',       8,  30, 'America/New_York'],
     ['US Non-Farm Payrolls',          8,  30, 'America/New_York'],
+    ['US Core PCE Inflation',         8,  30, 'America/New_York'],
   ];
   let checked = 0, wrong = [];
   for (const e of ED.CALENDAR_EVENTS) {
@@ -608,6 +609,16 @@ console.log('\nForward calendar — the window, and the daylight-saving trap');
   const notFriday = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('US Non-Farm'))
     .filter(e => new Date(e.date).getUTCDay() !== 5);
   ok('every payrolls date is a Friday', notFriday.length === 0, notFriday.map(e => e.date).join(', '));
+
+  // Core PCE lands in the LAST WEEK of the month — the whole reason it was missing from a
+  // calendar built around the mid-month CPI. A date early in the month would be a typo for
+  // some other release, and would put the Fed's own inflation gauge on the wrong week.
+  const pceOff = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('US Core PCE'))
+    .filter(e => new Date(e.date).getUTCDate() < 22);
+  ok('every core PCE date is in the last week of its month',
+     pceOff.length === 0, pceOff.map(e => e.date).join(', '));
+  ok('…and there is at least one per month for six months',
+     ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('US Core PCE')).length >= 6);
 
   // Nothing bundled may be missing the fields the card renders.
   const bad = ED.BUNDLED_EVENTS.filter(e => !e.id || !e.title || !e.flag || !e.region || !isFinite(Date.parse(e.date)));

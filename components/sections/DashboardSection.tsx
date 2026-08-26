@@ -85,8 +85,14 @@ const GROUPS: TileGroup[] = [
     tiles: [
       { kind: 'macro', id: 'UNRATE', label: 'US unemployment',
         hint: 'US unemployment rate. Half the Federal Reserve’s mandate, and the half that usually turns first.' },
-      { kind: 'macro', id: 'CPI_YOY', label: 'US inflation',
-        hint: 'US inflation — the change in the CPI over the last twelve months. The other half of the Federal Reserve’s mandate.' },
+      // Core PCE rather than the CPI. The CPI is the number the news quotes, but the
+      // FOMC's 2% objective is defined on the PCE price index, and core PCE — ex food
+      // and energy — is what it reads for the underlying trend. Since the tile sits
+      // directly under the policy rates it is set against, it should be the series
+      // those rates actually respond to. The CPI is still on the Macro tab, alongside
+      // this one.
+      { kind: 'macro', id: 'CORE_PCE_YOY', label: 'US inflation (Core PCE)',
+        hint: 'Core PCE inflation — the twelve-month change in the price index for personal consumption expenditures excluding food and energy. This is the gauge the Federal Reserve targets, published by the BEA at the end of each month. It normally runs a few tenths below the CPI: a different basket, and weights that update as people substitute.' },
     ],
   },
   {

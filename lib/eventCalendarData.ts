@@ -90,6 +90,17 @@ const nfp = (date: string) =>
     source: 'bls.gov',
     tentative: true,
   });
+// BEA "Personal Income and Outlays" — the release that carries the PCE price index, and
+// with it core PCE, the gauge the FOMC's 2% objective is actually defined on. It lands at
+// the END of the month, four weeks after the reference month, which is why a calendar
+// built around the mid-month CPI can look empty on the day the Fed's own inflation number
+// comes out. Titled so that searching for either name finds it.
+const pce = (date: string) =>
+  make(US, 'US Core PCE Inflation (Personal Income & Outlays)', 'economic-data', date, {
+    description: 'BEA personal income and outlays — carries the PCE price index and core PCE, the inflation gauge the Federal Reserve targets. The quarterly GDP estimate is often released the same morning.',
+    source: 'bea.gov',
+    tentative: true,
+  });
 
 export const CALENDAR_EVENTS: CalendarEvent[] = [
   // FOMC 2026 — 14:00 ET (18:00Z on EDT, 19:00Z on EST)
@@ -134,6 +145,24 @@ export const CALENDAR_EVENTS: CalendarEvent[] = [
   nfp('2026-10-02T12:30:00Z'),
   nfp('2026-11-06T13:30:00Z'),
   nfp('2026-12-04T13:30:00Z'),
+
+  // ── Core PCE / Personal Income & Outlays — 08:30 ET, last week of the month ──
+  //
+  // THESE DAYS ARE NOT VERIFIED against bea.gov and are the least certain entries in this
+  // file. They are placed on the BEA's usual cadence — the release for month M lands in
+  // the last week of month M+1 — anchored on the one date known to be right: the July 2026
+  // report came out on Wednesday 26 August 2026. December and November are pulled earlier
+  // in the week, as the BEA does around Thanksgiving and Christmas.
+  //
+  // They ship `tentative`, which the card renders, so the page never presents them as
+  // fixed. Replace them with the published schedule when checking this file next:
+  //   bea.gov/news/schedule
+  pce('2026-09-25T12:30:00Z'),
+  pce('2026-10-30T12:30:00Z'),
+  pce('2026-11-25T13:30:00Z'),
+  pce('2026-12-23T13:30:00Z'),
+  pce('2027-01-29T13:30:00Z'),
+  pce('2027-02-26T13:30:00Z'),
 ];
 
 // ── Geopolitical ─────────────────────────────────────────────────────────────

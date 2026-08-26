@@ -333,6 +333,24 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'CORE_CPI_YOY', name: 'Core Inflation Rate (YoY)', category: 'Inflation', unit: '%',
     source: { type: 'computed', label: 'Derived — 12-month change in Core CPI (FRED / DBnomics / BLS)',
               url: 'https://fred.stlouisfed.org/series/CPILFESL' } },
+  // ── Core PCE — the gauge the Federal Reserve actually targets ──────────────
+  // The FOMC's 2% objective is defined on the PCE price index, not the CPI, and core PCE
+  // (ex food and energy) is what it reads for the underlying trend. It is a different
+  // measure from the CPI, not a second opinion on it: a different basket (PCE counts
+  // spending made on your behalf, such as employer-paid health insurance, and weights
+  // housing far less), and weights that update continuously rather than being held fixed,
+  // so it captures substitution. It therefore normally prints a few tenths BELOW the CPI,
+  // and the two disagreeing is the expected state, not an error in either.
+  //
+  // Published by the BEA at the END of the month, four weeks after the reference month,
+  // while the CPI lands mid-month — which is why the app could show a July CPI and no
+  // sign of the July PCE released the same week.
+  { id: 'PCEPILFE', name: 'Core PCE Price Index',       category: 'Inflation',   unit: 'idx',
+    source: { type: 'fred',     label: 'FRED / BEA',
+              url: 'https://fred.stlouisfed.org/series/PCEPILFE' } },
+  { id: 'CORE_PCE_YOY', name: 'Core PCE Inflation Rate (YoY)', category: 'Inflation', unit: '%',
+    source: { type: 'computed', label: 'Derived — 12-month change in the Core PCE price index (FRED / DBnomics)',
+              url: 'https://fred.stlouisfed.org/series/PCEPILFE' } },
   // Growth
   { id: 'GDP',      name: 'Nominal GDP',            category: 'Growth',      unit: 'B$',
     source: { type: 'fred',    label: 'FRED',

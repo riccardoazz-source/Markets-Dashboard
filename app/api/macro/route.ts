@@ -1640,10 +1640,17 @@ async function fetchMacroSeries(
     // never disagree. The window is dropped for the fetch and re-applied after, or the
     // first twelve months of any view would have no prior year to compare against and
     // would come back empty.
-    if (fredId === 'CPI_YOY' || fredId === 'CORE_CPI_YOY') {
+    // Core PCE joins the two CPI rates here rather than getting its own branch: it is the
+    // same arithmetic on a different index, and the Fed's gauge deserves no special case.
+    const YOY_BASE: Record<string, string> = {
+      CPI_YOY: 'CPIAUCSL',
+      CORE_CPI_YOY: 'CPILFESL',
+      CORE_PCE_YOY: 'PCEPILFE',
+    };
+    if (YOY_BASE[fredId]) {
       // Fetched WITHOUT the window and filtered after — see lib/macroDerived for why,
       // and for the checks that pin it.
-      const base = await fetchMacroSeries(fredId === 'CPI_YOY' ? 'CPIAUCSL' : 'CPILFESL');
+      const base = await fetchMacroSeries(YOY_BASE[fredId]);
       return yearOverYear(base, fromDate);
     }
     if (fredId === 'BTC_HALVING')          return getBitcoinHalvings(fromDate);
