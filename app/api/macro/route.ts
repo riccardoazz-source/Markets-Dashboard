@@ -1979,6 +1979,60 @@ async function saveGistMacroCache(entries: GistCacheEntry[]): Promise<void> {
 export async function GET(req: NextRequest) {
   const mode = req.nextUrl.searchParams.get('mode') ?? 'list';
 
+  // ── Which sources actually answer, for one indicator ─────────────────────
+  //
+  // ?mode=diag&id=PCEPILFE
+  //
+  // A blank card says nothing about WHY it is blank, and the difference matters: a series
+  // every provider refuses needs another provider, while one that answers slowly needs
+  // patience, and one whose id is wrong needs a typo fixed. From a laptop every source is
+  // reachable, so a source that is blocked only from the deployment's own IPs — which FRED
+  // frequently is — cannot be reproduced locally at all. This asks the deployment itself.
+  //
+  // Each provider is probed independently and in parallel, so one blocked host cannot hide
+  // the others behind its timeout. Nothing here is cached: a diagnostic served from a cache
+  // is a diagnostic of the cache.
+  if (mode === 'diag') {
+    const id = req.nextUrl.searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'No id' }, { status: 400 });
+    // A derived rate is only ever as good as the index underneath it, so the providers are
+    // probed against THAT — asking them for "CORE_PCE_YOY" would report a failure that is
+    // simply the name of a series nobody publishes.
+    const base = YOY_BASE_SERIES[id] ?? id;
+    const probe = async (source: string, run: () => Promise<{ date: string; value: number }[]>) => {
+      const t0 = Date.now();
+      try {
+        const pts = await run();
+        return {
+          source, ok: pts.length > 0, points: pts.length,
+          first: pts[0]?.date ?? null, last: pts[pts.length - 1]?.date ?? null,
+          ms: Date.now() - t0,
+        };
+      } catch (e) {
+        return { source, ok: false, points: 0, error: (e as Error).message, ms: Date.now() - t0 };
+      }
+    };
+    const blsSym = BLS_MAP[base];
+    const [sources, resolved] = await Promise.all([
+      Promise.all([
+        probe('FRED', () => fetchFRED(base, undefined, 8_000)),
+        probe('DBnomics', () => fetchDBnomicsFRED(base, undefined, 8_000)),
+        ...(blsSym ? [probe(`BLS (${blsSym})`, () => fetchBLS(blsSym, undefined, 8_000))] : []),
+      ]),
+      // What the app itself would get, through the same dispatch the charts use — so a
+      // routing mistake shows up as "every provider has the data and the app still has
+      // none", which no per-provider probe would reveal.
+      probe('resolved — what the app actually uses', () => fetchMacroSeries(id)),
+    ]);
+    return NextResponse.json({
+      id,
+      base: base === id ? undefined : base,
+      declaredSource: indicatorSourceMap.get(base)?.type ?? 'not declared in config',
+      sources,
+      resolved,
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  }
+
   // Historical data for one series
   if (mode === 'history') {
     const id = req.nextUrl.searchParams.get('id');
