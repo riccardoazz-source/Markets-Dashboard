@@ -149,23 +149,67 @@ async function fetchFREDCsv(
       console.error(`[fred-csv] ${seriesId} empty/short response`);
       return [];
     }
-    const lines = csv.trim().split('\n');
-    const points: { date: string; value: number }[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].trim().split(',');
-      if (parts.length < 2) continue;
-      const date = parts[0].trim();
-      const num = parseFloat(parts[1].trim());
-      if (!isNaN(num) && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        points.push({ date, value: num });
-      }
-    }
+    const points = parseFredCsv(csv);
     if (points.length === 0) {
       console.warn(`[fred-csv] ${seriesId} parsed zero points; head:`, csv.slice(0, 120));
     }
     return points;
   } catch (e) {
     console.error(`[fred-csv] ${seriesId} fetch failed:`, (e as Error).message);
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** The two-column CSV fredgraph serves, from wherever it was fetched. */
+function parseFredCsv(csv: string): { date: string; value: number }[] {
+  const lines = csv.trim().split('\n');
+  const points: { date: string; value: number }[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].trim().split(',');
+    if (parts.length < 2) continue;
+    const date = parts[0].trim();
+    const num = parseFloat(parts[1].trim());
+    if (!isNaN(num) && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      points.push({ date, value: num });
+    }
+  }
+  return points;
+}
+
+// ---------- FRED through the reader proxy ----------
+// FRED does not refuse this deployment's requests, it IGNORES them: the direct calls
+// above hang until their own timeout and return nothing, which is what a datacenter-IP
+// block looks like from the inside. multpl.com does exactly the same thing, and this
+// codebase already solves it for multpl with the free r.jina.ai reader — so the same
+// door is used here rather than inventing a second one.
+//
+// Same fredgraph.csv URL, same parser, different route to it.
+async function fetchFREDViaReader(
+  seriesId: string,
+  fromDate?: string,
+  timeoutMs = 8_000,
+): Promise<{ date: string; value: number }[]> {
+  const params = new URLSearchParams({ id: seriesId });
+  if (fromDate) params.set('cosd', fromDate);
+  const url = `https://r.jina.ai/https://fred.stlouisfed.org/graph/fredgraph.csv?${params}`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const headers: Record<string, string> = {
+      'Accept': 'text/plain',
+      'X-Return-Format': 'text',
+      'X-Timeout': '15',
+    };
+    if (process.env.JINA_API_KEY) headers['Authorization'] = `Bearer ${process.env.JINA_API_KEY}`;
+    const res = await fetch(url, { signal: ctrl.signal, next: { revalidate: 1800 }, headers });
+    if (!res.ok) { console.warn(`[fred-reader] ${seriesId} HTTP ${res.status}`); return []; }
+    const points = parseFredCsv(await res.text());
+    if (points.length === 0) console.warn(`[fred-reader] ${seriesId} parsed zero points`);
+    return points;
+  } catch (e) {
+    console.warn(`[fred-reader] ${seriesId} failed:`, (e as Error).message);
     return [];
   } finally {
     clearTimeout(t);
@@ -213,21 +257,51 @@ async function fetchFREDTxt(
 }
 
 // ---------- Combined FRED fetch with fallback chain ----------
+/**
+ * The first of these to come back with data wins; if none does, the result is empty.
+ *
+ * Not `Promise.any` (which wants a rejection to move on, and an empty array is not one)
+ * and not `Promise.all` (which would wait for the slowest even after a winner is in hand).
+ */
+function firstNonEmpty<T>(attempts: Promise<T[]>[]): Promise<T[]> {
+  return new Promise(resolve => {
+    let pending = attempts.length;
+    if (pending === 0) { resolve([]); return; }
+    let settled = false;
+    const lose = () => { if (!settled && --pending === 0) resolve([]); };
+    for (const p of attempts) {
+      p.then(v => {
+        if (settled) return;
+        if (v.length > 0) { settled = true; resolve(v); } else lose();
+      }, lose);
+    }
+  });
+}
+
+/**
+ * FRED, by every route available, RACED rather than tried in turn.
+ *
+ * They used to run in sequence, which is right when a dead endpoint says so quickly. FRED
+ * does not: from this deployment's IPs it accepts the connection and then never answers,
+ * so each attempt costs its full timeout and three of them cost three timeouts. The
+ * `?mode=diag` endpoint measured it — 24,002 ms to return nothing, on every FRED-backed
+ * series, which is most of the Macro tab. Raced, a blocked FRED costs one timeout instead
+ * of three, and a working FRED answers as fast as its quickest route.
+ *
+ * The reader-proxy route is in the race precisely because it is the one that can succeed
+ * when the direct three cannot.
+ */
 async function fetchFRED(
   seriesId: string,
   fromDate?: string,
   timeoutMs = 6_000,
 ): Promise<{ date: string; value: number }[]> {
-  // 1. JSON API (FRED_API_KEY env var or hardcoded fallback — most reliable)
-  if (getFredApiKey()) {
-    const api = await fetchFREDApi(seriesId, fromDate, timeoutMs);
-    if (api.length > 0) return api;
-  }
-  // 2. Public CSV endpoint
-  const csv = await fetchFREDCsv(seriesId, fromDate, timeoutMs);
-  if (csv.length > 0) return csv;
-  // 3. Legacy .txt endpoint (tab-separated, different URL path)
-  return fetchFREDTxt(seriesId, fromDate, timeoutMs);
+  return firstNonEmpty([
+    ...(getFredApiKey() ? [fetchFREDApi(seriesId, fromDate, timeoutMs)] : []),
+    fetchFREDCsv(seriesId, fromDate, timeoutMs),
+    fetchFREDTxt(seriesId, fromDate, timeoutMs),
+    fetchFREDViaReader(seriesId, fromDate, timeoutMs),
+  ]);
 }
 
 // ---------- DBnomics (Banque de France public mirror of FRED) ----------
@@ -2015,7 +2089,10 @@ export async function GET(req: NextRequest) {
     const blsSym = BLS_MAP[base];
     const [sources, resolved] = await Promise.all([
       Promise.all([
-        probe('FRED', () => fetchFRED(base, undefined, 8_000)),
+        // The FRED routes are probed one by one rather than through fetchFRED: the point
+        // of asking is to see WHICH door opens, and a combined answer hides that.
+        probe('FRED direct (csv)', () => fetchFREDCsv(base, undefined, 8_000)),
+        probe('FRED via reader proxy', () => fetchFREDViaReader(base, undefined, 8_000)),
         probe('DBnomics', () => fetchDBnomicsFRED(base, undefined, 8_000)),
         ...(blsSym ? [probe(`BLS (${blsSym})`, () => fetchBLS(blsSym, undefined, 8_000))] : []),
       ]),

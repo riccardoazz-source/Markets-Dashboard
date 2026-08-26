@@ -801,6 +801,55 @@ ok('an unmappable symbol yields no link',
 ok('the URL carries the encoded symbol',
    TV.tradingViewUrl('^GSPC') === 'https://www.tradingview.com/chart/?symbol=TVC%3ASPX');
 
+// ── Snapshot merging: no key may be lost in either direction ─────────────────
+// This is a bug that shipped twice, once per direction. Both mergers used to rebuild the
+// object from a hand-written list of key names, so a key nobody added to the list was
+// destroyed — silently, with the server holding the right data the whole time. Personal
+// calendar entries were destroyed by the READ side for weeks: adding one worked, the
+// screen updated, the server stored it, and the next load rebuilt the snapshot without it.
+//
+// The guard is the same for both: an unknown key must survive. It is written with a key
+// name that is deliberately NOT one this app has, because a check that only tries the keys
+// someone remembered is the very mistake being guarded against.
+{
+  const G = await import(join(out, 'gistMerge.js'));
+  const other  = { pins: ['A'], notes: { x: [1] }, futureFeature: ['keep me'] };
+  const winner = { pins: ['B'], notes: { y: [2] } };
+
+  const patched = G.mergePatch(other, { calendarEvents: [{ id: 'e1' }] });
+  ok('a patch carries a key the merger was never told about',
+     patched.calendarEvents?.[0]?.id === 'e1' && patched.futureFeature?.[0] === 'keep me');
+
+  const m = G.mergeSnapshots(other, winner);
+  ok('a snapshot merge keeps a key present only in the loser', m.futureFeature?.[0] === 'keep me');
+  ok('…and the winner still wins on conflicts', m.pins[0] === 'B');
+  ok('…while notes MERGE rather than replace, or one chart wipes another',
+     m.notes.x && m.notes.y);
+  // The round trip that actually broke: add locally, then load from the server.
+  const afterAdd  = G.mergePatch({ pins: ['A'] }, { calendarEvents: [{ id: 'own_1' }] });
+  const afterLoad = G.mergeSnapshots(afterAdd, { pins: ['A'] });
+  ok('an added calendar entry survives the next load', afterLoad.calendarEvents?.[0]?.id === 'own_1');
+
+  // Sentiment history is the one key that must UNION, so no device loses a day another
+  // recorded — and recency is judged on when the reading was generated, not on which
+  // device happened to load first.
+  const a = [{ date: '2026-01-01', generatedAt: '2026-01-01T10:00:00Z', v: 'old' }];
+  const b = [{ date: '2026-01-01', generatedAt: '2026-01-01T18:00:00Z', v: 'new' },
+             { date: '2026-01-02', generatedAt: '2026-01-02T10:00:00Z', v: 'other day' }];
+  const u = G.unionByDate(a, b);
+  ok('history unions across devices', u.length === 2);
+  ok('…and the later reading of a day wins', u.find(r => r.date === '2026-01-01').v === 'new');
+  ok('…newest first', u[0].date === '2026-01-02');
+  ok('the cap keeps the NEWEST, not the first seen',
+     G.unionByDate([], Array.from({ length: 200 }, (_, i) => ({
+       date: `2026-01-${String((i % 28) + 1).padStart(2, '0')}`,
+       generatedAt: `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}Z`,
+     })), 5).length === 5);
+  // A snapshot that never had history must not acquire an empty array: `undefined` and
+  // `[]` look the same on screen and different to the next merge.
+  ok('no empty history is invented', G.mergeSnapshots({ pins: ['A'] }, { pins: ['A'] }).sentiments === undefined);
+}
+
 // ── Derived inflation rates: config and the base-series map must agree ───────
 // A "(YoY)" indicator declared in config with no base registered here fetches cleanly and
 // returns an empty series — a blank card, no error, nothing in the logs. Both directions

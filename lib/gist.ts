@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { mergePatch } from './gistMerge';
+import { mergePatch, mergeSnapshots, unionByDate } from './gistMerge';
 
 // Snapshot of the chart view captured when a note is created, so clicking "restore"
 // returns to exactly the same setup (active tools + toggles, timeframe, custom range).
@@ -169,34 +169,16 @@ export function makeId(): string {
 
 interface GistResponse { cloud?: boolean; data?: GistData }
 
-// Union sentiment history by date — newest reading per day wins. This guarantees
-// no device ever loses macro history, and a fresher reading on one device replaces
-// an older same-day reading on another.
-function mergeSentiments(a: SentimentRecord[] = [], b: SentimentRecord[] = []): SentimentRecord[] {
-  const byDate = new Map<string, SentimentRecord>();
-  for (const r of [...a, ...b]) {
-    const prev = byDate.get(r.date);
-    if (!prev || (r.generatedAt ?? '') > (prev.generatedAt ?? '')) byDate.set(r.date, r);
-  }
-  return [...byDate.values()]
-    .sort((x, y) => (y.generatedAt ?? '').localeCompare(x.generatedAt ?? ''))
-    .slice(0, 120);
-}
+// Union sentiment history by date — newest reading per day wins, so no device ever loses
+// history another recorded. Kept as a named export because callers outside the merge use it.
+const mergeSentiments = (a: SentimentRecord[] = [], b: SentimentRecord[] = []) =>
+  unionByDate<SentimentRecord>(a, b);
 
-// Merge two snapshots. `winner` is authoritative for conflicts; keys present only
-// in `other` are preserved; sentiment history is always unioned by recency.
-// For notes, the per-chartId map merges with the winner's chartIds taking priority.
-function mergeCloud(other: GistData, winner: GistData): GistData {
-  return {
-    notes: { ...(other.notes ?? {}), ...(winner.notes ?? {}) },
-    analyses: winner.analyses ?? other.analyses,
-    sentiments: mergeSentiments(other.sentiments, winner.sentiments),
-    pins: winner.pins ?? other.pins,
-    rotationStockLists: winner.rotationStockLists ?? other.rotationStockLists,
-    strategyLinks: winner.strategyLinks ?? other.strategyLinks,
-    strategyCustom: winner.strategyCustom ?? other.strategyCustom,
-  };
-}
+// Merge two whole snapshots. `winner` wins conflicts; every key in either survives.
+// The implementation lives in lib/gistMerge, beside the patch merge and under the same
+// checks — see the note there for what it used to do instead, and what that cost.
+const mergeCloud = (other: GistData, winner: GistData): GistData =>
+  mergeSnapshots<GistData, SentimentRecord>(other, winner);
 
 // Shared fetch+merge. `preferCacheOnConflict` keeps any write made during an
 // initial in-flight load (true), or lets the freshly-fetched remote win on an
