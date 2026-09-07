@@ -198,27 +198,38 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
     return { label: subj.currentLabel, value: formatMacroValue(hit.value, unit), asOf: hit.date };
   };
 
-  // The nearest event is the one most likely to be opened, and its answer costs a web
-  // search. Warming exactly ONE — not the six on screen — makes the common tap feel
-  // instant without turning a glance at the Dashboard into six searches. The result lands
-  // in the route's own cache; nothing here reads it.
-  const firstOutlook = shown.find(e => eventSubject(e.title));
+  // ── Warming the cards ──────────────────────────────────────────────────────
+  //
+  // A grounded lookup takes ten to twenty seconds; that is what a web search plus a model
+  // costs and no amount of prompt tuning changes it. The only thing worth optimising is
+  // how often anyone WAITS for it, so the answers are fetched before they are asked for.
+  //
+  // Three, not one, and not all six. Now that the route caches in the deployment's shared
+  // store rather than per instance, a warmed answer serves every reader on every instance
+  // for half an hour — so the cost is three searches per window across everyone, not three
+  // per visit. Three covers the cards actually reachable without scrolling.
+  //
+  // Staggered, and only after the page has settled: this is the least urgent thing on the
+  // screen and must never compete with the prices for bandwidth.
+  const warmKeys = useMemo(
+    () => shown.filter(e => eventSubject(e.title)).slice(0, 3)
+      .map(e => `${e.title}|${e.date}|${e.region ?? ''}`).join('~~'),
+    [shown],
+  );
   useEffect(() => {
-    if (!firstOutlook) return;
-    const subj = eventSubject(firstOutlook.title);
-    if (!subj) return;
-    const t = setTimeout(() => {
+    if (!warmKeys) return;
+    const timers = warmKeys.split('~~').map((k, i) => setTimeout(() => {
+      const [title, date, region] = k.split('|');
+      const subj = eventSubject(title);
+      if (!subj) return;
       fetch('/api/event-outlook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: firstOutlook.title, date: firstOutlook.date,
-          region: firstOutlook.region, kind: subj.kind,
-        }),
+        body: JSON.stringify({ title, date, region: region || undefined, kind: subj.kind }),
       }).catch(() => {});
-    }, 1500); // after the page has settled; this is the least urgent thing on it
-    return () => clearTimeout(t);
-  }, [firstOutlook?.title, firstOutlook?.date]);
+    }, 1500 + i * 700));
+    return () => timers.forEach(clearTimeout);
+  }, [warmKeys]);
 
   if (!now) return null;
 

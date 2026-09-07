@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { unstable_cache } from 'next/cache';
 import type { EventKind } from '@/lib/eventIndicator';
 
 export const runtime = 'nodejs';
@@ -48,11 +49,22 @@ interface Body {
   kind: EventKind;
 }
 
-interface Entry { body: unknown; ts: number }
-const cache = new Map<string, Entry>();
-// Consensus moves as the date approaches, so this is short. It exists to stop re-opening
-// a card from costing another search, not to hold a number still.
-const TTL = 30 * 60_000;
+// ── Why the answer is cached where it is ─────────────────────────────────────
+//
+// A grounded call runs several web searches and then writes; ten to twenty seconds is
+// what that costs and no prompt makes it two. So the only thing worth optimising is how
+// often anyone WAITS for it.
+//
+// This used to be a Map in module scope. That is a cache per serverless instance, and
+// instances are ephemeral and per-region: the rail could warm one instance and the
+// reader's tap land on another, which is why it stayed slow after the first fix — the
+// warm-up was working and being thrown away.
+//
+// unstable_cache writes to the deployment's shared data cache instead, so the first
+// person to open a card pays for it and everyone after that, on any instance, does not.
+// Thirty minutes: consensus drifts as the date approaches, and the point is to stop a
+// re-open from costing another search, not to hold a number still.
+const TTL_SECONDS = 30 * 60;
 
 export async function POST(req: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -66,10 +78,29 @@ export async function POST(req: Request) {
   const { title, date, region, kind } = await req.json() as Body;
   if (!title || !date) return NextResponse.json({ error: 'bad_request' }, { status: 200 });
 
-  const key = `${title}:${date}`;
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.ts < TTL) return NextResponse.json(hit.body);
+  // Only a good answer is worth keeping. A failed search or an unreachable model is a
+  // transient state, and caching it for half an hour would hold the panel empty long
+  // after the cause had cleared — so those paths THROW, which unstable_cache does not
+  // store, and are turned back into a response out here.
+  try {
+    const body = await unstable_cache(
+      () => fetchOutlook(title, date, region, kind),
+      ['event-outlook', title, date, kind],
+      { revalidate: TTL_SECONDS },
+    )();
+    return NextResponse.json(body);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'fetch_failed';
+    try { return NextResponse.json(JSON.parse(msg)); } catch { /* not a payload */ }
+    return NextResponse.json({ error: 'fetch_failed' }, { status: 200 });
+  }
+}
 
+/** Throws a JSON string for anything not worth caching; returns the body otherwise. */
+async function fetchOutlook(
+  title: string, date: string, region: string | undefined, kind: EventKind,
+) {
+  const apiKey = process.env.GEMINI_API_KEY!;
   const day = date.slice(0, 10);
   const isRate = kind === 'rate';
 
@@ -133,8 +164,7 @@ export async function POST(req: Request) {
     });
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
-      return NextResponse.json(
-        { error: 'upstream', status: r.status, message: txt.slice(0, 400) }, { status: 200 });
+      throw new Error(JSON.stringify({ error: 'upstream', status: r.status, message: txt.slice(0, 400) }));
     }
 
     const json = await r.json() as {
@@ -154,12 +184,12 @@ export async function POST(req: Request) {
     const grounded = queries.length > 0 || chunks.length > 0;
 
     if (!grounded) {
-      return NextResponse.json({
+      throw new Error(JSON.stringify({
         grounded: false, queries: [], sources: [],
         reason: cand?.finishReason === 'MAX_TOKENS'
           ? 'The grounded run ran out of output budget before answering.'
           : 'The web-search tool did not run for this request.',
-      });
+      }));
     }
 
     const text = (cand?.content?.parts ?? []).map(p => p.text ?? '').join('').trim();
@@ -197,11 +227,11 @@ export async function POST(req: Request) {
       queries,
       sources: chunks.map(c => ({ uri: c.web?.uri ?? '', title: c.web?.title ?? '' })).filter(s => s.uri),
     };
-    cache.set(key, { body, ts: Date.now() });
-    return NextResponse.json(body);
+    return body;
   } catch (e) {
+    if (e instanceof Error && e.message.startsWith('{')) throw e; // already a payload
     const aborted = e instanceof Error && e.name === 'AbortError';
-    return NextResponse.json({ error: aborted ? 'timeout' : 'fetch_failed' }, { status: 200 });
+    throw new Error(JSON.stringify({ error: aborted ? 'timeout' : 'fetch_failed' }));
   } finally {
     clearTimeout(timer);
   }

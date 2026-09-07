@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { unstable_cache } from 'next/cache';
 import { identityHint } from '@/lib/recapIdentity';
 
 export const runtime = 'nodejs';
@@ -51,12 +52,14 @@ function monthBounds(ym: string): { from: string; to: string } {
 
 // A finished month never changes, so it is cached hard. The current one is still being
 // written, so it is cached only long enough to stop a panel re-open from costing another
-// search — a recap that refuses to update while the month is live would be worse than
-// slow.
-interface Entry { body: unknown; ts: number }
-const cache = new Map<string, Entry>();
-const TTL_PAST = 30 * 24 * 60 * 60_000;
-const TTL_CURRENT = 60 * 60_000;
+// search — a recap that refuses to update while the month is live would be worse than slow.
+//
+// In the deployment's SHARED data cache, not a Map in module scope: serverless instances
+// are ephemeral and per-region, so a per-instance cache is thrown away constantly and the
+// second reader of a finished month pays the full search again for an answer that can
+// never change.
+const TTL_PAST_S = 30 * 24 * 60 * 60;
+const TTL_CURRENT_S = 60 * 60;
 
 export async function POST(req: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -74,12 +77,28 @@ export async function POST(req: Request) {
   const ym = /^\d{4}-\d{2}$/.test(month ?? '') ? month! : nowYm;
   const isCurrent = ym >= nowYm;
 
-  const key = `${symbol}:${ym}`;
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.ts < (isCurrent ? TTL_CURRENT : TTL_PAST)) {
-    return NextResponse.json(hit.body);
+  // As in /api/event-outlook: only a good answer is cached. A failed search throws, which
+  // unstable_cache does not store, so an empty panel cannot outlive its cause.
+  try {
+    const body = await unstable_cache(
+      () => fetchRecap(symbol, name, assetClass, ym, isCurrent),
+      ['monthly-recap', symbol, ym],
+      { revalidate: isCurrent ? TTL_CURRENT_S : TTL_PAST_S },
+    )();
+    return NextResponse.json(body);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '';
+    try { return NextResponse.json(JSON.parse(msg)); } catch { /* not a payload */ }
+    return NextResponse.json({ error: 'fetch_failed' }, { status: 200 });
   }
+}
 
+/** Throws a JSON string for anything not worth caching; returns the body otherwise. */
+async function fetchRecap(
+  symbol: string, name: string, assetClass: string | undefined,
+  ym: string, isCurrent: boolean,
+) {
+  const apiKey = process.env.GEMINI_API_KEY!;
   const { from, to } = monthBounds(ym);
   const window = isCurrent
     ? `${monthLabel(ym)}, from ${from} up to today`
@@ -138,8 +157,7 @@ export async function POST(req: Request) {
 
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
-      return NextResponse.json(
-        { error: 'upstream', status: r.status, message: txt.slice(0, 400) }, { status: 200 });
+      throw new Error(JSON.stringify({ error: 'upstream', status: r.status, message: txt.slice(0, 400) }));
     }
 
     const json = await r.json() as {
@@ -162,15 +180,14 @@ export async function POST(req: Request) {
     const grounded = queries.length > 0 || chunks.length > 0;
 
     if (!grounded) {
-      const body = {
+      // Thrown, not returned: a failed search is transient, and caching it would keep the
+      // panel empty long after the cause had cleared.
+      throw new Error(JSON.stringify({
         month: ym, grounded: false, items: [], sources: [],
         reason: cand?.finishReason === 'MAX_TOKENS'
           ? 'The grounded run ran out of output budget before answering.'
           : 'The web-search tool did not run for this request.',
-      };
-      // Not cached: a failed search is a transient state, and caching it would keep the
-      // panel empty for an hour after the cause had cleared.
-      return NextResponse.json(body);
+      }));
     }
 
     const text = (cand?.content?.parts ?? []).map(p => p.text ?? '').join('').trim();
@@ -205,11 +222,11 @@ export async function POST(req: Request) {
       // is a different statement from an empty finished month, and the panel says which.
       partial: isCurrent, daysElapsed: isCurrent ? new Date().getUTCDate() : null,
     };
-    cache.set(key, { body, ts: Date.now() });
-    return NextResponse.json(body);
+    return body;
   } catch (e) {
+    if (e instanceof Error && e.message.startsWith('{')) throw e; // already a payload
     const aborted = e instanceof Error && e.name === 'AbortError';
-    return NextResponse.json({ error: aborted ? 'timeout' : 'fetch_failed' }, { status: 200 });
+    throw new Error(JSON.stringify({ error: aborted ? 'timeout' : 'fetch_failed' }));
   } finally {
     clearTimeout(timer);
   }
