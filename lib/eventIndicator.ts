@@ -14,13 +14,23 @@
 // search, are labelled as such, carry their sources, and are simply absent when the
 // search does not produce them.
 
+/**
+ * Both kinds can have market-implied odds. They differ in WHERE those odds come from, and
+ * therefore in how much weight the number carries — which is worth showing, not hiding.
+ *
+ * This started out as "rates have odds, statistics do not", which is wrong. It is true
+ * that no deep futures market trades on the value of a CPI print the way fed funds
+ * futures trade on a rate decision. But regulated event contracts (Kalshi, Polymarket)
+ * list monthly CPI and payrolls outcomes, and CPI fixing swaps price the print directly —
+ * those are real traded markets on a statistic's value, just thinner and less canonical
+ * than the rates curve. Refusing to show them was not caution, it was an over-broad claim
+ * dressed as caution.
+ */
 export type EventKind =
-  /** A committee sets a number. There IS a market-implied probability for each outcome,
-   *  because rate futures trade on it. */
+  /** A committee sets a number. Odds come from the rates curve — deep and canonical. */
   | 'rate'
-  /** A statistic is published. There is a consensus forecast and a distribution of
-   *  economists' estimates — but no "probability", and calling one a probability would be
-   *  inventing a precision the number does not have. */
+  /** A statistic is published. Odds, where they exist, come from event contracts or
+   *  fixing swaps: real, but thinner, so the market is named beside them. */
   | 'data';
 
 export interface EventSubject {

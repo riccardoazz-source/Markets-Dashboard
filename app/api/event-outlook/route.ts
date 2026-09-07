@@ -19,12 +19,22 @@ export const maxDuration = 60;
 //    reported in the press ahead of the release, which is what a grounded search finds.
 //    So it comes with its source and it is absent when the search does not find it.
 //
-// 3. A PROBABILITY only genuinely exists for a RATE DECISION. Rate futures trade on the
-//    outcome, so "82% priced for a hold" is a real market-implied number, published by
-//    the CME as FedWatch. For a data release there is no such thing: there is a consensus
-//    and a spread of economists' estimates, and calling that a probability would invent a
-//    precision the number does not have. This route therefore asks for probabilities ONLY
-//    on rate decisions, and the model is told why.
+// 3. A PROBABILITY has to come from a market that trades the outcome, and the market
+//    must be NAMED, because the two available are not equally solid.
+//
+//    For a rate decision it is the rates curve: fed funds futures, published by the CME
+//    as FedWatch. Deep, canonical, quoted everywhere.
+//
+//    For a data release it is event contracts (Kalshi, Polymarket) or CPI fixing swaps.
+//    This route used to refuse those outright, on the reasoning that "a statistic has no
+//    traded market on its value". That was wrong — regulated event contracts list monthly
+//    CPI and payrolls outcomes, and fixing swaps price the print directly. They are
+//    thinner and less canonical than the rates curve, which is a reason to name the
+//    market beside the number, not a reason to withhold it.
+//
+//    What is still refused is a probability with no market behind it: a consensus and a
+//    spread of economists' estimates converted into a percentage is a precision nobody
+//    measured, whatever the event.
 //
 // Grounding is the precondition, as in the monthly recap: a forecast recalled from
 // training is a number with a date attached and nothing behind it, which is worse than
@@ -73,23 +83,31 @@ export async function POST(req: Request) {
     '2. `consensus` is the median forecast reported ahead of the release, `previous` the ' +
     'last published reading. Include the unit exactly as the press writes it ("3.1%", ' +
     '"165K", "4.00%").\n' +
+    '3. `probabilities` must come from a market that TRADES the outcome, and you must name ' +
+    'that market in `oddsMarket`. ' +
     (isRate
-      ? '3. This is a RATE DECISION, so market-implied probabilities exist — rate futures ' +
-        'trade on the outcome and the CME publishes them as FedWatch. Give the current ' +
-        'probabilities per outcome, as read, and they should sum to about 100.\n'
-      : '3. This is a DATA RELEASE. There is NO probability for it — only a consensus and ' +
-        'a spread of estimates. Leave `probabilities` empty. Do not convert a forecast ' +
-        'range into a probability; that would invent a precision the number lacks.\n') +
-    '4. `asOf` is the date the figures you read were quoted, ISO YYYY-MM-DD.\n\n' +
+      ? 'For a rate decision that is the rates curve — fed funds or equivalent futures, ' +
+        'published by the CME as FedWatch. Give the current probability per outcome; they ' +
+        'should sum to about 100.\n'
+      : 'For a data release that is an event-contract venue (Kalshi, Polymarket) or a CPI ' +
+        'fixing swap. These exist and are quoted; use them if your search finds them.\n') +
+    '4. NEVER convert a consensus or a range of economists\' estimates into a percentage. ' +
+    'A forecast spread is not a probability, and presenting it as one invents a precision ' +
+    'nobody measured. If no traded market is quoted, leave `probabilities` empty and ' +
+    '`oddsMarket` null — that is a correct answer, not a failure.\n' +
+    '5. `asOf` is the date the figures you read were quoted, ISO YYYY-MM-DD.\n\n' +
     'Reply with JSON ONLY, no prose and no code fence:\n' +
-    '{"previous":"…|null","consensus":"…|null","asOf":"YYYY-MM-DD|null",' +
+    '{"previous":"…|null","consensus":"…|null","asOf":"YYYY-MM-DD|null","oddsMarket":"…|null",' +
     '"probabilities":[{"outcome":"hold at 3.50%","pct":82}],"note":"one short sentence or null"}';
 
   const prompt =
     `Event: ${title}\n` +
     `Scheduled: ${day}${region ? ` — ${region}` : ''}\n\n` +
-    `Search the web for the latest consensus forecast for this release` +
-    (isRate ? ', and the current market-implied probabilities for each outcome' : '') +
+    `Search the web for the latest consensus forecast for this release, and for any ` +
+    (isRate
+      ? `market-implied probabilities from the rates curve (CME FedWatch or equivalent)`
+      : `traded odds on the outcome from an event-contract venue such as Kalshi or ` +
+        `Polymarket, or a CPI fixing swap`) +
     `. Then return the JSON described in your instructions.`;
 
   const MODEL = 'gemini-2.5-flash';
@@ -106,7 +124,11 @@ export async function POST(req: Request) {
         systemInstruction: { parts: [{ text: systemInstruction }] },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         tools: [{ googleSearch: {} }],
-        generationConfig: { maxOutputTokens: 8192, temperature: 0.1 },
+        // Grounding spends thinking tokens from THIS budget before a word is written, and
+        // a run that dies at MAX_TOKENS makes the reader wait and then ask again — the
+        // slowest path of all. Only generated tokens are billed, so a high ceiling costs
+        // nothing when it is not reached. Same reasoning as the sentiment brief.
+        generationConfig: { maxOutputTokens: 24000, temperature: 0.1 },
       }),
     });
     if (!r.ok) {
@@ -143,31 +165,34 @@ export async function POST(req: Request) {
     const text = (cand?.content?.parts ?? []).map(p => p.text ?? '').join('').trim();
     let parsed: {
       previous?: string | null; consensus?: string | null; asOf?: string | null;
-      probabilities?: { outcome?: string; pct?: number }[]; note?: string | null;
+      probabilities?: { outcome?: string; pct?: number }[];
+      oddsMarket?: string | null; note?: string | null;
     } = {};
     try {
       const m = text.match(/\{[\s\S]*\}/);
       if (m) parsed = JSON.parse(m[0]);
     } catch { /* an unparseable answer is an answer with no figures */ }
 
-    const str = (v: unknown) =>
-      typeof v === 'string' && v.trim() && v.trim().toLowerCase() !== 'null' ? v.trim().slice(0, 40) : null;
+    const str = (v: unknown, max = 40) =>
+      typeof v === 'string' && v.trim() && v.trim().toLowerCase() !== 'null' ? v.trim().slice(0, max) : null;
 
-    // Probabilities are dropped outright for a data release even if the model produced
-    // them anyway. The instruction not to invent one is a request; this is the guarantee.
-    const probabilities = isRate
-      ? (parsed.probabilities ?? [])
-          .filter(p => p && typeof p.outcome === 'string' && typeof p.pct === 'number' && isFinite(p.pct))
-          .map(p => ({ outcome: String(p.outcome).slice(0, 60), pct: Math.max(0, Math.min(100, p.pct!)) }))
-          .slice(0, 6)
-      : [];
+    const probabilities = (parsed.probabilities ?? [])
+      .filter(p => p && typeof p.outcome === 'string' && typeof p.pct === 'number' && isFinite(p.pct))
+      .map(p => ({ outcome: String(p.outcome).slice(0, 60), pct: Math.max(0, Math.min(100, p.pct!)) }))
+      .slice(0, 6);
+    // A probability with no market named behind it is exactly the thing being guarded
+    // against — a consensus quietly rendered as odds. The instruction is a request; this
+    // is the guarantee, so odds without a venue are dropped whatever the event kind.
+    const oddsMarket = str(parsed.oddsMarket, 80);
+    const odds = oddsMarket ? probabilities : [];
 
     const body = {
       grounded: true,
       previous: str(parsed.previous),
       consensus: str(parsed.consensus),
       asOf: str(parsed.asOf),
-      probabilities,
+      probabilities: odds,
+      oddsMarket: odds.length > 0 ? oddsMarket : null,
       note: typeof parsed.note === 'string' ? parsed.note.slice(0, 240) : null,
       queries,
       sources: chunks.map(c => ({ uri: c.web?.uri ?? '', title: c.web?.title ?? '' })).filter(s => s.uri),

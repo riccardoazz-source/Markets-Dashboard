@@ -198,6 +198,28 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
     return { label: subj.currentLabel, value: formatMacroValue(hit.value, unit), asOf: hit.date };
   };
 
+  // The nearest event is the one most likely to be opened, and its answer costs a web
+  // search. Warming exactly ONE — not the six on screen — makes the common tap feel
+  // instant without turning a glance at the Dashboard into six searches. The result lands
+  // in the route's own cache; nothing here reads it.
+  const firstOutlook = shown.find(e => eventSubject(e.title));
+  useEffect(() => {
+    if (!firstOutlook) return;
+    const subj = eventSubject(firstOutlook.title);
+    if (!subj) return;
+    const t = setTimeout(() => {
+      fetch('/api/event-outlook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: firstOutlook.title, date: firstOutlook.date,
+          region: firstOutlook.region, kind: subj.kind,
+        }),
+      }).catch(() => {});
+    }, 1500); // after the page has settled; this is the least urgent thing on it
+    return () => clearTimeout(t);
+  }, [firstOutlook?.title, firstOutlook?.date]);
+
   if (!now) return null;
 
   return (

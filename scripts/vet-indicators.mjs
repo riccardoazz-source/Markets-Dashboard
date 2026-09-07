@@ -884,6 +884,9 @@ ok('the URL carries the encoded symbol',
   ok('the PCE card points at core PCE, not the CPI',
      EI.eventSubject('US Core PCE Inflation (Personal Income & Outlays)').indicatorId === 'CORE_PCE_YOY');
   // Rate vs data is the whole point.
+  // Both kinds can carry odds now — they differ in WHERE those odds trade, which is why
+  // the market is named beside them. The earlier rule ("statistics have no odds") was an
+  // over-broad claim: event contracts list CPI and payrolls outcomes.
   ok('a central-bank meeting is a rate decision',
      ['FOMC Rate Decision', 'ECB Monetary Policy Decision', 'Bank of England Rate Decision',
       'Bank of Japan Monetary Policy Decision'].every(t => EI.eventSubject(t).kind === 'rate'));

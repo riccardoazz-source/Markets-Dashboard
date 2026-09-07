@@ -13,13 +13,14 @@ import type { EventSubject } from '@/lib/eventIndicator';
 //
 //   NOW        our own series, exact, from the same fetch the Macro tab uses
 //   CONSENSUS  what the press reports forecasters expect — searched, sourced, often absent
-//   ODDS       market-implied, and ONLY for a rate decision, because only there does a
-//              traded market put a price on the outcome
+//   ODDS       market-implied — from the rates curve for a decision, from event contracts
+//              or fixing swaps for a statistic — and always with the market NAMED
 //
-// A data release gets no odds. Not because they are hard to find, but because they do not
-// exist: there is a consensus and a spread of estimates, and rendering that as "72%
-// likely" would be a precision nobody measured. The panel says so on the card rather than
-// leaving a blank the reader fills in themselves.
+// The market is named because the two are not equally solid: fed funds futures are deep
+// and canonical, Kalshi and Polymarket are real but thinner. Both are traded prices on an
+// outcome, which is what makes them probabilities. What never appears is a consensus
+// quietly rendered as a percentage — a forecast spread is not a probability, and the
+// route drops any odds that arrive without a market behind them.
 
 interface Outlook {
   grounded?: boolean;
@@ -27,6 +28,8 @@ interface Outlook {
   consensus?: string | null;
   asOf?: string | null;
   probabilities?: { outcome: string; pct: number }[];
+  /** Where the odds are traded. Odds never appear without it. */
+  oddsMarket?: string | null;
   note?: string | null;
   queries?: string[];
   sources?: { uri: string; title: string }[];
@@ -101,11 +104,10 @@ export function EventOutlookPanel({ title, date, region, subject, current, onClo
             body={`${data?.reason ?? 'The search tool did not run.'} A consensus recalled from memory is a number with a date on it and nothing behind it, so nothing is shown.`} />
         ) : (
           <>
-            {subject.kind === 'rate' ? (
-              probs.length > 0 ? (
-                <div className="space-y-1.5">
+            {probs.length > 0 ? (
+              <div className="space-y-1.5">
                   <p className="text-[10px] uppercase tracking-wider text-gray-500">
-                    Market-implied odds
+                    Market-implied odds · <span className="text-gray-400 normal-case tracking-normal">{data.oddsMarket}</span>
                   </p>
                   {probs.map((p, i) => (
                     <div key={i} className="space-y-0.5">
@@ -119,18 +121,15 @@ export function EventOutlookPanel({ title, date, region, subject, current, onClo
                     </div>
                   ))}
                   <p className="text-[10px] text-gray-600 leading-snug">
-                    Priced by rate futures, not a view. It is what the market is paying for
-                    each outcome right now, and it moves.
+                    A traded price, not a view: what that market is paying for each outcome
+                    right now. It moves, and it can be wrong.
                   </p>
-                </div>
-              ) : (
-                <Notice title="No odds found"
-                  body="The search did not return market-implied probabilities for this decision. They exist for rate meetings, but not every one is quoted in reachable sources." />
-              )
+              </div>
             ) : (
-              // The honest half of the answer, stated rather than left as an empty row.
-              <Notice title="No probability for a data release"
-                body="Rate decisions have market-implied odds because rate futures trade on the outcome. A statistic has no traded market on its value — only a consensus and a spread of estimates — so a percentage here would be a precision nobody measured." />
+              <Notice title="No traded odds found"
+                body={subject.kind === 'rate'
+                  ? 'The search did not return market-implied probabilities for this decision. They are usually quoted for rate meetings, but not every one reaches a reachable source.'
+                  : 'The search found no traded odds for this release. Event venues such as Kalshi and Polymarket do list CPI and payrolls outcomes, so they exist — they are just not always quoted where a search can read them. A consensus is NOT shown as odds: a forecast spread is not a probability.'} />
             )}
 
             {data.note && <p className="text-[11px] text-gray-500 leading-snug">{data.note}</p>}
