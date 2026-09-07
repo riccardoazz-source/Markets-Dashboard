@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -866,6 +866,52 @@ ok('the URL carries the encoded symbol',
   // A snapshot that never had history must not acquire an empty array: `undefined` and
   // `[]` look the same on screen and different to the next merge.
   ok('no empty history is invented', G.mergeSnapshots({ pins: ['A'] }, { pins: ['A'] }).sentiments === undefined);
+}
+
+// ── What a calendar event is about, and what may be claimed about it ─────────
+// The distinction that matters: a RATE decision has market-implied odds because rate
+// futures trade on the outcome; a DATA release has a consensus and a spread of estimates
+// and NO probability. Rendering the second as a percentage would be a precision nobody
+// measured, so the kind is what the outlook route keys off.
+{
+  const EI = await import(join(out, 'eventIndicator.js'));
+  const CF = await import(join(out, 'config.js'));
+
+  ok('the FOMC card knows it is about the Fed target',
+     EI.eventSubject('FOMC Rate Decision & Press Conference').indicatorId === 'DFEDTARU');
+  ok('the CPI card knows it is about the CPI rate',
+     EI.eventSubject('US CPI Inflation Report').indicatorId === 'CPI_YOY');
+  ok('the PCE card points at core PCE, not the CPI',
+     EI.eventSubject('US Core PCE Inflation (Personal Income & Outlays)').indicatorId === 'CORE_PCE_YOY');
+  // Rate vs data is the whole point.
+  ok('a central-bank meeting is a rate decision',
+     ['FOMC Rate Decision', 'ECB Monetary Policy Decision', 'Bank of England Rate Decision',
+      'Bank of Japan Monetary Policy Decision'].every(t => EI.eventSubject(t).kind === 'rate'));
+  ok('…and a statistic is a data release, which has no odds',
+     ['US CPI Inflation Report', 'US Non-Farm Payrolls (Jobs Report)',
+      'US Core PCE Inflation (Personal Income & Outlays)'].every(t => EI.eventSubject(t).kind === 'data'));
+  // Nothing may be claimed about an event with no subject — a summit, or something the
+  // user typed themselves.
+  ok('a summit has no subject, so no forecast is offered',
+     EI.eventSubject("G20 Leaders' Summit (Miami)") === null);
+  ok('a personal entry has none either', EI.eventSubject('Dentist') === null);
+
+  // Every id it points at must be a real indicator, or the card asks the macro endpoint
+  // for a series that does not exist and silently shows nothing.
+  const ids = new Set(CF.MACRO_INDICATORS.map(m => m.id));
+  const bad = ['FOMC Rate Decision', 'ECB Monetary Policy Decision', 'Bank of Japan Monetary Policy Decision',
+    'US CPI Inflation Report', 'US Core PCE Inflation (x)', 'US Non-Farm Payrolls (x)']
+    .map(t => EI.eventSubject(t)).filter(s => s && s.indicatorId && !ids.has(s.indicatorId));
+  ok('every subject points at a declared indicator', bad.length === 0,
+     bad.map(s => s.indicatorId).join(', '));
+
+  // The rail fetches once for all its cards; the ids must be de-duplicated or a month
+  // with three CPI-adjacent events asks for the same series three times.
+  const idsFor = EI.subjectIndicatorIds([
+    'US CPI Inflation Report', 'US CPI Inflation Report', 'FOMC Rate Decision', "G20 Leaders' Summit"]);
+  ok('the rail asks for each series once', idsFor.length === 2 && idsFor.includes('CPI_YOY'));
+  ok('…and does not ask for the ones it has no series for',
+     EI.subjectIndicatorIds(['Bank of England Rate Decision']).length === 0);
 }
 
 // ── Telling the recap what it is looking for ─────────────────────────────────

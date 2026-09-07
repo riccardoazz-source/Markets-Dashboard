@@ -25,10 +25,19 @@ import {
 } from '@/lib/eventCalendar';
 import { BUNDLED_EVENTS } from '@/lib/eventCalendarData';
 import { useCalendarEvents } from '@/lib/gist';
+import { eventSubject, subjectIndicatorIds } from '@/lib/eventIndicator';
+import { EventOutlookPanel } from '@/components/ui/EventOutlookPanel';
+import { MACRO_INDICATORS } from '@/lib/config';
+import { formatMacroValue } from '@/lib/macroDerived';
 
 const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-function EventCard({ e, now, onDelete }: { e: CalendarEvent; now: Date; onDelete?: () => void }) {
+function EventCard({ e, now, onDelete, current, onOpen }: {
+  e: CalendarEvent; now: Date; onDelete?: () => void;
+  /** Today's reading of the series this event concerns, already formatted. */
+  current?: { label: string; value: string } | null;
+  onOpen?: () => void;
+}) {
   const color = CALENDAR_COLORS[e.category];
   const d = new Date(e.date);
   const time = e.timeKnown
@@ -53,6 +62,14 @@ function EventCard({ e, now, onDelete }: { e: CalendarEvent; now: Date; onDelete
         <p className="text-[11px] font-bold text-gray-300 tabular-nums uppercase tracking-wide">{day}</p>
         <p className="text-xs font-semibold text-gray-100 leading-snug line-clamp-2">{e.title}</p>
         {e.description && <p className="text-[10px] text-gray-600 leading-snug line-clamp-2">{e.description}</p>}
+        {/* The one figure on this card that needs no qualification: it is our own series,
+            the same one the Macro tab charts. The forecast lives behind the tap, because
+            it costs a web search and is not always found. */}
+        {current && (
+          <p className="text-[10px] text-gray-500 leading-none">
+            {current.label}: <span className="text-gray-200 font-semibold tabular-nums">{current.value}</span>
+          </p>
+        )}
         <div className="flex items-center gap-1.5 flex-wrap text-[9px] pt-0.5">
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 text-gray-300 tabular-nums">
             <Clock size={9} />{time ?? 'All day'}
@@ -63,6 +80,12 @@ function EventCard({ e, now, onDelete }: { e: CalendarEvent; now: Date; onDelete
           )}
           {e.source && <span className="ml-auto text-gray-700 truncate max-w-[80px]">{e.source}</span>}
         </div>
+        {onOpen && (
+          <button onClick={onOpen}
+            className="w-full mt-0.5 px-1.5 py-1 rounded border border-border text-[10px] text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors">
+            Forecast &amp; odds
+          </button>
+        )}
       </div>
       {onDelete && (
         <button onClick={onDelete} title="Remove this event"
@@ -125,6 +148,8 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
   const [now, setNow] = useState<Date | null>(null);
   const [adding, setAdding] = useState(false);
   const { events: personal, addEvent, removeEvent } = useCalendarEvents();
+  const [latest, setLatest] = useState<Record<string, { value: number; date: string }>>({});
+  const [outlook, setOutlook] = useState<CalendarEvent | null>(null);
 
   useEffect(() => {
     setNow(new Date());
@@ -142,6 +167,36 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
     }));
     return upcomingEvents([...BUNDLED_EVENTS, ...mine], now, months);
   }, [now, months, personal]);
+
+  // One request for the whole rail: every series the visible events concern, from the
+  // endpoint the Macro tab already uses. Cheap and exact — the alternative was leaving the
+  // reader to remember what the rate currently is while reading that it is being decided.
+  const wantedIds = useMemo(() => subjectIndicatorIds(shown.map(e => e.title)).join(','), [shown]);
+  useEffect(() => {
+    if (!wantedIds) { setLatest({}); return; }
+    let cancelled = false;
+    fetch(`/api/macro?mode=list&ids=${wantedIds}`)
+      .then(r => r.json())
+      .then((rows: { id: string; latest: { date: string; value: number } | null }[]) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        const next: Record<string, { value: number; date: string }> = {};
+        for (const r of rows) if (r.latest) next[r.id] = { value: r.latest.value, date: r.latest.date };
+        setLatest(next);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [wantedIds]);
+
+  // The formatted "current" for one card, or null when this app carries no series for it
+  // (the Bank of England is the live example) or the fetch has not landed.
+  const currentFor = (title: string) => {
+    const subj = eventSubject(title);
+    if (!subj?.indicatorId) return null;
+    const hit = latest[subj.indicatorId];
+    if (!hit) return null;
+    const unit = MACRO_INDICATORS.find(m => m.id === subj.indicatorId)?.unit ?? 'idx';
+    return { label: subj.currentLabel, value: formatMacroValue(hit.value, unit), asOf: hit.date };
+  };
 
   if (!now) return null;
 
@@ -164,12 +219,31 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
         {adding && <AddCard onAdd={e => { addEvent({ ...e }); setAdding(false); }} onCancel={() => setAdding(false)} />}
         {shown.map(e => (
           <EventCard key={e.id} e={e} now={now}
+            current={currentFor(e.title)}
+            // Only the events this app knows the subject of get the affordance. A summit
+            // or a personal reminder has no consensus to look up, and offering the button
+            // anyway would promise an answer that cannot exist.
+            onOpen={eventSubject(e.title) ? () => setOutlook(e) : undefined}
             onDelete={e.category === 'personal' ? () => removeEvent(e.id) : undefined} />
         ))}
         {!shown.length && !adding && (
           <p className="text-[11px] text-gray-600 py-3">Nothing scheduled in the next {months} months.</p>
         )}
       </div>
+
+      {outlook && eventSubject(outlook.title) && (
+        <EventOutlookPanel
+          title={outlook.title}
+          date={outlook.date}
+          region={outlook.region}
+          subject={eventSubject(outlook.title)!}
+          current={(() => {
+            const c = currentFor(outlook.title);
+            return c ? { value: c.value, asOf: c.asOf } : null;
+          })()}
+          onClose={() => setOutlook(null)}
+        />
+      )}
     </div>
   );
 }
