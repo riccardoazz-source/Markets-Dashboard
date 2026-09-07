@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -848,6 +848,24 @@ ok('the URL carries the encoded symbol',
   // A snapshot that never had history must not acquire an empty array: `undefined` and
   // `[]` look the same on screen and different to the next merge.
   ok('no empty history is invented', G.mergeSnapshots({ pins: ['A'] }, { pins: ['A'] }).sentiments === undefined);
+}
+
+// ── Telling the recap what it is looking for ─────────────────────────────────
+// Searching the raw ticker is why a recap comes back empty on an asset that had a loud
+// month: no newspaper has ever printed "MIGA.MU", every story is filed under MSTR.
+{
+  const R = await import(join(out, 'recapIdentity.js'));
+  const kind = (sym) => R.identityHint(sym);
+  ok('a foreign line is named as a secondary listing', /SECONDARY/.test(kind('MIGA.MU')));
+  ok('…and so is a London one', /SECONDARY/.test(kind('EIMI.L')));
+  ok('an index is not treated as a company', /INDEX/.test(kind('^GSPC')));
+  ok('a futures ticker points at the commodity', /FUTURES/.test(kind('GC=F')));
+  ok('an FX pair is a pair, not an issuer', /FX PAIR/.test(kind('EURUSD=X')));
+  ok('crypto is crypto', /CRYPTOCURRENCY/.test(kind('BTC-USD')));
+  // The two that would misfire if the rules were sloppy: a hyphen ticker must not fall
+  // into the dot branch, and a plain US ticker must stay a plain company.
+  ok('a hyphenated crypto is not read as an exchange suffix', !/SECONDARY/.test(kind('BTC-USD')));
+  ok('a plain ticker is a listed company', /listed company/.test(kind('MU')));
 }
 
 // ── The outbox: a write that fails must not be forgotten ─────────────────────

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { identityHint } from '@/lib/recapIdentity';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -107,10 +108,12 @@ export async function POST(req: Request) {
     '{"items":[{"date":"YYYY-MM-DD","headline":"...","detail":"...","impact":"up|down|neutral"}]}';
 
   const prompt =
-    `Asset: ${name} (${symbol})${assetClass ? ` — ${assetClass}` : ''}\n` +
+    `Asset: ${name}\n` +
+    `Our ticker for it: ${symbol}${assetClass ? ` — ${assetClass}` : ''}\n` +
+    `${identityHint(symbol)}\n` +
     `Window: ${window}\n\n` +
-    `Search the web for what actually happened to this asset in that window, then return ` +
-    `the JSON described in your instructions.`;
+    `First work out WHAT INSTRUMENT this is and what the world calls it. Then search under ` +
+    `that name. Then return the JSON described in your instructions.`;
 
   const MODEL = 'gemini-2.5-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
@@ -196,7 +199,12 @@ export async function POST(req: Request) {
       .map(c => ({ uri: c.web?.uri ?? '', title: c.web?.title ?? '' }))
       .filter(s => s.uri);
 
-    const body = { month: ym, grounded: true, items, sources, queries };
+    const body = {
+      month: ym, grounded: true, items, sources, queries,
+      // How much of the window has actually happened. An empty current month on the 7th
+      // is a different statement from an empty finished month, and the panel says which.
+      partial: isCurrent, daysElapsed: isCurrent ? new Date().getUTCDate() : null,
+    };
     cache.set(key, { body, ts: Date.now() });
     return NextResponse.json(body);
   } catch (e) {

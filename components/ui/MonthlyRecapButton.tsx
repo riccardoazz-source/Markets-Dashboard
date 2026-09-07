@@ -28,6 +28,10 @@ interface Recap {
   grounded: boolean;
   items: RecapItem[];
   sources: { uri: string; title: string }[];
+  /** What the model actually typed into the search box. */
+  queries?: string[];
+  partial?: boolean;
+  daysElapsed?: number | null;
   reason?: string;
   error?: string;
   message?: string;
@@ -154,9 +158,28 @@ function RecapPanel({ symbol, name, assetClass, onClose }: {
             title="No live web search — nothing to report"
             body={`${data?.reason ?? 'The search tool did not run.'} A recap is reporting, so rather than write one from memory this shows nothing. Try again in a moment.`} />
         ) : empty ? (
-          <Notice
-            title={`Nothing notable found for ${label(month)}`}
-            body="The search returned no dated, specific events for this asset in that window. A quiet month is a real answer — this is not padded with filler." />
+          <div className="space-y-2">
+            <Notice
+              title={`Nothing notable found for ${label(month)}`}
+              body={data.partial
+                ? `Only ${data.daysElapsed} day${data.daysElapsed === 1 ? '' : 's'} of this month have happened so far, and the search found no dated, specific events for this asset in them. A quiet month is a real answer — this is not padded with filler.`
+                : 'The search returned no dated, specific events for this asset in that window. A quiet month is a real answer — this is not padded with filler.'} />
+            {/* What it actually looked for. An empty result is only trustworthy if you can
+                see the question that produced it — and on a secondary listing or an odd
+                ticker, the search terms are usually the thing that went wrong. */}
+            {data.queries && data.queries.length > 0 && (
+              <div className="px-1">
+                <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-1">It searched for</p>
+                <div className="flex flex-wrap gap-1">
+                  {data.queries.slice(0, 8).map((q, i) => (
+                    <span key={i} className="px-1.5 py-0.5 rounded border border-border text-[10px] text-gray-500">
+                      {q}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         ) : (
           <ul className="space-y-1.5">
             {data.items.map((it, i) => {
