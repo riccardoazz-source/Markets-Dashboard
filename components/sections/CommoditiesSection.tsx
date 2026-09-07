@@ -21,6 +21,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { MonthlyRecapButton } from '@/components/ui/MonthlyRecapButton';
 import { TradingViewButton } from '@/components/ui/TradingViewButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
@@ -308,6 +309,7 @@ export function CommoditiesSection({ jumpTo, onCompare }: { jumpTo?: string | nu
                 </button>
               )}
               <ReturnsTableButton name={selectedConfig?.name ?? selected!} symbol={selected!} />
+              <MonthlyRecapButton symbol={selected!} name={selectedConfig?.name ?? selected!} assetClass="Commodities" />
               <QuadrantButton name={selectedConfig?.name ?? selected!} symbol={selected!} group="Commodities" />
               <TradingViewButton symbol={selected!} name={selectedConfig?.name ?? selected!} group="Commodities" />
               <GeminiCommentButton

@@ -850,6 +850,26 @@ ok('the URL carries the encoded symbol',
   ok('no empty history is invented', G.mergeSnapshots({ pins: ['A'] }, { pins: ['A'] }).sentiments === undefined);
 }
 
+// ── The outbox: a write that fails must not be forgotten ─────────────────────
+// A dropped POST is invisible on the device that made it — the change is in that
+// browser's storage, so it keeps showing it and looks fine — while no other device ever
+// hears about it. Queued writes coalesce through the same merge as everything else, so
+// three offline edits cost one request.
+{
+  const G = await import(join(out, 'gistMerge.js'));
+  // Two different keys queued while offline must BOTH still be owed.
+  let q = G.mergePatch({}, { calendarEvents: [{ id: 'e1' }] });
+  q = G.mergePatch(q, { pins: ['AAPL'] });
+  ok('an offline queue keeps every key it was given',
+     q.calendarEvents?.[0]?.id === 'e1' && q.pins?.[0] === 'AAPL');
+  // The same key edited twice collapses to the LAST value, not to both.
+  q = G.mergePatch(q, { pins: ['AAPL', 'MSFT'] });
+  ok('…and the last value of a key wins', q.pins.length === 2 && q.pins[1] === 'MSFT');
+  // notes still merge rather than replace, even inside the queue.
+  q = G.mergePatch(G.mergePatch({}, { notes: { a: [1] } }), { notes: { b: [2] } });
+  ok('…while queued notes merge, so one chart does not wipe another', q.notes.a && q.notes.b);
+}
+
 // ── Derived inflation rates: config and the base-series map must agree ───────
 // A "(YoY)" indicator declared in config with no base registered here fetches cleanly and
 // returns an empty series — a blank card, no error, nothing in the logs. Both directions

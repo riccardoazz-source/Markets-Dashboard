@@ -131,6 +131,8 @@ export function rotationStockSymbols(data: GistData): string[] {
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error' | 'local-only';
 
 const LOCAL_KEY = 'markets-gist-cache';
+// Writes that have not reached the server yet, kept across reloads.
+const PENDING_KEY = 'markets-gist-pending';
 
 // Module-level cache so all components share one fetch
 let _cache: GistData | null = null;
@@ -157,6 +159,82 @@ function loadLocal(): GistData {
 function saveLocal(d: GistData) {
   if (typeof window === 'undefined') return;
   try { localStorage.setItem(LOCAL_KEY, JSON.stringify(d)); } catch {}
+}
+
+// ── Writes that have not landed yet ──────────────────────────────────────────
+//
+// The POST used to be fire-and-forget: on failure the status went to 'error' and the
+// change was never sent again. On a desk that is invisible, because the request
+// succeeds. On a phone on a weak signal it is the whole bug — the change is in that
+// phone's localStorage, so the phone keeps showing it and looks fine, while the server
+// never heard about it and no other device ever will. "I added it on the iPhone and the
+// PC doesn't see it" is exactly what a dropped write looks like from the outside.
+//
+// So an unsent write is KEPT, on disk, and retried on the next load or focus. Everything
+// queued collapses into one patch through the same merge the rest of the file uses, so
+// three offline edits cost one request and the last value of any key wins.
+let _pending: Partial<GistData> | null = null;
+
+function loadPending(): Partial<GistData> | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    return raw ? (JSON.parse(raw) as Partial<GistData>) : null;
+  } catch { return null; }
+}
+
+function savePending(p: Partial<GistData> | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (p) localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+    else localStorage.removeItem(PENDING_KEY);
+  } catch {}
+}
+
+/** Send whatever is still owed to the server. Safe to call at any time. */
+export async function flushPending(): Promise<boolean> {
+  if (_pending === null) _pending = loadPending();
+  const patch = _pending;
+  if (!patch || Object.keys(patch).length === 0) return true;
+  setSyncStatus('syncing');
+  try {
+    const resp = await fetch('/api/gist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).then(r => r.json()) as { ok?: boolean; cloud?: boolean };
+    if (!resp.cloud) {
+      // No cloud configured at all — this will never land, and keeping it queued
+      // forever would retry on every focus for nothing.
+      _pending = null; savePending(null);
+      setSyncStatus('local-only');
+      return false;
+    }
+    if (resp.ok) {
+      // Only what was actually sent is cleared: a write made WHILE this request was in
+      // flight is still owed, and dropping the queue wholesale would lose it.
+      _pending = subtractSent(_pending, patch);
+      savePending(_pending);
+      setSyncStatus('synced');
+      return true;
+    }
+    setSyncStatus('error');
+    return false;
+  } catch {
+    setSyncStatus('error');
+    return false;
+  }
+}
+
+/** What is still owed after `sent` went out: keys the queue has re-modified since. */
+function subtractSent(
+  queue: Partial<GistData> | null, sent: Partial<GistData>,
+): Partial<GistData> | null {
+  if (!queue) return null;
+  const left = Object.fromEntries(
+    Object.entries(queue).filter(([k, v]) => v !== (sent as Record<string, unknown>)[k]),
+  ) as Partial<GistData>;
+  return Object.keys(left).length > 0 ? left : null;
 }
 
 export function todayStr(): string {
@@ -217,7 +295,12 @@ async function fetchAndMerge(preferCacheOnConflict: boolean): Promise<GistData> 
       }).catch(() => {});
     }
 
-    setSyncStatus(cloud ? 'synced' : 'local-only');
+    // Anything this device still owes goes out now — this is the moment a phone that was
+    // offline when the user typed comes back and can finally deliver it. The status is
+    // set BEFORE the flush, because the flush sets its own ('syncing' → 'synced'/'error')
+    // and doing it after would overwrite the outcome with a stale optimistic value.
+    if (!cloud) setSyncStatus('local-only');
+    else { setSyncStatus('synced'); void flushPending(); }
     return _cache;
   } catch {
     _cache = _cache ?? loadLocal();
@@ -250,19 +333,12 @@ export async function updateGistData(patch: Partial<GistData>): Promise<GistData
   _cache = merged;
   saveLocal(merged);
   notify(merged);
-  // Persist async
-  setSyncStatus('syncing');
-  fetch('/api/gist', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  })
-    .then(r => r.json())
-    .then((resp: { ok?: boolean; cloud?: boolean }) => {
-      if (!resp.cloud) setSyncStatus('local-only');
-      else setSyncStatus(resp.ok ? 'synced' : 'error');
-    })
-    .catch(() => setSyncStatus('error'));
+  // Queued first, THEN sent. If the send fails the change is still owed and will go out
+  // on the next load or focus, instead of living only in this browser.
+  if (_pending === null) _pending = loadPending();
+  _pending = mergePatch(_pending ?? {}, patch);
+  savePending(_pending);
+  void flushPending();
   return merged;
 }
 

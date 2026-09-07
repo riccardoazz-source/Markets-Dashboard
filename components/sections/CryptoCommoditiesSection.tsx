@@ -21,6 +21,7 @@ import { GeminiCommentButton } from '@/components/ui/GeminiCommentButton';
 import { summarizeTools } from '@/lib/toolsSummary';
 import { ReturnsTableButton } from '@/components/ui/ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { MonthlyRecapButton } from '@/components/ui/MonthlyRecapButton';
 import { TradingViewButton } from '@/components/ui/TradingViewButton';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { useAvgYearly } from '@/lib/useAvgYearly';
@@ -375,6 +376,7 @@ export function CryptoCommoditiesSection({ jumpTo, onCompare }: { jumpTo?: strin
                 </button>
               )}
               <ReturnsTableButton name={selectedCrypto.name} symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} />
+              <MonthlyRecapButton symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} name={selectedCrypto.name} assetClass="Crypto" />
               <QuadrantButton name={selectedCrypto.name} symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} group="Crypto" />
               <TradingViewButton symbol={CRYPTO_YAHOO_SYMBOLS[selected] ?? `${selectedCrypto.symbol}-USD`} name={selectedCrypto.name} group="Crypto" />
               <GeminiCommentButton

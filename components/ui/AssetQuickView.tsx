@@ -11,6 +11,7 @@ import { TimeframeSelector } from './TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { ReturnsTableButton } from './ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
+import { MonthlyRecapButton } from '@/components/ui/MonthlyRecapButton';
 import { TradingViewButton } from '@/components/ui/TradingViewButton';
 import { GeminiCommentButton } from './GeminiCommentButton';
 import { ChartNotes } from './ChartNotes';
@@ -97,6 +98,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
               </button>
             )}
             <ReturnsTableButton name={name} symbol={symbol} />
+              <MonthlyRecapButton symbol={symbol} name={name} assetClass={group} />
               <QuadrantButton name={name} symbol={symbol} group={group} />
             <TradingViewButton symbol={symbol} name={name} group={group} />
             <GeminiCommentButton key={symbol} name={name} symbol={symbol} assetClass={group}
