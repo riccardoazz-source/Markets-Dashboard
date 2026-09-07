@@ -796,6 +796,24 @@ ok('a plain US ticker is passed through', TV.tradingViewSymbol('MU') === 'MU');
 // candidate now (/api/tv-symbol verifies it), but a known-dead entry has no business
 // being the candidate.
 ok('KOSPI is on KRX, not TVC', TV.tradingViewSymbol('^KS11') === 'KRX:KOSPI');
+// Foreign listings: the button vanished entirely on a Munich line, because an unmapped
+// suffix returns null and a null candidate renders nothing. The venue table is now wide,
+// and /api/tv-symbol still verifies whatever it produces.
+ok('a Munich line gets a venue', TV.tradingViewSymbol('1EL.MU') === 'MUN:1EL');
+ok('…and so does the other one that had no button', TV.tradingViewSymbol('4OQ.MU') === 'MUN:4OQ');
+ok('Milan is mapped', TV.tradingViewSymbol('ENI.MI') === 'MIL:ENI');
+ok('Tokyo is mapped', TV.tradingViewSymbol('7203.T') === 'TSE:7203');
+ok('Toronto is mapped', TV.tradingViewSymbol('SHOP.TO') === 'TSX:SHOP');
+// The Euronext venues share one prefix — several suffixes, one exchange, and that is
+// correct rather than a copy-paste slip.
+ok('Paris and Amsterdam share the Euronext prefix',
+   TV.tradingViewSymbol('AIR.PA') === 'EURONEXT:AIR' &&
+   TV.tradingViewSymbol('ASML.AS') === 'EURONEXT:ASML');
+// A wider table must not start swallowing the other symbol shapes.
+ok('a futures ticker is still futures, not a venue', TV.tradingViewSymbol('GC=F') === 'COMEX:GC1!');
+ok('an FX pair is still FX', TV.tradingViewSymbol('EURUSD=X') === 'FX_IDC:EURUSD');
+ok('crypto is still crypto', TV.tradingViewSymbol('BTC-USD') === 'CRYPTO:BTCUSD');
+
 ok('an unmappable symbol yields no link',
    TV.tradingViewSymbol('^UNKNOWNIDX') === null && TV.tradingViewUrl('^UNKNOWNIDX') === null);
 ok('the URL carries the encoded symbol',

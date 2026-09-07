@@ -92,15 +92,62 @@ const EXCHANGE_MAP: Record<string, string> = {
 };
 
 /**
- * Yahoo's venue suffixes for the three European markets this app actually holds.
- * These are standard, not inferred — .L is London, .AS is Euronext Amsterdam, .DE is
- * Xetra — so a listing added to the config later still gets a working link. Any other
- * suffix stays unmapped, because there the venue really would be a guess.
+ * Yahoo's venue suffix → TradingView's exchange prefix.
+ *
+ * This used to hold three entries, "the three European markets this app actually holds".
+ * That premise was true of the CONFIG and false of the app: the Stocks tab takes any
+ * ticker the user types, and a watchlist full of Munich lines (1EL.MU, 4OQ.MU) got no
+ * TradingView button at all — an unmapped suffix returns null, and a null candidate
+ * renders nothing, with no hint that a venue table was the reason.
+ *
+ * Being conservative was the wrong instinct here, because of where the caution already
+ * sits: /api/tv-symbol verifies every candidate against TradingView's own search and can
+ * swap in a better one, so a slightly wrong prefix gets CORRECTED, while a missing entry
+ * removes the feature. A candidate that might be improved beats no candidate.
+ *
+ * These are published venue codes, not inferences. Anything still unlisted stays unmapped.
  */
 const SUFFIX_EXCHANGE: Record<string, string> = {
-  L: 'LSE',
-  AS: 'EURONEXT',
-  DE: 'XETR',
+  // Europe
+  L:  'LSE',        // London
+  DE: 'XETR',       // Xetra
+  F:  'FWB',        // Frankfurt
+  MU: 'MUN',        // Munich
+  BE: 'BER',        // Berlin
+  AS: 'EURONEXT',   // Amsterdam
+  PA: 'EURONEXT',   // Paris
+  BR: 'EURONEXT',   // Brussels
+  LS: 'EURONEXT',   // Lisbon
+  IR: 'EURONEXT',   // Dublin
+  MI: 'MIL',        // Milan
+  MC: 'BME',        // Madrid
+  SW: 'SIX',        // Zurich
+  VI: 'VIE',        // Vienna
+  ST: 'OMXSTO',     // Stockholm
+  CO: 'OMXCOP',     // Copenhagen
+  HE: 'OMXHEX',     // Helsinki
+  OL: 'OSL',        // Oslo
+  WA: 'GPW',        // Warsaw
+  AT: 'ATHEX',      // Athens
+  // Americas
+  TO: 'TSX',        // Toronto
+  V:  'TSXV',       // TSX Venture
+  MX: 'BMV',        // Mexico
+  SA: 'BMFBOVESPA', // São Paulo
+  // Asia-Pacific
+  HK: 'HKEX',
+  T:  'TSE',        // Tokyo
+  SS: 'SSE',        // Shanghai
+  SZ: 'SZSE',       // Shenzhen
+  TW: 'TWSE',       // Taiwan
+  KS: 'KRX',        // Korea
+  SI: 'SGX',        // Singapore
+  AX: 'ASX',        // Australia
+  NZ: 'NZX',
+  NS: 'NSE',        // India — National
+  BO: 'BSE',        // India — Bombay
+  TA: 'TASE',       // Tel Aviv
+  JO: 'JSE',        // Johannesburg
 };
 
 /**
