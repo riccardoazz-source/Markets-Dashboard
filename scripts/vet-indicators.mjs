@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -866,6 +866,69 @@ ok('the URL carries the encoded symbol',
   // A snapshot that never had history must not acquire an empty array: `undefined` and
   // `[]` look the same on screen and different to the next merge.
   ok('no empty history is invented', G.mergeSnapshots({ pins: ['A'] }, { pins: ['A'] }).sentiments === undefined);
+}
+
+// ── Reading an Apify calendar dataset ────────────────────────────────────────
+// There is no standard shape for an economic-calendar row, so the normaliser tries the
+// names actors actually use and takes the first present. These checks pin the parts that
+// are decisions rather than guesses: what a bare date becomes, what is dropped, and that a
+// country it does not know never gets the WRONG flag.
+{
+  const A = await import(join(out, 'apifyCalendar.js'));
+
+  // A full instant is taken as given; a naive one is read as UTC rather than as the
+  // server's local time, which would move every release by the deployment's offset.
+  ok('an ISO instant survives intact',
+     A.rowInstant({ dateUtc: '2026-09-11T12:30:00Z' }).date === '2026-09-11T12:30:00.000Z');
+  ok('a naive timestamp is read as UTC, not as local time',
+     A.rowInstant({ date: '2026-09-11 12:30:00' }).date === '2026-09-11T12:30:00.000Z');
+  ok('a separate date and time are joined',
+     A.rowInstant({ date: '2026-09-11', time: '8:30' }).date === '2026-09-11T08:30:00.000Z');
+  // A bare date becomes MIDDAY, not midnight: midnight UTC lands on the previous day for
+  // anyone west of Greenwich, which would show a European morning release a day early.
+  {
+    const d = A.rowInstant({ date: '2026-09-11' });
+    ok('a date with no time becomes midday and says the hour is unknown',
+       d.date === '2026-09-11T12:00:00.000Z' && d.timeKnown === false);
+  }
+  ok('a row with no date at all is unusable', A.rowInstant({ event: 'CPI' }) === null);
+
+  // Field names vary; the alternatives must actually be tried.
+  {
+    const r = A.normalizeRow({ event: 'US CPI', date: '2026-09-11', time: '08:30',
+                               country: 'US', actual: '3.1%', forecast: '3.0%', previous: '2.9%' }, 0);
+    ok('the common field names are read', r.title === 'US CPI' && r.forecast === '3.0%');
+    const alt = A.normalizeRow({ title: 'ECB Rate', dateTime: '2026-09-17T12:15:00Z',
+                                 currency: 'EUR', consensus: '2.00%', prev: '2.25%' }, 1);
+    ok('…and so are the alternatives actors use instead',
+       alt.title === 'ECB Rate' && alt.forecast === '2.00%' && alt.previous === '2.25%');
+  }
+  ok('a row with no title cannot carry a card', A.normalizeRow({ date: '2026-09-11' }, 0) === null);
+
+  // Importance arrives as a word or a number depending on the actor.
+  ok('importance reads as a word', A.importanceOf({ importance: 'High' }) === 3);
+  ok('…or as a number', A.importanceOf({ impact: 2 }) === 2);
+  ok('…and an unrecognised value stays unknown rather than defaulting to low',
+     A.importanceOf({ impact: 'wibble' }) === undefined);
+
+  // The flag is the one place a wrong guess is worse than no guess: a card claiming the
+  // wrong country misinforms, a globe merely says nothing.
+  ok('a known country gets its flag', A.flagFor('United States') === '🇺🇸');
+  ok('a currency code works too', A.flagFor('EUR') === '🇪🇺');
+  ok('an unknown country gets a globe, never a wrong flag', A.flagFor('Ruritania') === '🌐');
+  ok('a missing country gets a globe', A.flagFor(undefined) === '🌐');
+
+  // Two releases can share a country and an instant; ids must still differ or the rail
+  // collapses them into one card.
+  {
+    const rows = A.normalizeDataset([
+      { event: 'CPI', date: '2026-09-11', time: '08:30', country: 'US' },
+      { event: 'Core CPI', date: '2026-09-11', time: '08:30', country: 'US' },
+    ]);
+    ok('two releases at the same instant stay two cards', rows.length === 2);
+  }
+  ok('unusable rows are skipped, not turned into blanks',
+     A.normalizeDataset([{ junk: 1 }, { event: 'CPI', date: '2026-09-11' }]).length === 1);
 }
 
 // ── The IPO feed's shape ─────────────────────────────────────────────────────
