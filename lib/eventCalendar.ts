@@ -12,7 +12,11 @@
 // winter. Storing the wall-clock time and a zone, and resolving it per date, is the only
 // way both readings come out right — a fixed UTC offset is wrong for half the year.
 
-export type CalendarCategory = 'central-bank' | 'economic-data' | 'geopolitical' | 'personal';
+// 'ipo' is the one category that cannot be bundled: the others are published a year ahead
+// and barely move, while an IPO calendar changes weekly. It is fetched live and simply
+// absent when the source is unreachable — see /api/ipo-calendar.
+export type CalendarCategory =
+  'central-bank' | 'economic-data' | 'geopolitical' | 'personal' | 'ipo';
 
 export interface CalendarEvent {
   id: string;
@@ -37,6 +41,7 @@ export const CALENDAR_COLORS: Record<CalendarCategory, string> = {
   'economic-data': '#22c55e',
   geopolitical:    '#f87171',
   personal:        '#ec4899',
+  ipo:             '#38bdf8',
 };
 
 export const CALENDAR_LABELS: Record<CalendarCategory, string> = {
@@ -44,6 +49,7 @@ export const CALENDAR_LABELS: Record<CalendarCategory, string> = {
   'economic-data': 'Economic Data',
   geopolitical:    'Geopolitical',
   personal:        'Personal',
+  ipo:             'IPO',
 };
 
 /**

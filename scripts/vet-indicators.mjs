@@ -868,6 +868,32 @@ ok('the URL carries the encoded symbol',
   ok('no empty history is invented', G.mergeSnapshots({ pins: ['A'] }, { pins: ['A'] }).sentiments === undefined);
 }
 
+// ── The IPO feed's shape ─────────────────────────────────────────────────────
+// Written blind: this sandbox's proxy refuses every outbound host, so the parser could not
+// be run against a real Nasdaq response. What CAN be pinned is that a wrong or renamed
+// shape degrades to an empty list rather than to nonsense — every category on the rail
+// except this one is bundled, so a bad day at the source must not be able to take the
+// calendar down.
+{
+  const EC = await import(join(out, 'eventCalendar.js'));
+  ok('the IPO category has a colour and a label',
+     !!EC.CALENDAR_COLORS.ipo && EC.CALENDAR_LABELS.ipo === 'IPO');
+  // Every category the data can carry must render, or a card appears with no colour bar
+  // and no label at all.
+  const cats = Object.keys(EC.CALENDAR_LABELS);
+  ok('every category is both coloured and labelled',
+     cats.every(c => EC.CALENDAR_COLORS[c]) &&
+     Object.keys(EC.CALENDAR_COLORS).length === cats.length, cats.join(', '));
+  // An IPO priced today is still ahead; one priced yesterday is not. The rail's window
+  // does that filtering, and it must not drop today's.
+  const now = new Date('2026-09-09T15:00:00Z');
+  const day = (d) => ({ id: d, title: 'x', category: 'ipo', region: 'US', flag: '🔔',
+                        date: `${d}T12:00:00.000Z`, timeKnown: false });
+  const win = EC.upcomingEvents([day('2026-09-08'), day('2026-09-30')], now, 6);
+  ok('a pricing date already past drops off, a future one stays',
+     win.length === 1 && win[0].id === '2026-09-30');
+}
+
 // ── What a calendar event is about, and what may be claimed about it ─────────
 // The distinction that matters: a RATE decision has market-implied odds because rate
 // futures trade on the outcome; a DATA release has a consensus and a spread of estimates

@@ -155,6 +155,7 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
   const [adding, setAdding] = useState(false);
   const { events: personal, addEvent, removeEvent } = useCalendarEvents();
   const [latest, setLatest] = useState<Record<string, { value: number; date: string }>>({});
+  const [ipos, setIpos] = useState<CalendarEvent[]>([]);
   const [outlook, setOutlook] = useState<CalendarEvent | null>(null);
 
   useEffect(() => {
@@ -165,14 +166,44 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
     return () => clearInterval(t);
   }, []);
 
+  // Upcoming IPOs, fetched rather than bundled — they are the only entries that change
+  // week to week. An unreachable source yields an empty list and the rail looks exactly as
+  // it did before, which is the correct degradation for something nothing else depends on.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/ipo-calendar')
+      .then(r => r.json())
+      .then((j: { events?: { id: string; ticker: string; company: string; date: string;
+                             exchange?: string; priceRange?: string; dealSize?: string }[] }) => {
+        if (cancelled || !Array.isArray(j.events)) return;
+        setIpos(j.events.map(e => ({
+          id: e.id,
+          title: `${e.company} IPO (${e.ticker})`,
+          category: 'ipo' as const,
+          region: e.exchange ?? 'US',
+          flag: '🔔',
+          // Pricing is announced during the day, not at a published minute, so the card
+          // says "All day" rather than inventing an hour.
+          date: `${e.date}T12:00:00.000Z`,
+          timeKnown: false,
+          tentative: true,   // a pricing date moves right up to the day itself
+          description: [e.priceRange && `Expected ${e.priceRange}`, e.dealSize && `deal size ${e.dealSize}`]
+            .filter(Boolean).join(' · ') || undefined,
+          source: 'nasdaq.com',
+        })));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const shown = useMemo(() => {
     if (!now) return [];
     const mine: CalendarEvent[] = personal.map(p => ({
       id: p.id, title: p.title, category: 'personal' as const,
       region: 'Mine', flag: '📌', date: p.date, timeKnown: p.timeKnown, description: p.description,
     }));
-    return upcomingEvents([...BUNDLED_EVENTS, ...mine], now, months);
-  }, [now, months, personal]);
+    return upcomingEvents([...BUNDLED_EVENTS, ...ipos, ...mine], now, months);
+  }, [now, months, personal, ipos]);
 
   // One request for the whole rail: every series the visible events concern, from the
   // endpoint the Macro tab already uses. Cheap and exact — the alternative was leaving the
