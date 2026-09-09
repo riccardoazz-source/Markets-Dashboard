@@ -50,10 +50,17 @@ function EventCard({ e, now, onDelete, current, onOpen }: {
           text on every card. */}
       <span className="w-1 shrink-0" style={{ backgroundColor: color }} />
       <div className="flex-1 min-w-0 p-2.5 space-y-1">
+        {/* The flag leads, at a size you can actually read.
+            It used to sit inside the category pill at 9px, where it was decoration rather
+            than information — the thing a reader most wants first from a calendar card is
+            WHOSE event this is, and a 9px flag beside a coloured label does not answer
+            that at a glance. Out of the pill, doubled in size, and given the region as its
+            tooltip for the flags that look alike at small sizes. */}
         <div className="flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium whitespace-nowrap"
+          <span className="text-base leading-none shrink-0" title={e.region}>{e.flag}</span>
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium whitespace-nowrap"
             style={{ backgroundColor: `${color}1f`, color }}>
-            <span>{e.flag}</span>{CALENDAR_LABELS[e.category]}
+            {CALENDAR_LABELS[e.category]}
           </span>
           <span className="ml-auto text-[9px] text-gray-400 border border-border rounded-full px-1.5 py-0.5 whitespace-nowrap">
             {countdown(e.date, now)}
@@ -74,7 +81,6 @@ function EventCard({ e, now, onDelete, current, onOpen }: {
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 text-gray-300 tabular-nums">
             <Clock size={9} />{time ?? 'All day'}
           </span>
-          <span className="text-gray-600">{e.region}</span>
           {e.tentative && (
             <span className="px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">tentative</span>
           )}

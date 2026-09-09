@@ -333,6 +333,24 @@ export const MACRO_INDICATORS: MacroIndicator[] = [
   { id: 'CORE_CPI_YOY', name: 'Core Inflation Rate (YoY)', category: 'Inflation', unit: '%',
     source: { type: 'computed', label: 'Derived — 12-month change in Core CPI (FRED / DBnomics / BLS)',
               url: 'https://fred.stlouisfed.org/series/CPILFESL' } },
+  // ── PPI — the same question asked one step earlier in the chain ────────────
+  // The CPI and the PCE both measure what a HOUSEHOLD pays. The PPI measures what a
+  // PRODUCER receives, before the good reaches a shop — so it moves earlier in the same
+  // cycle and is watched as a lead on the other two, though the pass-through is loose and
+  // often incomplete. Same shape as the two families above: index and rate, headline and
+  // core, so the three can be read against each other at the same level of detail.
+  { id: 'PPIFIS',   name: 'PPI Final Demand',            category: 'Inflation',   unit: 'idx',
+    source: { type: 'fred',     label: 'FRED / BLS',
+              url: 'https://fred.stlouisfed.org/series/PPIFIS' } },
+  { id: 'PPIFES',   name: 'Core PPI (ex food & energy)', category: 'Inflation',   unit: 'idx',
+    source: { type: 'fred',     label: 'FRED / BLS',
+              url: 'https://fred.stlouisfed.org/series/PPIFES' } },
+  { id: 'PPI_YOY',  name: 'PPI Inflation Rate (YoY)',    category: 'Inflation',   unit: '%',
+    source: { type: 'computed', label: 'Derived — 12-month change in PPI final demand (FRED / DBnomics)',
+              url: 'https://fred.stlouisfed.org/series/PPIFIS' } },
+  { id: 'CORE_PPI_YOY', name: 'Core PPI Inflation Rate (YoY)', category: 'Inflation', unit: '%',
+    source: { type: 'computed', label: 'Derived — 12-month change in core PPI (FRED / DBnomics)',
+              url: 'https://fred.stlouisfed.org/series/PPIFES' } },
   // ── Core PCE — the gauge the Federal Reserve actually targets ──────────────
   // The FOMC's 2% objective is defined on the PCE price index, not the CPI, and core PCE
   // (ex food and energy) is what it reads for the underlying trend. It is a different

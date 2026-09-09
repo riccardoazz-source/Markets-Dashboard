@@ -36,6 +36,8 @@ export const YOY_BASE_SERIES: Record<string, string> = {
   CORE_CPI_YOY: 'CPILFESL',
   PCE_YOY: 'PCEPI',
   CORE_PCE_YOY: 'PCEPILFE',
+  PPI_YOY: 'PPIFIS',
+  CORE_PPI_YOY: 'PPIFES',
 };
 
 export function yearOverYear(base: SeriesPoint[], from?: string): SeriesPoint[] {
