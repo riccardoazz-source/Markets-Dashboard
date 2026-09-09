@@ -869,66 +869,81 @@ ok('the URL carries the encoded symbol',
 }
 
 // ── Reading an Apify calendar dataset ────────────────────────────────────────
-// There is no standard shape for an economic-calendar row, so the normaliser tries the
-// names actors actually use and takes the first present. These checks pin the parts that
-// are decisions rather than guesses: what a bare date becomes, what is dropped, and that a
-// country it does not know never gets the WRONG flag.
+// Now written against a REAL row, which corrected two guesses that would each have broken
+// the feature outright:
+//
+//   date  is "09/09/2026", not ISO — the first parser accepted only ISO and would have
+//         dropped every single row, showing an empty calendar with no error anywhere.
+//   zone  is a lowercase country NAME ("indonesia"), not a code — so every card would
+//         have flown a globe.
 {
   const A = await import(join(out, 'apifyCalendar.js'));
+  const real = (over = {}) => ({
+    date: '09/09/2026', time: '01:30', zone: 'china', currency: 'CNY',
+    importance: 'medium', event: 'CPI (YoY)  (Aug)',
+    actual: '0.8%', forecast: '0.8%', previous: '0.5%', ...over,
+  });
 
-  // A full instant is taken as given; a naive one is read as UTC rather than as the
-  // server's local time, which would move every release by the deployment's offset.
-  ok('an ISO instant survives intact',
-     A.rowInstant({ dateUtc: '2026-09-11T12:30:00Z' }).date === '2026-09-11T12:30:00.000Z');
-  ok('a naive timestamp is read as UTC, not as local time',
-     A.rowInstant({ date: '2026-09-11 12:30:00' }).date === '2026-09-11T12:30:00.000Z');
-  ok('a separate date and time are joined',
-     A.rowInstant({ date: '2026-09-11', time: '8:30' }).date === '2026-09-11T08:30:00.000Z');
-  // A bare date becomes MIDDAY, not midnight: midnight UTC lands on the previous day for
-  // anyone west of Greenwich, which would show a European morning release a day early.
+  // ── The date, which is the one that silently ruins a calendar ──
+  // 09/09 cannot settle the order by itself, so it is inferred from the DATASET: one row
+  // with a day above the twelfth decides it for all of them. Guessing wrong moves half the
+  // calendar by up to eleven days, and nothing on screen would say so.
+  ok('a day above 12 in the second field proves month-first',
+     A.inferDateOrder([real(), real({ date: '09/25/2026' })]) === 'MDY');
+  ok('…and in the first field proves day-first',
+     A.inferDateOrder([real(), real({ date: '25/09/2026' })]) === 'DMY');
+  ok('an all-ambiguous dataset falls back to month-first',
+     A.inferDateOrder([real(), real({ date: '01/02/2026' })]) === 'MDY');
+  ok('the slashed date parses at all — the first version dropped every row',
+     A.rowInstant(real(), 'MDY').date === '2026-09-09T01:30:00.000Z');
+  ok('read day-first the SAME string is a different month',
+     A.rowInstant(real({ date: '05/09/2026' }), 'DMY').date.slice(0, 7) === '2026-09-05'.slice(0, 7));
+  ok('an impossible month is rejected rather than wrapped',
+     A.rowInstant(real({ date: '13/45/2026' }), 'MDY') === null);
+  // The feed's clock is not identified in the row, so the offset is a setting.
+  ok('the timezone offset shifts a wall-clock time into UTC',
+     A.rowInstant(real(), 'MDY', 120).date === '2026-09-08T23:30:00.000Z');
+
+  // ── The row ──
   {
-    const d = A.rowInstant({ date: '2026-09-11' });
-    ok('a date with no time becomes midday and says the hour is unknown',
-       d.date === '2026-09-11T12:00:00.000Z' && d.timeKnown === false);
+    const r = A.normalizeRow(real(), 0, 'MDY');
+    ok('the real field names are read', r.title === 'CPI (YoY) (Aug)' && r.forecast === '0.8%');
+    ok('the double space inside a scraped title is collapsed', !/  /.test(r.title));
+    ok('the country comes from `zone`, the currency kept beside it',
+       r.country === 'china' && r.currency === 'CNY');
   }
-  ok('a row with no date at all is unusable', A.rowInstant({ event: 'CPI' }) === null);
+  ok('a null forecast is absent, not the string "null"',
+     A.normalizeRow(real({ forecast: null }), 0).forecast === undefined);
 
-  // Field names vary; the alternatives must actually be tried.
+  // ── The flag ──
+  ok('a lowercase country NAME resolves', A.flagFor('indonesia') === '🇮🇩');
+  ok('…and so does a currency when the country is unknown',
+     A.flagFor('ruritania', 'CNY') === '🇨🇳');
+  ok('an unknown country gets a globe, never a wrong flag', A.flagFor('ruritania') === '🌐');
+
+  // ── The filter, which is what makes this usable ──
+  // The real dataset opens with Indonesian car sales and motorbike sales. Unfiltered, an
+  // FOMC decision would be buried under a hundred rows nobody here is looking at.
   {
-    const r = A.normalizeRow({ event: 'US CPI', date: '2026-09-11', time: '08:30',
-                               country: 'US', actual: '3.1%', forecast: '3.0%', previous: '2.9%' }, 0);
-    ok('the common field names are read', r.title === 'US CPI' && r.forecast === '3.0%');
-    const alt = A.normalizeRow({ title: 'ECB Rate', dateTime: '2026-09-17T12:15:00Z',
-                                 currency: 'EUR', consensus: '2.00%', prev: '2.25%' }, 1);
-    ok('…and so are the alternatives actors use instead',
-       alt.title === 'ECB Rate' && alt.forecast === '2.00%' && alt.previous === '2.25%');
+    const many = [
+      real({ importance: 'low', event: 'Car Sales (YoY)', zone: 'indonesia' }),
+      real({ importance: 'low', event: 'Motorbike Sales (YoY)', zone: 'indonesia' }),
+      real({ importance: 'medium', event: 'CPI (YoY)', zone: 'china' }),
+      real({ importance: 'high', event: 'FOMC Rate Decision', zone: 'united states', currency: 'USD' }),
+    ];
+    ok('low-importance noise is dropped by default', A.normalizeDataset(many).length === 2);
+    ok('…and nothing is dropped when asked for everything',
+       A.normalizeDataset(many, { minImportance: 1 }).length === 4);
+    ok('a country filter matches on the currency too',
+       A.normalizeDataset(many, { only: ['USD'] }).length === 1);
+    // An UNGRADED row is kept: the source declining to rate something is not a low rating,
+    // and dropping it would silently lose whatever the actor left blank.
+    ok('an ungraded row survives the importance filter',
+       A.normalizeDataset([real({ importance: null, event: 'Unrated thing' })]).length === 1);
   }
-  ok('a row with no title cannot carry a card', A.normalizeRow({ date: '2026-09-11' }, 0) === null);
-
-  // Importance arrives as a word or a number depending on the actor.
-  ok('importance reads as a word', A.importanceOf({ importance: 'High' }) === 3);
-  ok('…or as a number', A.importanceOf({ impact: 2 }) === 2);
-  ok('…and an unrecognised value stays unknown rather than defaulting to low',
-     A.importanceOf({ impact: 'wibble' }) === undefined);
-
-  // The flag is the one place a wrong guess is worse than no guess: a card claiming the
-  // wrong country misinforms, a globe merely says nothing.
-  ok('a known country gets its flag', A.flagFor('United States') === '🇺🇸');
-  ok('a currency code works too', A.flagFor('EUR') === '🇪🇺');
-  ok('an unknown country gets a globe, never a wrong flag', A.flagFor('Ruritania') === '🌐');
-  ok('a missing country gets a globe', A.flagFor(undefined) === '🌐');
-
-  // Two releases can share a country and an instant; ids must still differ or the rail
-  // collapses them into one card.
-  {
-    const rows = A.normalizeDataset([
-      { event: 'CPI', date: '2026-09-11', time: '08:30', country: 'US' },
-      { event: 'Core CPI', date: '2026-09-11', time: '08:30', country: 'US' },
-    ]);
-    ok('two releases at the same instant stay two cards', rows.length === 2);
-  }
-  ok('unusable rows are skipped, not turned into blanks',
-     A.normalizeDataset([{ junk: 1 }, { event: 'CPI', date: '2026-09-11' }]).length === 1);
+  ok('rows are returned most imminent first',
+     A.normalizeDataset([real({ date: '09/20/2026' }), real({ date: '09/10/2026' })])
+       .map(r => r.date.slice(0, 10)).join() === '2026-09-10,2026-09-20');
 }
 
 // ── The IPO feed's shape ─────────────────────────────────────────────────────

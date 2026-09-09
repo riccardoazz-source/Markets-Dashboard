@@ -42,7 +42,23 @@ export const maxDuration = 30;
 // lib/apifyCalendar guesses at field names that actors commonly use; one look at the diag
 // confirms them or says which to add.
 
-const TTL_SECONDS = 60 * 60;
+// The crawl itself is scheduled weekly, so re-reading it every hour buys nothing. Six
+// hours keeps the app responsive to a run finishing without asking Apify for the same
+// week's rows over and over.
+const TTL_SECONDS = 6 * 60 * 60;
+
+/** Filtering and time handling, all settable without a redeploy of the parser. */
+function options() {
+  const n = Number(process.env.APIFY_CALENDAR_MIN_IMPORTANCE);
+  return {
+    minImportance: isFinite(n) && n >= 1 && n <= 3 ? n : 2,
+    // The feed's times are wall-clock in whatever zone the scraper read, which nothing in
+    // the row records. Set this once, after comparing one known release (US CPI is always
+    // 08:30 in New York) against what the card shows.
+    tzOffsetMinutes: Number(process.env.APIFY_CALENDAR_TZ_OFFSET) || 0,
+    only: (process.env.APIFY_CALENDAR_ONLY ?? '').split(',').map(x => x.trim()).filter(Boolean),
+  };
+}
 
 function config() {
   // A whole URL pasted from the console wins: one variable, nothing to assemble.
@@ -91,7 +107,7 @@ async function fetchItems(): Promise<unknown[]> {
 }
 
 async function loadCalendar(): Promise<ApifyCalendarRow[]> {
-  return normalizeDataset(await fetchItems());
+  return normalizeDataset(await fetchItems(), options());
 }
 
 export async function GET(req: Request) {
@@ -121,7 +137,12 @@ export async function GET(req: Request) {
       // exactly these, and this is what turns them into knowledge.
       firstItemKeys: first && typeof first === 'object' ? Object.keys(first as object) : null,
       firstItem: first ?? null,
-      parsed: normalizeDataset(items).slice(0, 3),
+      options: options(),
+      // Both counts, because the gap between them is the thing worth seeing: a big drop
+      // means the importance filter is doing its job, and zero parsed from many items
+      // means the shape moved.
+      parsedCount: normalizeDataset(items, options()).length,
+      parsed: normalizeDataset(items, options()).slice(0, 3),
     }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
@@ -133,7 +154,7 @@ export async function GET(req: Request) {
     const rows = await unstable_cache(loadCalendar, ['apify-calendar'], { revalidate: TTL_SECONDS })();
     return NextResponse.json({
       configured: true,
-      events: rows.map(r => ({ ...r, flag: flagFor(r.country) })),
+      events: rows.map(r => ({ ...r, flag: flagFor(r.country, r.currency) })),
     });
   } catch {
     return NextResponse.json({ configured: true, events: [] });
