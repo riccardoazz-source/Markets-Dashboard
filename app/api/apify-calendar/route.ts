@@ -116,13 +116,16 @@ async function discoverDataset(token: string): Promise<{ datasetId: string; acto
   const t = setTimeout(() => ctrl.abort(), 12_000);
   try {
     const res = await fetch(
-      `https://api.apify.com/v2/actor-runs?token=${encodeURIComponent(token)}&status=SUCCEEDED&desc=true&limit=20`,
+      `https://api.apify.com/v2/actor-runs?token=${encodeURIComponent(token)}&status=SUCCEEDED&desc=true&limit=10`,
       { signal: ctrl.signal, cache: 'no-store' },
     );
     if (!res.ok) { console.warn(`[apify] run list HTTP ${res.status}`); return null; }
     const json = await res.json() as {
       data?: { items?: Array<{ id?: string; actId?: string; defaultDatasetId?: string; finishedAt?: string }> };
     };
+    // Bounded on purpose: each probe is a round trip, and this whole route has thirty
+    // seconds. Ten runs back is far more than a weekly schedule ever needs, and a
+    // diagnostic that times out before answering teaches nothing at all.
     for (const run of json.data?.items ?? []) {
       if (!run.defaultDatasetId) continue;
       // A cheap peek — fifty rows is plenty to tell a calendar from anything else.
@@ -144,19 +147,37 @@ async function discoverDataset(token: string): Promise<{ datasetId: string; acto
   } finally { clearTimeout(t); }
 }
 
-async function fetchItems(): Promise<unknown[]> {
-  const cfg = config();
-  if (!cfg.ok) return [];
+/** Every row of one dataset, by id. */
+async function fetchDataset(datasetId: string, token: string): Promise<unknown[]> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12_000);
   try {
-    let target = itemsUrl(cfg);
-    if (!cfg.url && !cfg.actor && !cfg.dataset && cfg.token) {
-      const found = await discoverDataset(cfg.token);
-      if (!found) return [];
-      target = `https://api.apify.com/v2/datasets/${found.datasetId}/items?clean=true&limit=1000&token=${encodeURIComponent(cfg.token)}`;
-    }
-    const res = await fetch(target, { signal: ctrl.signal, cache: 'no-store' });
+    const res = await fetch(
+      `https://api.apify.com/v2/datasets/${datasetId}/items?clean=true&limit=1000&token=${encodeURIComponent(token)}`,
+      { signal: ctrl.signal, cache: 'no-store' },
+    );
+    if (!res.ok) { console.warn(`[apify] dataset HTTP ${res.status}`); return []; }
+    const json = await res.json();
+    return Array.isArray(json) ? json : [];
+  } catch (e) {
+    console.warn('[apify] dataset failed:', (e as Error).message);
+    return [];
+  } finally { clearTimeout(t); }
+}
+
+async function fetchItems(): Promise<unknown[]> {
+  const cfg = config();
+  if (!cfg.ok) return [];
+  // Nothing named → find it. One path, so the diagnostic and the live feed cannot
+  // disagree about which dataset is being read.
+  if (!cfg.url && !cfg.actor && !cfg.dataset && cfg.token) {
+    const found = await discoverDataset(cfg.token);
+    return found ? fetchDataset(found.datasetId, cfg.token) : [];
+  }
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 12_000);
+  try {
+    const res = await fetch(itemsUrl(cfg), { signal: ctrl.signal, cache: 'no-store' });
     if (!res.ok) { console.warn(`[apify] HTTP ${res.status}`); return []; }
     const json = await res.json();
     return Array.isArray(json) ? json : [];
@@ -176,7 +197,15 @@ export async function GET(req: Request) {
   if (new URL(req.url).searchParams.get('mode') === 'diag') {
     // Deliberately reports WHICH half is missing: "no token" and "no actor" need
     // different fixes, and "unconfigured" tells you neither.
-    const items = cfg.ok ? await fetchItems() : [];
+    // Discovered ONCE and reused. The first version called discoverDataset here and again
+    // inside fetchItems, doubling the number of round trips on exactly the request most
+    // likely to be near its time limit.
+    const autoMode = cfg.ok && !cfg.url && !cfg.actor && !cfg.dataset && !!cfg.token;
+    const discovered = autoMode ? await discoverDataset(cfg.token!) : null;
+    const items = !cfg.ok ? []
+      : autoMode
+        ? (discovered ? await fetchDataset(discovered.datasetId, cfg.token!) : [])
+        : await fetchItems();
     const first = items[0];
     return NextResponse.json({
       configured: cfg.ok,
@@ -194,9 +223,7 @@ export async function GET(req: Request) {
       source: cfg.ok
         ? (cfg.url || cfg.actor || cfg.dataset ? redact(itemsUrl(cfg)) : 'discovered from recent runs')
         : null,
-      discovered: cfg.ok && !cfg.url && !cfg.actor && !cfg.dataset && cfg.token
-        ? await discoverDataset(cfg.token)
-        : undefined,
+      discovered: autoMode ? discovered : undefined,
       itemsReturned: items.length,
       // The key names are the thing worth seeing: the normaliser is a set of guesses at
       // exactly these, and this is what turns them into knowledge.
