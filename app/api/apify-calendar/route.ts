@@ -70,11 +70,15 @@ function config() {
   // Apify's three ways of naming an actor you happened to copy, it works.
   const actor = actorIdFrom(process.env.APIFY_CALENDAR_ACTOR);
   const dataset = process.env.APIFY_CALENDAR_DATASET;
-  return { url, token, actor, dataset, ok: !!url || (!!token && !!(actor || dataset)) };
+  // A token ALONE is now enough: the run is discovered. Naming the actor is still
+  // supported and skips the discovery, but it is no longer something to work out.
+  return { url, token, actor, dataset, ok: !!url || !!token };
 }
 
 function itemsUrl({ url, token, actor, dataset }: ReturnType<typeof config>): string {
   if (url) return url;
+  // Neither named: the caller discovers the dataset instead. This value is never fetched.
+  if (!actor && !dataset) return '(discovered from the account\'s recent runs)';
   const auth = `token=${encodeURIComponent(token!)}`;
   return actor
     ? `https://api.apify.com/v2/acts/${encodeURIComponent(actor)}/runs/last/dataset/items?status=SUCCEEDED&clean=true&limit=1000&${auth}`
@@ -92,13 +96,67 @@ function isSnapshot(cfg: ReturnType<typeof config>): boolean {
   return !!cfg.dataset || /\/v2\/datasets\//.test(u);
 }
 
+/**
+ * Find the calendar run without being told where it is.
+ *
+ * Asking someone to hunt down an "actor id" is asking them to learn Apify's URL scheme to
+ * use this app, and the console makes it genuinely hard: the schedule page, the actor page
+ * and the run page all have different ids in the address bar and none of them is labelled.
+ * With a token, none of that is necessary — Apify will list the account's own runs.
+ *
+ * So: the most recent successful runs, newest first, and for each one a peek at its
+ * dataset. The first whose rows actually PARSE as calendar rows is the one. That test is
+ * what makes this safe on an account running several actors: a web scraper's output does
+ * not normalise into dated events, so it is skipped rather than mistaken for a calendar.
+ *
+ * It also tracks a weekly schedule for free — next Monday's run is simply the newest one.
+ */
+async function discoverDataset(token: string): Promise<{ datasetId: string; actorId?: string; finishedAt?: string } | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 12_000);
+  try {
+    const res = await fetch(
+      `https://api.apify.com/v2/actor-runs?token=${encodeURIComponent(token)}&status=SUCCEEDED&desc=true&limit=20`,
+      { signal: ctrl.signal, cache: 'no-store' },
+    );
+    if (!res.ok) { console.warn(`[apify] run list HTTP ${res.status}`); return null; }
+    const json = await res.json() as {
+      data?: { items?: Array<{ id?: string; actId?: string; defaultDatasetId?: string; finishedAt?: string }> };
+    };
+    for (const run of json.data?.items ?? []) {
+      if (!run.defaultDatasetId) continue;
+      // A cheap peek — fifty rows is plenty to tell a calendar from anything else.
+      const probe = await fetch(
+        `https://api.apify.com/v2/datasets/${run.defaultDatasetId}/items?clean=true&limit=50&token=${encodeURIComponent(token)}`,
+        { cache: 'no-store' },
+      ).then(r => r.ok ? r.json() : null).catch(() => null);
+      if (!Array.isArray(probe) || probe.length === 0) continue;
+      // minImportance 1: the probe asks "is this a calendar at all", not "is it
+      // interesting" — filtering here could reject a run of purely low-grade rows.
+      if (normalizeDataset(probe, { ...options(), minImportance: 1 }).length === 0) continue;
+      return { datasetId: run.defaultDatasetId, actorId: run.actId, finishedAt: run.finishedAt };
+    }
+    console.warn('[apify] no recent successful run looked like a calendar');
+    return null;
+  } catch (e) {
+    console.warn('[apify] discovery failed:', (e as Error).message);
+    return null;
+  } finally { clearTimeout(t); }
+}
+
 async function fetchItems(): Promise<unknown[]> {
   const cfg = config();
   if (!cfg.ok) return [];
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 12_000);
   try {
-    const res = await fetch(itemsUrl(cfg), { signal: ctrl.signal, cache: 'no-store' });
+    let target = itemsUrl(cfg);
+    if (!cfg.url && !cfg.actor && !cfg.dataset && cfg.token) {
+      const found = await discoverDataset(cfg.token);
+      if (!found) return [];
+      target = `https://api.apify.com/v2/datasets/${found.datasetId}/items?clean=true&limit=1000&token=${encodeURIComponent(cfg.token)}`;
+    }
+    const res = await fetch(target, { signal: ctrl.signal, cache: 'no-store' });
     if (!res.ok) { console.warn(`[apify] HTTP ${res.status}`); return []; }
     const json = await res.json();
     return Array.isArray(json) ? json : [];
@@ -124,16 +182,21 @@ export async function GET(req: Request) {
       configured: cfg.ok,
       // When nothing is set, the answer is not "false" — it is what to do about it.
       setup: cfg.ok ? undefined : {
-        easiest: 'Set APIFY_CALENDAR_URL in the Vercel project to the whole "Get dataset items" URL from the Apify console (it already contains the token). Redeploy.',
-        better: 'Or set APIFY_TOKEN and APIFY_CALENDAR_ACTOR — the actor\'s page URL works, so does "user~actor-name" or its console id. This reads the actor\'s LATEST successful run, which is what you want with a schedule: every scheduled run creates a NEW dataset, so a dataset URL freezes on the run it was copied from.',
-        where: 'Vercel → Project → Settings → Environment Variables',
+        allYouNeed: 'Set APIFY_TOKEN in the Vercel project to an Apify API token. Nothing else — the calendar run is found by looking at the account\'s own recent successful runs and taking the newest one whose rows parse as calendar events.',
+        where: 'Vercel → Project → Settings → Environment Variables, then redeploy.',
+        optional: 'APIFY_CALENDAR_ACTOR pins a specific actor and skips the search; APIFY_CALENDAR_URL takes a whole "Get dataset items" URL. Neither is necessary.',
       },
       // A dataset URL is a SNAPSHOT of one finished run: correct today, stale tomorrow.
       // Worth saying out loud, because it fails by going quietly out of date.
       warning: cfg.ok && isSnapshot(cfg)
         ? 'This points at one finished run\'s dataset, which never updates. Use APIFY_CALENDAR_ACTOR with a daily schedule for a feed that stays current.'
         : undefined,
-      url: cfg.ok ? redact(itemsUrl(cfg)) : null,
+      source: cfg.ok
+        ? (cfg.url || cfg.actor || cfg.dataset ? redact(itemsUrl(cfg)) : 'discovered from recent runs')
+        : null,
+      discovered: cfg.ok && !cfg.url && !cfg.actor && !cfg.dataset && cfg.token
+        ? await discoverDataset(cfg.token)
+        : undefined,
       itemsReturned: items.length,
       // The key names are the thing worth seeing: the normaliser is a set of guesses at
       // exactly these, and this is what turns them into knowledge.
