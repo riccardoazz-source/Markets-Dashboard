@@ -947,6 +947,18 @@ ok('the URL carries the encoded symbol',
     ok('an ungraded row survives the importance filter',
        A.normalizeDataset([real({ importance: null, event: 'Unrated thing' })]).length === 1);
   }
+  // Apify names an actor three ways depending on the page. Working out which one is "the
+  // id" is a job the code can do, and getting it wrong yields a 404 nobody can read.
+  ok('a store URL becomes an actor id',
+     A.actorIdFrom('https://apify.com/borderline/investing-calendar') === 'borderline~investing-calendar');
+  ok('a console URL yields the opaque id',
+     A.actorIdFrom('https://console.apify.com/actors/aBc123XyZ') === 'aBc123XyZ');
+  ok('the bare owner/name form works', A.actorIdFrom('borderline/investing-calendar') === 'borderline~investing-calendar');
+  ok('the canonical form is left alone', A.actorIdFrom('borderline~investing-calendar') === 'borderline~investing-calendar');
+  ok('a lone opaque id is legal', A.actorIdFrom('aBc123XyZ') === 'aBc123XyZ');
+  ok('nonsense is rejected rather than sent as a URL', A.actorIdFrom('not an actor') === null);
+  ok('empty is unconfigured, not an error', A.actorIdFrom(undefined) === null);
+
   ok('rows are returned most imminent first',
      A.normalizeDataset([real({ date: '09/20/2026' }), real({ date: '09/10/2026' })])
        .map(r => r.date.slice(0, 10)).join() === '2026-09-10,2026-09-20');

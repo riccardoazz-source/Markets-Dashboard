@@ -291,3 +291,38 @@ export function flagFor(country: string | undefined, currency?: string): string 
   }
   return '🌐';
 }
+
+/**
+ * The actor id, from whatever the user had to hand.
+ *
+ * Apify writes an actor's identity three different ways depending on which page you are
+ * looking at, and asking someone to work out which one is "the id" is asking them to do a
+ * job the code can do:
+ *
+ *   apify.com/borderline/investing-calendar   → borderline~investing-calendar
+ *   console.apify.com/actors/aBc123XyZ        → aBc123XyZ
+ *   borderline/investing-calendar             → borderline~investing-calendar
+ *   borderline~investing-calendar             → unchanged
+ *
+ * Returns null for something that is clearly not an actor reference, so a mistyped value
+ * is reported as unconfigured instead of producing a 404 nobody can read.
+ */
+export function actorIdFrom(input: string | undefined): string | null {
+  const raw = (input ?? '').trim();
+  if (!raw) return null;
+
+  // A console URL addresses the actor by its opaque id.
+  const console_ = raw.match(/console\.apify\.com\/actors\/([A-Za-z0-9]+)/);
+  if (console_) return console_[1];
+
+  // A store URL addresses it as owner/name.
+  const store = raw.match(/apify\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/);
+  if (store) return `${store[1]}~${store[2]}`;
+
+  // Bare forms, with either separator.
+  const bare = raw.match(/^([A-Za-z0-9_.-]+)[/~]([A-Za-z0-9_.-]+)$/);
+  if (bare) return `${bare[1]}~${bare[2]}`;
+
+  // A lone opaque id is legal too; anything with spaces or slashes left is not.
+  return /^[A-Za-z0-9]+$/.test(raw) ? raw : null;
+}

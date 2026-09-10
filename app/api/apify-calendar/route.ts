@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { unstable_cache } from 'next/cache';
-import { normalizeDataset, flagFor, type ApifyCalendarRow } from '@/lib/apifyCalendar';
+import { normalizeDataset, flagFor, actorIdFrom, type ApifyCalendarRow } from '@/lib/apifyCalendar';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -66,7 +66,9 @@ function config() {
   const token = process.env.APIFY_TOKEN;
   // Either address the actor's latest run (what you want, with a schedule), or pin one
   // dataset (useful while checking a shape).
-  const actor = process.env.APIFY_CALENDAR_ACTOR;
+  // Accepts the actor's page URL as readily as its id — see actorIdFrom. Whichever of
+  // Apify's three ways of naming an actor you happened to copy, it works.
+  const actor = actorIdFrom(process.env.APIFY_CALENDAR_ACTOR);
   const dataset = process.env.APIFY_CALENDAR_DATASET;
   return { url, token, actor, dataset, ok: !!url || (!!token && !!(actor || dataset)) };
 }
@@ -123,7 +125,7 @@ export async function GET(req: Request) {
       // When nothing is set, the answer is not "false" — it is what to do about it.
       setup: cfg.ok ? undefined : {
         easiest: 'Set APIFY_CALENDAR_URL in the Vercel project to the whole "Get dataset items" URL from the Apify console (it already contains the token). Redeploy.',
-        better: 'Or set APIFY_TOKEN and APIFY_CALENDAR_ACTOR (as "user~actor-name"), which reads the actor\'s latest successful run instead of one frozen dataset.',
+        better: 'Or set APIFY_TOKEN and APIFY_CALENDAR_ACTOR — the actor\'s page URL works, so does "user~actor-name" or its console id. This reads the actor\'s LATEST successful run, which is what you want with a schedule: every scheduled run creates a NEW dataset, so a dataset URL freezes on the run it was copied from.',
         where: 'Vercel → Project → Settings → Environment Variables',
       },
       // A dataset URL is a SNAPSHOT of one finished run: correct today, stale tomorrow.
