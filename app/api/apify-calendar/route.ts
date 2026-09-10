@@ -52,10 +52,10 @@ function options() {
   const n = Number(process.env.APIFY_CALENDAR_MIN_IMPORTANCE);
   return {
     minImportance: isFinite(n) && n >= 1 && n <= 3 ? n : 2,
-    // The feed's times are wall-clock in whatever zone the scraper read, which nothing in
-    // the row records. Set this once, after comparing one known release (US CPI is always
-    // 08:30 in New York) against what the card shows.
-    tzOffsetMinutes: Number(process.env.APIFY_CALENDAR_TZ_OFFSET) || 0,
+    // The feed publishes wall-clock times in ONE zone, which the row does not record.
+    // Italian, for this actor — and named rather than an offset, because Rome is +2 in
+    // summer and +1 in winter and a fixed number would be an hour wrong for half the year.
+    timeZone: process.env.APIFY_CALENDAR_TZ || 'Europe/Rome',
     only: (process.env.APIFY_CALENDAR_ONLY ?? '').split(',').map(x => x.trim()).filter(Boolean),
   };
 }

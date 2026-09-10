@@ -14,6 +14,8 @@
 // host, Apify included — so `/api/apify-calendar?mode=diag` returns the raw first item and
 // its keys. One look at that either confirms these names or says which to add.
 
+import { zonedTimeToUtc } from './eventCalendar';
+
 export interface ApifyCalendarRow {
   id: string;
   title: string;
@@ -83,12 +85,14 @@ export function inferDateOrder(items: unknown[]): DateOrder {
  * on the previous day for anyone west of Greenwich, so it becomes midday, and `timeKnown`
  * says the hour was never published.
  *
- * `tzOffsetMinutes` shifts a wall-clock time into UTC. The feed publishes times in
- * whatever zone the scraper was reading in, which nothing in the row records — so it is a
- * setting rather than a guess, and it defaults to zero (times taken as UTC).
+ * `timeZone` is the zone the feed's clock is in — the row does not record it, so it is a
+ * setting. A NAMED zone and not a fixed offset: this feed publishes Italian time, which is
+ * +2 in summer and +1 in winter, so a single number would be an hour wrong for half the
+ * year on every card. `zonedTimeToUtc` resolves the rule per date, which is the same
+ * reason the bundled FOMC times are stored the way they are.
  */
 export function rowInstant(
-  row: Record<string, unknown>, order: DateOrder = 'MDY', tzOffsetMinutes = 0,
+  row: Record<string, unknown>, order: DateOrder = 'MDY', timeZone = 'UTC',
 ): { date: string; timeKnown: boolean } | null {
   const stamp = pick(row, ['dateUtc', 'dateTime', 'datetime', 'timestamp', 'date']);
   if (!stamp) return null;
@@ -115,9 +119,9 @@ export function rowInstant(
   const time = pick(row, ['time', 'releaseTime', 'hour']);
   const hm = time?.match(/^(\d{1,2}):(\d{2})/);
   if (hm) {
-    const ms = Date.parse(`${day}T${hm[1].padStart(2, '0')}:${hm[2]}:00Z`);
-    if (isFinite(ms)) {
-      return { date: new Date(ms - tzOffsetMinutes * 60_000).toISOString(), timeKnown: true };
+    const h = Number(hm[1]), mi = Number(hm[2]);
+    if (h >= 0 && h < 24 && mi >= 0 && mi < 60) {
+      return { date: zonedTimeToUtc(day, h, mi, timeZone), timeKnown: true };
     }
   }
   return { date: `${day}T12:00:00.000Z`, timeKnown: false };
@@ -143,7 +147,7 @@ export function importanceOf(row: Record<string, unknown>): number | undefined {
  * two cards with the same key would collapse into one on the rail.
  */
 export function normalizeRow(
-  item: unknown, seq: number, order: DateOrder = 'MDY', tzOffsetMinutes = 0,
+  item: unknown, seq: number, order: DateOrder = 'MDY', timeZone = 'UTC',
 ): ApifyCalendarRow | null {
   if (!item || typeof item !== 'object') return null;
   const row = item as Record<string, unknown>;
@@ -152,7 +156,7 @@ export function normalizeRow(
   // where the layout supplied the gap. Collapsed here, because the card renders text.
   const title = pick(row, ['event', 'title', 'name', 'eventName', 'indicator'])
     ?.replace(/\s+/g, ' ').trim();
-  const when = rowInstant(row, order, tzOffsetMinutes);
+  const when = rowInstant(row, order, timeZone);
   if (!title || !when) return null;
 
   // `zone` is where the real feed puts it ("indonesia", "china"), and `currency` is the
@@ -177,8 +181,8 @@ export function normalizeRow(
 export interface NormalizeOptions {
   /** Drop anything the source grades below this. 2 = medium and high. */
   minImportance?: number;
-  /** Minutes to subtract from a wall-clock time to reach UTC. */
-  tzOffsetMinutes?: number;
+  /** The zone the feed's clock is in, e.g. 'Europe/Rome'. Named, so DST is handled. */
+  timeZone?: string;
   /** Keep only these countries/currencies, matched case-insensitively. Empty = keep all. */
   only?: string[];
 }
@@ -193,13 +197,13 @@ export interface NormalizeOptions {
  * already grades every row, so this is its judgement, not ours.
  */
 export function normalizeDataset(items: unknown[], opts: NormalizeOptions = {}): ApifyCalendarRow[] {
-  const { minImportance = 2, tzOffsetMinutes = 0, only = [] } = opts;
+  const { minImportance = 2, timeZone = 'UTC', only = [] } = opts;
   const order = inferDateOrder(items);
   const keep = new Set(only.map(o => o.trim().toUpperCase()).filter(Boolean));
   const seen = new Set<string>();
   const out: ApifyCalendarRow[] = [];
   items.forEach((it, i) => {
-    const row = normalizeRow(it, i, order, tzOffsetMinutes);
+    const row = normalizeRow(it, i, order, timeZone);
     if (!row || seen.has(row.id)) return;
     // An UNGRADED row is kept: the source declining to rate something is not the same as
     // rating it low, and dropping it would silently lose anything the actor left blank.

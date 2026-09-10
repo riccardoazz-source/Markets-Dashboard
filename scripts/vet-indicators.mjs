@@ -900,9 +900,15 @@ ok('the URL carries the encoded symbol',
      A.rowInstant(real({ date: '05/09/2026' }), 'DMY').date.slice(0, 7) === '2026-09-05'.slice(0, 7));
   ok('an impossible month is rejected rather than wrapped',
      A.rowInstant(real({ date: '13/45/2026' }), 'MDY') === null);
-  // The feed's clock is not identified in the row, so the offset is a setting.
-  ok('the timezone offset shifts a wall-clock time into UTC',
-     A.rowInstant(real(), 'MDY', 120).date === '2026-09-08T23:30:00.000Z');
+  // The feed's clock is not identified in the row, so the zone is a setting — and a NAMED
+  // zone, not an offset. This feed publishes Italian time: +2 in summer, +1 in winter. A
+  // fixed number would be an hour wrong for half the year, on every card.
+  ok('a summer time converts from Rome at +2',
+     A.rowInstant(real(), 'MDY', 'Europe/Rome').date === '2026-09-08T23:30:00.000Z');
+  ok('…and the SAME wall clock in winter converts at +1',
+     A.rowInstant(real({ date: '01/15/2026' }), 'MDY', 'Europe/Rome').date === '2026-01-15T00:30:00.000Z');
+  ok('an out-of-range clock falls back to an all-day card rather than a wrong hour',
+     A.rowInstant(real({ time: '99:99' }), 'MDY', 'Europe/Rome').timeKnown === false);
 
   // ── The row ──
   {
