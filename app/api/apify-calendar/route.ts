@@ -96,6 +96,19 @@ function isSnapshot(cfg: ReturnType<typeof config>): boolean {
   return !!cfg.dataset || /\/v2\/datasets\//.test(u);
 }
 
+interface DiscoveredRun {
+  datasetId: string; actorId?: string; status?: string; finishedAt?: string;
+}
+/**
+ * The outcome AND the reasoning.
+ *
+ * The first version returned the run or null, which meant a failed search reported itself
+ * as one word — a diagnostic that could not diagnose its own failure, on the one request
+ * whose whole job is to explain what went wrong. The trace names each run it looked at,
+ * what it found there and why it moved on.
+ */
+interface DiscoveryResult { found: DiscoveredRun | null; trace: string[] }
+
 /**
  * Find the calendar run without being told where it is.
  *
@@ -111,39 +124,68 @@ function isSnapshot(cfg: ReturnType<typeof config>): boolean {
  *
  * It also tracks a weekly schedule for free — next Monday's run is simply the newest one.
  */
-async function discoverDataset(token: string): Promise<{ datasetId: string; actorId?: string; finishedAt?: string } | null> {
+async function discoverDataset(token: string): Promise<DiscoveryResult> {
+  const trace: string[] = [];
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 12_000);
+  const t = setTimeout(() => ctrl.abort(), 15_000);
   try {
-    const res = await fetch(
-      `https://api.apify.com/v2/actor-runs?token=${encodeURIComponent(token)}&status=SUCCEEDED&desc=true&limit=10`,
-      { signal: ctrl.signal, cache: 'no-store' },
-    );
-    if (!res.ok) { console.warn(`[apify] run list HTTP ${res.status}`); return null; }
+    // NOT filtered to SUCCEEDED. A run can fill its dataset and still finish as TIMED-OUT
+    // or ABORTED — a scraper that got through most of a calendar before its limit is
+    // still a calendar, and filtering on status hid exactly that case. The parse test
+    // below is the real filter; status is only reported.
+    const listUrl = `https://api.apify.com/v2/actor-runs?token=${encodeURIComponent(token)}&desc=1&limit=10`;
+    const res = await fetch(listUrl, { signal: ctrl.signal, cache: 'no-store' });
+    trace.push(`run list: HTTP ${res.status}`);
+    if (!res.ok) {
+      // 401 means the token is wrong or lacks the scope; anything else is Apify's side.
+      trace.push(res.status === 401 || res.status === 403
+        ? 'the token was refused — check it was pasted whole, with no spaces'
+        : 'Apify refused the request');
+      return { found: null, trace };
+    }
     const json = await res.json() as {
-      data?: { items?: Array<{ id?: string; actId?: string; defaultDatasetId?: string; finishedAt?: string }> };
+      data?: { items?: Array<{ id?: string; actId?: string; status?: string;
+                               defaultDatasetId?: string; finishedAt?: string }> };
     };
-    // Bounded on purpose: each probe is a round trip, and this whole route has thirty
-    // seconds. Ten runs back is far more than a weekly schedule ever needs, and a
-    // diagnostic that times out before answering teaches nothing at all.
-    for (const run of json.data?.items ?? []) {
-      if (!run.defaultDatasetId) continue;
-      // A cheap peek — fifty rows is plenty to tell a calendar from anything else.
+    const runs = json.data?.items ?? [];
+    trace.push(`${runs.length} recent run(s)`);
+    if (runs.length === 0) {
+      trace.push('the account has no runs yet — a weekly schedule may not have fired');
+      return { found: null, trace };
+    }
+
+    // Bounded on purpose: each probe is a round trip, and this route has thirty seconds.
+    for (const run of runs) {
+      const label = `${run.actId ?? '?'} (${run.status ?? '?'})`;
+      if (!run.defaultDatasetId) { trace.push(`${label}: no dataset`); continue; }
       const probe = await fetch(
         `https://api.apify.com/v2/datasets/${run.defaultDatasetId}/items?clean=true&limit=50&token=${encodeURIComponent(token)}`,
         { cache: 'no-store' },
       ).then(r => r.ok ? r.json() : null).catch(() => null);
-      if (!Array.isArray(probe) || probe.length === 0) continue;
+      if (!Array.isArray(probe)) { trace.push(`${label}: dataset unreadable`); continue; }
+      if (probe.length === 0) { trace.push(`${label}: dataset empty`); continue; }
       // minImportance 1: the probe asks "is this a calendar at all", not "is it
       // interesting" — filtering here could reject a run of purely low-grade rows.
-      if (normalizeDataset(probe, { ...options(), minImportance: 1 }).length === 0) continue;
-      return { datasetId: run.defaultDatasetId, actorId: run.actId, finishedAt: run.finishedAt };
+      const parsed = normalizeDataset(probe, { ...options(), minImportance: 1 }).length;
+      if (parsed === 0) {
+        // The keys are what says WHY: a scraper's output has no date/event fields at all,
+        // while a calendar whose field names moved has different ones.
+        const keys = probe[0] && typeof probe[0] === 'object' ? Object.keys(probe[0]).join(',') : '?';
+        trace.push(`${label}: ${probe.length} rows, none parsed — keys: ${keys}`);
+        continue;
+      }
+      trace.push(`${label}: ${probe.length} rows, ${parsed} parsed → using this one`);
+      return {
+        found: { datasetId: run.defaultDatasetId, actorId: run.actId,
+                 status: run.status, finishedAt: run.finishedAt },
+        trace,
+      };
     }
-    console.warn('[apify] no recent successful run looked like a calendar');
-    return null;
+    trace.push('no run looked like a calendar');
+    return { found: null, trace };
   } catch (e) {
-    console.warn('[apify] discovery failed:', (e as Error).message);
-    return null;
+    trace.push(`failed: ${(e as Error).message}`);
+    return { found: null, trace };
   } finally { clearTimeout(t); }
 }
 
@@ -171,7 +213,7 @@ async function fetchItems(): Promise<unknown[]> {
   // Nothing named → find it. One path, so the diagnostic and the live feed cannot
   // disagree about which dataset is being read.
   if (!cfg.url && !cfg.actor && !cfg.dataset && cfg.token) {
-    const found = await discoverDataset(cfg.token);
+    const { found } = await discoverDataset(cfg.token);
     return found ? fetchDataset(found.datasetId, cfg.token) : [];
   }
   const ctrl = new AbortController();
@@ -201,10 +243,10 @@ export async function GET(req: Request) {
     // inside fetchItems, doubling the number of round trips on exactly the request most
     // likely to be near its time limit.
     const autoMode = cfg.ok && !cfg.url && !cfg.actor && !cfg.dataset && !!cfg.token;
-    const discovered = autoMode ? await discoverDataset(cfg.token!) : null;
+    const discovery = autoMode ? await discoverDataset(cfg.token!) : null;
     const items = !cfg.ok ? []
       : autoMode
-        ? (discovered ? await fetchDataset(discovered.datasetId, cfg.token!) : [])
+        ? (discovery?.found ? await fetchDataset(discovery.found.datasetId, cfg.token!) : [])
         : await fetchItems();
     const first = items[0];
     return NextResponse.json({
@@ -223,7 +265,10 @@ export async function GET(req: Request) {
       source: cfg.ok
         ? (cfg.url || cfg.actor || cfg.dataset ? redact(itemsUrl(cfg)) : 'discovered from recent runs')
         : null,
-      discovered: autoMode ? discovered : undefined,
+      discovered: autoMode ? discovery?.found ?? null : undefined,
+      // Each run considered, and why it was or was not used. This is the field to read
+      // when `discovered` is null.
+      discoveryTrace: autoMode ? discovery?.trace : undefined,
       itemsReturned: items.length,
       // The key names are the thing worth seeing: the normaliser is a set of guesses at
       // exactly these, and this is what turns them into knowledge.
