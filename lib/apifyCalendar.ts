@@ -163,9 +163,16 @@ export function normalizeRow(
   // reliable fallback: a row without a country still has IDR or CNY on it.
   const country = pick(row, ['country', 'countryCode', 'zone', 'region']);
   const currency = pick(row, ['currency']);
+  // The source carries its OWN id, which is stable across crawls. Preferred over a
+  // sequence number, which is just the row's position in the array: a re-crawl that
+  // returns the same events in a different order would otherwise give every card a new
+  // identity, and React would rebuild the whole rail instead of leaving it alone.
+  const sourceId = pick(row, ['id', 'eventId', 'uid']);
   return {
-    id: `apify-${seq}-${when.date.slice(0, 10)}-${title}`.toLowerCase()
-      .replace(/[^a-z0-9-]+/g, '-').slice(0, 90),
+    id: sourceId
+      ? `apify-${sourceId}`
+      : `apify-${seq}-${when.date.slice(0, 10)}-${title}`.toLowerCase()
+          .replace(/[^a-z0-9-]+/g, '-').slice(0, 90),
     title,
     currency,
     date: when.date,

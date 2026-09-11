@@ -918,6 +918,11 @@ ok('the URL carries the encoded symbol',
     ok('the country comes from `zone`, the currency kept beside it',
        r.country === 'china' && r.currency === 'CNY');
   }
+  // The source's own id is stable across crawls; the row's position in the array is not.
+  ok('the source id becomes the card id when there is one',
+     A.normalizeRow(real({ id: 556975 }), 7, 'MDY').id === 'apify-556975');
+  ok('…and a positional id is the fallback when there is none',
+     A.normalizeRow(real(), 7, 'MDY').id.startsWith('apify-7-'));
   ok('a null forecast is absent, not the string "null"',
      A.normalizeRow(real({ forecast: null }), 0).forecast === undefined);
 

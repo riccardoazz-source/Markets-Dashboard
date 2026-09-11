@@ -53,9 +53,16 @@ function options() {
   return {
     minImportance: isFinite(n) && n >= 1 && n <= 3 ? n : 2,
     // The feed publishes wall-clock times in ONE zone, which the row does not record.
-    // Italian, for this actor — and named rather than an offset, because Rome is +2 in
-    // summer and +1 in winter and a fixed number would be an hour wrong for half the year.
-    timeZone: process.env.APIFY_CALENDAR_TZ || 'Europe/Rome',
+    //
+    // UTC, not Rome — and this is arithmetic rather than a preference. China's statistics
+    // bureau publishes CPI at 09:30 Beijing, which is 01:30 UTC, and the feed's row for
+    // that release says exactly "01:30". Read as Rome it would have been 23:30 UTC, i.e.
+    // 07:30 Beijing: two hours before the release actually happened, on every card.
+    //
+    // The actor's own TimeZone input was left empty, so it fell back to its default, and
+    // GMT is what that default turns out to be. Setting that field in Apify changes this,
+    // so it stays overridable.
+    timeZone: process.env.APIFY_CALENDAR_TZ || 'UTC',
     only: (process.env.APIFY_CALENDAR_ONLY ?? '').split(',').map(x => x.trim()).filter(Boolean),
   };
 }
