@@ -2,9 +2,14 @@
 
 // The next six months, on the landing page.
 //
-// A horizontal rail rather than a vertical list: on a landing page this is context, not
-// the main event, and a list long enough to hold six months of releases pushes everything
-// under it off the screen. Scrolling sideways keeps the whole thing to one band.
+// ONE ROW, with the rest behind a button. This was a sideways-scrolling rail, which keeps
+// the height down but hides its own contents: nothing on screen says how many events are
+// off to the right, and on a desktop with no touch gesture they are easy to miss entirely.
+// A row that says "12 more" tells you what you are not seeing, and opening it is one
+// click rather than a scroll of unknown length.
+//
+// Search sits beside Add because six months of releases is more than a row, and scanning
+// for "the next ECB meeting" by eye through a grid is the thing a filter is for.
 //
 // Times render in the READER'S zone, not hardcoded to Rome. The stored instant is UTC, so
 // Intl converts, and it stays right on either side of a daylight-saving changeover —
@@ -18,7 +23,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { CalendarClock, Clock, Plus, X } from 'lucide-react';
+import { CalendarClock, Clock, Plus, X, Search, ChevronDown, ChevronUp } from 'lucide-react';
 import {
   upcomingEvents, countdown,
   CALENDAR_COLORS, CALENDAR_LABELS, type CalendarEvent,
@@ -45,50 +50,49 @@ function EventCard({ e, now, onDelete, current, onOpen }: {
     : null;
   const day = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: '2-digit', month: 'short' }).format(d);
   return (
-    <div className="relative shrink-0 w-[230px] rounded-xl border border-border bg-bg-card overflow-hidden flex">
-      {/* The category as a colour bar — readable down a rail without spending a line of
+    <div className="relative rounded-lg border border-border bg-bg-card overflow-hidden flex">
+      {/* The category as a colour bar — readable across a grid without spending a line of
           text on every card. */}
       <span className="w-1 shrink-0" style={{ backgroundColor: color }} />
-      <div className="flex-1 min-w-0 p-2.5 space-y-1">
+      <div className="flex-1 min-w-0 px-2 py-1.5 space-y-0.5">
         {/* The flag leads, at a size you can actually read.
             It used to sit inside the category pill at 9px, where it was decoration rather
             than information — the thing a reader most wants first from a calendar card is
             WHOSE event this is, and a 9px flag beside a coloured label does not answer
             that at a glance. Out of the pill, doubled in size, and given the region as its
             tooltip for the flags that look alike at small sizes. */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-base leading-none shrink-0" title={e.region}>{e.flag}</span>
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium whitespace-nowrap"
-            style={{ backgroundColor: `${color}1f`, color }}>
-            {CALENDAR_LABELS[e.category]}
-          </span>
-          <span className="ml-auto text-[9px] text-gray-400 border border-border rounded-full px-1.5 py-0.5 whitespace-nowrap">
+        {/* The flag, the day and the countdown on ONE line. They were three: a category
+            pill, a date line and a countdown chip, which is a lot of furniture around a
+            single fact. The category survives as the colour bar on the left, so its pill
+            was saying twice what the stripe already says. */}
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-sm leading-none shrink-0" title={`${CALENDAR_LABELS[e.category]} · ${e.region}`}>{e.flag}</span>
+          <span className="text-[10px] font-bold text-gray-300 tabular-nums uppercase tracking-wide truncate">{day}</span>
+          <span className="ml-auto text-[9px] text-gray-500 whitespace-nowrap shrink-0">
             {countdown(e.date, now)}
           </span>
         </div>
-        <p className="text-[11px] font-bold text-gray-300 tabular-nums uppercase tracking-wide">{day}</p>
-        <p className="text-xs font-semibold text-gray-100 leading-snug line-clamp-2">{e.title}</p>
-        {e.description && <p className="text-[10px] text-gray-600 leading-snug line-clamp-2">{e.description}</p>}
+        <p className="text-[11px] font-semibold text-gray-100 leading-snug line-clamp-2">{e.title}</p>
         {/* The one figure on this card that needs no qualification: it is our own series,
             the same one the Macro tab charts. The forecast lives behind the tap, because
             it costs a web search and is not always found. */}
-        {current && (
-          <p className="text-[10px] text-gray-500 leading-none">
-            {current.label}: <span className="text-gray-200 font-semibold tabular-nums">{current.value}</span>
-          </p>
-        )}
-        <div className="flex items-center gap-1.5 flex-wrap text-[9px] pt-0.5">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 text-gray-300 tabular-nums">
+        {/* Time, current value and the tentative mark share one line. The description and
+            the source domain are gone from the face of the card: both are available in the
+            panel, and on a card this size they were crowding out the figure. */}
+        <div className="flex items-center gap-1.5 text-[9px] min-w-0">
+          <span className="inline-flex items-center gap-0.5 text-gray-400 tabular-nums shrink-0">
             <Clock size={9} />{time ?? 'All day'}
           </span>
-          {e.tentative && (
-            <span className="px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">tentative</span>
+          {e.tentative && <span className="text-amber-500/80 shrink-0">tentative</span>}
+          {current && (
+            <span className="ml-auto text-gray-500 truncate">
+              <span className="text-gray-200 font-semibold tabular-nums">{current.value}</span> now
+            </span>
           )}
-          {e.source && <span className="ml-auto text-gray-700 truncate max-w-[80px]">{e.source}</span>}
         </div>
         {onOpen && (
           <button onClick={onOpen}
-            className="w-full mt-0.5 px-1.5 py-1 rounded border border-border text-[10px] text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors">
+            className="w-full px-1 py-0.5 rounded border border-border text-[9px] text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors">
             Forecast &amp; odds
           </button>
         )}
@@ -120,7 +124,7 @@ function AddCard({ onAdd, onCancel }: {
     setTitle(''); setDay(''); setTime('');
   };
   return (
-    <div className="shrink-0 w-[230px] rounded-xl border border-accent/40 bg-bg-card p-2.5 space-y-1.5">
+    <div className="rounded-lg border border-accent/40 bg-bg-card p-2.5 space-y-1.5">
       <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Earnings call, meeting…"
         autoFocus
         className="w-full bg-white/5 rounded px-2 py-1 text-xs text-gray-100 placeholder-gray-600 outline-none focus:ring-1 focus:ring-accent" />
@@ -153,6 +157,9 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
   // server would bake in the build machine's "now" and hydrate against a different list.
   const [now, setNow] = useState<Date | null>(null);
   const [adding, setAdding] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
   const { events: personal, addEvent, removeEvent } = useCalendarEvents();
   const [latest, setLatest] = useState<Record<string, { value: number; date: string }>>({});
   const [ipos, setIpos] = useState<CalendarEvent[]>([]);
@@ -224,6 +231,22 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
     return () => { cancelled = true; };
   }, [wantedIds]);
 
+  // Searching overrides the fold: a filter that still hid most of its own matches behind
+  // "show more" would be answering a question and then covering the answer.
+  const q = query.trim().toLowerCase();
+  const matches = useMemo(
+    () => (q ? shown.filter(e =>
+      e.title.toLowerCase().includes(q) ||
+      e.region.toLowerCase().includes(q) ||
+      (e.description ?? '').toLowerCase().includes(q)) : shown),
+    [shown, q],
+  );
+  // Four is one row at the widest breakpoint and two on a phone — the point is a fixed,
+  // small number, not a number that happens to fill the viewport.
+  const COLLAPSED = 4;
+  const folded = !q && !expanded && matches.length > COLLAPSED;
+  const visible = folded ? matches.slice(0, COLLAPSED) : matches;
+
   // The formatted "current" for one card, or null when this app carries no series for it
   // (the Bank of England is the live example) or the fetch has not landed.
   const currentFor = (title: string) => {
@@ -278,16 +301,40 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
         <span className="text-[10px] text-gray-600 hidden sm:inline">
           next {months} months · {zone()}
         </span>
-        <button onClick={() => setAdding(a => !a)}
-          className={clsx('ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] transition-colors',
-            adding ? 'border-accent text-accent' : 'border-border text-gray-400 hover:text-gray-200 hover:border-accent/50')}>
-          <Plus size={12} /> Add
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          {searching ? (
+            <input
+              value={query} onChange={ev => setQuery(ev.target.value)} autoFocus
+              placeholder="Search events…"
+              onKeyDown={ev => { if (ev.key === 'Escape') { setQuery(''); setSearching(false); } }}
+              onBlur={() => { if (!query) setSearching(false); }}
+              className="w-[140px] sm:w-[180px] bg-white/5 rounded-lg px-2 py-1 text-[11px] text-gray-100 placeholder-gray-600 outline-none focus:ring-1 focus:ring-accent" />
+          ) : (
+            <button onClick={() => setSearching(true)} title="Search the next six months"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border text-gray-400 hover:text-gray-200 hover:border-accent/50 text-[11px] transition-colors">
+              <Search size={12} /> <span className="hidden sm:inline">Search</span>
+            </button>
+          )}
+          {query && (
+            <button onClick={() => { setQuery(''); setSearching(false); }} title="Clear the search"
+              className="p-1 rounded text-gray-500 hover:text-gray-200"><X size={12} /></button>
+          )}
+          <button onClick={() => setAdding(a => !a)}
+            className={clsx('inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] transition-colors',
+              adding ? 'border-accent text-accent' : 'border-border text-gray-400 hover:text-gray-200 hover:border-accent/50')}>
+            <Plus size={12} /> Add
+          </button>
+        </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
-        {adding && <AddCard onAdd={e => { addEvent({ ...e }); setAdding(false); }} onCancel={() => setAdding(false)} />}
-        {shown.map(e => (
+      {adding && (
+        <div className="max-w-[260px]">
+          <AddCard onAdd={e => { addEvent({ ...e }); setAdding(false); }} onCancel={() => setAdding(false)} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-1.5">
+        {visible.map(e => (
           <EventCard key={e.id} e={e} now={now}
             current={currentFor(e.title)}
             // Only the events this app knows the subject of get the affordance. A summit
@@ -296,10 +343,29 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
             onOpen={eventSubject(e.title) ? () => setOutlook(e) : undefined}
             onDelete={e.category === 'personal' ? () => removeEvent(e.id) : undefined} />
         ))}
-        {!shown.length && !adding && (
-          <p className="text-[11px] text-gray-600 py-3">Nothing scheduled in the next {months} months.</p>
-        )}
       </div>
+
+      {!matches.length && !adding && (
+        <p className="text-[11px] text-gray-600 py-2">
+          {q ? `Nothing matches “${query}”.` : `Nothing scheduled in the next ${months} months.`}
+        </p>
+      )}
+
+      {/* The count is the point: "12 more" says what is being withheld, which a sideways
+          scrollbar never did. */}
+      {matches.length > COLLAPSED && !q && (
+        <button onClick={() => setExpanded(v => !v)}
+          className="w-full flex items-center justify-center gap-1 px-2 py-1 rounded-lg border border-border text-[11px] text-gray-400 hover:text-gray-100 hover:border-accent/50 transition-colors">
+          {expanded
+            ? <>Show less <ChevronUp size={12} /></>
+            : <>{matches.length - COLLAPSED} more event{matches.length - COLLAPSED === 1 ? '' : 's'} <ChevronDown size={12} /></>}
+        </button>
+      )}
+      {q && (
+        <p className="text-[10px] text-gray-600">
+          {matches.length} of {shown.length} event{shown.length === 1 ? '' : 's'} match.
+        </p>
+      )}
 
       {outlook && eventSubject(outlook.title) && (
         <EventOutlookPanel

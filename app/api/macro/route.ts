@@ -296,11 +296,18 @@ async function fetchFRED(
   fromDate?: string,
   timeoutMs = 6_000,
 ): Promise<{ date: string; value: number }[]> {
+  // The reader proxy joins the race only on the ROOMY calls (history, 8s). List mode runs
+  // this for every indicator at once on a 4s budget, and adding a fourth outbound request
+  // per series turns ~10 series into ~40 simultaneous connections — enough to starve the
+  // other fetches sharing the same function, which is the likeliest reason the VIX tile
+  // lost its value while its chart kept working. The proxy is the slowest route anyway, so
+  // it is the one that belongs in the patient call and not the crowded one.
+  const roomy = timeoutMs >= 6_000;
   return firstNonEmpty([
     ...(getFredApiKey() ? [fetchFREDApi(seriesId, fromDate, timeoutMs)] : []),
     fetchFREDCsv(seriesId, fromDate, timeoutMs),
     fetchFREDTxt(seriesId, fromDate, timeoutMs),
-    fetchFREDViaReader(seriesId, fromDate, timeoutMs),
+    ...(roomy ? [fetchFREDViaReader(seriesId, fromDate, timeoutMs)] : []),
   ]);
 }
 
