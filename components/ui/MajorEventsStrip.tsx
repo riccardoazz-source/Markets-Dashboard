@@ -209,7 +209,7 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
       id: p.id, title: p.title, category: 'personal' as const,
       region: 'Mine', flag: '📌', date: p.date, timeKnown: p.timeKnown, description: p.description,
     }));
-    return upcomingEvents([...BUNDLED_EVENTS, ...ipos, ...mine], now, months);
+    return upcomingEvents([...BUNDLED_EVENTS, ...ipos, ...mine], now, months, zone());
   }, [now, months, personal, ipos]);
 
   // One request for the whole rail: every series the visible events concern, from the

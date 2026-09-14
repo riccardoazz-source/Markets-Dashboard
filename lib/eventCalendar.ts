@@ -81,16 +81,38 @@ export function zonedTimeToUtc(day: string, hour: number, minute: number, timeZo
   return new Date(ms).toISOString();
 }
 
-/** The six-month window, computed against the clock — see the header. */
-export function upcomingEvents(events: CalendarEvent[], now: Date = new Date(), months = 6): CalendarEvent[] {
-  const from = now.getTime();
+/** The calendar day an instant falls on, in a given zone. 'en-CA' is ISO order. */
+function dayIn(instant: number | Date, timeZone?: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(instant);
+}
+
+/**
+ * The six-month window, computed against the clock — see the header.
+ *
+ * An event survives to the END OF ITS DAY, not to its own minute. Dropping it the instant
+ * it starts means the FOMC decision vanishes from the page at 20:00 while the market is
+ * still reacting to it and while it is still the most interesting thing that happened —
+ * and the reader who opens the app that evening to see what the Fed did finds the card
+ * gone. Keeping it until tomorrow costs one row and answers the question people actually
+ * have after a release rather than only before it.
+ *
+ * The comparison is on the calendar DAY in the reader's own zone, because "today" is a
+ * local idea: an 08:30 New York release is still today for someone in Rome at 21:00, and
+ * measuring in UTC would retire it early for anyone east of Greenwich.
+ */
+export function upcomingEvents(
+  events: CalendarEvent[], now: Date = new Date(), months = 6, timeZone?: string,
+): CalendarEvent[] {
+  const today = dayIn(now, timeZone);
   const until = new Date(now.getTime());
   until.setMonth(until.getMonth() + months);
   const to = until.getTime();
   return events
     .filter(e => {
       const t = Date.parse(e.date);
-      return isFinite(t) && t >= from && t <= to;
+      return isFinite(t) && dayIn(t, timeZone) >= today && t <= to;
     })
     .sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
 }

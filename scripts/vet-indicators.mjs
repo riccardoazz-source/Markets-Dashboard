@@ -557,6 +557,24 @@ console.log('\nForward calendar — the window, and the daylight-saving trap');
     ev('edge-out', '2027-03-01T00:00:00Z'),
   ];
   const win = EC.upcomingEvents(all, now, 6);
+  // An event lives to the END of its day, not to its own minute: the FOMC decision must
+  // still be on the page that evening, when "what did the Fed do" is the live question.
+  {
+    const at = (d) => ({ id: d, title: 'x', category: 'central-bank', region: 'US',
+                         flag: '🇺🇸', date: d, timeKnown: true });
+    const evening = new Date('2026-09-16T22:00:00Z');   // hours after an 18:00Z decision
+    const kept = EC.upcomingEvents([at('2026-09-16T18:00:00.000Z')], evening, 6, 'UTC');
+    ok('an event already past today is still shown', kept.length === 1);
+    const gone = EC.upcomingEvents([at('2026-09-16T18:00:00.000Z')],
+                                   new Date('2026-09-17T06:00:00Z'), 6, 'UTC');
+    ok('…and drops off the next day', gone.length === 0);
+    // "Today" is local. An 08:30 New York release is still today for a reader in Rome at
+    // 21:00; judging in UTC alone would be fine here, but a zone east of the event's is
+    // where retiring it early would show.
+    ok('the day is judged in the reader\'s zone',
+       EC.upcomingEvents([at('2026-09-16T12:30:00.000Z')],
+                         new Date('2026-09-16T21:00:00Z'), 6, 'Europe/Rome').length === 1);
+  }
   ok('the window drops what has passed', !win.some(e => e.id === 'past'));
   ok('…keeps what is still ahead today', win.some(e => e.id === 'today'));
   ok('…keeps the far edge inside six months', win.some(e => e.id === 'edge-in'));
