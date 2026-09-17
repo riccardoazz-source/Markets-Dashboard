@@ -642,6 +642,26 @@ console.log('\nForward calendar — the window, and the daylight-saving trap');
   const bad = ED.BUNDLED_EVENTS.filter(e => !e.id || !e.title || !e.flag || !e.region || !isFinite(Date.parse(e.date)));
   ok('every bundled event is complete', bad.length === 0, bad.map(e => e.id).join(', '));
   ok('ids are unique', new Set(ED.BUNDLED_EVENTS.map(e => e.id)).size === ED.BUNDLED_EVENTS.length);
+  // Three time states, not two. "All day" for a summit that has no hour is right; the same
+  // words on a BoJ decision would throw away the half of the answer that IS known — it
+  // lands around midday in Tokyo, and only the minute is the surprise.
+  {
+    const boj = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('Bank of Japan'));
+    ok('every BoJ entry is marked approximate, not timeless',
+       boj.length > 0 && boj.every(e => e.timeKnown === false && e.timeApprox === true));
+    // 12:00 JST is the usual landing point; Japan keeps no daylight saving, so this is a
+    // fixed +9 all year and a stored 03:00Z must read as midday in Tokyo.
+    const wrong = boj.filter(e => new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date(e.date)) !== '12:00');
+    ok('…and each sits at midday Tokyo', wrong.length === 0, wrong.map(e => e.date).join(', '));
+    // A summit genuinely has no hour: marking one approximate would invent a precision.
+    ok('a multi-day summit stays timeless, not approximate',
+       ED.GEOPOLITICAL_EVENTS.every(e => e.timeKnown === false && !e.timeApprox));
+    // Everything with an exact time must NOT claim to be approximate.
+    ok('an exact time is never also approximate',
+       ED.BUNDLED_EVENTS.every(e => !(e.timeKnown && e.timeApprox)));
+  }
   ok('the US releases are flagged tentative',
      ED.CALENDAR_EVENTS.filter(e => e.category === 'economic-data').every(e => e.tentative === true));
   ok('the central-bank dates are NOT', 

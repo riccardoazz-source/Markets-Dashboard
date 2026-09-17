@@ -38,10 +38,12 @@ interface Outlook {
   message?: string;
 }
 
-export function EventOutlookPanel({ title, date, region, subject, current, onClose }: {
+export function EventOutlookPanel({ title, date, region, subject, current, timeApprox, onClose }: {
   title: string;
   date: string;
   region?: string;
+  /** The hour is roughly known but not published to the minute — said, not hidden. */
+  timeApprox?: boolean;
   subject: EventSubject;
   /** Today's value of the series this event concerns, already formatted. */
   current?: { value: string; asOf: string | null } | null;
@@ -76,7 +78,10 @@ export function EventOutlookPanel({ title, date, region, subject, current, onClo
         <PanelClose onClose={onClose} />
         <div className="pr-7">
           <h3 className="text-base font-bold text-white leading-snug">{title}</h3>
-          <p className="text-xs text-gray-500 mt-0.5">{day}{region ? ` · ${region}` : ''}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {day}{region ? ` · ${region}` : ''}
+            {timeApprox && <span className="text-gray-600"> · time approximate, the exact minute is not published</span>}
+          </p>
         </div>
 
         {/* OURS. Shown first and without qualification, because it is the only figure here

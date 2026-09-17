@@ -66,11 +66,18 @@ const boe = (date: string) =>
     description: 'BoE Monetary Policy Committee bank rate decision.',
     source: 'bankofengland.co.uk',
   });
+// The BoJ announces when the meeting ENDS, which is around midday in Tokyo and
+// deliberately not a fixed minute — the "lunchtime surprise" is a real feature of that
+// calendar, not missing data. Stored at 12:00 JST as the usual landing point and marked
+// approximate, so the card can say "~13:00" in Rome rather than "All day", which would be
+// throwing away the half of the answer that IS known. Governor's press conference at
+// 15:30 JST is fixed, and named in the description since that is where the guidance lands.
 const boj = (date: string) =>
   make(JP, 'Bank of Japan Monetary Policy Decision', 'central-bank', date, {
-    description: 'BoJ policy rate decision; exact release time varies.',
+    description: 'BoJ policy rate decision, announced when the meeting ends — usually around midday in Tokyo, never at a fixed minute. Governor\'s press conference at 15:30 JST.',
     source: 'boj.or.jp',
     timeKnown: false,
+    timeApprox: true,
   });
 
 // ── US data releases ─────────────────────────────────────────────────────────

@@ -45,9 +45,13 @@ function EventCard({ e, now, onDelete, current, onOpen }: {
 }) {
   const color = CALENDAR_COLORS[e.category];
   const d = new Date(e.date);
-  const time = e.timeKnown
-    ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }).format(d)
-    : null;
+  // Three states, not two. An exact time prints plainly; an approximate one prints with a
+  // tilde and explains itself on hover; only a genuinely timeless entry says "All day".
+  const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+  const time = e.timeKnown ? clock : e.timeApprox ? `~${clock}` : null;
+  const timeHint = e.timeKnown ? undefined
+    : e.timeApprox ? 'The exact minute is not published — this is when it usually lands'
+    : 'No time published for this entry';
   const day = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: '2-digit', month: 'short' }).format(d);
   return (
     <div className="relative rounded-lg border border-border bg-bg-card overflow-hidden flex">
@@ -80,7 +84,8 @@ function EventCard({ e, now, onDelete, current, onOpen }: {
             the source domain are gone from the face of the card: both are available in the
             panel, and on a card this size they were crowding out the figure. */}
         <div className="flex items-center gap-1.5 text-[9px] min-w-0">
-          <span className="inline-flex items-center gap-0.5 text-gray-400 tabular-nums shrink-0">
+          <span className="inline-flex items-center gap-0.5 text-gray-400 tabular-nums shrink-0"
+            title={timeHint}>
             <Clock size={9} />{time ?? 'All day'}
           </span>
           {e.tentative && <span className="text-amber-500/80 shrink-0">tentative</span>}
@@ -372,6 +377,7 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
           title={outlook.title}
           date={outlook.date}
           region={outlook.region}
+          timeApprox={outlook.timeApprox}
           subject={eventSubject(outlook.title)!}
           current={(() => {
             const c = currentFor(outlook.title);

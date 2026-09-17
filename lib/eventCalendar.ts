@@ -27,8 +27,18 @@ export interface CalendarEvent {
   flag: string;
   /** Absolute instant, ISO 8601 in UTC. */
   date: string;
-  /** False → the card says "All day" instead of a time. */
+  /** False → the card shows no exact time. See `timeApprox` for the middle case. */
   timeKnown: boolean;
+  /**
+   * The hour is KNOWN APPROXIMATELY but not published to the minute.
+   *
+   * There is a real difference between "nobody said when" and "everyone knows roughly
+   * when, and the exact minute is the surprise". A summit has no hour at all. The Bank of
+   * Japan announces when its meeting ends — around midday in Tokyo, famously not at a
+   * fixed minute — and rendering that as "All day" throws away the half of the answer we
+   * do have. The card shows "~12:00" and says why on hover.
+   */
+  timeApprox?: boolean;
   /** The date is expected but not yet confirmed by the publisher. */
   tentative?: boolean;
   description?: string;
