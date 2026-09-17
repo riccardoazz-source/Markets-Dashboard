@@ -30,6 +30,10 @@ interface Outlook {
   probabilities?: { outcome: string; pct: number }[];
   /** Where the odds are traded. Odds never appear without it. */
   oddsMarket?: string | null;
+  /** The date the search says this event is really on, and whether it disagrees with ours. */
+  scheduledFor?: string | null;
+  dateMismatch?: boolean;
+  alreadyHappened?: boolean;
   note?: string | null;
   queries?: string[];
   sources?: { uri: string; title: string }[];
@@ -96,6 +100,24 @@ export function EventOutlookPanel({ title, date, region, subject, current, timeA
             dim={!data?.consensus} />
         </div>
 
+        {/* The most important thing on the panel, so it goes at the TOP.
+            A bundled calendar is hand-written and goes stale silently: a meeting moves, the
+            card keeps the old day, and the only symptom is an empty odds panel that reads
+            as a search failure. The model has just read the real schedule — when it
+            disagrees with ours, ours is the one to suspect. */}
+        {!loading && data?.dateMismatch && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 space-y-0.5">
+            <p className="text-xs font-semibold text-amber-300">
+              This app has the wrong date for this event
+            </p>
+            <p className="text-[11px] text-amber-200/70 leading-snug">
+              The search says it {data.alreadyHappened ? 'took place' : 'is scheduled'} on{' '}
+              <span className="font-semibold">{data.scheduledFor}</span>, not {date.slice(0, 10)}.
+              {data.alreadyHappened && ' Odds are missing because the meeting has already happened — what markets price now belongs to the next one.'}
+            </p>
+          </div>
+        )}
+
         {loading ? (
           <div className="h-24 flex flex-col items-center justify-center gap-2">
             <LoadingSpinner size={24} />
@@ -132,7 +154,9 @@ export function EventOutlookPanel({ title, date, region, subject, current, timeA
               </div>
             ) : (
               <Notice title="No traded odds found"
-                body={subject.kind === 'rate'
+                body={data.alreadyHappened
+                  ? 'This event has already happened, so there is nothing left to price. Whatever the market is quoting now belongs to the next meeting.'
+                  : subject.kind === 'rate'
                   ? 'The search did not return market-implied probabilities for this decision. They are usually quoted for rate meetings, but not every one reaches a reachable source.'
                   : 'The search found no traded odds for this release. Event venues such as Kalshi and Polymarket do list CPI and payrolls outcomes, so they exist — they are just not always quoted where a search can read them. A consensus is NOT shown as odds: a forecast spread is not a probability.'} />
             )}
@@ -176,7 +200,10 @@ function Cell({ label, value, sub, dim }: {
   return (
     <div className="rounded-lg bg-bg-input px-2.5 py-2">
       <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none">{label}</p>
-      <p className={`text-lg font-bold tabular-nums leading-tight mt-1 ${dim ? 'text-gray-600' : 'text-white'}`}>
+      {/* Long answers shrink instead of being clipped: "Deposit rate: 2.50%, Main
+          refinancing ra" is worse than the same sentence one size smaller. */}
+      <p className={`font-bold tabular-nums leading-tight mt-1 ${dim ? 'text-gray-600' : 'text-white'} ${
+        value.length > 28 ? 'text-xs' : value.length > 14 ? 'text-sm' : 'text-lg'}`}>
         {value}
       </p>
       {sub && <p className="text-[9px] text-gray-600 leading-none mt-0.5">{sub}</p>}

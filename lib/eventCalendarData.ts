@@ -118,6 +118,18 @@ export const CALENDAR_EVENTS: CalendarEvent[] = [
   fomc('2026-12-09T19:00:00Z'),
 
   // ECB 2026 — 14:15 Frankfurt (12:15Z on CEST, 13:15Z on CET)
+  //
+  // ⚠ THE SEPTEMBER DATE IS DISPUTED. A grounded search run from the app's own outlook
+  // panel reported the September 2026 Governing Council decision as the 10th, with the new
+  // rates effective the 16th — not the 17th recorded here. These dates were ported with
+  // the rest of the file and carry the same "verified 2026-06" claim as everything else,
+  // which is exactly the kind of claim that goes quietly stale.
+  //
+  // Not corrected here on one model's say-so: replacing a hand-entered date with a
+  // searched one is trading an unverified number for another unverified number. Check
+  // ecb.europa.eu (Governing Council monetary policy meeting dates) and fix the whole
+  // year's list at once. The panel now warns on any card whose date the search disputes,
+  // so the rest of this list reports on itself the first time each one is opened.
   ecb('2026-06-18T12:15:00Z'),
   ecb('2026-07-30T12:15:00Z'),
   ecb('2026-09-17T12:15:00Z'),

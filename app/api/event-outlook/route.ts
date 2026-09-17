@@ -112,8 +112,9 @@ async function fetchOutlook(
     'If the search does not give you a figure, leave that field null. A remembered ' +
     'consensus is a number with a date on it and nothing behind it — worse than none.\n' +
     '2. `consensus` is the median forecast reported ahead of the release, `previous` the ' +
-    'last published reading. Include the unit exactly as the press writes it ("3.1%", ' +
-    '"165K", "4.00%").\n' +
+    'last published reading. ONE figure with its unit, exactly as the press writes it — ' +
+    '"3.1%", "165K", "4.00%". Not a sentence, and not several rates joined together: the ' +
+    'card has room for a number, and a paragraph there gets cut off mid-word.\n' +
     '3. `probabilities` must come from a market that TRADES the outcome, and you must name ' +
     'that market in `oddsMarket`. ' +
     (isRate
@@ -126,9 +127,14 @@ async function fetchOutlook(
     'A forecast spread is not a probability, and presenting it as one invents a precision ' +
     'nobody measured. If no traded market is quoted, leave `probabilities` empty and ' +
     '`oddsMarket` null — that is a correct answer, not a failure.\n' +
-    '5. `asOf` is the date the figures you read were quoted, ISO YYYY-MM-DD.\n\n' +
+    '5. `asOf` is the date the figures you read were quoted, ISO YYYY-MM-DD.\n' +
+    '6. `scheduledFor` is the date your search says this event is ACTUALLY scheduled for, ' +
+    'ISO YYYY-MM-DD, and `alreadyHappened` is true if it is in the past. Answer these from ' +
+    'the search, NOT from the date you were given — that date may be wrong, and saying so ' +
+    'is more useful than quietly answering about a different day.\n\n' +
     'Reply with JSON ONLY, no prose and no code fence:\n' +
     '{"previous":"…|null","consensus":"…|null","asOf":"YYYY-MM-DD|null","oddsMarket":"…|null",' +
+    '"scheduledFor":"YYYY-MM-DD|null","alreadyHappened":false,' +
     '"probabilities":[{"outcome":"hold at 3.50%","pct":82}],"note":"one short sentence or null"}';
 
   const prompt =
@@ -197,6 +203,7 @@ async function fetchOutlook(
       previous?: string | null; consensus?: string | null; asOf?: string | null;
       probabilities?: { outcome?: string; pct?: number }[];
       oddsMarket?: string | null; note?: string | null;
+      scheduledFor?: string | null; alreadyHappened?: boolean;
     } = {};
     try {
       const m = text.match(/\{[\s\S]*\}/);
@@ -216,10 +223,24 @@ async function fetchOutlook(
     const oddsMarket = str(parsed.oddsMarket, 80);
     const odds = oddsMarket ? probabilities : [];
 
+    // Does the search agree with the date we hold? A bundled calendar is hand-written and
+    // goes out of date silently — a meeting moves, the card keeps the old day, and the
+    // only symptom is an empty odds panel that looks like a search failure. The model has
+    // just read the real schedule, so it is asked, and a disagreement is reported at the
+    // TOP of the panel rather than buried in a grey footnote nobody reads.
+    const scheduledFor = str(parsed.scheduledFor, 10);
+    const dateMismatch = !!scheduledFor && /^\d{4}-\d{2}-\d{2}$/.test(scheduledFor)
+      && scheduledFor !== day;
+
     const body = {
       grounded: true,
       previous: str(parsed.previous),
-      consensus: str(parsed.consensus),
+      // Room for a compound answer rather than a word chopped in half. The instruction
+      // asks for one figure; this is what happens when it does not comply.
+      consensus: str(parsed.consensus, 90),
+      scheduledFor,
+      dateMismatch,
+      alreadyHappened: parsed.alreadyHappened === true,
       asOf: str(parsed.asOf),
       probabilities: odds,
       oddsMarket: odds.length > 0 ? oddsMarket : null,
