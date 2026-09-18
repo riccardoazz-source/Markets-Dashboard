@@ -250,6 +250,38 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
     return { best: sorted.slice(0, 3), worst: sorted.slice(-3).reverse() };
   }, [matrix, gran]);
 
+  // ── What a weekend is worth, for the assets that have one ──────────────────
+  //
+  // Only in Daily view, and only when weekend observations actually exist — which is the
+  // same as asking whether the asset trades at all on a Saturday. An equity produces
+  // nothing here and the block stays hidden; crypto produces two averages that are
+  // genuinely their own question.
+  //
+  // The WEEKDAY average is computed alongside and shown with them, because a figure like
+  // "Saturday +0.08%" is unreadable on its own: the whole point is whether it differs from
+  // an ordinary day, and without the baseline the reader has to hold the comparison in
+  // their head. The count comes too — an average over nine Saturdays is a different claim
+  // from one over nine hundred.
+  const weekendStats = useMemo(() => {
+    if (!matrix || gran !== 'Daily') return null;
+    const bag = { saturday: [] as number[], sunday: [] as number[], weekday: [] as number[] };
+    for (const [row, m] of matrix.grid) {
+      for (const [col, v] of m) {
+        if (!isFinite(v)) continue;
+        const kind = dayKind('Daily', row, col);
+        if (kind === 'saturday' || kind === 'sunday' || kind === 'weekday') bag[kind].push(v);
+      }
+    }
+    if (bag.saturday.length === 0 && bag.sunday.length === 0) return null;
+    const mean = (xs: number[]) => xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null;
+    const share = (xs: number[]) => xs.length ? xs.filter(x => x > 0).length / xs.length * 100 : null;
+    return {
+      saturday: { n: bag.saturday.length, avg: mean(bag.saturday), up: share(bag.saturday) },
+      sunday:   { n: bag.sunday.length,   avg: mean(bag.sunday),   up: share(bag.sunday) },
+      weekday:  { n: bag.weekday.length,  avg: mean(bag.weekday),  up: share(bag.weekday) },
+    };
+  }, [matrix, gran]);
+
   return (
     <>
       <button
@@ -393,6 +425,43 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Weekend averages — under the records, and only for an asset that has a
+                  weekend to average. The weekday row is the baseline that makes the other
+                  two mean anything. */}
+              {!loading && !error && weekendStats && (
+                <div className="mt-4 rounded-lg border border-indigo-500/20 bg-indigo-500/[0.04] p-2.5">
+                  <p className="text-[10px] uppercase tracking-widest text-indigo-300/80 mb-1.5">
+                    Weekend vs weekday (daily returns)
+                  </p>
+                  <div className="space-y-0.5">
+                    {([['Saturday', weekendStats.saturday], ['Sunday', weekendStats.sunday],
+                       ['Mon–Fri', weekendStats.weekday]] as const).map(([label, st]) => (
+                      st.n === 0 ? null : (
+                        <div key={label} className="flex items-center justify-between gap-2 py-0.5 text-[11px]">
+                          <span className={label === 'Mon–Fri' ? 'text-gray-500' : 'text-gray-300'}>
+                            {label}
+                            <span className="text-gray-600"> · {st.n} day{st.n === 1 ? '' : 's'}</span>
+                          </span>
+                          <span className="flex items-center gap-3 shrink-0 tabular-nums">
+                            {st.up != null && (
+                              <span className="text-gray-500 text-[10px]">{st.up.toFixed(0)}% up</span>
+                            )}
+                            <span className={`font-bold ${
+                              st.avg == null ? 'text-gray-600' : st.avg >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {st.avg == null ? '—' : `${st.avg >= 0 ? '+' : ''}${st.avg.toFixed(3)}%`}
+                            </span>
+                          </span>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-gray-600 leading-snug mt-1.5">
+                    An average, not an edge: with this many observations a few tenths either
+                    way is noise, and the Mon–Fri row is there to be compared against.
+                  </p>
                 </div>
               )}
 
