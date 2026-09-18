@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -904,6 +904,105 @@ ok('the URL carries the encoded symbol',
   // A snapshot that never had history must not acquire an empty array: `undefined` and
   // `[]` look the same on screen and different to the next merge.
   ok('no empty history is invented', G.mergeSnapshots({ pins: ['A'] }, { pins: ['A'] }).sentiments === undefined);
+}
+
+// ── The returns table, against series whose answers are known by hand ────────
+// These numbers look plausible when they are wrong — a cell filed one column over, a
+// return attributed to the wrong end of its own move, a partial period dragging a mean.
+// None of that is visible on screen, so it is checked here instead.
+{
+  const RT = await import(join(out, 'returnsTable.js'));
+  const pt = (date, close) => ({ date, close });
+
+  // ── Which day a return belongs to ──
+  // A daily return is filed on its CLOSING day: Tuesday's return is Tuesday/Monday − 1.
+  // Filing it on the opening day instead would shift the whole weekend analysis by one.
+  {
+    const m = RT.buildMatrix([
+      pt('2026-09-07', 100),   // Monday — the base, no return of its own
+      pt('2026-09-08', 110),   // Tuesday +10%
+      pt('2026-09-09', 99),    // Wednesday −10%
+    ], 'Daily');
+    ok('a daily return lands on its closing day',
+       Math.abs(m.grid.get('2026-09').get(7) - 10) < 1e-9);
+    ok('…and the first point has no return of its own',
+       m.grid.get('2026-09').get(6) === undefined);
+    ok('a fall is negative and exact',
+       Math.abs(m.grid.get('2026-09').get(8) - (-10)) < 1e-9);
+  }
+
+  // ── The weekend split, on a month whose calendar is known ──
+  // September 2026: Saturdays 5, 12, 19, 26 and Sundays 6, 13, 20, 27.
+  {
+    const pts = [pt('2026-08-31', 100)];   // a base so day 1 has a return
+    let px = 100;
+    for (let d = 1; d <= 30; d++) {
+      const iso = `2026-09-${String(d).padStart(2, '0')}`;
+      const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+      // +10% every Saturday, −10% every Sunday, +1% every weekday — chosen so each
+      // bucket's mean is a number I can state without computing it.
+      px *= dow === 6 ? 1.10 : dow === 0 ? 0.90 : 1.01;
+      pts.push(pt(iso, px));
+    }
+    const m = RT.buildMatrix(pts, 'Daily');
+    const w = RT.weekendBreakdown(m, 'Daily');
+    ok('four Saturdays and four Sundays in September 2026',
+       w.saturday.n === 4 && w.sunday.n === 4);
+    ok('…and the other 22 days are weekdays', w.weekday.n === 22);
+    ok('…which accounts for all 30 days with none lost or双counted'.replace('双', 'double-'),
+       w.saturday.n + w.sunday.n + w.weekday.n === 30);
+    ok('the Saturday average is the Saturday move', Math.abs(w.saturday.avg - 10) < 1e-9);
+    ok('the Sunday average is the Sunday move', Math.abs(w.sunday.avg - (-10)) < 1e-9);
+    ok('the weekday average is the weekday move', Math.abs(w.weekday.avg - 1) < 1e-9);
+    ok('every Saturday counted as an up day', w.saturday.up === 100);
+    ok('…and no Sunday did', w.sunday.up === 0);
+  }
+
+  // An asset that never trades at the weekend gets no block at all, rather than a block
+  // of zeros — "no weekend data" and "flat at the weekend" are different claims.
+  {
+    const pts = [];
+    let px = 100;
+    for (let d = 1; d <= 30; d++) {
+      const iso = `2026-09-${String(d).padStart(2, '0')}`;
+      const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+      if (dow === 0 || dow === 6) continue;          // a closed market
+      px *= 1.01;
+      pts.push(pt(iso, px));
+    }
+    ok('an asset with no weekend trading gets no weekend block',
+       RT.weekendBreakdown(RT.buildMatrix(pts, 'Daily'), 'Daily') === null);
+  }
+
+  // ── The column means ──
+  // Monthly, so the answer is checkable: January 2025 +10%, January 2026 −10% → mean 0.
+  {
+    const m = RT.buildMatrix([
+      pt('2024-12-31', 100), pt('2025-01-31', 110),
+      pt('2025-12-31', 100), pt('2026-01-31', 90),
+    ], 'Monthly');
+    ok('a column mean averages the same month across years',
+       Math.abs(m.avg[0] - 0) < 1e-9, String(m.avg[0]));
+    ok('…and the median of two is their midpoint', Math.abs(m.median[0] - 0) < 1e-9);
+  }
+  // A month reached across a data gap is NOT a month's return: the adjacency guard exists
+  // because the ratio would span the whole gap and be filed as one period.
+  {
+    const m = RT.buildMatrix([
+      pt('2025-01-31', 100), pt('2025-06-30', 200),   // five months apart
+    ], 'Monthly');
+    ok('a gap is not filed as a single period return', (m.grid.get('2025')?.size ?? 0) === 0);
+  }
+
+  // ── The period filter ──
+  {
+    const pts = [pt('2024-06-01', 100), pt('2025-01-01', 110), pt('2026-01-01', 120)];
+    ok('a window keeps only what falls inside it',
+       RT.withinPeriod(pts, '2025-01-01', '2026-01-01').length === 2);
+    ok('no window is the whole series', RT.withinPeriod(pts, '', '').length === 3);
+    ok('an open end still bounds the start',
+       RT.withinPeriod(pts, '2025-06-01', '').length === 1);
+  }
 }
 
 // ── Reading an Apify calendar dataset ────────────────────────────────────────

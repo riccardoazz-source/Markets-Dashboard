@@ -5,6 +5,10 @@ import { Table2, X } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { PrintButton } from '@/components/ui/PrintButton';
 import { HistoricalPoint } from '@/lib/types';
+import {
+  type Gran, type Matrix, GRANS, bucket, colLabels, periodLabel,
+  buildMatrix, dayKind, dayBg, weekendBreakdown, withinPeriod,
+} from '@/lib/returnsTable';
 
 // ── Seasonal returns table (Coinglass-style) ─────────────────────────────────
 // A button (sits next to Compare / AI on every asset detail panel) that opens a
@@ -13,167 +17,7 @@ import { HistoricalPoint } from '@/lib/types';
 // (/api/historical) and derives every period return from period-END closes, so
 // it never depends on the section's current timeframe or chart data.
 
-type Gran = 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly';
-const GRANS: Gran[] = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'];
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function dayOfYear(d: Date): number {
-  const start = Date.UTC(d.getUTCFullYear(), 0, 1);
-  const cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  return Math.floor((cur - start) / 86_400_000) + 1;
-}
-
-// The (row, column) a date maps to for a given granularity, plus a unique period id.
-// Column labels are fixed per granularity; rows are years (or year-months for Daily).
-function bucket(d: Date, gran: Gran): { id: string; row: string; col: number } {
-  const y = d.getUTCFullYear();
-  switch (gran) {
-    case 'Yearly':    return { id: `${y}`, row: `${y}`, col: 0 };
-    case 'Quarterly': { const q = Math.floor(d.getUTCMonth() / 3); return { id: `${y}-Q${q}`, row: `${y}`, col: q }; }
-    case 'Monthly':   { const m = d.getUTCMonth(); return { id: `${y}-M${m}`, row: `${y}`, col: m }; }
-    case 'Weekly':    { const w = Math.min(52, Math.floor((dayOfYear(d) - 1) / 7)); return { id: `${y}-W${w}`, row: `${y}`, col: w }; }
-    case 'Daily':     { const m = d.getUTCMonth(), day = d.getUTCDate(); return { id: `${y}-${m}-${day}`, row: `${y}-${String(m + 1).padStart(2, '0')}`, col: day - 1 }; }
-  }
-}
-
-function colLabels(gran: Gran): string[] {
-  switch (gran) {
-    case 'Yearly':    return ['Return'];
-    case 'Quarterly': return ['Q1', 'Q2', 'Q3', 'Q4'];
-    case 'Monthly':   return MONTHS;
-    case 'Weekly':    return Array.from({ length: 53 }, (_, i) => `W${i + 1}`);
-    case 'Daily':     return Array.from({ length: 31 }, (_, i) => `${i + 1}`);
-  }
-}
-
-interface Matrix {
-  rows: string[];                       // row labels, most-recent first
-  cols: string[];                       // column headers
-  grid: Map<string, Map<number, number>>; // row -> col -> return %
-  avg: (number | null)[];               // per-column average
-  median: (number | null)[];            // per-column median
-}
-
-// Human-readable label for one (row, col) cell — used by the best/worst records list.
-function periodLabel(gran: Gran, row: string, col: number): string {
-  switch (gran) {
-    case 'Yearly':    return row;
-    case 'Quarterly': return `Q${col + 1} ${row}`;
-    case 'Monthly':   return `${MONTHS[col] ?? ''} ${row}`;
-    case 'Weekly':    return `W${col + 1} ${row}`;
-    case 'Daily': {   // row is "YYYY-MM", col is day-of-month − 1
-      const [y, m] = row.split('-');
-      return `${col + 1} ${MONTHS[Number(m) - 1] ?? ''} ${y}`;
-    }
-  }
-}
-
-// Sequential index of a period on the calendar — used to require ADJACENT periods
-// when pairing period-end closes. Daily is exempt (weekend gaps are normal there;
-// day-over-day on trading days is the standard convention).
-function periodIndex(d: Date, gran: Gran): number | null {
-  const y = d.getUTCFullYear();
-  switch (gran) {
-    case 'Yearly':    return y;
-    case 'Quarterly': return y * 4 + Math.floor(d.getUTCMonth() / 3);
-    case 'Monthly':   return y * 12 + d.getUTCMonth();
-    case 'Weekly':    return y * 53 + Math.min(52, Math.floor((dayOfYear(d) - 1) / 7));
-    case 'Daily':     return null;
-  }
-}
-
-// Period returns from period-END closes: last close of each period, in chronological
-// order, then consecutive % changes. A month's return = monthEnd/prevMonthEnd − 1
-// (so January is measured against the prior December — cross-year, exactly like the
-// standard seasonality table). The first period in the whole series has no base → blank.
-// Guards: (a) only ADJACENT calendar periods are paired — across a data gap the ratio
-// spans multiple periods and would be filed as a single period's return; (b) the
-// CURRENT (incomplete) period is shown but excluded from the Average/Median rows.
-function buildMatrix(points: HistoricalPoint[], gran: Gran): Matrix {
-  const pts = points
-    .map(p => ({ t: new Date(p.date + 'T00:00:00Z'), c: p.close }))
-    .filter(p => isFinite(p.c) && p.c > 0 && !isNaN(p.t.getTime()))
-    .sort((a, b) => a.t.getTime() - b.t.getTime());
-
-  // Last close per period, preserving chronological order of first appearance.
-  const periods = new Map<string, { row: string; col: number; c: number; order: number; idx: number | null }>();
-  let order = 0;
-  for (const p of pts) {
-    const b = bucket(p.t, gran);
-    const e = periods.get(b.id);
-    if (e) e.c = p.c;                                   // keep updating → period-end close
-    else periods.set(b.id, { row: b.row, col: b.col, c: p.c, order: order++, idx: periodIndex(p.t, gran) });
-  }
-  const seq = [...periods.values()].sort((a, b) => a.order - b.order);
-  const nowB = bucket(new Date(), gran);                // the current, incomplete period
-
-  const grid = new Map<string, Map<number, number>>();
-  for (let i = 1; i < seq.length; i++) {
-    // Adjacency guard: skip when the two period-end closes are not consecutive
-    // calendar periods (data gap → multi-period return, not a period return).
-    if (seq[i].idx != null && seq[i - 1].idx != null && seq[i].idx !== (seq[i - 1].idx as number) + 1) continue;
-    const ret = (seq[i].c / seq[i - 1].c - 1) * 100;
-    if (!isFinite(ret)) continue;
-    if (!grid.has(seq[i].row)) grid.set(seq[i].row, new Map());
-    grid.get(seq[i].row)!.set(seq[i].col, ret);
-  }
-
-  const rows = [...grid.keys()].sort().reverse();       // most recent period first
-  const cols = colLabels(gran);
-  const avg: (number | null)[] = [];
-  const median: (number | null)[] = [];
-  for (let c = 0; c < cols.length; c++) {
-    const vals: number[] = [];
-    for (const r of rows) {
-      if (r === nowB.row && c === nowB.col) continue;   // partial current period → not in stats
-      const v = grid.get(r)?.get(c);
-      if (v != null) vals.push(v);
-    }
-    if (vals.length === 0) { avg.push(null); median.push(null); continue; }
-    avg.push(vals.reduce((s, v) => s + v, 0) / vals.length);
-    const sorted = [...vals].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    median.push(sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2);
-  }
-  return { rows, cols, grid, avg, median };
-}
-
 // Green for gains, red for losses; opacity scales with magnitude (full at ±25%).
-// ── Which weekday a Daily cell actually is ───────────────────────────────────
-//
-// In Daily mode a row is a month ('2026-09') and a column is a day of it, so the weekday
-// is recoverable — and worth recovering. A blank Saturday on an equity is the market being
-// shut; a blank Saturday on Bitcoin, which trades every day, means data is MISSING. Same
-// empty cell, opposite meanings, and nothing on the grid distinguished them.
-//
-// It also shows the weekend effect where there is one: crypto genuinely moves on Sundays,
-// and being able to see those columns as a group is the point of marking them.
-//
-// A day that does not exist in that month — the 30th of February, the 31st of April — is
-// its own case. The grid is a fixed 31 columns, so those cells were rendering as ordinary
-// empty ones, indistinguishable from a day that existed and had no data.
-type DayKind = 'weekday' | 'saturday' | 'sunday' | 'nonexistent';
-
-function dayKind(gran: Gran, row: string, col: number): DayKind | null {
-  if (gran !== 'Daily') return null;
-  const [y, m] = row.split('-').map(Number);
-  if (!isFinite(y) || !isFinite(m)) return null;
-  const d = new Date(Date.UTC(y, m - 1, col + 1));
-  // Date.UTC rolls over, so 30 February becomes 2 March — which is how a day that never
-  // existed is detected rather than silently drawn.
-  if (d.getUTCMonth() !== m - 1) return 'nonexistent';
-  const dow = d.getUTCDay();
-  return dow === 0 ? 'sunday' : dow === 6 ? 'saturday' : 'weekday';
-}
-
-/** The tint under a cell when it carries no return of its own. */
-function dayBg(kind: DayKind | null): string {
-  if (kind === 'saturday' || kind === 'sunday') return 'rgba(99,102,241,0.10)';
-  if (kind === 'nonexistent') return 'rgba(255,255,255,0.02)';
-  return 'transparent';
-}
-
 function cellBg(v: number | null | undefined): string {
   if (v == null) return 'transparent';
   const a = 0.14 + 0.5 * Math.min(1, Math.abs(v) / 25);
@@ -192,6 +36,8 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
   const [open, setOpen] = useState(false);
   const [gran, setGran] = useState<Gran>(defaultGran);
   const [data, setData] = useState<HistoricalPoint[] | null>(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cache = useRef<Map<string, HistoricalPoint[]>>(new Map());
@@ -236,7 +82,19 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const matrix = useMemo(() => (data && data.length ? buildMatrix(data, gran) : null), [data, gran]);
+  // The window is applied to the SERIES, before the matrix is built — so the cells, the
+  // column means, the records and the weekend split all describe the chosen period.
+  // Filtering the finished table instead would leave every average measuring a history the
+  // reader is no longer looking at.
+  const windowed = useMemo(
+    () => (data ? withinPeriod(data, from, to) : null), [data, from, to]);
+  const matrix = useMemo(
+    () => (windowed && windowed.length ? buildMatrix(windowed, gran) : null), [windowed, gran]);
+  // The span actually covered, which is not the span requested: an asset that listed in
+  // 2021 shows 2021 whatever was typed, and saying so beats a silently shorter table.
+  const span = windowed && windowed.length
+    ? { first: windowed[0].date, last: windowed[windowed.length - 1].date, n: windowed.length }
+    : null;
 
   // Best/worst records: the 3 biggest gains and 3 biggest losses across every cell in this view.
   const records = useMemo(() => {
@@ -262,25 +120,8 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
   // an ordinary day, and without the baseline the reader has to hold the comparison in
   // their head. The count comes too — an average over nine Saturdays is a different claim
   // from one over nine hundred.
-  const weekendStats = useMemo(() => {
-    if (!matrix || gran !== 'Daily') return null;
-    const bag = { saturday: [] as number[], sunday: [] as number[], weekday: [] as number[] };
-    for (const [row, m] of matrix.grid) {
-      for (const [col, v] of m) {
-        if (!isFinite(v)) continue;
-        const kind = dayKind('Daily', row, col);
-        if (kind === 'saturday' || kind === 'sunday' || kind === 'weekday') bag[kind].push(v);
-      }
-    }
-    if (bag.saturday.length === 0 && bag.sunday.length === 0) return null;
-    const mean = (xs: number[]) => xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null;
-    const share = (xs: number[]) => xs.length ? xs.filter(x => x > 0).length / xs.length * 100 : null;
-    return {
-      saturday: { n: bag.saturday.length, avg: mean(bag.saturday), up: share(bag.saturday) },
-      sunday:   { n: bag.sunday.length,   avg: mean(bag.sunday),   up: share(bag.sunday) },
-      weekday:  { n: bag.weekday.length,  avg: mean(bag.weekday),  up: share(bag.weekday) },
-    };
-  }, [matrix, gran]);
+  const weekendStats = useMemo(
+    () => (matrix ? weekendBreakdown(matrix, gran) : null), [matrix, gran]);
 
   return (
     <>
@@ -325,12 +166,46 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
                   {g}
                 </button>
               ))}
+
+              {/* Period filter. Empty means unbounded on that side, so one date alone is a
+                  valid window — "everything since 2020" is a question people actually ask,
+                  and requiring both ends would make them invent a second date. */}
+              <div className="ml-auto flex items-center gap-1.5 text-[11px]">
+                <span className="text-gray-500 hidden sm:inline">Period</span>
+                <input type="date" value={from} max={to || undefined}
+                  onChange={e => setFrom(e.target.value)}
+                  title="From — leave empty to start at the beginning of the history"
+                  className="bg-bg-input rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:ring-1 focus:ring-emerald-500" />
+                <span className="text-gray-600">→</span>
+                <input type="date" value={to} min={from || undefined}
+                  onChange={e => setTo(e.target.value)}
+                  title="To — leave empty to run to the latest data"
+                  className="bg-bg-input rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:ring-1 focus:ring-emerald-500" />
+                {(from || to) && (
+                  <button onClick={() => { setFrom(''); setTo(''); }} title="Full history"
+                    className="px-1.5 py-1 rounded text-gray-500 hover:text-gray-200">
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Body */}
             <div className="flex-1 overflow-auto p-3">
               {loading && <div className="flex items-center justify-center h-40 gap-2 text-xs text-gray-500"><LoadingSpinner size={22} /> Loading full history…</div>}
               {error && !loading && <p className="text-[12px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ {error}</p>}
+              {!loading && !error && span && (from || to) && (
+                <p className="text-[10px] text-gray-500 mb-2">
+                  Showing <span className="text-gray-300">{span.first}</span> to{' '}
+                  <span className="text-gray-300">{span.last}</span> · {span.n.toLocaleString()} data points.
+                  Every figure below — cells, averages, records, weekend split — is computed on this window only.
+                </p>
+              )}
+              {!loading && !error && data && data.length > 0 && windowed && windowed.length === 0 && (
+                <p className="text-[12px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">
+                  No data in that period. The history runs {data[0].date} to {data[data.length - 1].date}.
+                </p>
+              )}
               {!loading && !error && matrix && (
                 <>
                 {gran === 'Daily' && (
