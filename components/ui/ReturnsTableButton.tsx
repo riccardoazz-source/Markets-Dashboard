@@ -140,6 +140,40 @@ function buildMatrix(points: HistoricalPoint[], gran: Gran): Matrix {
 }
 
 // Green for gains, red for losses; opacity scales with magnitude (full at ±25%).
+// ── Which weekday a Daily cell actually is ───────────────────────────────────
+//
+// In Daily mode a row is a month ('2026-09') and a column is a day of it, so the weekday
+// is recoverable — and worth recovering. A blank Saturday on an equity is the market being
+// shut; a blank Saturday on Bitcoin, which trades every day, means data is MISSING. Same
+// empty cell, opposite meanings, and nothing on the grid distinguished them.
+//
+// It also shows the weekend effect where there is one: crypto genuinely moves on Sundays,
+// and being able to see those columns as a group is the point of marking them.
+//
+// A day that does not exist in that month — the 30th of February, the 31st of April — is
+// its own case. The grid is a fixed 31 columns, so those cells were rendering as ordinary
+// empty ones, indistinguishable from a day that existed and had no data.
+type DayKind = 'weekday' | 'saturday' | 'sunday' | 'nonexistent';
+
+function dayKind(gran: Gran, row: string, col: number): DayKind | null {
+  if (gran !== 'Daily') return null;
+  const [y, m] = row.split('-').map(Number);
+  if (!isFinite(y) || !isFinite(m)) return null;
+  const d = new Date(Date.UTC(y, m - 1, col + 1));
+  // Date.UTC rolls over, so 30 February becomes 2 March — which is how a day that never
+  // existed is detected rather than silently drawn.
+  if (d.getUTCMonth() !== m - 1) return 'nonexistent';
+  const dow = d.getUTCDay();
+  return dow === 0 ? 'sunday' : dow === 6 ? 'saturday' : 'weekday';
+}
+
+/** The tint under a cell when it carries no return of its own. */
+function dayBg(kind: DayKind | null): string {
+  if (kind === 'saturday' || kind === 'sunday') return 'rgba(99,102,241,0.10)';
+  if (kind === 'nonexistent') return 'rgba(255,255,255,0.02)';
+  return 'transparent';
+}
+
 function cellBg(v: number | null | undefined): string {
   if (v == null) return 'transparent';
   const a = 0.14 + 0.5 * Math.min(1, Math.abs(v) / 25);
@@ -266,6 +300,24 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
               {loading && <div className="flex items-center justify-center h-40 gap-2 text-xs text-gray-500"><LoadingSpinner size={22} /> Loading full history…</div>}
               {error && !loading && <p className="text-[12px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ {error}</p>}
               {!loading && !error && matrix && (
+                <>
+                {gran === 'Daily' && (
+                  <p className="flex items-center gap-3 text-[10px] text-gray-500 mb-2">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-block w-3 h-3 rounded-sm"
+                        style={{ backgroundColor: 'rgba(99,102,241,0.10)', boxShadow: 'inset 0 0 0 1px rgba(129,140,248,0.22)' }} />
+                      Saturday or Sunday
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-block w-3 h-3 rounded-sm text-gray-700 text-center leading-3">·</span>
+                      day not in this month
+                    </span>
+                    <span className="text-gray-600">
+                      An empty weekend is a closed market — unless the asset trades every day,
+                      in which case it is missing data.
+                    </span>
+                  </p>
+                )}
                 <table className="border-separate border-spacing-0 text-[11px] tabular-nums">
                   <thead>
                     <tr>
@@ -281,9 +333,22 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
                         <td className="sticky left-0 z-10 bg-[#12172a] px-2 py-1.5 text-left text-gray-300 font-semibold whitespace-nowrap border-r border-white/10">{r}</td>
                         {matrix.cols.map((_, c) => {
                           const v = matrix.grid.get(r)?.get(c);
+                          const kind = dayKind(gran, r, c);
+                          const weekend = kind === 'saturday' || kind === 'sunday';
                           return (
-                            <td key={c} className="px-2 py-1.5 text-center text-gray-100 whitespace-nowrap" style={{ backgroundColor: cellBg(v) }}>
-                              {fmt(v)}
+                            <td key={c}
+                              title={weekend ? `${r}-${String(c + 1).padStart(2, '0')} — ${kind === 'saturday' ? 'Saturday' : 'Sunday'}` : undefined}
+                              className="px-2 py-1.5 text-center text-gray-100 whitespace-nowrap"
+                              style={{
+                                // The return's own heat wins when there is one; the weekend
+                                // tint shows through the blanks, which is where the question
+                                // "why is this empty" actually gets asked.
+                                backgroundColor: v == null ? dayBg(kind) : cellBg(v),
+                                // A rule on the weekend cells so they stay legible as a
+                                // block even where a return has painted over the tint.
+                                boxShadow: weekend ? 'inset 0 0 0 1px rgba(129,140,248,0.22)' : undefined,
+                              }}>
+                              {kind === 'nonexistent' ? <span className="text-gray-700">·</span> : fmt(v)}
                             </td>
                           );
                         })}
@@ -304,6 +369,7 @@ export function ReturnsTableButton({ name, symbol, externalData, defaultGran = '
                     </tr>
                   </tbody>
                 </table>
+                </>
               )}
 
               {/* Records — the 3 biggest gains and 3 biggest losses across the whole history */}
