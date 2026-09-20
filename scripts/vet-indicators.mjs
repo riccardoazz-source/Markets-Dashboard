@@ -628,15 +628,42 @@ console.log('\nForward calendar — the window, and the daylight-saving trap');
     .filter(e => new Date(e.date).getUTCDay() !== 5);
   ok('every payrolls date is a Friday', notFriday.length === 0, notFriday.map(e => e.date).join(', '));
 
-  // Core PCE lands in the LAST WEEK of the month — the whole reason it was missing from a
-  // calendar built around the mid-month CPI. A date early in the month would be a typo for
-  // some other release, and would put the Fed's own inflation gauge on the wrong week.
-  const pceOff = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('US Core PCE'))
-    .filter(e => new Date(e.date).getUTCDate() < 22);
-  ok('every core PCE date is in the last week of its month',
-     pceOff.length === 0, pceOff.map(e => e.date).join(', '));
-  ok('…and there is at least one per month for six months',
-     ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('US Core PCE')).length >= 6);
+  // Core PCE lands on the LAST WEDNESDAY of the month — the whole reason it was missing
+  // from a calendar built around the mid-month CPI. Two release days are known (26 Aug
+  // 2026 for July data, 30 Sep 2026 for August data) and both are last Wednesdays; the
+  // rest of the list is that pattern continued, so the pattern is what gets asserted.
+  // The first version of this list was a business week early on September, which the
+  // outlook panel's live date check caught and this test did not — `< 22` passed a wrong
+  // date happily. A weaker check that agrees with a bug is worse than no check.
+  {
+    const pce = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('US Core PCE'));
+    // The stored instant is 08:30 ET, so the New York calendar day is the release day —
+    // reading getUTCDay() off 12:30Z happens to agree here, but would not at 23:00Z.
+    const nyDay = (iso) => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(iso));
+    const notLastWed = pce.filter(e => {
+      const [y, m, d] = nyDay(e.date).split('-').map(Number);
+      const at = new Date(Date.UTC(y, m - 1, d));
+      // A Wednesday with no further Wednesday left in the month.
+      return at.getUTCDay() !== 3 || new Date(Date.UTC(y, m - 1, d + 7)).getUTCMonth() === m - 1;
+    });
+    ok('every core PCE date is the last Wednesday of its month',
+       pce.length > 0 && notLastWed.length === 0, notLastWed.map(e => nyDay(e.date)).join(', '));
+    // The one date a live search put a source behind. Pinned so a future tidy-up of this
+    // list cannot quietly walk back the correction that produced it.
+    ok('…and the searched September date is the one in the file',
+       pce.some(e => nyDay(e.date) === '2026-09-30'));
+    ok('…and there is at least one per month for six months', pce.length >= 6);
+    // Six consecutive months, no gap and no double-booking: one release per reference month.
+    const months = pce.map(e => nyDay(e.date).slice(0, 7));
+    ok('…one per month, consecutive', new Set(months).size === months.length &&
+       months.every((mo, i) => {
+         if (i === 0) return true;
+         const [py, pm] = months[i - 1].split('-').map(Number);
+         return mo === `${pm === 12 ? py + 1 : py}-${String(pm === 12 ? 1 : pm + 1).padStart(2, '0')}`;
+       }), months.join(' '));
+  }
 
   // Nothing bundled may be missing the fields the card renders.
   const bad = ED.BUNDLED_EVENTS.filter(e => !e.id || !e.title || !e.flag || !e.region || !isFinite(Date.parse(e.date)));

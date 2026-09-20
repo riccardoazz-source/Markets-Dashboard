@@ -165,23 +165,30 @@ export const CALENDAR_EVENTS: CalendarEvent[] = [
   nfp('2026-11-06T13:30:00Z'),
   nfp('2026-12-04T13:30:00Z'),
 
-  // ── Core PCE / Personal Income & Outlays — 08:30 ET, last week of the month ──
+  // ── Core PCE / Personal Income & Outlays — 08:30 ET, LAST WEDNESDAY of the month ──
   //
-  // THESE DAYS ARE NOT VERIFIED against bea.gov and are the least certain entries in this
-  // file. They are placed on the BEA's usual cadence — the release for month M lands in
-  // the last week of month M+1 — anchored on the one date known to be right: the July 2026
-  // report came out on Wednesday 26 August 2026. December and November are pulled earlier
-  // in the week, as the BEA does around Thanksgiving and Christmas.
+  // Two dates here are evidence-backed, the rest follow the pattern those two establish:
   //
-  // They ship `tentative`, which the card renders, so the page never presents them as
-  // fixed. Replace them with the published schedule when checking this file next:
+  //   2026-08-26  July data      Wed — the release day the user saw reported live
+  //   2026-09-30  August data    Wed — returned by a bea.gov-sourced search
+  //
+  // Both are the last Wednesday of their month, so the remaining four are placed on the
+  // last Wednesday of theirs. This replaced an earlier guess (the 25th, the 30th, the
+  // 23rd…) that put September a business week early and made the outlook panel's own
+  // date check fire — the check was right and the calendar was wrong.
+  //
+  // STILL NOT the published schedule: four of the six are a two-point extrapolation, and
+  // the BEA does shift releases around Thanksgiving and Christmas, so 25 Nov and 30 Dec
+  // are the two most likely to move. Every entry ships `tentative`, the card renders
+  // that, and the outlook panel re-checks each date against a live search and says so
+  // when it disagrees. Replace the lot when checking this file next:
   //   bea.gov/news/schedule
-  pce('2026-09-25T12:30:00Z'),
-  pce('2026-10-30T12:30:00Z'),
+  pce('2026-09-30T12:30:00Z'),
+  pce('2026-10-28T12:30:00Z'),
   pce('2026-11-25T13:30:00Z'),
-  pce('2026-12-23T13:30:00Z'),
-  pce('2027-01-29T13:30:00Z'),
-  pce('2027-02-26T13:30:00Z'),
+  pce('2026-12-30T13:30:00Z'),
+  pce('2027-01-27T13:30:00Z'),
+  pce('2027-02-24T13:30:00Z'),
 ];
 
 // ── Geopolitical ─────────────────────────────────────────────────────────────
