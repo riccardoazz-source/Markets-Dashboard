@@ -64,9 +64,14 @@ export function Navbar({ active, onSelect }: Props) {
           <div className="flex items-center gap-1.5 shrink-0">
             <TrendingUp size={18} className="text-accent" />
             <span className="font-bold text-white text-base tracking-tight">MarketPulse</span>
-            <span className="text-[9px] font-semibold bg-up-dim text-up-text px-1.5 py-0.5 rounded uppercase tracking-wider">
-              Live
-            </span>
+            {/* The green "LIVE" badge that used to sit here has been removed.
+                Nothing computed it. It was a decoration printed unconditionally on every
+                page, including pages showing a policy rate read out of a table edited by
+                hand — and it was read, correctly, as a promise that everything on screen
+                was current. A freshness claim the code never checks is worse than no claim,
+                because it overrides the per-tile dates that ARE true.
+                Freshness is now stated where it can be known: each tile carries its own
+                as-of date, and a CACHED / NOT LIVE mark when it is not live. */}
           </div>
 
           {/* Desktop nav — hidden on mobile */}

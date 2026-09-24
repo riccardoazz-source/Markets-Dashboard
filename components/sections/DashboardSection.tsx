@@ -140,6 +140,10 @@ interface MacroLatest {
   id: string;
   latest: { date: string; value: number } | null;
   prev?: { date: string; value: number } | null;
+  /** 'live' | 'cache' | 'bundled' | 'none'. Optional so an older cached response, or any
+   *  other caller of this endpoint, still parses — it degrades to the `fromGist` flag. */
+  source?: TileSource;
+  fromGist?: boolean;
 }
 
 // ── What a tile compares itself against ──────────────────────────────────────
@@ -157,6 +161,12 @@ interface MacroLatest {
 // and `refDate` records which observation it actually was — for a monthly series the
 // earliest point in the window is not exactly 365 days back, and the tooltip says so
 // rather than implying a precision the data does not have.
+// Where a tile's number came from. Carried all the way to the pixel, because a dashboard
+// that says LIVE across the top and then quietly serves a value out of a cache — or out of
+// a table someone typed by hand — is not telling the truth, and the reader has no way to
+// find out. `live` is silent; everything else says so on the tile.
+type TileSource = 'live' | 'cache' | 'bundled' | 'none';
+
 interface TileData {
   value: number | null;
   /** Value one year ago — the first point of the 1Y series. */
@@ -164,6 +174,7 @@ interface TileData {
   refDate: string | null;
   asOf: string | null;
   unit: MacroUnit;
+  source: TileSource;
   spark: { date: string; v: number }[];
 }
 
@@ -216,12 +227,27 @@ function MacroTile({ spec, data, onOpen }: {
   const ref = d?.refDate
     ? `\n\nThe change is over one year, measured against ${d.refDate}.`
     : '';
+  const prov = d?.source === 'cache'
+    ? '\n\nNOT LIVE: every upstream source failed just now, so this is the last value the app managed to store. It is as old as the date shown.'
+    : d?.source === 'bundled'
+    ? '\n\nNOT LIVE: served from a table bundled with the app, which is updated by hand and can lag the real figure. Open the chart and check the source before using it.'
+    : '';
   return (
-    <button title={`${spec.hint}${ref}\n\nClick for the chart.`} onClick={onOpen}
+    <button title={`${spec.hint}${ref}${prov}\n\nClick for the chart.`} onClick={onOpen}
       className="rounded-lg border border-border bg-bg-card px-2.5 py-2 flex flex-col gap-0.5 text-left
                  hover:border-accent/50 transition-colors">
-      <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none truncate">{spec.label}</p>
-      <p className="text-lg font-bold text-white tabular-nums leading-tight">
+      <div className="flex items-center gap-1 leading-none">
+        <p className="text-[10px] uppercase tracking-wider text-gray-500 truncate">{spec.label}</p>
+        {/* Sits beside the label, not under the number: it qualifies the whole tile, and
+            at this size a word is read before a colour is noticed. */}
+        {(d?.source === 'cache' || d?.source === 'bundled') && (
+          <span className="shrink-0 px-1 rounded bg-amber-500/15 text-amber-300 text-[8px] font-bold uppercase tracking-wider">
+            {d.source === 'cache' ? 'cached' : 'not live'}
+          </span>
+        )}
+      </div>
+      <p className={clsx('text-lg font-bold tabular-nums leading-tight',
+        d?.source === 'bundled' ? 'text-amber-200' : 'text-white')}>
         {d?.value == null ? '—'
           : spec.kind === 'fx' ? d.value.toFixed(4)
           : formatMacroValue(d.value, d.unit)}
@@ -321,6 +347,8 @@ export function DashboardSection({ onNavigate, onCompare }: {
     // Sharing one object let whichever finished last clobber the other's fields — the
     // sparklines would appear or not depending on which request won the race.
     const level: Record<string, Omit<TileData, 'spark' | 'ref' | 'refDate'>> = {};
+    // Default 'live'. Nothing is marked stale unless the endpoint says so — a wrong
+    // "not live" badge would train the eye to ignore the right one.
     const sparks: Record<string, { date: string; v: number }[]> = {};
 
     await Promise.allSettled([
@@ -335,6 +363,7 @@ export function DashboardSection({ onNavigate, onCompare }: {
             value: r.latest?.value ?? null,
             asOf: r.latest?.date ?? null,
             unit: ind?.unit ?? 'idx',
+            source: r.source ?? (r.fromGist ? 'cache' : 'live'),
           };
         }
       })(),
@@ -371,7 +400,7 @@ export function DashboardSection({ onNavigate, onCompare }: {
           const [a, b] = t.pair.split('/');
           const hit = (Array.isArray(rows) ? rows : []).find(r => r.from === a && r.to === b);
           if (!hit || hit.rate == null) continue;
-          level[t.pair] = { value: hit.rate, asOf: null, unit: 'idx' };
+          level[t.pair] = { value: hit.rate, asOf: null, unit: 'idx', source: 'live' };
         }
       })(),
     ]);
@@ -379,7 +408,7 @@ export function DashboardSection({ onNavigate, onCompare }: {
     for (const key of new Set([...Object.keys(level), ...Object.keys(sparks)])) {
       const spark = sparks[key] ?? [];
       next[key] = {
-        ...(level[key] ?? { value: null, asOf: null, unit: 'idx' as MacroUnit }),
+        ...(level[key] ?? { value: null, asOf: null, unit: 'idx' as MacroUnit, source: 'none' as TileSource }),
         spark,
         // The oldest point in the one-year window. Deliberately taken from the SAME
         // series the sparkline draws rather than from a second request, so the number

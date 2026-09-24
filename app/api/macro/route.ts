@@ -1517,19 +1517,38 @@ const FOMC_TARGET_UPPER: { date: string; value: number }[] = [
   { date: '2026-01-28', value: 3.50 },
   { date: '2026-03-18', value: 3.50 },
   { date: '2026-04-29', value: 3.50 },
-  // 2026 projected meetings — rate held at current 3.50 (no cuts assumed, flat).
   { date: '2026-06-17', value: 3.50 },
   { date: '2026-07-29', value: 3.50 },
   { date: '2026-09-16', value: 3.50 },
-  { date: '2026-10-28', value: 3.50 },
-  { date: '2026-12-09', value: 3.50 },
+  // NOTHING BELOW THIS LINE UNTIL A MEETING HAS ACTUALLY HAPPENED.
+  //
+  // This table used to carry rows for meetings still in the future, filled in with the
+  // current rate under the assumption that nothing would change. That is a forecast, and
+  // it was being served as an observation: the dashboard reads the LAST point of this
+  // list, so it printed "3.50% · 2026-12-09" — a guess about a meeting three months away,
+  // displayed as today's policy rate under a badge that says LIVE.
+  //
+  // A meeting that has not happened has no rate. If the Fed holds, the step function is
+  // already flat and needs no help; if it moves, a row here would have been wrong anyway.
+  // `getFOMCFallback` now drops future dates whatever this list says, so re-adding one
+  // cannot bring the bug back — but do not re-add one.
+  //
+  // This table is also KNOWN TO LAG: on 2026-09-23 FRED (DFEDTARU) reported 4.00 while
+  // the last row here says 3.50, so at least one 2026 decision is missing above. It is a
+  // last-resort fallback, ranked below the Gist cache and tagged `bundled` in the
+  // response so the UI can say the number is not live. Refresh it from:
+  //   https://www.federalreserve.gov/monetarypolicy/openmarket.htm
 ];
 
 function getFOMCFallback(fromDate?: string): { date: string; value: number }[] {
-  if (!fromDate) return FOMC_TARGET_UPPER;
+  // Today, in UTC. A hand-written table is reference data about decisions that have been
+  // taken; anything dated ahead of now is a prediction and never leaves this function.
+  const today = new Date().toISOString().slice(0, 10);
+  const TABLE = FOMC_TARGET_UPPER.filter(p => p.date <= today);
+  if (!fromDate) return TABLE;
 
-  const pts = FOMC_TARGET_UPPER.filter(p => p.date >= fromDate);
-  const prevPts = FOMC_TARGET_UPPER.filter(p => p.date < fromDate);
+  const pts = TABLE.filter(p => p.date >= fromDate);
+  const prevPts = TABLE.filter(p => p.date < fromDate);
 
   // If fromDate falls mid-era (e.g. the zero-rate period 2008-2015 where no entries
   // exist), the first matching entry would jump ahead years.  Inject a synthetic
@@ -1540,9 +1559,12 @@ function getFOMCFallback(fromDate?: string): { date: string; value: number }[] {
     return [{ date: fromDate, value: lastBefore.value }, ...pts];
   }
 
-  // Always ensure we return at least the last known rate even if it's before fromDate
-  if (pts.length === 0 && FOMC_TARGET_UPPER.length > 0) {
-    return [FOMC_TARGET_UPPER[FOMC_TARGET_UPPER.length - 1]];
+  // Always ensure we return at least the last known rate even if it's before fromDate.
+  // Reads TABLE, not FOMC_TARGET_UPPER: this branch is the one the dashboard hits, and
+  // going back to the raw list here would hand back exactly the future-dated row the
+  // filter above exists to remove.
+  if (pts.length === 0 && TABLE.length > 0) {
+    return [TABLE[TABLE.length - 1]];
   }
   return pts;
 }
@@ -2282,8 +2304,6 @@ export async function GET(req: NextRequest) {
     if (!pts.length) pts = fredMap.get(id) ?? [];
     if (!pts.length) pts = dbnMap.get(id) ?? [];
     if (!pts.length) { const blsSym = BLS_MAP[id]; if (blsSym) pts = blsBatch.get(blsSym) ?? []; }
-    if (!pts.length && id === 'DFEDTARU')     pts = getFOMCFallback(fromStr);
-    if (!pts.length && id === 'FEDFUNDS')     pts = getFOMCFallback(fromStr); // proxy: eff ≈ target
     if (!pts.length && id === 'ECBDFR')       pts = ecbPts;
     if (!pts.length && id === 'DGS2')         pts = tDgs2.length  ? tDgs2  : yahooIrx;
     if (!pts.length && id === 'DGS10')        pts = tDgs10.length ? tDgs10 : yahooTnx;
@@ -2300,6 +2320,7 @@ export async function GET(req: NextRequest) {
         latest: pts[pts.length - 1],
         prev:   pts.length > 1 ? pts[pts.length - 2] : null,
         fromGist: false,
+        source: 'live' as const,
       };
     }
 
@@ -2307,10 +2328,33 @@ export async function GET(req: NextRequest) {
     const cached = gistCacheMap?.get(id);
     if (cached?.latest) {
       console.log(`[macro] ${id} served from Gist cache (${cached.latest.date})`);
-      return { id, latest: cached.latest, prev: cached.prev, fromGist: true };
+      return { id, latest: cached.latest, prev: cached.prev, fromGist: true, source: 'cache' as const };
     }
 
-    return { id, latest: null, prev: null, fromGist: false };
+    // LAST resort: the hand-written tables in this file.
+    //
+    // They sit here, below the cache, rather than up in the waterfall where they used to
+    // be. Up there they always returned something, so `pts` was never empty for DFEDTARU
+    // and the Gist cache below was unreachable for it — a real observation recorded three
+    // days ago lost to a table last edited by hand months ago. Worse, the table's value
+    // then counted as "fresh live data" at the save step and was written INTO the cache,
+    // so the invented number became a stored observation and stuck.
+    //
+    // Ranked last and tagged, it is what it is: better than an empty tile, worse than
+    // anything actually observed, and never mistaken for either.
+    const bundled = (id === 'DFEDTARU' || id === 'FEDFUNDS') ? getFOMCFallback(fromStr) : [];
+    if (bundled.length > 0) {
+      console.warn(`[macro] ${id} served from the BUNDLED table (${bundled[bundled.length - 1].date}) — not live`);
+      return {
+        id,
+        latest: bundled[bundled.length - 1],
+        prev:   bundled.length > 1 ? bundled[bundled.length - 2] : null,
+        fromGist: false,
+        source: 'bundled' as const,
+      };
+    }
+
+    return { id, latest: null, prev: null, fromGist: false, source: 'none' as const };
   });
 
   // Merge fresh results with existing Gist cache and save async.
@@ -2318,8 +2362,11 @@ export async function GET(req: NextRequest) {
   // We never overwrite a Gist entry with null — only update with fresh data.
   const entriesToSave: GistCacheEntry[] = ids.map(id => {
     const r = results.find(x => x.id === id)!;
-    if (!r.fromGist && r.latest !== null) {
-      // Fresh live data — update the cloud
+    // `source === 'live'`, not merely `!fromGist`. The old test let anything that was not
+    // read back out of the cache count as fresh — including the hand-written table, whose
+    // value was then PERSISTED and served afterwards as a cached observation. The cache
+    // may only ever be filled from something an upstream source actually published.
+    if (r.source === 'live' && r.latest !== null) {
       return { id, latest: r.latest, prev: r.prev };
     }
     // No live data — keep existing Gist value (or null if new)
@@ -2328,7 +2375,7 @@ export async function GET(req: NextRequest) {
   });
   const freshCount = entriesToSave.filter(e => {
     const r = results.find(x => x.id === e.id);
-    return r && !r.fromGist && r.latest !== null;
+    return r && r.source === 'live' && r.latest !== null;
   }).length;
   if (freshCount > 0) {
     // Fire-and-forget — don't block the response

@@ -1402,6 +1402,56 @@ ok('a series entirely before the boundary keeps only its last point',
   ok('and they disagreed by over a point before', Math.abs(oldYtd - quoteYtd) > 1);
 }
 
+// ── No hand-written table may contain tomorrow ───────────────────────────────
+//
+// The dashboard once showed "US interest rate 3.50% · 2026-12-09" — a date three months
+// in the future — because the bundled FOMC table carried rows for meetings that had not
+// happened yet, filled in with the current rate on the assumption nothing would change.
+// The tile reads the LAST point of a series, so the guess won, and because it counted as
+// fresh data it was then written into the persistent cache and served back as an
+// observation.
+//
+// These tables are read as source text rather than imported: they live inside a Next.js
+// route that cannot be transpiled on its own here. A regex over a literal array is crude,
+// but it fails loudly if the shape changes, which is the behaviour wanted — silently
+// matching nothing would make this check a decoration.
+{
+  const src = readFileSync('app/api/macro/route.ts', 'utf8');
+  const today = new Date().toISOString().slice(0, 10);
+  const TABLES = ['FOMC_TARGET_UPPER', 'ECB_DFR_TABLE'];
+  for (const name of TABLES) {
+    const m = src.match(new RegExp(`${name}[^=]*=\\s*\\[(.*?)\\n\\];`, 's'));
+    ok(`${name} is still a literal table this check can read`, !!m);
+    if (!m) continue;
+    const rows = [...m[1].matchAll(/date:\s*'([\d-]+)',\s*value:\s*(-?[\d.]+)/g)]
+      .map(r => ({ date: r[1], value: Number(r[2]) }));
+    ok(`…with rows in it (${rows.length})`, rows.length > 20);
+    const future = rows.filter(r => r.date > today);
+    ok(`${name} contains no future-dated observation`,
+       future.length === 0, future.map(r => `${r.date}=${r.value}`).join(', '));
+    ok(`…and is sorted oldest first`,
+       rows.every((r, i) => i === 0 || rows[i - 1].date <= r.date));
+  }
+
+  // The table is the belt; these two are the braces. Both are the lines whose absence
+  // caused the bug, so their absence is what gets asserted — if someone removes the
+  // filter, a table that happens to be clean today would hide it until the next edit.
+  ok('getFOMCFallback drops anything dated after today',
+     /const TABLE = FOMC_TARGET_UPPER\.filter\(p => p\.date <= today\)/.test(src));
+  ok('…and its short-circuit branch reads the filtered table, not the raw one',
+     /return \[TABLE\[TABLE\.length - 1\]\]/.test(src) &&
+     !/return \[FOMC_TARGET_UPPER\[FOMC_TARGET_UPPER\.length - 1\]\]/.test(src));
+  // Only something an upstream source actually published may be persisted. `!r.fromGist`
+  // was the old test, and it let the bundled table through into the cloud cache.
+  ok('only live data is written to the Gist cache',
+     /r\.source === 'live' && r\.latest !== null/.test(src) &&
+     !/!r\.fromGist && r\.latest !== null/.test(src));
+  // Ranking: the bundled table must be consulted AFTER the cache, or the cache is dead
+  // code for the one series that has a bundled table.
+  ok('the bundled table is ranked below the Gist cache',
+     src.indexOf("source: 'cache'") < src.indexOf("source: 'bundled'"));
+}
+
 rmSync(out, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
