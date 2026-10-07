@@ -602,6 +602,7 @@ console.log('\nForward calendar — the window, and the daylight-saving trap');
   // Each entry is reconstructed from its published local time and must match exactly.
   const WALL = [
     ['FOMC Rate Decision',            14, 0,  'America/New_York'],
+    ['FOMC Meeting Minutes',          14, 0,  'America/New_York'],
     ['ECB Monetary Policy',           14, 15, 'Europe/Berlin'],
     ['Bank of England Rate Decision', 12, 0,  'Europe/London'],
     ['US CPI Inflation Report',       8,  30, 'America/New_York'],
@@ -663,6 +664,37 @@ console.log('\nForward calendar — the window, and the daylight-saving trap');
          const [py, pm] = months[i - 1].split('-').map(Number);
          return mo === `${pm === 12 ? py + 1 : py}-${String(pm === 12 ? 1 : pm + 1).padStart(2, '0')}`;
        }), months.join(' '));
+  }
+
+  // ── Minutes: three weeks after the decision, one per meeting ──────────────
+  //
+  // The whole point of deriving them is that this relationship holds. Checked on the New
+  // York CALENDAR, not on the stored instants: two of the five gaps straddle the DST
+  // changeover, so 21 calendar days is 21×24h±1h in milliseconds, and a millisecond test
+  // would fail on exactly the pairs most likely to be written wrong by hand.
+  {
+    const nyDay = (iso) => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(iso));
+    const dayNum = (d) => { const [y, m, dd] = d.split('-').map(Number); return Date.UTC(y, m - 1, dd) / 864e5; };
+    const meets = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('FOMC Rate Decision')).map(e => nyDay(e.date));
+    const mins  = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('FOMC Meeting Minutes')).map(e => nyDay(e.date));
+    ok('every FOMC meeting has a minutes release', meets.length > 0 && mins.length === meets.length,
+       `${meets.length} meetings, ${mins.length} minutes`);
+    const offBy = meets.map((d, i) => ({ d, gap: dayNum(mins[i]) - dayNum(d) })).filter(x => x.gap !== 21);
+    ok('…each exactly 21 calendar days after its decision',
+       offBy.length === 0, offBy.map(x => `${x.d} +${x.gap}d`).join(', '));
+    // A millisecond-based derivation passes the gap test and still lands on the wrong UTC
+    // hour across the changeover. The wall-clock check above covers the hour; this pins
+    // the pair that actually crosses it, so the two cannot drift apart unnoticed.
+    const nov = ED.CALENDAR_EVENTS.find(e => e.title.startsWith('FOMC Meeting Minutes') && e.date.startsWith('2026-11'));
+    ok('…and the minutes that fall after the DST change are 19:00Z, not 18:00Z',
+       !!nov && nov.date === '2026-11-18T19:00:00.000Z', nov?.date);
+    // The card must NOT offer "Forecast & odds": there is no consensus on a document and
+    // nothing trading on it, so the subject lookup has to come back empty.
+    const EIm = await import(join(out, 'eventIndicator.js'));
+    ok('minutes carry no forecast subject', EIm.eventSubject('FOMC Meeting Minutes') === null);
+    ok('…while the decision still does', EIm.eventSubject('FOMC Rate Decision & Press Conference') !== null);
   }
 
   // Nothing bundled may be missing the fields the card renders.

@@ -24,6 +24,7 @@
 // Add the next year's dates and the rolling six-month window keeps working.
 
 import type { CalendarEvent } from './eventCalendar';
+import { zonedTimeToUtc } from './eventCalendar';
 
 export const CALENDAR_LAST_VERIFIED = '2026-06';
 export const GEOPOLITICAL_LAST_VERIFIED = '2026-06';
@@ -56,6 +57,45 @@ const fomc = (date: string) =>
     description: 'Federal Reserve interest rate decision (press conference 30 min later).',
     source: 'federalreserve.gov',
   });
+// ── FOMC minutes ─────────────────────────────────────────────────────────────
+//
+// The Fed publishes the minutes of each regularly scheduled meeting exactly THREE WEEKS
+// after the day of the policy decision, at 14:00 ET. That is a standing rule rather than
+// a per-meeting date, so these are DERIVED from the meeting list below instead of being
+// typed out a second time: one source of truth, and a meeting that moves takes its
+// minutes with it.
+//
+// The release day is computed on the NEW YORK calendar, not by adding 21×24h to the
+// stored instant: the gap straddles the DST changeover twice a year, and 14:00 ET is
+// 18:00Z in October but 19:00Z in November. `zonedTimeToUtc` resolves the offset that is
+// actually in force on the day.
+//
+// These get no "Forecast & odds" button, deliberately — the title does not match any
+// prefix in SUBJECTS, so `eventSubject` returns null and the card renders without one.
+// The minutes are a document, not a number: there is no consensus to quote and nothing
+// trading on their contents, so the panel would come back empty every time. An
+// affordance that never pays out teaches the reader to ignore it on the events where it
+// does.
+const MINUTES_LAG_DAYS = 21;
+
+function fomcMinutes(meetingInstant: string): CalendarEvent {
+  const meetingDay = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(meetingInstant));
+  const [y, m, d] = meetingDay.split('-').map(Number);
+  const release = new Date(Date.UTC(y, m - 1, d + MINUTES_LAG_DAYS));
+  const releaseDay = release.toISOString().slice(0, 10);
+  const held = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric',
+  }).format(new Date(Date.UTC(y, m - 1, d)));
+
+  return make(US, 'FOMC Meeting Minutes', 'central-bank',
+    zonedTimeToUtc(releaseDay, 14, 0, 'America/New_York'), {
+      description: `Full account of the FOMC meeting held on ${held}, published three weeks after the decision. Carries the committee's internal discussion — the dissents, the range of views on the path of rates, and the staff's economic projections — which is where the guidance beyond the headline rate usually turns up.`,
+      source: 'federalreserve.gov',
+    });
+}
+
 const ecb = (date: string) =>
   make(EU, 'ECB Monetary Policy Decision', 'central-bank', date, {
     description: 'ECB Governing Council rate decision, followed by a press conference.',
@@ -109,13 +149,23 @@ const pce = (date: string) =>
     tentative: true,
   });
 
+// The 2026 FOMC decision days, as absolute instants (14:00 ET — 18:00Z on EDT, 19:00Z on
+// EST). Named rather than inlined because the minutes are generated from this same list.
+const FOMC_2026 = [
+  '2026-06-17T18:00:00Z',
+  '2026-07-29T18:00:00Z',
+  '2026-09-16T18:00:00Z',
+  '2026-10-28T18:00:00Z',
+  '2026-12-09T19:00:00Z',
+];
+
 export const CALENDAR_EVENTS: CalendarEvent[] = [
   // FOMC 2026 — 14:00 ET (18:00Z on EDT, 19:00Z on EST)
-  fomc('2026-06-17T18:00:00Z'),
-  fomc('2026-07-29T18:00:00Z'),
-  fomc('2026-09-16T18:00:00Z'),
-  fomc('2026-10-28T18:00:00Z'),
-  fomc('2026-12-09T19:00:00Z'),
+  ...FOMC_2026.map(fomc),
+  // …and the minutes of each, three weeks later to the day. Derived, so this line is the
+  // whole maintenance burden: next year's dates go in FOMC_2026 above and the minutes
+  // follow by themselves.
+  ...FOMC_2026.map(fomcMinutes),
 
   // ECB 2026 — 14:15 Frankfurt (12:15Z on CEST, 13:15Z on CET)
   //
