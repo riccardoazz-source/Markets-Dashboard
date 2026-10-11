@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Navbar, Section } from '@/components/Navbar';
 import { DashboardSection } from '@/components/sections/DashboardSection';
 import { IndexesSection } from '@/components/sections/IndexesSection';
+import { BondsSection } from '@/components/sections/BondsSection';
 import { CurrenciesSection } from '@/components/sections/CurrenciesSection';
 import { CryptoCommoditiesSection } from '@/components/sections/CryptoCommoditiesSection';
 import { CommoditiesSection } from '@/components/sections/CommoditiesSection';
@@ -22,6 +23,7 @@ import { isNotesSection, type NotesSection } from '@/lib/sectionNotes';
 const SECTION_LABELS: Record<Section, string> = {
   dashboard:   'Dashboard',
   indexes:     'Global Market Indexes',
+  bonds:       'US Treasuries',
   currencies:  'Currency Exchange Rates',
   crypto:      'Cryptocurrency',
   commodities: 'Commodities',
@@ -37,6 +39,7 @@ const SECTION_LABELS: Record<Section, string> = {
 const SECTION_DESCRIPTIONS: Record<Section, string> = {
   dashboard:   'The dollar, the policy rate, the VIX, inflation and unemployment — the numbers that set the weather — and everything you have pinned',
   indexes:     'Live prices and performance for major global indexes and ETFs',
+  bonds:       'The US Treasury yield curve, and the actual securities at each maturity',
   currencies:  'Real-time currency conversion rates with historical charts',
   crypto:      'Live cryptocurrency prices with CAGR and return analysis',
   commodities: 'Live prices for metals, energy and agricultural commodities',
@@ -93,6 +96,7 @@ export default function Home() {
           />
         )}
         {section === 'indexes'     && <IndexesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
+        {section === 'bonds'       && <BondsSection />}
         {section === 'currencies'  && <CurrenciesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'crypto'      && <CryptoCommoditiesSection jumpTo={jumpTarget} onCompare={handleCompare} />}
         {section === 'commodities' && <CommoditiesSection jumpTo={jumpTarget} onCompare={handleCompare} />}

@@ -1,11 +1,11 @@
 'use client';
 
-import { LucideProps, TrendingUp, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe, LayoutDashboard } from 'lucide-react';
+import { LucideProps, TrendingUp, Landmark, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe, LayoutDashboard } from 'lucide-react';
 import { ForwardRefExoticComponent, RefAttributes } from 'react';
 import clsx from 'clsx';
 import { MACRO_WORLD_ENABLED } from '@/lib/imfConfig';
 
-export type Section = 'dashboard' | 'indexes' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'macroworld' | 'stock' | 'compare' | 'rotation' | 'sources';
+export type Section = 'dashboard' | 'indexes' | 'bonds' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'macroworld' | 'stock' | 'compare' | 'rotation' | 'sources';
 
 type LucideIcon = ForwardRefExoticComponent<Omit<LucideProps, 'ref'> & RefAttributes<SVGSVGElement>>;
 
@@ -20,6 +20,7 @@ export const SECTION_ICONS: Record<Section, LucideIcon> = {
   dashboard:   LayoutDashboard,
   commodities: Gem,
   indexes:     BarChart2,
+  bonds:       Landmark,
   currencies:  DollarSign,
   crypto:      Bitcoin,
   sectors:     Grid2X2,
@@ -38,6 +39,9 @@ const SECTIONS: { id: Section; label: string; short: string }[] = [
   { id: 'dashboard',   label: 'Dashboard',   short: 'Home'   },
   { id: 'commodities', label: 'Commodities', short: 'Cmdty'  },
   { id: 'indexes',     label: 'Indexes',     short: 'Idx'    },
+  // Bonds sits right after Indexes: it is the other half of "what the market is doing",
+  // and the yield curve is read alongside the equity indexes, not buried near Macro.
+  { id: 'bonds',       label: 'Bonds',       short: 'Bonds'  },
   { id: 'currencies',  label: 'Currencies',  short: 'FX'     },
   { id: 'crypto',      label: 'Crypto',      short: 'Crypto' },
   { id: 'sectors',     label: 'Sectors',     short: 'Sec'    },

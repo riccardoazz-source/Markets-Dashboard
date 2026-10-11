@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -1482,6 +1482,225 @@ ok('a series entirely before the boundary keeps only its last point',
   // code for the one series that has a bundled table.
   ok('the bundled table is ranked below the Gist cache',
      src.indexOf("source: 'cache'") < src.indexOf("source: 'bundled'"));
+}
+
+// ── Treasury securities: identity, curve, price ──────────────────────────────
+//
+// The pricing here is a MODEL — there is no free per-CUSIP market feed — so it has to be
+// pinned to cases where algebra, not judgement, fixes the answer. A flat par curve is the
+// one that does the work: every zero rate must come back exactly equal to it, and a bond
+// whose coupon equals it must price at exactly 100. Both are identities, so they hold to
+// machine precision and catch a wrong compounding convention or an off-by-one in the
+// bootstrap sum. A "price goes down when yields go up" check would pass with all of those
+// still wrong.
+{
+  const B = await import(join(out, 'bonds.js'));
+  const flat = (pct) => [0.5, 1, 2, 3, 5, 7, 10, 20, 30].map(years => ({ years, pct }));
+
+  // ISIN. Anchored on a published one rather than on the algorithm restated: Apple's
+  // CUSIP 037833100 is ISIN US0378331005, which is the canonical worked example.
+  ok('ISIN check digit matches a published ISIN',
+     B.isinFromCusip('037833100') === 'US0378331005', B.isinFromCusip('037833100'));
+  ok('…and the result validates against its own check digit',
+     B.isValidIsin('US0378331005') && !B.isValidIsin('US0378331004'));
+  ok('letters expand A=10 … Z=35', B.expandAlnum('AZ9') === '1035' + '9');
+  // A malformed CUSIP yields null, never a plausible-looking identifier: a wrong ISIN can
+  // be pasted into a broker, an absent one cannot.
+  ok('a malformed CUSIP yields no ISIN',
+     B.isinFromCusip('12345') === null && B.isinFromCusip('91282CJT!') === null);
+  ok('every generated Treasury ISIN self-validates',
+     ['912810TL2', '91282CJW4', '912797LK7'].every(c => B.isValidIsin(B.isinFromCusip(c))));
+
+  // Bootstrap. The identity: flat par in, flat zero out.
+  for (const c of [0.5, 4, 9]) {
+    const dfs = B.bootstrapDiscountFactors(flat(c), 30);
+    const zeros = dfs.map((df, i) => B.zeroRateFromDf(df, (i + 1) / 2));
+    const worst = Math.max(...zeros.map(z => Math.abs(z - c)));
+    ok(`a flat ${c}% par curve bootstraps to a flat ${c}% zero curve`, worst < 1e-9, `worst ${worst}`);
+  }
+  // …and NOT flat when the curve is not: a check that passes on a sloped curve too would
+  // be testing nothing. 3%→5.5% is about as steep as a real curve gets.
+  {
+    const steep = [{ years: 0.5, pct: 3 }, { years: 2, pct: 3.8 }, { years: 10, pct: 5 }, { years: 30, pct: 5.5 }];
+    const dfs = B.bootstrapDiscountFactors(steep, 30);
+    const z30 = B.zeroRateFromDf(dfs[dfs.length - 1], 30);
+    ok('a rising curve gives a zero rate above the par yield at the long end',
+       dfs.length === 60 && z30 > 5.5, `zero ${z30.toFixed(3)} vs par 5.5`);
+    // Zeros sit above pars on a rising curve and the gap widens with tenor — the actual
+    // content of the bootstrap, as opposed to its arithmetic.
+    const z10 = B.zeroRateFromDf(dfs[19], 10);
+    ok('…and the zero-par gap widens with maturity', z30 - 5.5 > z10 - 5 && z10 > 5,
+       `10y +${(z10 - 5).toFixed(3)}, 30y +${(z30 - 5.5).toFixed(3)}`);
+  }
+  // A curve too steep to be arbitrage-free implies a negative price for a future dollar.
+  // The bootstrap must stop there, and a bond past that point must come back UNPRICED —
+  // this used to raise a negative factor to a fractional power and return NaN, which
+  // reaches the screen looking like a price.
+  {
+    const absurd = [{ years: 0.5, pct: 1 }, { years: 30, pct: 9 }];
+    const dfs = B.bootstrapDiscountFactors(absurd, 30);
+    ok('an arbitrage-inconsistent curve truncates instead of going negative',
+       dfs.length > 0 && dfs.length < 60 && dfs.every(d => d > 0), `${dfs.length} factors`);
+    ok('…a flow beyond the truncation has no discount factor',
+       !isFinite(B.discountFactorAt(dfs, 30)));
+    ok('…and the bond comes back unpriced, not NaN',
+       B.priceFromCurve(5, '2056-02-15', '2026-02-15', absurd) === null);
+    ok('…while one inside the valid range still prices',
+       B.priceFromCurve(5, '2031-02-15', '2026-02-15', absurd)?.cleanPrice > 0);
+  }
+
+  // Cash flow timing. The bug this pins: measuring coupons in calendar years instead of
+  // coupon periods put every flow ~0.0044y off the grid the curve was bootstrapped on,
+  // and a par bond priced at 100.0103 instead of 100.
+  {
+    ok('a coupon falls at exactly half a period, not 181/365.25 of a year',
+       eq(B.flowTimes(4, 0), [0.5, 1, 1.5, 2]));
+    ok('…and shifts back by however much of the period is already gone',
+       eq(B.flowTimes(2, 0.5), [0.25, 0.75]));
+    ok('settlement on a coupon date is zero periods in',
+       B.elapsedFraction('2026-02-15', '2026-08-15') === 0);
+    ok('…and three months in is about half', Math.abs(B.elapsedFraction('2026-05-16', '2026-08-15') - 0.5) < 0.02);
+  }
+
+  // Pricing identities, on a flat 5% curve settling exactly on a coupon date.
+  const settle = '2026-02-15';
+  const mat30  = '2056-02-15';
+  {
+    const atPar = B.priceFromCurve(5, mat30, settle, flat(5));
+    ok('a bond whose coupon equals a flat curve prices at exactly 100',
+       Math.abs(atPar.cleanPrice - 100) < 1e-8, atPar.cleanPrice);
+    ok('…and its yield to maturity comes back as that same rate',
+       Math.abs(atPar.ytmPct - 5) < 1e-6, atPar.ytmPct);
+    const low  = B.priceFromCurve(2, mat30, settle, flat(5));
+    const high = B.priceFromCurve(8, mat30, settle, flat(5));
+    ok('a coupon below the curve prices BELOW par', B.parStatus(low.cleanPrice) === 'below',
+       low.cleanPrice.toFixed(3));
+    ok('a coupon above the curve prices ABOVE par', B.parStatus(high.cleanPrice) === 'above',
+       high.cleanPrice.toFixed(3));
+    // The discount is bounded by the coupon shortfall: 3% a year for 30 years, discounted,
+    // cannot be worth more than 90 nor less than a tenth of that.
+    ok('…and the discount is the size the shortfall implies',
+       100 - low.cleanPrice > 25 && 100 - low.cleanPrice < 90, low.cleanPrice.toFixed(3));
+  }
+  // Accrued interest: zero on a coupon date, half a coupon mid-period, and the clean price
+  // must not jump across the payment while the dirty price does.
+  {
+    const on  = B.priceFromCurve(6, mat30, '2026-02-15', flat(5));
+    const mid = B.priceFromCurve(6, mat30, '2026-05-16', flat(5));
+    ok('accrued is zero when settlement is a coupon date', Math.abs(on.accrued) < 1e-9, on.accrued);
+    ok('…and about half a coupon three months in',
+       Math.abs(mid.accrued - 1.5) < 0.1, mid.accrued.toFixed(4));
+    ok('…and the clean price barely moves across that gap, while the dirty price rises',
+       Math.abs(mid.cleanPrice - on.cleanPrice) < 0.6 && mid.dirtyPrice > on.dirtyPrice);
+  }
+  // A bill has no coupons: price is the discount factor, and it is ALWAYS below par.
+  {
+    const bill = B.billPrice('2026-08-15', settle, flat(5));
+    ok('a bill prices as a pure discount', bill.cleanPrice < 100 && bill.cleanPrice > 95,
+       bill.cleanPrice.toFixed(4));
+    ok('…with no accrued interest', bill.accrued === 0);
+    ok('…and is below par by definition', B.parStatus(bill.cleanPrice) === 'below');
+  }
+
+  // Coupon dates run backwards from maturity, never past settlement, every six months.
+  {
+    const ds = B.couponDates('2026-03-01', '2029-02-28');
+    ok('coupon dates end on the maturity date', ds[ds.length - 1] === '2029-02-28');
+    ok('…are six months apart', ds.length === 6, ds.join(' '));
+    ok('…and none precedes settlement', ds.every(d => d > '2026-03-01'));
+    // Rolling back from the 31st must land on a real day, not spill into the next month.
+    ok('a 31st maturity rolls back onto month ends, not into the next month',
+       B.couponDates('2026-01-01', '2027-08-31').every(d => /-(?:30|31|28|29)$/.test(d)),
+       B.couponDates('2026-01-01', '2027-08-31').join(' '));
+  }
+
+  // Par and issue price are DIFFERENT questions. This is the one the user's version got
+  // wrong, so it is pinned with the case that separates them: a bill auctioned at 97.5
+  // and now at 98.9 is above its issue price and still below par.
+  {
+    ok('below par means below 100, not below the issue price',
+       B.compareTo(98.9, 100) === 'below' && B.compareTo(98.9, 97.5) === 'above');
+    const sec = { cusip: '912797LK7', isin: B.isinFromCusip('912797LK7'), type: 'Bill',
+      term: '26-Week', issueDate: '2026-02-15', maturityDate: '2026-08-15',
+      couponPct: null, issuePrice: 97.5 };
+    const row = B.toRow(sec, settle, flat(5));
+    ok('…and a real bill row carries both marks, disagreeing',
+       row.vsPar === 'below' && row.vsIssue === 'above', `${row.vsPar} / ${row.vsIssue}`);
+  }
+
+  // Buckets. 30 years is the longest tenor the Treasury issues — there is no "30+".
+  {
+    ok('the long bucket is 20Y & 30Y, and nothing claims to be beyond 30',
+       B.BUCKETS.filter(b => b.group === 'Bonds').map(b => b.label).join(',') === '20-Year,30-Year');
+    ok('every bucket maps to a column of the published curve',
+       B.BUCKETS.every(b => /^\d+ (Mo|Yr)$/.test(b.curveCol)));
+    // The ranges must tile the line with no gap and no overlap, or a security falls
+    // through or lands in two places.
+    const sorted = [...B.BUCKETS].sort((a, b) => a.lo - b.lo);
+    ok('…and the buckets tile the maturity line with no gap or overlap',
+       sorted.every((b, i) => i === 0 ? b.lo === 0 : b.lo === sorted[i - 1].hi));
+    ok('a 30-year bond lands in the 30-Year bucket',
+       B.bucketFor('2056-02-15', settle)?.id === 'UST30Y');
+    ok('…a 26-week bill in the 6-Month bucket',
+       B.bucketFor('2026-08-15', settle)?.id === 'UST6M');
+    ok('…and a matured security lands nowhere', B.bucketFor('2020-01-01', settle) === null);
+  }
+
+  // Filters. The one that matters: an unknown value must not pass a range test, or a
+  // security we could not price would show up in "below par".
+  {
+    const rows = [
+      B.toRow({ cusip: '912810TL2', isin: B.isinFromCusip('912810TL2'), type: 'Bond', term: '30-Year',
+        issueDate: '2026-02-15', maturityDate: mat30, couponPct: 2, issuePrice: 99.5 }, settle, flat(5)),
+      B.toRow({ cusip: '91282CJW4', isin: B.isinFromCusip('91282CJW4'), type: 'Note', term: '10-Year',
+        issueDate: '2026-02-15', maturityDate: '2036-02-15', couponPct: 8, issuePrice: 99.5 }, settle, flat(5)),
+      B.toRow({ cusip: '912828ZZ9', isin: B.isinFromCusip('912828ZZ9'), type: 'FRN', term: '2-Year',
+        issueDate: '2026-02-15', maturityDate: '2028-02-15', couponPct: null, issuePrice: 100 }, settle, flat(5)),
+    ];
+    ok('a floating-rate note is not priced off a fixed curve', rows[2].priced === null);
+    ok('below-par keeps only the discount bond', eq(B.filterBonds(rows, { belowPar: true }).map(r => r.cusip), ['912810TL2']));
+    ok('…and an unpriced security never passes a price filter',
+       B.filterBonds(rows, { priceMin: 0, priceMax: 1e9 }).every(r => r.cusip !== '912828ZZ9'));
+    ok('coupon range filters on the real coupon',
+       eq(B.filterBonds(rows, { couponMin: 5 }).map(r => r.cusip), ['91282CJW4']));
+    ok('type filter selects the type', eq(B.filterBonds(rows, { types: ['FRN'] }).map(r => r.cusip), ['912828ZZ9']));
+    ok('search matches CUSIP and ISIN alike',
+       B.filterBonds(rows, { q: '912810' }).length === 1 &&
+       B.filterBonds(rows, { q: 'US912810TL2' }).length === 1);
+    ok('no filters returns everything', B.filterBonds(rows, {}).length === 3);
+  }
+  // Reading the auction file. Written against a schema no request could reach from here,
+  // so what is pinned is the handling that would be WRONG rather than merely absent.
+  {
+    const row = (o) => B.normalizeAuctionRow(o);
+    const note = row({ cusip: '91282CJW4', security_type: 'Note', security_term: '10-Year',
+      issue_date: '2026-02-15', maturity_date: '2036-02-15', int_rate: '4.250', price_per100: '99.812' });
+    ok('an auction row becomes a security, ISIN and all',
+       note.cusip === '91282CJW4' && note.couponPct === 4.25 && note.issuePrice === 99.812 &&
+       note.isin === B.isinFromCusip('91282CJW4'));
+    // The one that would be silently catastrophic: a bill's rate is a DISCOUNT rate, not
+    // a coupon. Carried as a coupon it would price a 97.9 discount instrument near par.
+    const bill = row({ cusip: '912797LK7', security_type: 'Bill', security_term: '26-Week',
+      issue_date: '2026-02-15', maturity_date: '2026-08-15', int_rate: '4.180' });
+    ok('a bill carries NO coupon, whatever rate the row holds', bill.couponPct === null);
+    ok('…and an FRN carries none either', row({ cusip: '912828ZZ9', security_type: 'Floating Rate Note',
+      maturity_date: '2028-02-15', int_rate: '0.2' }).couponPct === null);
+    ok('TIPS are recognised as their own type',
+       row({ cusip: '912810TL2', security_type: 'Inflation-Protected Note', maturity_date: '2036-01-15', int_rate: '1.5' }).type === 'TIPS');
+    // Incomplete or unrecognised rows are dropped, not half-built: a security with no
+    // maturity cannot be priced or bucketed, and one with an invented type would be.
+    ok('a row with no CUSIP, no maturity or an unknown type is dropped',
+       row({ security_type: 'Note', maturity_date: '2036-02-15' }) === null &&
+       row({ cusip: 'X', security_type: 'Note' }) === null &&
+       row({ cusip: 'X', security_type: 'Widget', maturity_date: '2036-02-15' }) === null);
+    ok('…and so is a maturity that is not an ISO date',
+       row({ cusip: 'X', security_type: 'Note', maturity_date: '02/15/2036' }) === null);
+    ok('field-name variants are both accepted',
+       row({ CUSIP: '91282CJW4', securityType: 'Note', maturityDate: '2036-02-15', intRate: '4' })?.couponPct === 4);
+    // Reopenings repeat a CUSIP across auctions; the list must hold each security once.
+    ok('reopenings collapse to one row per CUSIP',
+       B.dedupeByCusip([note, { ...note, issueDate: '2026-05-15' }, bill]).length === 2);
+  }
 }
 
 rmSync(out, { recursive: true, force: true });
