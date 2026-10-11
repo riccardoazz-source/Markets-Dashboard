@@ -1628,21 +1628,25 @@ ok('a series entirely before the boundary keeps only its last point',
        row.vsPar === 'below' && row.vsIssue === 'above', `${row.vsPar} / ${row.vsIssue}`);
   }
 
-  // Buckets. 30 years is the longest tenor the Treasury issues — there is no "30+".
+  // Buckets are cut on REMAINING life, on the standard index ladder. A 30-year bond sold
+  // in 2010 has six years left and must land with the six-year paper, not with the
+  // thirty-year paper it was issued as — that is the whole reason to bucket by remaining
+  // life, and it is the case that an issuance-based cut gets wrong.
   {
-    ok('the long bucket is 20Y & 30Y, and nothing claims to be beyond 30',
-       B.BUCKETS.filter(b => b.group === 'Bonds').map(b => b.label).join(',') === '20-Year,30-Year');
-    ok('every bucket maps to a column of the published curve',
+    ok('the ladder is the standard index one',
+       B.BUCKETS.map(b => b.label).join(',') === '0–1 Y,1–3 Y,3–5 Y,5–7 Y,7–10 Y,10–20 Y,20+ Y',
+       B.BUCKETS.map(b => b.label).join(','));
+    ok('every bucket reads against a column of the published curve',
        B.BUCKETS.every(b => /^\d+ (Mo|Yr)$/.test(b.curveCol)));
     // The ranges must tile the line with no gap and no overlap, or a security falls
     // through or lands in two places.
     const sorted = [...B.BUCKETS].sort((a, b) => a.lo - b.lo);
     ok('…and the buckets tile the maturity line with no gap or overlap',
        sorted.every((b, i) => i === 0 ? b.lo === 0 : b.lo === sorted[i - 1].hi));
-    ok('a 30-year bond lands in the 30-Year bucket',
-       B.bucketFor('2056-02-15', settle)?.id === 'UST30Y');
-    ok('…a 26-week bill in the 6-Month bucket',
-       B.bucketFor('2026-08-15', settle)?.id === 'UST6M');
+    ok('a bond maturing in 30 years lands in 20+', B.bucketFor('2056-02-15', settle)?.id === 'UST20P');
+    ok('…a 26-week bill in 0–1 Y', B.bucketFor('2026-08-15', settle)?.id === 'UST0_1');
+    ok('…a 30-year bond with six years left lands in 5–7 Y, not at the long end',
+       B.bucketFor('2032-02-15', settle)?.id === 'UST5_7');
     ok('…and a matured security lands nowhere', B.bucketFor('2020-01-01', settle) === null);
   }
 

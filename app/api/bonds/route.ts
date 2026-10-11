@@ -30,7 +30,19 @@ export const revalidate = 3600;
 
 const UA = 'Mozilla/5.0 (compatible; MarketPulse/1.0)';
 const FISCAL = 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/od/auctions_query';
-const CURVE = 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/all/all?type=daily_treasury_yield_curve&download=true&field_tdr_date_value=all';
+const CURVE_BASE = 'https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv';
+
+/**
+ * The curve CSV for ONE year — about 250 rows.
+ *
+ * The first version of this asked for `all/all`, which is every daily curve the Treasury
+ * has ever published: roughly 20,000 rows, downloaded in full to read the single most
+ * recent one. It timed out on Vercel and the whole section rendered its empty state. The
+ * macro route already knew better and says so in a comment next to the same URL builder
+ * ("~80 rows vs 20k"); this one did not reuse it.
+ */
+const curveUrl = (year: number) =>
+  `${CURVE_BASE}/${year}/all?type=daily_treasury_yield_curve&download=true`;
 
 // ── The par curve ────────────────────────────────────────────────────────────
 
@@ -73,19 +85,34 @@ function parseCurveCsv(csv: string): CurveSnapshot | null {
   return points.length >= 4 ? { date, points, byCol } : null;
 }
 
-async function fetchCurve(timeoutMs = 9_000): Promise<CurveSnapshot | null> {
-  try {
-    const res = await fetch(CURVE, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: { 'User-Agent': UA, Accept: 'text/csv,*/*', Referer: 'https://home.treasury.gov/' },
-      next: { revalidate: 3600 },
-    });
-    if (!res.ok) { console.error(`[bonds] curve HTTP ${res.status}`); return null; }
-    return parseCurveCsv(await res.text());
-  } catch (e) {
-    console.error('[bonds] curve failed:', (e as Error).message);
-    return null;
+async function fetchCurve(timeoutMs = 9_000): Promise<{ snap: CurveSnapshot | null; trace: string[] }> {
+  const trace: string[] = [];
+  const now = new Date().getFullYear();
+  // Current year first, previous as a fallback: in the first days of January the new
+  // year's file exists but can still be empty.
+  for (const year of [now, now - 1]) {
+    const url = curveUrl(year);
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: { 'User-Agent': UA, Accept: 'text/csv,*/*', Referer: 'https://home.treasury.gov/' },
+        next: { revalidate: 1800 },
+      });
+      trace.push(`${year}: HTTP ${res.status}`);
+      if (!res.ok) continue;
+      const csv = await res.text();
+      trace.push(`${year}: ${csv.length} bytes`);
+      const snap = parseCurveCsv(csv);
+      if (snap) {
+        trace.push(`${year}: parsed ${snap.points.length} tenors for ${snap.date}`);
+        return { snap, trace };
+      }
+      trace.push(`${year}: parsed nothing — header was "${csv.split('\n')[0]?.slice(0, 90)}"`);
+    } catch (e) {
+      trace.push(`${year}: ${(e as Error).message}`);
+    }
   }
+  return { snap: null, trace };
 }
 
 // ── The security universe ────────────────────────────────────────────────────
@@ -139,21 +166,41 @@ export async function GET(req: NextRequest) {
     const [curve, uni] = await Promise.all([fetchCurve(), fetchUniverse(today)]);
     return NextResponse.json({
       today,
-      curve: curve ? { date: curve.date, tenors: curve.points.length, byCol: curve.byCol } : null,
+      curve: curve.snap
+        ? { date: curve.snap.date, tenors: curve.snap.points.length, byCol: curve.snap.byCol, trace: curve.trace }
+        : { error: 'unavailable', trace: curve.trace },
       universe: { count: uni.secs.length, trace: uni.trace, sample: uni.secs.slice(0, 3) },
       note: 'Prices are computed from the par curve, not quoted. No free per-CUSIP market feed exists.',
     }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
-  const curve = await loadCurve();
-  if (!curve) {
-    return NextResponse.json({ error: 'curve_unavailable' }, { status: 503 });
-  }
+  // NOTHING below requires the curve to have loaded.
+  //
+  // The first version bailed out here with a 503 when the curve was missing, and the page
+  // rendered one apologetic paragraph where the whole section should have been. That was
+  // the wrong unit of failure: the buckets are a fixed list, the securities in them and
+  // their coupons, maturities and ISINs are exact facts that do not involve the curve at
+  // all, and only the YIELD on a tile and the computed PRICE in the table depend on it.
+  // Degrade per field, not per page — a missing number can say so; a missing section
+  // cannot say anything.
+  const { snap: curve, trace: curveTrace } = await loadCurve();
 
   if (mode === 'curve') {
+    const { secs } = await loadUniverse(today);
+    const counts = new Map<string, number>();
+    for (const s of secs) {
+      const b = bucketFor(s.maturityDate, today);
+      if (b) counts.set(b.id, (counts.get(b.id) ?? 0) + 1);
+    }
     return NextResponse.json({
-      date: curve.date,
-      buckets: BUCKETS.map(b => ({ ...b, yieldPct: curve.byCol[b.curveCol] ?? null })),
+      date: curve?.date ?? null,
+      curveAvailable: !!curve,
+      curveTrace: curve ? undefined : curveTrace,
+      buckets: BUCKETS.map(b => ({
+        ...b,
+        yieldPct: curve?.byCol[b.curveCol] ?? null,
+        count: counts.get(b.id) ?? 0,
+      })),
     });
   }
 
@@ -164,13 +211,18 @@ export async function GET(req: NextRequest) {
       ? secs.filter(s => bucketFor(s.maturityDate, today)?.id === bucketId)
       : secs;
     // Priced here rather than in the browser: the bootstrap runs once for the whole list
-    // instead of once per row, and the client never has to hold the curve.
+    // instead of once per row, and the client never has to hold the curve. With no curve
+    // the rows still go out — coupon, maturity, ISIN and issue price are exact and owe
+    // the curve nothing — and `priced` is null on each, which the table renders as "—".
     const rows: BondRow[] = inBucket
-      .map(s => toRow(s, today, curve.points))
+      .map(s => curve
+        ? toRow(s, today, curve.points)
+        : { ...s, priced: null, vsPar: null, vsIssue: null })
       .sort((a, b) => a.maturityDate.localeCompare(b.maturityDate) || a.cusip.localeCompare(b.cusip));
     return NextResponse.json({
       asOf: today,
-      curveDate: curve.date,
+      curveDate: curve?.date ?? null,
+      curveAvailable: !!curve,
       bucket: bucketId,
       count: rows.length,
       priced: rows.filter(r => r.priced).length,

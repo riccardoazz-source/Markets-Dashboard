@@ -93,35 +93,43 @@ export function isValidIsin(isin: string): boolean {
 
 // ── Maturity buckets ─────────────────────────────────────────────────────────
 //
-// The names are the Treasury's own, not the ETF convention. There is no "30+" in
-// Treasuries: 30 years is the longest tenor issued, so the long bucket is "20Y & 30Y".
-// TLT's "20+ Year" counts REMAINING life, which is a different thing and belongs to the
-// fund, not to the issuer.
+// By REMAINING life, not by the tenor the security was issued at. A 30-year bond sold in
+// 2010 has six years left and belongs with the six-year paper — that is what it behaves
+// like and that is where someone looking for a six-year bond expects to find it.
+//
+// The ranges are the standard index convention — 1–3, 3–5, 5–7, 7–10, 10–20, 20+ — the
+// one the Treasury ETFs are cut on (SHY, IEI, IEF, TLH, TLT), because that is the ladder
+// people already have in their heads.
+//
+// An earlier version grouped these by instrument type instead (Bills / Notes / Bonds) and
+// labelled the long end "20-Year" and "30-Year" on the grounds that the Treasury issues
+// no tenor beyond 30. True, and beside the point: "20+" is a statement about remaining
+// life, not about issuance, and there are hundreds of bonds with more than twenty years
+// left. Type is still there, as a filter inside the bucket, which is where it is useful.
 
 export interface Bucket {
   id: string;
   /** What the tile says. */
   label: string;
-  /** Column in the Treasury's daily par yield curve CSV. */
+  /** The curve tenor this bucket is read against. */
   curveCol: string;
-  /** Years to maturity this bucket accepts, [lo, hi). */
+  /** Years of remaining life this bucket accepts, [lo, hi). */
   lo: number;
   hi: number;
-  group: 'Bills' | 'Notes' | 'Bonds';
+  /** One line on what lives here. */
+  note: string;
 }
 
 export const BUCKETS: Bucket[] = [
-  { id: 'UST1M',  label: '1-Month',  curveCol: '1 Mo',  lo: 0,     hi: 0.125, group: 'Bills' },
-  { id: 'UST3M',  label: '3-Month',  curveCol: '3 Mo',  lo: 0.125, hi: 0.375, group: 'Bills' },
-  { id: 'UST6M',  label: '6-Month',  curveCol: '6 Mo',  lo: 0.375, hi: 0.75,  group: 'Bills' },
-  { id: 'UST1Y',  label: '1-Year',   curveCol: '1 Yr',  lo: 0.75,  hi: 1.5,   group: 'Bills' },
-  { id: 'UST2Y',  label: '2-Year',   curveCol: '2 Yr',  lo: 1.5,   hi: 2.5,   group: 'Notes' },
-  { id: 'UST3Y',  label: '3-Year',   curveCol: '3 Yr',  lo: 2.5,   hi: 4,     group: 'Notes' },
-  { id: 'UST5Y',  label: '5-Year',   curveCol: '5 Yr',  lo: 4,     hi: 6,     group: 'Notes' },
-  { id: 'UST7Y',  label: '7-Year',   curveCol: '7 Yr',  lo: 6,     hi: 8.5,   group: 'Notes' },
-  { id: 'UST10Y', label: '10-Year',  curveCol: '10 Yr', lo: 8.5,   hi: 15,    group: 'Notes' },
-  { id: 'UST20Y', label: '20-Year',  curveCol: '20 Yr', lo: 15,    hi: 25,    group: 'Bonds' },
-  { id: 'UST30Y', label: '30-Year',  curveCol: '30 Yr', lo: 25,    hi: 100,   group: 'Bonds' },
+  { id: 'UST0_1',   label: '0–1 Y',   curveCol: '6 Mo',  lo: 0,  hi: 1,
+    note: 'Bills and anything close to redemption. Bills pay no coupon — sold under 100, redeemed at 100.' },
+  { id: 'UST1_3',   label: '1–3 Y',   curveCol: '2 Yr',  lo: 1,  hi: 3,  note: 'The front end. Tracks policy expectations most closely.' },
+  { id: 'UST3_5',   label: '3–5 Y',   curveCol: '5 Yr',  lo: 3,  hi: 5,  note: 'Belly of the curve.' },
+  { id: 'UST5_7',   label: '5–7 Y',   curveCol: '7 Yr',  lo: 5,  hi: 7,  note: 'Belly of the curve.' },
+  { id: 'UST7_10',  label: '7–10 Y',  curveCol: '10 Yr', lo: 7,  hi: 10, note: 'The 10-year area — the benchmark most rates are quoted against.' },
+  { id: 'UST10_20', label: '10–20 Y', curveCol: '20 Yr', lo: 10, hi: 20, note: 'Long end. Mostly old 30-year bonds with time run off them.' },
+  { id: 'UST20P',   label: '20+ Y',   curveCol: '30 Yr', lo: 20, hi: 100,
+    note: 'The longest paper outstanding. Most sensitive to rate moves, and where the deepest discounts to par sit.' },
 ];
 
 /** Years between two ISO dates, on the actual/365.25 basis used for bucketing only. */
