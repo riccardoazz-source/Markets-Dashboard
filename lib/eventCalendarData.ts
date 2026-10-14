@@ -200,10 +200,21 @@ export const CALENDAR_EVENTS: CalendarEvent[] = [
   boj('2026-12-18T03:00:00Z'),
 
   // US CPI 2026 — 08:30 ET (12:30Z on EDT, 13:30Z on EST)
+  //
+  // HAND-TYPED AND KNOWN TO HAVE BEEN WRONG. The October entry said the 13th; the release
+  // was on the 14th, so the card expired the morning of the day it should have been most
+  // useful and the page showed no CPI at all on CPI day. The hour was right — only the
+  // day was out, which is exactly the error this list is prone to and the one nothing in
+  // the app could catch, because no live feed was wired in to disagree with it.
+  //
+  // The live economic calendar now IS wired in (see MajorEventsStrip) and takes precedence
+  // over these when the two describe the same release. That is the actual fix; this list
+  // is the fallback for when the feed is not configured or not reachable. Refresh from
+  // bls.gov/schedule/news_release when touching this file.
   cpi('2026-07-14T12:30:00Z'),
   cpi('2026-08-12T12:30:00Z'),
   cpi('2026-09-11T12:30:00Z'),
-  cpi('2026-10-13T12:30:00Z'),
+  cpi('2026-10-14T12:30:00Z'),   // was 10-13: off by one, and it cost the whole card
   cpi('2026-11-18T13:30:00Z'),
   cpi('2026-12-10T13:30:00Z'),
 

@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -1704,6 +1704,90 @@ ok('a series entirely before the boundary keeps only its last point',
     // Reopenings repeat a CUSIP across auctions; the list must hold each security once.
     ok('reopenings collapse to one row per CUSIP',
        B.dedupeByCusip([note, { ...note, issueDate: '2026-05-15' }, bill]).length === 2);
+  }
+}
+
+// ── The live calendar overruling the hand-typed one ──────────────────────────
+//
+// Reconstructed from the failure it exists to prevent: the bundled October 2026 CPI said
+// the 13th, the release was on the 14th, and on the morning of the 14th the card had
+// already expired — so the page showed no CPI at all on CPI day.
+{
+  const M = await import(join(out, 'calendarMerge.js'));
+
+  const bundledCpi = { id: 'cal-cpi', title: 'US CPI Inflation Report', region: 'US',
+    date: '2026-10-13T12:30:00Z', tentative: true };
+  // What a feed returns for one CPI print: several rows, one instant, data-label titles.
+  const liveCpi = [
+    { id: 'l1', title: 'Inflation Rate YoY',      currency: 'USD', date: '2026-10-14T12:30:00Z' },
+    { id: 'l2', title: 'Core Inflation Rate YoY', currency: 'USD', date: '2026-10-14T12:30:00Z' },
+    { id: 'l3', title: 'Inflation Rate MoM',      currency: 'USD', date: '2026-10-14T12:30:00Z' },
+  ];
+
+  ok('a feed row and a bundled card for the same release share a key',
+     M.releaseKey(bundledCpi) === M.releaseKey(liveCpi[0]) &&
+     M.releaseKey(bundledCpi) === 'US|CPI|2026-10', M.releaseKey(bundledCpi));
+
+  const r = M.reconcileCalendars([bundledCpi], liveCpi);
+  ok('the live date wins', r.events[0].date === '2026-10-14T12:30:00Z');
+  ok('…and the card keeps its own title, not the feed\'s data label',
+     r.events[0].title === 'US CPI Inflation Report');
+  ok('…four feed rows do not become four cards', r.events.length === 1);
+  ok('…the move is reported, not silent',
+     r.corrections.length === 1 && r.corrections[0].from.startsWith('2026-10-13') &&
+     r.corrections[0].to.startsWith('2026-10-14'));
+  ok('…and it stops being flagged tentative, since the date is no longer a guess',
+     r.events[0].tentative === false && r.events[0].dateCorrected === true);
+
+  // The guards. Each of these would be a worse bug than the drift being fixed.
+  ok('a DIFFERENT month never moves a card',
+     M.reconcileCalendars([bundledCpi],
+       [{ id: 'x', title: 'Inflation Rate YoY', currency: 'USD', date: '2026-11-18T13:30:00Z' }]
+     ).corrections.length === 0);
+  ok('a different economy never moves a card',
+     M.reconcileCalendars([bundledCpi],
+       [{ id: 'x', title: 'Inflation Rate YoY', currency: 'EUR', date: '2026-10-14T12:30:00Z' }]
+     ).corrections.length === 0);
+  ok('a different release never moves a card',
+     M.reconcileCalendars([bundledCpi],
+       [{ id: 'x', title: 'Non-Farm Payrolls', currency: 'USD', date: '2026-10-14T12:30:00Z' }]
+     ).corrections.length === 0);
+  ok('an unrecognised title is left alone rather than guessed at',
+     M.subjectKey('Baltic Dry Index') === null &&
+     M.reconcileCalendars([bundledCpi],
+       [{ id: 'x', title: 'Baltic Dry Index', currency: 'USD', date: '2026-10-14T12:30:00Z' }]
+     ).corrections.length === 0);
+  // Core PCE must not be read as CPI: both carry the word "inflation" on their cards, and
+  // collapsing them would move the PCE card onto the CPI date.
+  ok('core PCE and CPI are different subjects',
+     M.subjectKey('US Core PCE Inflation (Personal Income & Outlays)') === 'PCE' &&
+     M.subjectKey('US CPI Inflation Report') === 'CPI');
+  ok('…and a core-inflation feed row is still CPI, not PCE',
+     M.subjectKey('Core Inflation Rate MoM') === 'CPI');
+
+  // Same day, different minute, is not a correction — otherwise every refresh "corrects".
+  ok('a few minutes apart on the same day is not a correction',
+     M.reconcileCalendars([bundledCpi],
+       [{ id: 'x', title: 'Inflation Rate YoY', currency: 'USD', date: '2026-10-13T12:31:00Z' }]
+     ).corrections.length === 0);
+
+  // A feed row matching nothing is NEW information and must survive the merge.
+  {
+    const out2 = M.reconcileCalendars([bundledCpi],
+      [...liveCpi, { id: 'n1', title: 'China Caixin PMI', currency: 'CNY', date: '2026-10-20T01:45:00Z' }]);
+    ok('a feed event the bundled list does not know about is kept',
+       out2.events.some(e => e.title === 'China Caixin PMI'));
+    ok('…while the ones folded into a card are not duplicated',
+       out2.events.filter(e => M.subjectKey(e.title) === 'CPI').length === 1);
+  }
+  ok('an empty feed changes nothing',
+     M.reconcileCalendars([bundledCpi], []).events[0].date === '2026-10-13T12:30:00Z');
+
+  // And the entry that started it: the bundled file itself must now say the 14th.
+  {
+    const oct = ED.CALENDAR_EVENTS.filter(e => e.title.startsWith('US CPI') && e.date.startsWith('2026-10'));
+    ok('the bundled October CPI is the 14th, the day it was released',
+       oct.length === 1 && oct[0].date === '2026-10-14T12:30:00Z', oct[0]?.date);
   }
 }
 

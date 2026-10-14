@@ -29,6 +29,7 @@ import {
   CALENDAR_COLORS, CALENDAR_LABELS, type CalendarEvent,
 } from '@/lib/eventCalendar';
 import { BUNDLED_EVENTS } from '@/lib/eventCalendarData';
+import { reconcileCalendars } from '@/lib/calendarMerge';
 import { useCalendarEvents } from '@/lib/gist';
 import { eventSubject, subjectIndicatorIds } from '@/lib/eventIndicator';
 import { EventOutlookPanel } from '@/components/ui/EventOutlookPanel';
@@ -168,6 +169,7 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
   const { events: personal, addEvent, removeEvent } = useCalendarEvents();
   const [latest, setLatest] = useState<Record<string, { value: number; date: string }>>({});
   const [ipos, setIpos] = useState<CalendarEvent[]>([]);
+  const [feed, setFeed] = useState<CalendarEvent[]>([]);
   const [outlook, setOutlook] = useState<CalendarEvent | null>(null);
 
   useEffect(() => {
@@ -208,14 +210,56 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
     return () => { cancelled = true; };
   }, []);
 
-  const shown = useMemo(() => {
-    if (!now) return [];
+  // The live economic calendar. Built, tested, and then — until now — read by nothing:
+  // the endpoint existed and no component ever fetched it, so a date typed wrong by a day
+  // in the bundled list had nothing to disagree with it. That is how October's CPI card
+  // expired the morning of CPI day.
+  //
+  // Unconfigured or unreachable yields an empty list and the rail falls back to the
+  // bundled dates exactly as before.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/apify-calendar')
+      .then(r => r.json())
+      .then((j: { configured?: boolean; events?: {
+        id: string; title: string; date: string; timeKnown: boolean;
+        country?: string; currency?: string; flag?: string;
+        forecast?: string | null; previous?: string | null }[] }) => {
+        if (cancelled || !Array.isArray(j.events)) return;
+        setFeed(j.events.map(e => ({
+          id: `live-${e.id}`,
+          title: e.title,
+          category: 'economic-data' as const,
+          region: e.country ?? e.currency ?? '',
+          currency: e.currency,
+          flag: e.flag ?? '📅',
+          date: e.date,
+          timeKnown: e.timeKnown,
+          description: [e.forecast && `Forecast ${e.forecast}`, e.previous && `previous ${e.previous}`]
+            .filter(Boolean).join(' · ') || undefined,
+          source: 'live economic calendar',
+        })));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const { shown, corrections } = useMemo(() => {
+    if (!now) return { shown: [] as CalendarEvent[], corrections: [] };
     const mine: CalendarEvent[] = personal.map(p => ({
       id: p.id, title: p.title, category: 'personal' as const,
       region: 'Mine', flag: '📌', date: p.date, timeKnown: p.timeKnown, description: p.description,
     }));
-    return upcomingEvents([...BUNDLED_EVENTS, ...ipos, ...mine], now, months, zone());
-  }, [now, months, personal, ipos]);
+    // The live feed is merged BEFORE the window filter, not after: an event whose bundled
+    // date has already passed must get its corrected date first, or it is dropped on the
+    // way in and the correction never happens. That is precisely the CPI case — the
+    // bundled 13th was already behind us on the 14th.
+    const merged = reconcileCalendars<CalendarEvent>([...BUNDLED_EVENTS, ...ipos, ...mine], feed);
+    return {
+      shown: upcomingEvents(merged.events, now, months, zone()),
+      corrections: merged.corrections,
+    };
+  }, [now, months, personal, ipos, feed]);
 
   // One request for the whole rail: every series the visible events concern, from the
   // endpoint the Macro tab already uses. Cheap and exact — the alternative was leaving the
@@ -305,6 +349,14 @@ export function MajorEventsStrip({ months = 6 }: { months?: number }) {
         <h2 className="text-[13px] font-semibold text-gray-200 leading-none">What&apos;s ahead</h2>
         <span className="text-[10px] text-gray-600 hidden sm:inline">
           next {months} months · {zone()}
+          {/* Named, not swallowed. A date quietly moving under the reader is the same class
+              of thing as a stale one: they should be able to see that it happened. */}
+          {corrections.length > 0 && (
+            <span className="text-amber-400/70" title={corrections
+              .map(c => `${c.title}: ${c.from.slice(0, 10)} → ${c.to.slice(0, 10)}`).join('\n')}>
+              {' '}· {corrections.length} date{corrections.length > 1 ? 's' : ''} corrected from the live calendar
+            </span>
+          )}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           {searching ? (
