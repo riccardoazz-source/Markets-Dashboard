@@ -1,9 +1,11 @@
 'use client';
 
-import { LucideProps, TrendingUp, Landmark, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe, LayoutDashboard } from 'lucide-react';
-import { ForwardRefExoticComponent, RefAttributes } from 'react';
+import { LucideProps, TrendingUp, CloudOff, Landmark, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe, LayoutDashboard } from 'lucide-react';
+import { ForwardRefExoticComponent, RefAttributes, useState } from 'react';
 import clsx from 'clsx';
 import { MACRO_WORLD_ENABLED } from '@/lib/imfConfig';
+import { useSyncStatus } from '@/lib/gist';
+import { DataBackupPanel } from '@/components/ui/DataBackupPanel';
 
 export type Section = 'dashboard' | 'indexes' | 'bonds' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'macroworld' | 'stock' | 'compare' | 'rotation' | 'sources';
 
@@ -60,6 +62,14 @@ interface Props {
 }
 
 export function Navbar({ active, onSelect }: Props) {
+  const syncStatus = useSyncStatus();
+  const [backup, setBackup] = useState(false);
+  // Shown ONLY when something is wrong. The same indicator already existed, but it lived
+  // inside the Notes panel — inside the feature that stops working when sync does, so the
+  // one case it was built to warn about is the one case nobody could see it. A person can
+  // end up with a full watchlist on a phone and an empty one on a desktop and no sign
+  // anywhere that the two were never connected.
+  const sickSync = syncStatus === 'local-only' || syncStatus === 'error';
   return (
     <>
       {/* Top bar — logo only on mobile, logo + tabs on desktop */}
@@ -68,6 +78,19 @@ export function Navbar({ active, onSelect }: Props) {
           <div className="flex items-center gap-1.5 shrink-0">
             <TrendingUp size={18} className="text-accent" />
             <span className="font-bold text-white text-base tracking-tight">MarketPulse</span>
+            {sickSync && (
+              <button onClick={() => setBackup(true)}
+                title={syncStatus === 'local-only'
+                  ? 'Saved only on this device — nothing is shared with your other devices. Click for details and a backup.'
+                  : 'Cloud storage could not be reached. Click for details and a backup.'}
+                className={clsx('flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider',
+                  syncStatus === 'local-only'
+                    ? 'bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
+                    : 'bg-red-500/15 text-red-300 hover:bg-red-500/25')}>
+                <CloudOff size={10} />
+                {syncStatus === 'local-only' ? 'This device only' : 'Sync error'}
+              </button>
+            )}
             {/* The green "LIVE" badge that used to sit here has been removed.
                 Nothing computed it. It was a decoration printed unconditionally on every
                 page, including pages showing a policy rate read out of a table edited by
@@ -119,6 +142,8 @@ export function Navbar({ active, onSelect }: Props) {
           })}
         </div>
       </nav>
+
+      {backup && <DataBackupPanel onClose={() => setBackup(false)} />}
     </>
   );
 }
