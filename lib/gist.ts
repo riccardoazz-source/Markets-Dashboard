@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { mergePatch, mergeSnapshots, unionByDate } from './gistMerge';
+import { mergePatch, mergeSnapshots, missingFromRemote, unionByDate } from './gistMerge';
 
 // Snapshot of the chart view captured when a note is created, so clicking "restore"
 // returns to exactly the same setup (active tools + toggles, timeframe, custom range).
@@ -286,13 +286,29 @@ async function fetchAndMerge(preferCacheOnConflict: boolean): Promise<GistData> 
     saveLocal(_cache);
     notify(_cache);
 
-    // Cloud configured but empty while this device has local notes: seed the cloud.
-    if (cloud && !remoteHasData && Object.keys(local).length > 0) {
-      fetch('/api/gist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(local),
-      }).catch(() => {});
+    // Send up whatever this device holds that the server has never seen.
+    //
+    // This used to fire only when the server was COMPLETELY empty
+    // (`cloud && !remoteHasData`), which is almost never true after the first save. Once
+    // the account held anything at all — one list of pins was enough — the upload stopped
+    // happening, and any device that had built up notes locally kept them to itself
+    // forever: merged into its own view on every load, written back to its own disk, and
+    // never transmitted. From any other device the account simply looked near-empty.
+    //
+    // `missingFromRemote` is additive by construction: it returns only keys, and only
+    // note-charts, that the server does not already have, so this can add to the server
+    // and cannot overwrite it. A remote value always stays the authority for anything
+    // that exists on both sides.
+    if (cloud) {
+      const owed = missingFromRemote(local, remote);
+      if (Object.keys(owed).length > 0) {
+        console.log('[gist] uploading local-only keys the server never saw:', Object.keys(owed).join(', '));
+        fetch('/api/gist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(owed),
+        }).catch(() => {});
+      }
     }
 
     // Anything this device still owes goes out now — this is the moment a phone that was

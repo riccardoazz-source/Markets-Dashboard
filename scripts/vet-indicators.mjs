@@ -1791,6 +1791,60 @@ ok('a series entirely before the boundary keeps only its last point',
   }
 }
 
+// ── Uploading what the server has never seen ─────────────────────────────────
+//
+// Built from the real case: a gist holding ONLY pins and calendarEvents, while a phone
+// held a 48-stock watchlist and every note. The upload fired only when the server was
+// completely empty, so one list of pins was enough to stop it forever, and the phone
+// merged its own notes in on every load and never told anyone.
+{
+  const GM = await import(join(out, 'gistMerge.js'));
+
+  const remote = {
+    pins: ['GC=F', 'SI=F', 'BTC-USD'],
+    calendarEvents: [{ id: 'own_1', title: 'Midterm Election', date: '2026-11-03T18:00:00.000Z' }],
+  };
+  const local = {
+    pins: ['GC=F'],                                   // server's copy must stay authoritative
+    calendarEvents: [],
+    notes: { 'stock:NVDA': [{ id: 'n1', text: 'a' }], 'stock:CRCL': [{ id: 'n2', text: 'b' }] },
+    rotationStockLists: ['Watchlist', 'Portfolio'],
+    strategyCustom: [{ id: 's1', label: 'mine' }],
+  };
+
+  const owed = GM.missingFromRemote(local, remote);
+  ok('a server holding only pins no longer blocks the upload',
+     Object.keys(owed).sort().join(',') === 'notes,rotationStockLists,strategyCustom',
+     Object.keys(owed).join(','));
+  ok('…the watchlist and the notes are what goes up',
+     owed.rotationStockLists.length === 2 && Object.keys(owed.notes).length === 2);
+  // The property that makes this safe to run on every load: it can ADD to the server, it
+  // can never overwrite it. A key the server already has is never in the payload.
+  ok('a key the server already has is never sent',
+     !('pins' in owed) && !('calendarEvents' in owed));
+  ok('…even when this device disagrees about its value', local.pins.length !== remote.pins.length);
+
+  // Notes are compared per chart, not as one blob: a chart the server knows stays its,
+  // and only charts it has never heard of go up.
+  {
+    const o = GM.missingFromRemote(
+      { notes: { 'stock:NVDA': [{ id: 'local' }], 'stock:NEW': [{ id: 'x' }] } },
+      { notes: { 'stock:NVDA': [{ id: 'server' }] } });
+    ok('a chart the server already has is not re-sent', !('stock:NVDA' in o.notes));
+    ok('…while a chart it has never seen is', o.notes['stock:NEW'].length === 1);
+  }
+
+  ok('nothing is owed when the server has everything',
+     Object.keys(GM.missingFromRemote({ pins: ['A'] }, { pins: ['A', 'B'] })).length === 0);
+  ok('an empty device owes nothing', Object.keys(GM.missingFromRemote({}, remote)).length === 0);
+  ok('an empty server is owed everything this device has',
+     Object.keys(GM.missingFromRemote(local, {})).sort().join(',') ===
+     'calendarEvents,notes,pins,rotationStockLists,strategyCustom');
+  // A key explicitly undefined is absence, not a value to transmit.
+  ok('an undefined key is not sent as data',
+     !('pins' in GM.missingFromRemote({ pins: undefined, notes: undefined }, {})));
+}
+
 rmSync(out, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

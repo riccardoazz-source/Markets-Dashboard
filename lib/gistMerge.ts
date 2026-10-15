@@ -14,6 +14,48 @@
 // MERGE rather than replace, because notes for one chart must not wipe another's — is the
 // single special case.
 
+// ── What this device has that the server has never seen ─────────────────────
+//
+// The gap that stranded a whole watchlist on one phone.
+//
+// On load the app merged the server's snapshot with this device's local one and showed
+// the union — so the phone looked complete. It then uploaded the local copy only when the
+// server was COMPLETELY empty. Once the server held anything at all, even a single list
+// of pins, the upload never fired again: the phone kept merging its own notes in for
+// display, kept saving them back to its own disk, and never told the server. Another
+// device fetching the same account saw pins and nothing else, which is exactly what it
+// had been given.
+//
+// This returns the part of `local` the server does not have, so it can be sent. It is
+// deliberately ADDITIVE: a key present on the server is never included, so an upload
+// built from this can add to the server but can never overwrite it. `notes` is compared
+// per chart for the same reason — a chart the server already knows about is left alone,
+// and only charts it has never heard of go up.
+//
+// What it does NOT do is make deletions propagate. If something was deleted on one device
+// while another still holds it locally, the one holding it will put it back. That is the
+// existing union-shaped design of this file, not something introduced here, and fixing it
+// needs tombstones rather than a bigger merge.
+export function missingFromRemote<T extends { notes?: Record<string, unknown[]> }>(
+  local: T, remote: T,
+): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(local)) {
+    if (k === 'notes' || v === undefined) continue;
+    if (!(k in remote)) out[k] = v;
+  }
+  const localNotes = local.notes;
+  if (localNotes) {
+    const remoteNotes = remote.notes ?? {};
+    const charts: Record<string, unknown[]> = {};
+    for (const [chartId, list] of Object.entries(localNotes)) {
+      if (!(chartId in remoteNotes)) charts[chartId] = list;
+    }
+    if (Object.keys(charts).length > 0) out.notes = charts;
+  }
+  return out as Partial<T>;
+}
+
 export function mergePatch<T extends { notes?: Record<string, unknown[]> }>(
   current: T,
   patch: Partial<T>,
