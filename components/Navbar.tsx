@@ -1,6 +1,6 @@
 'use client';
 
-import { LucideProps, TrendingUp, CloudOff, Landmark, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe, LayoutDashboard } from 'lucide-react';
+import { LucideProps, TrendingUp, Cloud, CloudOff, Landmark, BarChart2, DollarSign, Bitcoin, Grid2X2, GitCompare, Gem, Activity, Briefcase, BookOpen, RefreshCw, Globe, LayoutDashboard } from 'lucide-react';
 import { ForwardRefExoticComponent, RefAttributes, useState } from 'react';
 import clsx from 'clsx';
 import { MACRO_WORLD_ENABLED } from '@/lib/imfConfig';
@@ -78,19 +78,27 @@ export function Navbar({ active, onSelect }: Props) {
           <div className="flex items-center gap-1.5 shrink-0">
             <TrendingUp size={18} className="text-accent" />
             <span className="font-bold text-white text-base tracking-tight">MarketPulse</span>
-            {sickSync && (
-              <button onClick={() => setBackup(true)}
-                title={syncStatus === 'local-only'
-                  ? 'Saved only on this device — nothing is shared with your other devices. Click for details and a backup.'
-                  : 'Cloud storage could not be reached. Click for details and a backup.'}
-                className={clsx('flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider',
-                  syncStatus === 'local-only'
-                    ? 'bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
-                    : 'bg-red-500/15 text-red-300 hover:bg-red-500/25')}>
-                <CloudOff size={10} />
-                {syncStatus === 'local-only' ? 'This device only' : 'Sync error'}
-              </button>
-            )}
+            {/* Always reachable, loud only when it needs to be.
+                The first version rendered this ONLY when sync was local-only or erroring,
+                which left the backup panel unreachable in the case that actually bit: the
+                server was configured and reachable, so the status read 'synced' and
+                everything looked fine, while a whole watchlist sat on one phone that had
+                never uploaded it. A status that is healthy is not the same as data that
+                is present, so the way in is always here — muted when there is nothing to
+                say, and a word when there is. */}
+            <button onClick={() => setBackup(true)}
+              title={syncStatus === 'local-only'
+                ? 'Saved only on this device — nothing is shared with your other devices. Click for details and a backup.'
+                : syncStatus === 'error'
+                ? 'Cloud storage could not be reached. Click for details and a backup.'
+                : 'Your saved data — what this device is holding, and how to back it up.'}
+              className={clsx('flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-colors',
+                syncStatus === 'local-only' ? 'bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
+                  : syncStatus === 'error'  ? 'bg-red-500/15 text-red-300 hover:bg-red-500/25'
+                  : 'text-gray-600 hover:text-gray-300')}>
+              {sickSync ? <CloudOff size={10} /> : <Cloud size={11} />}
+              {syncStatus === 'local-only' ? 'This device only' : syncStatus === 'error' ? 'Sync error' : ''}
+            </button>
             {/* The green "LIVE" badge that used to sit here has been removed.
                 Nothing computed it. It was a decoration printed unconditionally on every
                 page, including pages showing a policy rate read out of a table edited by

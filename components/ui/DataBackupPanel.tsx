@@ -5,6 +5,7 @@ import { CloudOff, Download, Upload, AlertTriangle, Check } from 'lucide-react';
 import {
   loadGistData, updateGistData, useSyncStatus, type GistData,
 } from '@/lib/gist';
+import { missingFromRemote } from '@/lib/gistMerge';
 import { DetailModal } from './DetailModal';
 import { PanelClose } from './PanelClose';
 
@@ -46,10 +47,34 @@ function countsOf(d: GistData) {
 export function DataBackupPanel({ onClose }: { onClose: () => void }) {
   const status = useSyncStatus();
   const [data, setData] = useState<GistData | null>(null);
+  const [owed, setOwed] = useState<string[] | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { loadGistData().then(setData).catch(() => setData({})); }, []);
+
+  // What this device is holding that the server has not got.
+  //
+  // The question "where is my data" cannot be answered by reading /api/gist, because that
+  // endpoint returns the SERVER's copy and therefore says the same thing from every
+  // device. The interesting comparison is local against remote, and only the device
+  // itself can make it.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [local, resp] = await Promise.all([
+          loadGistData(),
+          fetch('/api/gist').then(r => r.json()) as Promise<{ cloud?: boolean; data?: GistData }>,
+        ]);
+        if (cancelled) return;
+        if (!resp?.cloud) { setOwed(null); return; }
+        const diff = missingFromRemote(local, resp.data ?? {});
+        setOwed(Object.keys(diff));
+      } catch { if (!cancelled) setOwed(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [data]);
   const c = data ? countsOf(data) : null;
 
   const download = useCallback(() => {
@@ -117,10 +142,31 @@ export function DataBackupPanel({ onClose }: { onClose: () => void }) {
             </p>
           </div>
         ) : (
-          <p className="text-[11px] text-gray-500 leading-snug">
-            Synced to cloud storage, so every device sees the same thing. A downloaded copy
-            is still worth having.
-          </p>
+          <>
+            <p className="text-[11px] text-gray-500 leading-snug">
+              Synced to cloud storage, so every device sees the same thing. A downloaded copy
+              is still worth having.
+            </p>
+            {owed !== null && (
+              owed.length > 0 ? (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 space-y-1">
+                  <p className="text-xs font-semibold text-amber-300">
+                    This device holds {owed.length} thing{owed.length > 1 ? 's' : ''} the server does not
+                  </p>
+                  <p className="text-[11px] text-amber-200/70 leading-snug">
+                    <span className="font-mono">{owed.join(', ')}</span> — present here, absent from
+                    cloud storage, so no other device can see {owed.length > 1 ? 'them' : 'it'} yet.
+                    This uploads by itself on load; reopening the app is enough. Download a copy
+                    first if you would rather not rely on that.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-[11px] text-emerald-300/80 leading-snug">
+                  Everything on this device has reached the server.
+                </p>
+              )
+            )}
+          </>
         )}
 
         {c && (
