@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', 'lib/bondLinks.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -1920,6 +1920,60 @@ ok('a series entirely before the boundary keeps only its last point',
   ok('a longer timeframe asks for more years',
      TC.yearsForTimeframe('1M') < TC.yearsForTimeframe('5Y') &&
      TC.yearsForTimeframe('5Y') < TC.yearsForTimeframe('MAX'));
+}
+
+// ── Sorting the bond list, and the way out to real quotes ───────────────────
+{
+  const L = await import(join(out, 'bondLinks.js'));
+  const row = (cusip, mat, cpn, price, ytm, issue) => ({
+    cusip, maturityDate: mat, type: 'Note', couponPct: cpn, issuePrice: issue,
+    priced: price === null ? null : { cleanPrice: price, ytmPct: ytm },
+  });
+  const rows = [
+    row('AAAAAAAA1', '2030-01-01', 2.0, 96.5, 4.4, 99.5),
+    row('BBBBBBBB2', '2028-01-01', 5.0, 101.2, 4.5, 100.0),
+    row('CCCCCCCC3', '2029-01-01', null, null, null, null),  // an FRN: nothing to price
+  ];
+
+  const by = (k, d) => L.sortBonds(rows, k, d).map(r => r.cusip);
+  ok('sorting by maturity orders the dates', eq(by('maturityDate', 'asc').slice(0, 2), ['BBBBBBBB2', 'CCCCCCCC3']));
+  ok('…and reverses', eq(by('maturityDate', 'desc').slice(0, 2), ['AAAAAAAA1', 'CCCCCCCC3']));
+  ok('sorting by price is numeric, not alphabetical',
+     eq(by('price', 'asc').slice(0, 2), ['AAAAAAAA1', 'BBBBBBBB2']));
+  // The property that matters: an unpriced row is UNKNOWN, not zero and not infinity.
+  // Treated as either, it would crowd the top of one direction and read as data.
+  ok('an unpriced row sits last ascending', by('price', 'asc')[2] === 'CCCCCCCC3');
+  ok('…and last descending too', by('price', 'desc')[2] === 'CCCCCCCC3');
+  ok('…the same for coupon and yield',
+     by('couponPct', 'asc')[2] === 'CCCCCCCC3' && by('ytm', 'desc')[2] === 'CCCCCCCC3');
+  ok('sorting does not mutate the caller\'s array', rows[0].cusip === 'AAAAAAAA1');
+  ok('ties break on CUSIP, so the order is stable',
+     eq(L.sortBonds([row('ZZZZZZZZ9', '2030-01-01', 1, 100, 4, 100),
+                     row('AAAAAAAA1', '2030-01-01', 1, 100, 4, 100)], 'price', 'asc').map(r => r.cusip),
+        ['AAAAAAAA1', 'ZZZZZZZZ9']));
+
+  // The links. Not reachable from here, so what is checked is that each one is https and
+  // actually carries the identifier it claims to — the failure that would send someone to
+  // a page about a different bond, or to nothing at all.
+  {
+    const isin = 'US912810TL27';
+    const links = L.bondLinks('912810TL2', isin);
+    ok('every destination is offered', links.length >= 4, links.map(l => l.id).join(','));
+    ok('…each is https and carries the right identifier',
+       links.every(l => L.isWellFormedLink(l, '912810TL2', isin)));
+    ok('…FINRA is first, because TRACE is the real traded price', links[0].id === 'finra');
+    ok('…and a search is last, because it is the one that always resolves',
+       links[links.length - 1].id === 'search');
+    // A malformed CUSIP must produce NO links rather than links to a blank.
+    ok('a malformed CUSIP yields no links at all',
+       L.bondLinks('123', null).length === 0 && L.bondLinks('', null).length === 0);
+    ok('…and a missing ISIN still works, falling back to the CUSIP',
+       L.bondLinks('912810TL2', null).every(l => L.isWellFormedLink(l, '912810TL2', null)));
+    // An identifier is put through encodeURIComponent, so a stray character cannot break
+    // out of the query string.
+    ok('the identifier is encoded into the query, not pasted',
+       L.bondLinks('912810TL2', isin).every(l => !/\s/.test(l.url)));
+  }
 }
 
 rmSync(out, { recursive: true, force: true });

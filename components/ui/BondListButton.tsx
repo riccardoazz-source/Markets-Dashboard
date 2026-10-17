@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { List, Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ExternalLink, List, Search, X } from 'lucide-react';
 import { parseBondSymbol, securitySymbol } from '@/lib/bondSeries';
 import type { BondRow, SecurityType } from '@/lib/bonds';
+import { bondLinks, sortBonds, type SortDir, type SortKey } from '@/lib/bondLinks';
 import { DetailModal } from './DetailModal';
 import { PanelClose } from './PanelClose';
 import { LoadingSpinner } from './LoadingSpinner';
@@ -61,6 +62,8 @@ function BondList({ bucketId, label, onClose }: {
   const [couponMin, setCouponMin] = useState('');
   const [couponMax, setCouponMax] = useState('');
   const [picked, setPicked] = useState<BondRow | null>(null);
+  const [links, setLinks] = useState<BondRow | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'maturityDate', dir: 'asc' });
 
   useEffect(() => {
     let cancelled = false;
@@ -78,7 +81,7 @@ function BondList({ bucketId, label, onClose }: {
     const needle = q.trim().toUpperCase();
     const lo = couponMin === '' ? null : Number(couponMin);
     const hi = couponMax === '' ? null : Number(couponMax);
-    return all.filter(r => {
+    const kept = all.filter(r => {
       if (types.length && !types.includes(r.type)) return false;
       if (belowPar && r.vsPar !== 'below') return false;
       if (belowIssue && r.vsIssue !== 'below') return false;
@@ -87,7 +90,13 @@ function BondList({ bucketId, label, onClose }: {
       if (needle && !(r.cusip.includes(needle) || (r.isin ?? '').includes(needle))) return false;
       return true;
     });
-  }, [data, q, types, belowPar, belowIssue, couponMin, couponMax]);
+    return sortBonds(kept, sort.key, sort.dir);
+  }, [data, q, types, belowPar, belowIssue, couponMin, couponMax, sort]);
+
+  // Clicking the column you are already on flips it, rather than re-sorting it the same
+  // way and looking broken.
+  const sortBy = useCallback((key: SortKey) => setSort(prev =>
+    prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }), []);
 
   const toggleType = useCallback((t: SecurityType) =>
     setTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]), []);
@@ -143,8 +152,13 @@ function BondList({ bucketId, label, onClose }: {
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-[10px] uppercase tracking-wider text-gray-500 border-b border-border">
-                  <Th>Maturity</Th><Th>Type</Th><Th right>Coupon</Th>
-                  <Th right>Price*</Th><Th right>Yield*</Th><Th right>Issue</Th><Th>ISIN</Th>
+                  <SortTh k="maturityDate" sort={sort} onSort={sortBy}>Maturity</SortTh>
+                  <SortTh k="type" sort={sort} onSort={sortBy}>Type</SortTh>
+                  <SortTh k="couponPct" sort={sort} onSort={sortBy} right>Coupon</SortTh>
+                  <SortTh k="price" sort={sort} onSort={sortBy} right>Price*</SortTh>
+                  <SortTh k="ytm" sort={sort} onSort={sortBy} right>Yield*</SortTh>
+                  <SortTh k="issuePrice" sort={sort} onSort={sortBy} right>Issue</SortTh>
+                  <Th>ISIN</Th><Th />
                 </tr>
               </thead>
               <tbody>
@@ -166,6 +180,15 @@ function BondList({ bucketId, label, onClose }: {
                     <Td right>{r.issuePrice == null ? <span className="text-gray-600">—</span>
                       : <span className="text-gray-400 tabular-nums">{r.issuePrice.toFixed(3)}</span>}</Td>
                     <Td><span className="text-gray-500 font-mono text-[10px]">{r.isin ?? r.cusip}</span></Td>
+                    {/* stopPropagation: the row opens the chart, this opens the sources,
+                        and a tap must not do both. */}
+                    <Td>
+                      <button onClick={e => { e.stopPropagation(); setLinks(r); }}
+                        title="Open this bond on FINRA, TreasuryDirect or the issuer's record"
+                        className="text-gray-600 hover:text-accent transition-colors p-1 -m-1">
+                        <ExternalLink size={12} />
+                      </button>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
@@ -175,6 +198,8 @@ function BondList({ bucketId, label, onClose }: {
             )}
           </div>
         )}
+
+        {links && <LinkSheet row={links} onClose={() => setLinks(null)} />}
 
         {/* One level down, the same panel again — chart, timeframes, tools and all. */}
         {picked && (
@@ -187,6 +212,56 @@ function BondList({ bucketId, label, onClose }: {
         )}
       </div>
     </DetailModal>
+  );
+}
+
+// The destinations that hold what this app models. FINRA first, because TRACE is the
+// actual traded price — the thing the computed column here is an approximation of.
+function LinkSheet({ row, onClose }: { row: BondRow; onClose: () => void }) {
+  const links = bondLinks(row.cusip, row.isin);
+  return (
+    <DetailModal onClose={onClose}>
+      <div className="relative rounded-xl border border-accent/40 bg-bg-card p-4 space-y-2 max-w-sm">
+        <PanelClose onClose={onClose} />
+        <div className="pr-7">
+          <h3 className="text-sm font-bold text-white">Open this bond elsewhere</h3>
+          <p className="text-[11px] text-gray-500 font-mono mt-0.5">{row.isin ?? row.cusip}</p>
+        </div>
+        {links.length === 0 ? (
+          <p className="text-[11px] text-gray-500">This security has no usable identifier to look up.</p>
+        ) : links.map(l => (
+          <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer"
+            className="block rounded-lg border border-border bg-bg-input px-3 py-2
+                       hover:border-accent/50 transition-colors">
+            <p className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
+              {l.label} <ExternalLink size={10} className="text-gray-600" />
+            </p>
+            <p className="text-[10px] text-gray-500 leading-snug mt-0.5">{l.note}</p>
+          </a>
+        ))}
+        <p className="text-[10px] text-gray-600 leading-snug">
+          FINRA carries TRACE — trades that actually executed. That is the real price; the
+          one in the table is this app&apos;s model of it.
+        </p>
+      </div>
+    </DetailModal>
+  );
+}
+
+function SortTh({ k, sort, onSort, right, children }: {
+  k: SortKey; sort: { key: SortKey; dir: SortDir }; onSort: (k: SortKey) => void;
+  right?: boolean; children: React.ReactNode;
+}) {
+  const on = sort.key === k;
+  return (
+    <th className={clsx('font-medium py-1.5 px-1.5', right ? 'text-right' : 'text-left')}>
+      <button onClick={() => onSort(k)}
+        className={clsx('inline-flex items-center gap-0.5 uppercase tracking-wider transition-colors',
+          on ? 'text-accent' : 'text-gray-500 hover:text-gray-300')}>
+        {children}
+        {on && (sort.dir === 'asc' ? <ArrowUp size={9} /> : <ArrowDown size={9} />)}
+      </button>
+    </th>
   );
 }
 
@@ -210,7 +285,7 @@ function NumBox({ value, onChange, placeholder }: {
   );
 }
 
-const Th = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
+const Th = ({ children, right }: { children?: React.ReactNode; right?: boolean }) => (
   <th className={clsx('font-medium py-1.5 px-1.5', right ? 'text-right' : 'text-left')}>{children}</th>
 );
 const Td = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
