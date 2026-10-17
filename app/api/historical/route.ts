@@ -3,6 +3,9 @@ import { fetchYahooChart } from '@/lib/yahoo';
 import { fetchStooqDaily } from '@/lib/stooq';
 import { subDays, subWeeks, subMonths, subYears, startOfYear, startOfMonth } from 'date-fns';
 import { LEAD_IN_DAYS, calendarBoundary, anchorSeries } from '@/lib/windows';
+import { isBondSymbol, resolveBondSeries } from '@/lib/bondSeries';
+import { fetchCurveRows, fetchSecurityRows, yearsForTimeframe } from '@/lib/treasuryCurve';
+import { normalizeAuctionRow } from '@/lib/bonds';
 
 export const runtime = 'edge';
 
@@ -57,6 +60,26 @@ export async function GET(req: NextRequest) {
   const key = isCustom ? `${symbol}:${fromParam}:${toParam}` : `${symbol}:${timeframe}`;
   const cached = getCached(key);
   if (cached) return NextResponse.json(cached);
+
+  // Treasuries are served from the Treasury's own files rather than from a price vendor,
+  // so they are handled before the equity path rather than being looked up and missed.
+  // A bucket's series is its published par yield — observed. A single security's is its
+  // price per 100, discounted on each past day's curve — modelled, and said so wherever
+  // it is shown.
+  if (isBondSymbol(symbol)) {
+    const years = isCustom
+      ? Math.max(1, new Date().getFullYear() - new Date(fromParam!).getFullYear() + 1)
+      : yearsForTimeframe(timeframe);
+    const resolved = await resolveBondSeries(symbol, years, {
+      fetchCurveRows, fetchSecurityRows, normalizeAuctionRow,
+    });
+    if (!resolved) return NextResponse.json([]);
+    const start = isCustom ? fromParam! : getStartDate(timeframe).toISOString().slice(0, 10);
+    const end = isCustom ? toParam! : '9999';
+    const out = resolved.series.filter(p => p.date >= start && p.date <= end);
+    if (out.length) cache.set(key, { data: out, ts: Date.now() });
+    return NextResponse.json(out);
+  }
 
   // YTD and MTD are measured from the last close BEFORE the period began, so a lead-in is
   // fetched and the series trimmed back to that close (see lib/windows.ts). A custom range

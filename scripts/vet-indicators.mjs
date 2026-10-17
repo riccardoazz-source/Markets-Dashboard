@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -1843,6 +1843,83 @@ ok('a series entirely before the boundary keeps only its last point',
   // A key explicitly undefined is absence, not a value to transmit.
   ok('an undefined key is not sent as data',
      !('pins' in GM.missingFromRemote({ pins: undefined, notes: undefined }, {})));
+}
+
+// ── Treasuries as symbols ────────────────────────────────────────────────────
+//
+// A bond opens the same panel as any other asset because it HAS a symbol the shared
+// endpoints understand. That only holds while the round trip does, so the round trip is
+// what gets pinned — along with the one distinction the whole tab rests on: a bucket
+// measures a yield, a security measures a price.
+{
+  const BS = await import(join(out, 'bondSeries.js'));
+  const TC = await import(join(out, 'curveParse.js'));
+  const Bo = await import(join(out, 'bonds.js'));
+
+  ok('a bucket symbol survives the round trip',
+     BS.parseBondSymbol(BS.bucketSymbol('UST20P'))?.bucket?.id === 'UST20P');
+  ok('a security symbol survives the round trip',
+     BS.parseBondSymbol(BS.securitySymbol('912810TL2'))?.cusip === '912810TL2');
+  ok('a bucket measures a yield, a security a price',
+     BS.bondUnit(BS.parseBondSymbol(BS.bucketSymbol('UST20P'))) === 'yield' &&
+     BS.bondUnit(BS.parseBondSymbol(BS.securitySymbol('912810TL2'))) === 'price');
+  // Anything that is not a bond must fall through to the vendor path untouched. A false
+  // positive here would route a real ticker to the Treasury and return nothing.
+  ok('an ordinary ticker is not mistaken for a bond',
+     !BS.isBondSymbol('AAPL') && !BS.isBondSymbol('^GSPC') && !BS.isBondSymbol('BTC-USD') &&
+     BS.parseBondSymbol('AAPL') === null);
+  ok('a malformed or unknown bond symbol resolves to nothing',
+     BS.parseBondSymbol('UST:B:NOPE') === null && BS.parseBondSymbol('UST:S:short') === null &&
+     BS.parseBondSymbol('UST:X:912810TL2') === null);
+
+  // The curve CSV, parsed the way the Treasury actually ships it: newest first, MM/DD/YYYY.
+  {
+    const csv = [
+      'Date,"1 Mo","3 Mo","6 Mo","1 Yr","2 Yr","3 Yr","5 Yr","7 Yr","10 Yr","20 Yr","30 Yr"',
+      '10/16/2026,4.10,4.20,4.30,4.40,4.74,4.80,4.89,4.98,5.09,5.47,5.43',
+      '10/15/2026,4.11,4.21,4.31,4.41,4.75,4.81,4.90,4.99,5.10,5.48,5.44',
+    ].join('\n');
+    const rows = TC.parseCurveRows(csv);
+    ok('the curve CSV parses into days', rows.length === 2);
+    ok('…sorted oldest first, whatever order it arrived in',
+       rows[0].date === '2026-10-15' && rows[1].date === '2026-10-16');
+    ok('…with the US date format read as a date, not a string',
+       rows[1].date === '2026-10-16' && rows[1].byCol['30 Yr'] === 5.43);
+    ok('…and every tenor carried, sorted by maturity',
+       rows[1].points.length === 11 &&
+       rows[1].points.every((p, i) => i === 0 || p.years > rows[1].points[i - 1].years));
+    // A row missing most of its curve is dropped rather than priced off two points.
+    ok('a near-empty row is dropped',
+       TC.parseCurveRows('Date,"1 Mo","30 Yr"\n10/16/2026,4.10,5.43').length === 0);
+
+    // A bucket's series is the published column, untouched.
+    const b = Bo.BUCKETS.find(x => x.id === 'UST20P');
+    ok('a bucket series is the published yield for its tenor',
+       eq(BS.bucketSeries(b, rows), [{ date: '2026-10-15', close: 5.44 }, { date: '2026-10-16', close: 5.43 }]));
+
+    // A security's series is modelled, and must respect the bond's own lifetime.
+    const sec = { cusip: '912810TL2', isin: null, type: 'Bond', term: '30-Year',
+      issueDate: '2026-10-16', maturityDate: '2056-10-16', couponPct: 5, issuePrice: 100 };
+    const ps = BS.securityPriceSeries(sec, rows);
+    ok('a security priced before it was issued is not in its series',
+       ps.length === 1 && ps[0].date === '2026-10-16');
+    ok('…and nothing is priced on or after maturity',
+       BS.securityPriceSeries({ ...sec, issueDate: '2000-01-01', maturityDate: '2026-10-15' }, rows).length === 0);
+    // The direction that matters: a coupon under the curve prices under par.
+    ok('a low coupon sits below par on this curve', ps[0].close < 100, ps[0].close);
+  }
+
+  ok('percent change needs two points', BS.pctChange([{ date: 'a', close: 1 }]) === null);
+  ok('…and is measured first to last',
+     Math.abs(BS.pctChange([{ date: 'a', close: 4 }, { date: 'b', close: 5 }]) - 25) < 1e-9);
+  // A yield can be negative, and a change measured against it must not flip sign because
+  // of the divisor. Percent change here divides by the absolute value.
+  ok('a negative starting level does not invert the change',
+     BS.pctChange([{ date: 'a', close: -2 }, { date: 'b', close: -1 }]) > 0);
+
+  ok('a longer timeframe asks for more years',
+     TC.yearsForTimeframe('1M') < TC.yearsForTimeframe('5Y') &&
+     TC.yearsForTimeframe('5Y') < TC.yearsForTimeframe('MAX'));
 }
 
 rmSync(out, { recursive: true, force: true });

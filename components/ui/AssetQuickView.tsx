@@ -9,6 +9,7 @@ import { BarChart2 } from 'lucide-react';
 import { DetailModal } from './DetailModal';
 import { TimeframeSelector } from './TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
+import { BondListButton } from '@/components/ui/BondListButton';
 import { ReturnsTableButton } from './ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { MonthlyRecapButton } from '@/components/ui/MonthlyRecapButton';
@@ -97,6 +98,11 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
                 <BarChart2 size={13} /> <span className="hidden sm:inline">Compare</span>
               </button>
             )}
+            {/* Bonds get one extra tool the other assets have no use for: the list of
+                actual securities in this maturity bucket. It sits in the same row as
+                everything else because that is where tools live — a bond should open the
+                same panel as anything else, plus one thing, not a panel of its own. */}
+            <BondListButton symbol={symbol} />
             <ReturnsTableButton name={name} symbol={symbol} />
               <MonthlyRecapButton symbol={symbol} name={name} assetClass={group} />
               <QuadrantButton name={name} symbol={symbol} group={group} />
