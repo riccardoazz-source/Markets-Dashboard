@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Landmark, Search, X } from 'lucide-react';
-import { BUCKETS, type Bucket, type BondRow, type SecurityType } from '@/lib/bonds';
+import { BUCKETS, couponDates, type Bucket, type BondRow, type SecurityType } from '@/lib/bonds';
 import { DetailModal } from '@/components/ui/DetailModal';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -102,6 +103,193 @@ export function BondsSection() {
 
 // ── The finder ───────────────────────────────────────────────────────────────
 
+// ── The yield history of one bucket ──────────────────────────────────────────
+//
+// This is the part of the Bonds tab with nothing modelled in it. The Treasury has
+// published this curve every business day for decades, so the line is the yield as it was
+// quoted, not a price derived from anything.
+//
+// It is NOT a price chart, and is labelled a yield chart, because for a maturity bucket
+// there is no price to draw: "the 20+ year" is not a thing anyone buys, it is a rate. The
+// individual bonds underneath it do have prices — see the note on those.
+function BucketHistory({ bucket }: { bucket: Bucket }) {
+  const [years, setYears] = useState(5);
+  const [points, setPoints] = useState<{ date: string; v: number }[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/bonds?mode=history&bucket=${bucket.id}&years=${years}`)
+      .then(r => r.json())
+      .then((j: { points?: { date: string; v: number }[] }) => {
+        if (!cancelled) setPoints(Array.isArray(j?.points) ? j.points : null);
+      })
+      .catch(() => { if (!cancelled) setPoints(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [bucket.id, years]);
+
+  const stat = useMemo(() => {
+    if (!points || points.length < 2) return null;
+    const vals = points.map(p => p.v);
+    return {
+      first: points[0], last: points[points.length - 1],
+      min: Math.min(...vals), max: Math.max(...vals),
+    };
+  }, [points]);
+  const up = stat ? stat.last.v >= stat.first.v : null;
+  const stroke = up == null ? '#64748b' : up ? '#22c55e' : '#f87171';
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-gray-500 leading-none">
+            {bucket.curveCol} yield · published daily by the US Treasury
+          </p>
+          {stat && (
+            <p className="text-sm font-bold text-white tabular-nums mt-1">
+              {stat.last.v.toFixed(2)}%
+              <span className={clsx('ml-2 text-xs', up ? 'text-up-text' : 'text-down-text')}>
+                {stat.last.v - stat.first.v >= 0 ? '+' : ''}{(stat.last.v - stat.first.v).toFixed(2)} over {years}Y
+              </span>
+              <span className="ml-2 text-[10px] text-gray-600 font-normal">
+                range {stat.min.toFixed(2)}–{stat.max.toFixed(2)}
+              </span>
+            </p>
+          )}
+        </div>
+        <div className="flex gap-1">
+          {[1, 5, 10, 25].map(y => (
+            <button key={y} onClick={() => setYears(y)}
+              className={clsx('px-2 py-0.5 rounded text-[10px] font-semibold transition-colors',
+                years === y ? 'bg-accent/25 text-white' : 'bg-bg-input text-gray-500 hover:text-gray-300')}>
+              {y}Y
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="h-36">
+        {loading ? (
+          <div className="h-full flex items-center justify-center"><LoadingSpinner size={20} /></div>
+        ) : !points || points.length < 2 ? (
+          <p className="text-[11px] text-gray-600 h-full flex items-center justify-center">
+            The Treasury&apos;s published history could not be read for this tenor.
+          </p>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+              <YAxis domain={['dataMin', 'dataMax']} width={34} tick={{ fontSize: 9, fill: '#64748b' }}
+                tickFormatter={(v: number) => `${v.toFixed(1)}`} axisLine={false} tickLine={false} />
+              <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false}
+                minTickGap={44} tickFormatter={(d: string) => d.slice(0, 7)} />
+              <Tooltip
+                contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 11 }}
+                labelStyle={{ color: '#94a3b8' }}
+                formatter={(v: number) => [`${v.toFixed(2)}%`, `${bucket.curveCol} yield`]} />
+              <Area type="monotone" dataKey="v" stroke={stroke} strokeWidth={1.5}
+                fill={stroke} fillOpacity={0.1} dot={false} isAnimationActive={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── One security, opened ─────────────────────────────────────────────────────
+//
+// What is shown here is split by how solid it is, because the difference matters more on
+// a bond than almost anywhere else in this app:
+//
+//   EXACT      CUSIP, ISIN, coupon, maturity, issue date, auction price, and every
+//              remaining cash flow with its date. All published by the Treasury.
+//   COMPUTED   today's price and yield. There is no free per-CUSIP market feed, so these
+//              are the present value of the cash flows below, discounted on the curve.
+//
+// There is deliberately NO price history line here. Drawing one would mean computing a
+// price for every past day off every past curve — a smooth, convincing line that was
+// never a quote anybody traded on. A chart implies observation in a way a single labelled
+// number does not, so the line is the one thing not offered until a real feed exists.
+function SecurityDetail({ row, onClose }: { row: BondRow; onClose: () => void }) {
+  const flows = useMemo(() => {
+    if (row.type === 'Bill' || row.couponPct == null) {
+      return [{ date: row.maturityDate, amount: 100, kind: 'redemption' as const }];
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const dates = couponDates(today, row.maturityDate);
+    return dates.map((d, i) => ({
+      date: d,
+      amount: row.couponPct! / 2 + (i === dates.length - 1 ? 100 : 0),
+      kind: i === dates.length - 1 ? ('redemption' as const) : ('coupon' as const),
+    }));
+  }, [row]);
+
+  return (
+    <DetailModal onClose={onClose}>
+      <div className="relative rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3 max-w-lg">
+        <PanelClose onClose={onClose} />
+        <div className="pr-7">
+          <h3 className="text-base font-bold text-white">
+            {row.couponPct != null ? `${row.couponPct.toFixed(3)}% ` : ''}{row.type} due {row.maturityDate}
+          </h3>
+          <p className="text-[11px] text-gray-500 font-mono mt-0.5">{row.isin ?? '—'} · CUSIP {row.cusip}</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <Fact label="Coupon" v={row.couponPct == null ? 'none' : `${row.couponPct.toFixed(3)}%`} exact />
+          <Fact label="Matures" v={row.maturityDate} exact />
+          <Fact label="Issued" v={row.issueDate || '—'} exact />
+          <Fact label="Auction price" v={row.issuePrice == null ? '—' : row.issuePrice.toFixed(3)} exact />
+          <Fact label="Price today" v={row.priced ? row.priced.cleanPrice.toFixed(3) : '—'} />
+          <Fact label="Yield today" v={row.priced ? `${row.priced.ytmPct.toFixed(3)}%` : '—'} />
+        </div>
+
+        <p className="text-[10px] text-gray-600 leading-snug">
+          The top four come from the Treasury&apos;s auction records and are exact. The bottom
+          two are computed from today&apos;s par curve — there is no free public feed of traded
+          prices for an individual CUSIP, so no price history is drawn here rather than
+          drawing a modelled one that would look observed.
+        </p>
+
+        <div className="space-y-1">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500">
+            Remaining cash flows · per 100 face
+          </p>
+          <div className="max-h-48 overflow-y-auto rounded-lg border border-border">
+            <table className="w-full text-[11px]">
+              <tbody>
+                {flows.map((f, i) => (
+                  <tr key={i} className="border-b border-border/40 last:border-0">
+                    <td className="py-1 px-2 text-gray-400 tabular-nums">{f.date}</td>
+                    <td className="py-1 px-2 text-gray-600">{f.kind === 'redemption' ? 'coupon + principal' : 'coupon'}</td>
+                    <td className="py-1 px-2 text-right text-white font-semibold tabular-nums">{f.amount.toFixed(3)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] text-gray-600">
+            {flows.length} payment{flows.length > 1 ? 's' : ''} left. These are contractual — exact, not estimated.
+          </p>
+        </div>
+      </div>
+    </DetailModal>
+  );
+}
+
+function Fact({ label, v, exact }: { label: string; v: string; exact?: boolean }) {
+  return (
+    <div className="rounded-lg bg-bg-input px-2.5 py-1.5">
+      <p className="text-[9px] uppercase tracking-wider text-gray-500 leading-none">
+        {label}{!exact && <span className="text-amber-400/70"> *</span>}
+      </p>
+      <p className="text-sm font-bold text-white tabular-nums leading-tight mt-0.5">{v}</p>
+    </div>
+  );
+}
+
 const TYPES: SecurityType[] = ['Bill', 'Note', 'Bond', 'TIPS', 'FRN'];
 
 function BondFinder({ bucket, onClose }: {
@@ -110,6 +298,7 @@ function BondFinder({ bucket, onClose }: {
   const [data, setData] = useState<SecuritiesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
+  const [detail, setDetail] = useState<BondRow | null>(null);
   const [types, setTypes] = useState<SecurityType[]>([]);
   const [belowPar, setBelowPar] = useState(false);
   const [belowIssue, setBelowIssue] = useState(false);
@@ -159,6 +348,8 @@ function BondFinder({ bucket, onClose }: {
             {data?.curveDate ? ` · curve ${data.curveDate}` : ''}
           </p>
         </div>
+
+        <BucketHistory bucket={bucket} />
 
         {/* Said once, at the top, in words — not a footnote under a table of numbers that
             look exactly like quotes. Two versions, because "computed" and "absent" are
@@ -228,7 +419,8 @@ function BondFinder({ bucket, onClose }: {
               </thead>
               <tbody>
                 {rows.slice(0, 250).map(r => (
-                  <tr key={r.cusip} className="border-b border-border/40 hover:bg-white/[0.02]">
+                  <tr key={r.cusip} onClick={() => setDetail(r)}
+                    className="border-b border-border/40 hover:bg-white/[0.04] cursor-pointer">
                     <Td>{r.maturityDate}</Td>
                     <Td><span className="text-gray-400">{r.type}</span></Td>
                     <Td right>{r.couponPct == null ? '—' : `${r.couponPct.toFixed(3)}%`}</Td>
@@ -259,8 +451,11 @@ function BondFinder({ bucket, onClose }: {
 
         <p className="text-[10px] text-gray-600 leading-snug">
           * computed from the par curve, not a traded quote. Coupon, maturity, ISIN and issue
-          price come from the Treasury&apos;s own auction records and are exact. Not financial advice.
+          price come from the Treasury&apos;s own auction records and are exact. Tap any row for
+          its cash flows. Not financial advice.
         </p>
+
+        {detail && <SecurityDetail row={detail} onClose={() => setDetail(null)} />}
       </div>
     </DetailModal>
   );

@@ -44,6 +44,57 @@ const CURVE_BASE = 'https://home.treasury.gov/resource-center/data-chart-center/
 const curveUrl = (year: number) =>
   `${CURVE_BASE}/${year}/all?type=daily_treasury_yield_curve&download=true`;
 
+// ── History ──────────────────────────────────────────────────────────────────
+//
+// The one thing in this whole section that is REAL market data over time, with nothing
+// modelled: the Treasury has published this curve every business day for decades. A
+// bucket's chart is the published yield for its tenor, exactly as it came out.
+//
+// Fetched a year at a time rather than from the `all/all` file. That file is every curve
+// ever published — around 20,000 rows — and asking for it to draw five years was what
+// made the section time out and render empty the first time round.
+
+/** Every row of one year's CSV, for one tenor column. */
+function parseCurveSeries(csv: string, col: string): { date: string; v: number }[] {
+  const lines = csv.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  const i = headers.indexOf(col);
+  if (i < 0) return [];
+  const out: { date: string; v: number }[] = [];
+  for (let r = 1; r < lines.length; r++) {
+    const cells = lines[r].split(',').map(c => c.trim().replace(/"/g, ''));
+    if (cells.length <= i) continue;
+    const segs = cells[0].split('/');
+    if (segs.length !== 3) continue;
+    const v = parseFloat(cells[i]);
+    if (!isFinite(v)) continue;
+    out.push({ date: `${segs[2]}-${segs[0].padStart(2, '0')}-${segs[1].padStart(2, '0')}`, v });
+  }
+  return out;
+}
+
+async function fetchCurveHistory(col: string, years: number): Promise<{ date: string; v: number }[]> {
+  const now = new Date().getFullYear();
+  const wanted = Array.from({ length: Math.min(Math.max(years, 1), 25) }, (_, i) => now - i);
+  const parts = await Promise.all(wanted.map(async y => {
+    try {
+      const res = await fetch(curveUrl(y), {
+        signal: AbortSignal.timeout(12_000),
+        headers: { 'User-Agent': UA, Accept: 'text/csv,*/*', Referer: 'https://home.treasury.gov/' },
+        next: { revalidate: 86400 },
+      });
+      if (!res.ok) return [];
+      return parseCurveSeries(await res.text(), col);
+    } catch { return []; }
+  }));
+  return parts.flat().sort((a, b) => a.date.localeCompare(b.date));
+}
+
+const loadHistory = unstable_cache(
+  async (col: string, years: number) => fetchCurveHistory(col, years),
+  ['bonds-history'], { revalidate: 86400 });
+
 // ── The par curve ────────────────────────────────────────────────────────────
 
 /** Column header → years. The CSV carries every tenor in one row. */
@@ -201,6 +252,23 @@ export async function GET(req: NextRequest) {
         yieldPct: curve?.byCol[b.curveCol] ?? null,
         count: counts.get(b.id) ?? 0,
       })),
+    });
+  }
+
+  if (mode === 'history') {
+    // Published yields for one tenor, straight from the Treasury's own daily file. The
+    // only series in this route with nothing computed in it, which is why the payload
+    // says so — anything reading this endpoint should be able to tell it apart from the
+    // prices, which are modelled.
+    const bucket = BUCKETS.find(b => b.id === sp.get('bucket'));
+    if (!bucket) return NextResponse.json({ error: 'bad_bucket' }, { status: 400 });
+    const years = Number(sp.get('years') ?? 5);
+    const points = await loadHistory(bucket.curveCol, isFinite(years) ? years : 5);
+    return NextResponse.json({
+      bucket: bucket.id,
+      tenor: bucket.curveCol,
+      points,
+      basis: 'published daily par yield, US Treasury — observed, not computed',
     });
   }
 
