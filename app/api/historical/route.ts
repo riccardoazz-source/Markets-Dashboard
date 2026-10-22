@@ -6,6 +6,8 @@ import { LEAD_IN_DAYS, calendarBoundary, anchorSeries } from '@/lib/windows';
 import { isBondSymbol, resolveBondSeries } from '@/lib/bondSeries';
 import { fetchCurveRows, fetchSecurityRows, yearsForTimeframe } from '@/lib/treasuryCurve';
 import { normalizeAuctionRow } from '@/lib/bonds';
+import { isGovtSymbol, parseGovtSymbol } from '@/lib/govtBonds';
+import { fetchGovtSeries } from '@/lib/govtFetch';
 
 export const runtime = 'edge';
 
@@ -66,6 +68,21 @@ export async function GET(req: NextRequest) {
   // A bucket's series is its published par yield — observed. A single security's is its
   // price per 100, discounted on each past day's curve — modelled, and said so wherever
   // it is shown.
+  // Non-US government yields. Same shape as the US side — a yield gets a symbol, so it
+  // opens the standard panel — but the series comes from DBnomics rather than from an
+  // issuer's own file, because no other issuer publishes one this app can read the same
+  // way.
+  if (isGovtSymbol(symbol)) {
+    const hit = parseGovtSymbol(symbol);
+    if (!hit) return NextResponse.json([]);
+    const { points } = await fetchGovtSeries(hit.tenor);
+    const start = isCustom ? fromParam! : getStartDate(timeframe).toISOString().slice(0, 10);
+    const end = isCustom ? toParam! : '9999';
+    const out = points.filter(p => p.date >= start && p.date <= end);
+    if (out.length) cache.set(key, { data: out, ts: Date.now() });
+    return NextResponse.json(out);
+  }
+
   if (isBondSymbol(symbol)) {
     const years = isCustom
       ? Math.max(1, new Date().getFullYear() - new Date(fromParam!).getFullYear() + 1)

@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', 'lib/bondLinks.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', 'lib/bondLinks.ts', 'lib/govtBonds.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -1974,6 +1974,94 @@ ok('a series entirely before the boundary keeps only its last point',
     ok('the identifier is encoded into the query, not pasted',
        L.bondLinks('912810TL2', isin).every(l => !/\s/.test(l.url)));
   }
+}
+
+// ── Government bonds outside the US ──────────────────────────────────────────
+//
+// None of these provider keys could be reached from the machine that wrote them, so what
+// is pinned is everything that does NOT depend on the network: the symbol scheme, the
+// shape of what comes back, and the two distinctions a reader would otherwise be misled
+// by — a monthly series is not a stale daily one, and a null observation is not a zero.
+{
+  const G = await import(join(out, 'govtBonds.js'));
+
+  ok('every country has at least one tenor, with sources and a stated frequency',
+     G.GOVT_COUNTRIES.length >= 6 && G.GOVT_COUNTRIES.every(c =>
+       c.tenors.length > 0 && c.tenors.every(t =>
+         t.sources.length > 0 && (t.freq === 'daily' || t.freq === 'monthly'))));
+  ok('the euro-area curve is the deep one, and daily',
+     G.findCountry('EMU').tenors.length >= 10 &&
+     G.findCountry('EMU').tenors.every(t => t.freq === 'daily'));
+  ok('…while a single-country benchmark is monthly, and says so',
+     G.findCountry('IT').tenors.every(t => t.freq === 'monthly'));
+  // The spread pairing has to point at a country that exists, or the tile reads "vs
+  // undefined" and the subtraction never happens.
+  ok('every spread points at a country that exists',
+     G.GOVT_COUNTRIES.filter(c => c.spreadVs).every(c => G.findCountry(c.spreadVs) !== null));
+  ok('…and Italy is quoted against Germany, which is how it is read',
+     G.findCountry('IT').spreadVs === 'DE');
+
+  // Symbols round-trip, and nothing else is mistaken for one.
+  ok('a government symbol round-trips',
+     G.parseGovtSymbol(G.govtSymbol('IT', '10Y'))?.country.code === 'IT' &&
+     G.parseGovtSymbol(G.govtSymbol('EMU', '30Y'))?.tenor.label === '30Y');
+  ok('an unknown country or tenor resolves to nothing',
+     G.parseGovtSymbol('GOVT:ZZ:10Y') === null && G.parseGovtSymbol('GOVT:IT:99Y') === null &&
+     G.parseGovtSymbol('GOVT:IT') === null);
+  ok('an ordinary ticker is not a government symbol',
+     !G.isGovtSymbol('AAPL') && !G.isGovtSymbol('UST:B:UST20P'));
+
+  // Periods. A monthly observation anchored to the month's end would sort after a daily
+  // one from the same month and put October's print after November's on a mixed chart.
+  ok('a daily period passes through', G.normalizePeriod('2026-10-22') === '2026-10-22');
+  ok('a monthly period anchors to the first', G.normalizePeriod('2026-10') === '2026-10-01');
+  ok('a yearly one anchors to January', G.normalizePeriod('2026') === '2026-01-01');
+  ok('anything else is refused rather than guessed',
+     G.normalizePeriod('2026-Q4') === null && G.normalizePeriod('') === null);
+
+  // Parsing. The null case is the one that matters: the Bund genuinely traded near zero
+  // for years, so a missing observation read as 0 would be invisible in the chart.
+  {
+    const doc = { series: { docs: [{
+      period: ['2026-10-20', '2026-10-21', '2026-10-22'],
+      value: [2.5, null, 2.7],
+    }] } };
+    const pts = G.parseDbnomics(doc);
+    ok('a null observation is dropped, not read as a zero yield',
+       pts.length === 2 && pts.every(p => p.close !== 0));
+    ok('…and a real zero survives, because zero is a yield',
+       G.parseDbnomics({ series: { docs: [{ period: ['2020-05-01'], value: [0] }] } })[0].close === 0);
+    ok('…output is sorted oldest first',
+       eq(G.parseDbnomics({ series: { docs: [{ period: ['2026-02-01', '2026-01-01'], value: [2, 1] }] } })
+          .map(p => p.date), ['2026-01-01', '2026-02-01']));
+    ok('a malformed document yields nothing rather than throwing',
+       G.parseDbnomics(null).length === 0 && G.parseDbnomics({}).length === 0 &&
+       G.parseDbnomics({ series: { docs: [] } }).length === 0);
+  }
+
+  // Spreads. An inner join, because carrying a value forward would invent a spread on a
+  // day one side never published — and this number is read to the basis point.
+  {
+    const it = [{ date: 'd1', close: 4.0 }, { date: 'd2', close: 4.2 }, { date: 'd3', close: 4.1 }];
+    const de = [{ date: 'd1', close: 2.5 }, { date: 'd3', close: 2.6 }];
+    const s = G.spread(it, de);
+    ok('a spread exists only on days both sides published',
+       eq(s.map(p => p.date), ['d1', 'd3']));
+    ok('…and is the difference, in points', Math.abs(s[0].close - 1.5) < 1e-9);
+    ok('…converted to basis points for display', Math.abs(G.toBps(1.5) - 150) < 1e-9);
+    ok('no overlap yields no spread, rather than a line of zeros',
+       G.spread([{ date: 'a', close: 1 }], [{ date: 'b', close: 1 }]).length === 0);
+  }
+
+  // URL shapes. FRED series on DBnomics need the id twice; a provider/dataset/series key
+  // does not, and sending one form for the other returns nothing.
+  ok('a FRED-style key is tried in both forms',
+     G.dbnomicsUrls('FRED/IRLTLT01ITM156N').length === 2);
+  ok('…a three-part key in one', G.dbnomicsUrls('ECB/YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y').length === 1);
+  ok('…and every URL is https with the key encoded',
+     G.GOVT_COUNTRIES.flatMap(c => c.tenors).flatMap(t => t.sources).flatMap(G.dbnomicsUrls)
+       .every(u => u.startsWith('https://') && !/\s/.test(u)));
+  ok('a nonsense key produces no URL at all', G.dbnomicsUrls('nodataset').length === 0);
 }
 
 rmSync(out, { recursive: true, force: true });
