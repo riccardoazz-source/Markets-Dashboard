@@ -37,9 +37,10 @@ async function readGist(): Promise<Record<string, unknown>> {
  */
 async function readGistRaw(): Promise<{
   data: Record<string, unknown>; status: number | null; updatedAt: string | null; error: string | null;
+  size: number | null; truncated: boolean;
 }> {
   const { id, token } = gistEnv();
-  if (!id || !token) return { data: {}, status: null, updatedAt: null, error: 'not configured' };
+  if (!id || !token) return { data: {}, status: null, updatedAt: null, error: 'not configured', size: null, truncated: false };
   try {
     const res = await fetch(`https://api.github.com/gists/${id}`, {
       headers: gistHeaders(token),
@@ -47,14 +48,32 @@ async function readGistRaw(): Promise<{
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      return { data: {}, status: res.status, updatedAt: null, error: body.slice(0, 200) || res.statusText };
+      return { data: {}, status: res.status, updatedAt: null, error: body.slice(0, 200) || res.statusText, size: null, truncated: false };
     }
-    const gist = await res.json() as { updated_at?: string; files: Record<string, { content: string }> };
-    const content = gist.files?.[FILE_NAME]?.content;
+    const gist = await res.json() as {
+      updated_at?: string;
+      files: Record<string, { content?: string; truncated?: boolean; size?: number; raw_url?: string }>;
+    };
+    const file = gist.files?.[FILE_NAME];
+    let content = file?.content ?? '';
+    const truncated = !!file?.truncated;
+    // THE BUG THAT ATE THE NOTES. GitHub returns `content` for a gist file only up to
+    // about 1 MB; past that it sets `truncated: true` and hands back a prefix. A prefix of
+    // a JSON document is not JSON, so this threw, the catch returned {}, and every device
+    // read an empty server. Worse, the POST handler then merged its patch against that
+    // {} and wrote the result — a small file with only the patch in it — so the next read
+    // worked and showed a server holding pins and nothing else. The phone, seeing that,
+    // uploaded everything again, the file went back over the limit, and round it went.
+    // The full file is always available at raw_url; that is what has to be read.
+    if (truncated && file?.raw_url) {
+      const raw = await fetch(file.raw_url, { cache: 'no-store' });
+      if (!raw.ok) return { data: {}, status: raw.status, updatedAt: gist.updated_at ?? null, error: `raw_url HTTP ${raw.status}`, size: file?.size ?? null, truncated };
+      content = await raw.text();
+    }
     const data = content ? JSON.parse(content) as Record<string, unknown> : {};
-    return { data, status: res.status, updatedAt: gist.updated_at ?? null, error: null };
+    return { data, status: res.status, updatedAt: gist.updated_at ?? null, error: null, size: file?.size ?? content.length, truncated };
   } catch (e) {
-    return { data: {}, status: null, updatedAt: null, error: (e as Error).message };
+    return { data: {}, status: null, updatedAt: null, error: (e as Error).message, size: null, truncated: false };
   }
 }
 
@@ -63,7 +82,10 @@ async function writeGistRaw(data: Record<string, unknown>): Promise<{
   ok: boolean; status: number | null; error: string | null; bytes: number;
 }> {
   const { id, token } = gistEnv();
-  const content = JSON.stringify(data, null, 2);
+  // Compact, not pretty-printed. The two-space indent roughly doubled the file, and that
+  // doubling is what carried a 600 KB upload past GitHub's 1 MB read limit. Nobody reads
+  // this file by eye; the app does.
+  const content = JSON.stringify(data);
   if (!id || !token) return { ok: false, status: null, error: 'not configured', bytes: content.length };
   try {
     const res = await fetch(`https://api.github.com/gists/${id}`, {
@@ -123,10 +145,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       configured: cloud,
       tokenPrefix: token ? `${token.slice(0, 8)}…` : null,
-      read: { status: read.status, error: read.error, keys, noteCharts, lastServerWrite: read.updatedAt },
+      read: { status: read.status, error: read.error, keys, noteCharts, lastServerWrite: read.updatedAt,
+              fileBytes: read.size, truncatedByGitHub: read.truncated },
       write,
       verdict: !cloud ? 'not configured'
         : read.status !== 200 ? `read FAILS (HTTP ${read.status}) — the token or gist id is wrong or expired`
+        : read.error ? `read returned but could not be parsed: ${read.error}`
         : write.attempted && !write.ok ? `read works, write FAILS (HTTP ${write.status}) — the token has expired or lacks gist write permission`
         : write.attempted ? 'read and write both work'
         : 'read works — add &write=1 to test writing',
@@ -145,8 +169,17 @@ export async function POST(req: NextRequest) {
     // No cloud storage configured — nothing to persist server-side.
     return NextResponse.json({ ok: false, cloud: false });
   }
-  const existing = await readGist();
-  const merged = deepMerge(existing, update);
+  // REFUSE rather than merge against a base that could not be read. The old code took an
+  // unreadable server as an empty one, merged the patch into {}, and wrote that back —
+  // which is how a 600 KB file of notes was replaced by a 2 KB file of pins, repeatedly.
+  // A write that cannot see what it is overwriting must not happen.
+  const base = await readGistRaw();
+  if (base.status !== 200 || base.error) {
+    return NextResponse.json(
+      { ok: false, cloud: true, status: base.status, error: `refusing to write: server copy unreadable (${base.error ?? `HTTP ${base.status}`})` },
+      { status: 503 });
+  }
+  const merged = deepMerge(base.data, update);
   const r = await writeGistRaw(merged);
   // The failure is carried back rather than flattened to `ok: false`: the client turns
   // the badge red, and the panel can say WHY instead of "sync error".
