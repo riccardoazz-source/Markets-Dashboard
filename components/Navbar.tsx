@@ -4,7 +4,7 @@ import { LucideProps, TrendingUp, Cloud, CloudOff, Landmark, BarChart2, DollarSi
 import { ForwardRefExoticComponent, RefAttributes, useState } from 'react';
 import clsx from 'clsx';
 import { MACRO_WORLD_ENABLED } from '@/lib/imfConfig';
-import { useSyncStatus } from '@/lib/gist';
+import { useSyncStatus, useOwedKeys } from '@/lib/gist';
 import { DataBackupPanel } from '@/components/ui/DataBackupPanel';
 
 export type Section = 'dashboard' | 'indexes' | 'bonds' | 'currencies' | 'crypto' | 'commodities' | 'sectors' | 'macro' | 'macroworld' | 'stock' | 'compare' | 'rotation' | 'sources';
@@ -63,13 +63,19 @@ interface Props {
 
 export function Navbar({ active, onSelect }: Props) {
   const syncStatus = useSyncStatus();
+  const owed = useOwedKeys();
   const [backup, setBackup] = useState(false);
   // Shown ONLY when something is wrong. The same indicator already existed, but it lived
   // inside the Notes panel — inside the feature that stops working when sync does, so the
   // one case it was built to warn about is the one case nobody could see it. A person can
   // end up with a full watchlist on a phone and an empty one on a desktop and no sign
   // anywhere that the two were never connected.
-  const sickSync = syncStatus === 'local-only' || syncStatus === 'error';
+  // "Unsynced" is its own state, louder than 'synced' and distinct from 'error': the
+  // server is fine and reachable, and THIS DEVICE still holds things it has not managed
+  // to hand over. That is exactly the condition that was invisible before — a phone
+  // full of notes, a healthy badge, and a server that had never heard of them.
+  const unsynced = !(syncStatus === 'local-only' || syncStatus === 'error') && owed.length > 0;
+  const sickSync = syncStatus === 'local-only' || syncStatus === 'error' || unsynced;
   return (
     <>
       {/* Top bar — logo only on mobile, logo + tabs on desktop */}
@@ -93,11 +99,13 @@ export function Navbar({ active, onSelect }: Props) {
                 ? 'Cloud storage could not be reached. Click for details and a backup.'
                 : 'Your saved data — what this device is holding, and how to back it up.'}
               className={clsx('flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-colors',
-                syncStatus === 'local-only' ? 'bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
+                syncStatus === 'local-only' || unsynced ? 'bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
                   : syncStatus === 'error'  ? 'bg-red-500/15 text-red-300 hover:bg-red-500/25'
                   : 'text-gray-600 hover:text-gray-300')}>
               {sickSync ? <CloudOff size={10} /> : <Cloud size={11} />}
-              {syncStatus === 'local-only' ? 'This device only' : syncStatus === 'error' ? 'Sync error' : ''}
+              {syncStatus === 'local-only' ? 'This device only'
+                : syncStatus === 'error' ? 'Sync error'
+                : unsynced ? `${owed.length} unsynced` : ''}
             </button>
             {/* The green "LIVE" badge that used to sit here has been removed.
                 Nothing computed it. It was a decoration printed unconditionally on every

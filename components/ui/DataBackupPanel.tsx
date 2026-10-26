@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudOff, Download, Upload, AlertTriangle, Check } from 'lucide-react';
 import {
-  loadGistData, updateGistData, useSyncStatus, lastWriteError, type GistData,
+  loadGistData, updateGistData, useSyncStatus, lastWriteError, lastUpload, type GistData,
 } from '@/lib/gist';
 import { missingFromRemote } from '@/lib/gistMerge';
 import { DetailModal } from './DetailModal';
@@ -176,6 +176,24 @@ export function DataBackupPanel({ onClose }: { onClose: () => void }) {
             )}
           </>
         )}
+
+        {/* The last automatic upload, verbatim. This is the record that did not exist:
+            whether this device ever SENT what it holds, how much, and what came back. */}
+        {lastUpload() && (() => { const u = lastUpload()!; return (
+          <div className={`rounded-lg border px-3 py-2 space-y-0.5 ${
+            u.ok === true ? 'border-emerald-500/30 bg-emerald-500/5'
+            : u.ok === false ? 'border-red-500/40 bg-red-500/5' : 'border-border bg-bg-input'}`}>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500">Last upload from this device</p>
+            <p className="text-[11px] text-gray-300 font-mono break-all">
+              {u.at.slice(11, 19)}Z · sent {u.keys.join(', ') || 'nothing'} · {(u.bytes / 1024).toFixed(1)} KB
+            </p>
+            <p className={`text-[11px] font-mono ${u.ok === true ? 'text-emerald-300' : u.ok === false ? 'text-red-300' : 'text-gray-500'}`}>
+              {u.ok === null ? 'waiting for the server…'
+                : u.ok ? `accepted (HTTP ${u.status})`
+                : `REFUSED — HTTP ${u.status ?? '?'}: ${u.error ?? 'no reason given'}`}
+            </p>
+          </div>
+        ); })()}
 
         {c && (
           <div className="grid grid-cols-2 gap-1.5 text-[11px]">

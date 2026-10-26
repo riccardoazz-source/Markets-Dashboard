@@ -179,6 +179,41 @@ let _pending: Partial<GistData> | null = null;
 let _lastWriteError: string | null = null;
 export const lastWriteError = () => _lastWriteError;
 
+// ── What this device still owes the server, and what happened last time it tried ─────
+//
+// Kept here, on the module, so the navbar can show it without a second fetch and the
+// panel can print the last attempt verbatim. This exists because the fault being chased
+// could not be seen from the server side at all: reads and writes both succeed there,
+// and the phone that holds the data keeps showing it. Whether the phone ever SENT it,
+// and what came back, was known to nobody. Now the device says so itself.
+export interface UploadAttempt {
+  at: string;
+  keys: string[];
+  /** Approximate size of what was sent, in bytes. */
+  bytes: number;
+  ok: boolean | null;
+  status: number | null;
+  error: string | null;
+}
+let _owedKeys: string[] = [];
+let _lastUpload: UploadAttempt | null = null;
+const _owedListeners = new Set<() => void>();
+function setOwed(keys: string[]) { _owedKeys = keys; _owedListeners.forEach(l => l()); }
+export const owedKeys = () => _owedKeys;
+export const lastUpload = () => _lastUpload;
+
+/** The keys this device holds that the server does not, live. */
+export function useOwedKeys(): string[] {
+  const [keys, setKeys] = useState<string[]>(_owedKeys);
+  useEffect(() => {
+    const l = () => setKeys([..._owedKeys]);
+    _owedListeners.add(l);
+    l();
+    return () => { _owedListeners.delete(l); };
+  }, []);
+  return keys;
+}
+
 function loadPending(): Partial<GistData> | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -307,7 +342,10 @@ async function fetchAndMerge(preferCacheOnConflict: boolean): Promise<GistData> 
     // that exists on both sides.
     if (cloud) {
       const owed = missingFromRemote(local, remote);
+      setOwed(Object.keys(owed));
       if (Object.keys(owed).length > 0) {
+        const body = JSON.stringify(owed);
+        _lastUpload = { at: new Date().toISOString(), keys: Object.keys(owed), bytes: body.length, ok: null, status: null, error: null };
         console.log('[gist] uploading local-only keys the server never saw:', Object.keys(owed).join(', '));
         // NOT fire-and-forget any more. This used to end in `.catch(() => {})` and the
         // status was then set to 'synced' regardless — so a server that had stopped
@@ -316,15 +354,17 @@ async function fetchAndMerge(preferCacheOnConflict: boolean): Promise<GistData> 
         void fetch('/api/gist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(owed),
-        }).then(r => r.json() as Promise<{ ok?: boolean; status?: number | null; error?: string | null }>)
-          .then(resp => {
-            if (resp.ok) { _lastWriteError = null; return; }
-            _lastWriteError = `HTTP ${resp.status ?? '?'}: ${resp.error ?? 'write refused'}`;
+          body,
+        }).then(async r => {
+            const resp = await r.json() as { ok?: boolean; status?: number | null; error?: string | null };
+            if (_lastUpload) _lastUpload = { ..._lastUpload, ok: !!resp.ok, status: resp.status ?? r.status, error: resp.error ?? null };
+            if (resp.ok) { _lastWriteError = null; setOwed([]); return; }
+            _lastWriteError = `HTTP ${resp.status ?? r.status}: ${resp.error ?? 'write refused'}`;
             console.warn('[gist] upload of local-only keys FAILED:', _lastWriteError);
             setSyncStatus('error');
           })
           .catch(e => {
+            if (_lastUpload) _lastUpload = { ..._lastUpload, ok: false, status: null, error: (e as Error).message };
             _lastWriteError = (e as Error).message;
             setSyncStatus('error');
           });
