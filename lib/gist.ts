@@ -175,6 +175,10 @@ function saveLocal(d: GistData) {
 // three offline edits cost one request and the last value of any key wins.
 let _pending: Partial<GistData> | null = null;
 
+/** GitHub's answer the last time a write failed, or null. The panel shows it verbatim. */
+let _lastWriteError: string | null = null;
+export const lastWriteError = () => _lastWriteError;
+
 function loadPending(): Partial<GistData> | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -215,9 +219,11 @@ export async function flushPending(): Promise<boolean> {
       // flight is still owed, and dropping the queue wholesale would lose it.
       _pending = subtractSent(_pending, patch);
       savePending(_pending);
+      _lastWriteError = null;
       setSyncStatus('synced');
       return true;
     }
+    _lastWriteError = `HTTP ${(resp as { status?: number }).status ?? '?'}: ${(resp as { error?: string }).error ?? 'write refused'}`;
     setSyncStatus('error');
     return false;
   } catch {
@@ -303,11 +309,25 @@ async function fetchAndMerge(preferCacheOnConflict: boolean): Promise<GistData> 
       const owed = missingFromRemote(local, remote);
       if (Object.keys(owed).length > 0) {
         console.log('[gist] uploading local-only keys the server never saw:', Object.keys(owed).join(', '));
-        fetch('/api/gist', {
+        // NOT fire-and-forget any more. This used to end in `.catch(() => {})` and the
+        // status was then set to 'synced' regardless — so a server that had stopped
+        // accepting writes looked, from every device, exactly like one that was fine.
+        // The result is read, and a failure turns the badge red with GitHub's reason.
+        void fetch('/api/gist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(owed),
-        }).catch(() => {});
+        }).then(r => r.json() as Promise<{ ok?: boolean; status?: number | null; error?: string | null }>)
+          .then(resp => {
+            if (resp.ok) { _lastWriteError = null; return; }
+            _lastWriteError = `HTTP ${resp.status ?? '?'}: ${resp.error ?? 'write refused'}`;
+            console.warn('[gist] upload of local-only keys FAILED:', _lastWriteError);
+            setSyncStatus('error');
+          })
+          .catch(e => {
+            _lastWriteError = (e as Error).message;
+            setSyncStatus('error');
+          });
       }
     }
 

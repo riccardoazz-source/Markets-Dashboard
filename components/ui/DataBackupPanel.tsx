@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudOff, Download, Upload, AlertTriangle, Check } from 'lucide-react';
 import {
-  loadGistData, updateGistData, useSyncStatus, type GistData,
+  loadGistData, updateGistData, useSyncStatus, lastWriteError, type GistData,
 } from '@/lib/gist';
 import { missingFromRemote } from '@/lib/gistMerge';
 import { DetailModal } from './DetailModal';
@@ -134,11 +134,19 @@ export function DataBackupPanel({ onClose }: { onClose: () => void }) {
         ) : status === 'error' ? (
           <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2.5 space-y-1">
             <p className="text-xs font-semibold text-red-300 flex items-center gap-1.5">
-              <AlertTriangle size={13} /> Cloud storage unreachable
+              <AlertTriangle size={13} /> The server refused to save
             </p>
+            {lastWriteError() && (
+              <p className="text-[11px] font-mono text-red-200/80 break-all">{lastWriteError()}</p>
+            )}
             <p className="text-[11px] text-red-200/70 leading-snug">
-              Changes are kept here and will be retried. If this persists, the access token
-              behind cloud storage may have expired — those expire on a schedule.
+              Reading works, writing does not, so every device sees the same frozen copy and
+              this one keeps its changes to itself. A 401 or 403 from GitHub means the access
+              token has expired or lacks gist write permission — GitHub tokens expire after
+              30 days by default. Make a new one at github.com/settings/tokens with the
+              <span className="font-mono"> gist </span>scope, set it as
+              <span className="font-mono"> GITHUB_GIST_TOKEN </span>on Vercel, and redeploy.
+              Nothing here is lost meanwhile — download a copy to be sure.
             </p>
           </div>
         ) : (
