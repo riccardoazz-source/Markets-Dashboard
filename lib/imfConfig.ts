@@ -182,7 +182,7 @@ export const IMF_COUNTRY_INDEX: Record<string, { symbol: string; name: string }>
   SWE: { symbol: '^OMX',       name: 'OMX Stockholm 30' },
   POL: { symbol: 'WIG20.WA',   name: 'WIG20' },
   JPN: { symbol: '^N225',      name: 'Nikkei 225' },
-  CHN: { symbol: '000300.SS',  name: 'CSI 300' },
+  CHN: { symbol: '000001.SS',  name: 'Shanghai Composite' },
   IND: { symbol: '^BSESN',     name: 'BSE Sensex' },
   KOR: { symbol: '^KS11',      name: 'KOSPI' },
   HKG: { symbol: '^HSI',       name: 'Hang Seng' },

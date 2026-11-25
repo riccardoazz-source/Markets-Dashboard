@@ -47,7 +47,7 @@ const INDEX_MAP: Record<string, string> = {
   '^BVSP': 'BMFBOVESPA:IBOV',
   '^VIX': 'TVC:VIX',
   '^TNX': 'TVC:TNX',
-  '000300.SS': 'SSE:000300',
+  '000001.SS': 'SSE:000001',
   // MSCI World has no free TradingView index; the iShares tracker is the closest
   // thing that is actually the same exposure, and it is labelled as such below.
   '^990100-USD-STRD': 'AMEX:URTH',

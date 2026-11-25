@@ -27,7 +27,6 @@ export const INDEX_PROXY: Record<string, string> = {
   '^990100-USD-STRD': 'URTH',
   '^N225': '1321.T',
   '^HSI': '2800.HK',
-  '000300.SS': 'ASHR',
   '^STI': 'ES3.SI',
   '^AXJO': 'STW.AX',
   '^GSPTSE': 'XIC.TO',
