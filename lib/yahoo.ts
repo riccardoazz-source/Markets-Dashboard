@@ -1345,3 +1345,29 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
 export async function fetchYahooTopHoldings(symbol: string): Promise<Record<string, unknown> | null> {
   return fetchQuoteSummary(symbol, 'topHoldings', 10_000);
 }
+
+/**
+ * Price and day change for many symbols through the per-symbol v8 chart endpoint — the
+ * one path that keeps working from Vercel when the v7 batch quote and the crumb session
+ * do not. Wider concurrency than fetchQuotesNoAuth's 10, because 500 names at 10 a round
+ * is fifty sequential round trips; capped by a deadline so a slow Yahoo cannot run the
+ * function past its limit. Carries no market cap and no P/E: v8 does not have them.
+ */
+export async function fetchYahooPricesWide(
+  symbols: string[], concurrency = 40, deadlineMs = 25_000,
+): Promise<YahooQuote[]> {
+  const out: YahooQuote[] = [];
+  const stop = Date.now() + deadlineMs;
+  for (let i = 0; i < symbols.length; i += concurrency) {
+    if (Date.now() > stop) break;
+    const r = await Promise.all(symbols.slice(i, i + concurrency).map(s => fetchQuoteNoAuth(s).catch(() => null)));
+    for (const q of r) if (q) out.push(q);
+  }
+  return out;
+}
+
+/** Whether a crumb session can be opened right now — the gate for v7-crumb and quoteSummary. */
+export async function yahooSessionOk(): Promise<{ ok: boolean; error: string | null }> {
+  try { await getSession(); return { ok: true, error: null }; }
+  catch (e) { return { ok: false, error: (e as Error).message }; }
+}

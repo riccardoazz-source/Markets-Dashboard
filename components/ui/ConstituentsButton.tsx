@@ -66,13 +66,16 @@ function ConstituentList({ symbol, onClose }: { symbol: string; onClose: () => v
     () => u.sector ? [] : [...new Set(members.map(m => m.sector).filter(Boolean))].sort(),
     [members, u.sector]);
 
+  const noWeights = members.length > 0 && members.every(m => m.weight == null);
   const rows = useMemo(() => {
     const needle = q.trim().toUpperCase();
     const kept = members.filter(m =>
       (!sector || m.sector === sector) &&
       (!needle || m.symbol.includes(needle) || m.name.toUpperCase().includes(needle)));
-    return sortConstituents(kept, sort.key, sort.dir);
-  }, [members, q, sector, sort]);
+    // Sorting by a column that is empty everywhere is no sort at all; fall back to ticker.
+    const eff = noWeights && sort.key === 'weight' ? { key: 'symbol' as ConstSortKey, dir: 'asc' as const } : sort;
+    return sortConstituents(kept, eff.key, eff.dir);
+  }, [members, q, sector, sort, noWeights]);
 
   const sortBy = useCallback((key: ConstSortKey) => setSort(prev =>
     prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
@@ -93,6 +96,16 @@ function ConstituentList({ symbol, onClose }: { symbol: string; onClose: () => v
               : `${rows.length} of ${members.length} stocks · tap one for its chart`}
           </p>
         </div>
+
+        {/* Prices without caps is the state Yahoo's v8 fallback leaves: say what is
+            missing and why, instead of a column of dashes and a "—" top-10 tile. */}
+        {!loading && members.length > 0 && members.every(m => m.weight == null) && (
+          <p className="text-[11px] text-amber-200/70 leading-snug">
+            {members.some(m => m.price != null)
+              ? 'Weights and P/E are unavailable right now: Yahoo is not returning market caps, only prices. The list is sorted by ticker meanwhile.'
+              : 'No prices came back from Yahoo for this list. The names are current; the numbers could not be fetched.'}
+          </p>
+        )}
 
         {!loading && members.length > 0 && (
           <div className="grid grid-cols-3 gap-1.5">
@@ -178,7 +191,7 @@ function ConstituentList({ symbol, onClose }: { symbol: string; onClose: () => v
 // ── Any other fund, or an index through its tracker ──────────────────────────
 function FundHoldingsList({ symbol, group, onClose }: { symbol: string; group?: string; onClose: () => void }) {
   const src = holdingsSourceFor(symbol, group)!;
-  const [data, setData] = useState<FundHoldings | null>(null);
+  const [data, setData] = useState<(FundHoldings & { error?: string }) | null>(null);
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState<{ symbol: string; name: string } | null>(null);
 
@@ -208,9 +221,16 @@ function FundHoldingsList({ symbol, group, onClose }: { symbol: string; group?: 
 
         {loading ? (
           <div className="h-32 flex items-center justify-center"><LoadingSpinner size={24} /></div>
-        ) : !data || (data.holdings.length === 0 && data.sectors.length === 0) ? (
+        ) : !data || data.error ? (
+          // NOT "Yahoo has none". The request failed, which says nothing about the fund.
+          // The two used to share one sentence, which turned an outage into a false fact.
+          <p className="text-xs text-amber-200/70 py-6 text-center leading-snug">
+            Could not get an answer from Yahoo for {src.fund} — this is a failed request,
+            not an empty fund. The diagnostic at /api/holdings?symbol={encodeURIComponent(symbol)}&amp;mode=diag shows why.
+          </p>
+        ) : data.holdings.length === 0 && data.sectors.length === 0 ? (
           <p className="text-xs text-gray-500 py-6 text-center">
-            Yahoo publishes no holdings for {src.fund}.
+            Yahoo answered for {src.fund}, but its answer carries no holdings.
           </p>
         ) : (
           <>
