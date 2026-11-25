@@ -104,7 +104,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
                 everything else because that is where tools live — a bond should open the
                 same panel as anything else, plus one thing, not a panel of its own. */}
             <BondListButton symbol={symbol} />
-            <ConstituentsButton symbol={symbol} />
+            <ConstituentsButton symbol={symbol} group={group} />
             <ReturnsTableButton name={name} symbol={symbol} />
               <MonthlyRecapButton symbol={symbol} name={name} assetClass={group} />
               <QuadrantButton name={name} symbol={symbol} group={group} />

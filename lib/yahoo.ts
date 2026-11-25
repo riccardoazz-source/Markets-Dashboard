@@ -1337,3 +1337,11 @@ export async function fetchYahooEarnings(symbol: string): Promise<YahooEarnings 
   console.log(`[yahoo-earnings] ${symbol}: ${quarterly.length} EPS / ${financials.length} fin (${withRevenue} w/ revenue, ${withNetIncome} w/ netIncome) / modules: ${Object.keys(qsResult ?? {}).join(',')}`);
   return { quarterly, financials, currency };
 }
+
+/**
+ * A fund's largest holdings and sector split, as Yahoo publishes them — the one source
+ * that answers the same way for every ETF. Raw quoteSummary result; lib/holdings parses.
+ */
+export async function fetchYahooTopHoldings(symbol: string): Promise<Record<string, unknown> | null> {
+  return fetchQuoteSummary(symbol, 'topHoldings', 10_000);
+}

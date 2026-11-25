@@ -7,6 +7,7 @@ import {
   membersOf, sortConstituents, topShare, universeFor,
   type ConstSortKey, type Constituent, type WeightedConstituent,
 } from '@/lib/constituents';
+import { holdingsSourceFor, type FundHoldings } from '@/lib/holdings';
 import { DetailModal } from './DetailModal';
 import { PanelClose } from './PanelClose';
 import { LoadingSpinner } from './LoadingSpinner';
@@ -18,18 +19,25 @@ import { AssetQuickView } from './AssetQuickView';
 // for, and absent everywhere else rather than shown and empty. Picking a stock opens it
 // in the same standard panel, one level down — the same pattern as the bond list.
 
-export function ConstituentsButton({ symbol }: { symbol: string }) {
+// Two sources, one button. The full member list where the app has it (the S&P 500 and
+// its eleven sector SPDRs); Yahoo's published top holdings for every other fund, and for
+// every other index through the fund that tracks it. The button appears wherever either
+// can answer, and nowhere else.
+export function ConstituentsButton({ symbol, group }: { symbol: string; group?: string }) {
   const u = universeFor(symbol);
+  const fund = holdingsSourceFor(symbol, group);
   const [open, setOpen] = useState(false);
-  if (!u) return null;
+  if (!u && !fund) return null;
   return (
     <>
-      <button onClick={() => setOpen(true)} title={`The stocks inside ${u.label}`}
+      <button onClick={() => setOpen(true)} title={`What ${symbol} holds`}
         className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border text-gray-400
                    hover:text-gray-100 hover:border-accent/50 transition-colors text-[11px] sm:text-xs font-medium">
         <Layers size={13} /> <span className="hidden sm:inline">Stocks</span>
       </button>
-      {open && <ConstituentList symbol={symbol} onClose={() => setOpen(false)} />}
+      {open && (u
+        ? <ConstituentList symbol={symbol} onClose={() => setOpen(false)} />
+        : <FundHoldingsList symbol={symbol} group={group} onClose={() => setOpen(false)} />)}
     </>
   );
 }
@@ -157,6 +165,102 @@ function ConstituentList({ symbol, onClose }: { symbol: string; onClose: () => v
           Membership is refreshed daily from a public S&amp;P 500 constituent list. Weight≈ is each
           company&apos;s share of the combined market cap — close to the index weight, not equal to it:
           the index uses float-adjusted cap{u.sector ? ', and sector funds cap their largest names, so the top weights here run high' : ''}.
+        </p>
+
+        {picked && (
+          <AssetQuickView symbol={picked.symbol} name={picked.name} group="Stocks" onClose={() => setPicked(null)} />
+        )}
+      </div>
+    </DetailModal>
+  );
+}
+
+// ── Any other fund, or an index through its tracker ──────────────────────────
+function FundHoldingsList({ symbol, group, onClose }: { symbol: string; group?: string; onClose: () => void }) {
+  const src = holdingsSourceFor(symbol, group)!;
+  const [data, setData] = useState<FundHoldings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState<{ symbol: string; name: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/holdings?symbol=${encodeURIComponent(symbol)}&group=${encodeURIComponent(group ?? '')}`)
+      .then(r => r.json())
+      .then((j: FundHoldings) => { if (!cancelled) setData(Array.isArray(j?.holdings) ? j : null); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [symbol, group]);
+
+  const maxSector = Math.max(1, ...(data?.sectors ?? []).map(s => s.weight));
+
+  return (
+    <DetailModal onClose={onClose}>
+      <div className="relative rounded-xl border border-accent/40 bg-bg-card p-4 space-y-3 max-w-2xl">
+        <PanelClose onClose={onClose} />
+        <div className="pr-7">
+          <h3 className="text-base font-bold text-white">{symbol} · top holdings</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {src.via ? <>read through <span className="font-semibold text-gray-300">{src.via}</span>, a fund that tracks this index · </> : null}
+            source: Yahoo Finance
+          </p>
+        </div>
+
+        {loading ? (
+          <div className="h-32 flex items-center justify-center"><LoadingSpinner size={24} /></div>
+        ) : !data || (data.holdings.length === 0 && data.sectors.length === 0) ? (
+          <p className="text-xs text-gray-500 py-6 text-center">
+            Yahoo publishes no holdings for {src.fund}.
+          </p>
+        ) : (
+          <>
+            {data.holdings.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500">
+                  Largest {data.holdings.length}
+                  {data.listedShare != null && <> · together {data.listedShare.toFixed(1)}% of the fund</>}
+                </p>
+                <table className="w-full text-xs">
+                  <tbody>
+                    {data.holdings.map((h, i) => (
+                      <tr key={`${h.symbol ?? h.name}-${i}`}
+                        onClick={() => h.symbol && setPicked({ symbol: h.symbol, name: h.name })}
+                        className={clsx('border-b border-border/40', h.symbol && 'hover:bg-white/[0.04] cursor-pointer')}>
+                        <td className="py-1.5 px-1.5">
+                          <span className="font-semibold text-white">{h.symbol ?? '—'}</span>
+                          <span className="block text-[10px] text-gray-500 truncate max-w-[220px]">{h.name}</span>
+                        </td>
+                        <td className="py-1.5 px-1.5 text-right text-gray-300 tabular-nums">
+                          {h.weight == null ? '—' : `${h.weight.toFixed(2)}%`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {data.sectors.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500">Sector split</p>
+                {data.sectors.map(s => (
+                  <div key={s.sector} className="flex items-center gap-2 text-[11px]">
+                    <span className="w-40 shrink-0 text-gray-400 truncate">{s.sector}</span>
+                    <div className="flex-1 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                      <div className="h-full rounded-full bg-accent" style={{ width: `${(s.weight / maxSector) * 100}%` }} />
+                    </div>
+                    <span className="w-12 text-right text-gray-300 tabular-nums">{s.weight.toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        <p className="text-[10px] text-gray-600 leading-snug">
+          Yahoo publishes a fund&apos;s largest holdings — usually ten — and its sector split, not the
+          full book. The same source answers for every fund, which is why it is used here.
+          {src.via ? ' An index has no holdings of its own, so it is shown through a fund that tracks it; the weights are that fund\'s, which match the index closely but not exactly.' : ''}
         </p>
 
         {picked && (

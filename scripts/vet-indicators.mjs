@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', 'lib/bondLinks.ts', 'lib/govtBonds.ts', 'lib/constituents.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', 'lib/bondLinks.ts', 'lib/govtBonds.ts', 'lib/constituents.ts', 'lib/holdings.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -2087,6 +2087,39 @@ ok('a series entirely before the boundary keeps only its last point',
      C.sortConstituents(whole, 'weight', 'desc').at(-1).symbol === 'DDD' &&
      C.sortConstituents(whole, 'weight', 'asc').at(-1).symbol === 'DDD');
   ok('top-N share adds the largest weights', Math.abs(C.topShare(whole, 1) - 60) < 1e-9);
+}
+
+// ── Fund holdings: one source for every index and sector ─────────────────────
+{
+  const H = await import(join(out, 'holdings.js'));
+  ok('an index is read through the fund that tracks it', H.holdingsSourceFor('^NDX', 'Indexes')?.fund === 'QQQ' &&
+     H.holdingsSourceFor('^GDAXI', 'Indexes')?.via === 'EXS1.DE');
+  ok('an index with no known tracker gets no source, not a lookalike',
+     H.holdingsSourceFor('^KS11', 'Indexes') === null && H.holdingsSourceFor('^BSESN', 'Indexes') === null);
+  ok('any fund in the Sectors tab is read directly', H.holdingsSourceFor('WCLD', 'Sectors')?.fund === 'WCLD' &&
+     H.holdingsSourceFor('WCLD', 'Sectors')?.via === null);
+  ok('a stock, a currency or a future gets nothing',
+     H.holdingsSourceFor('AAPL', 'Stocks') === null && H.holdingsSourceFor('EURUSD=X', 'Currencies') === null &&
+     H.holdingsSourceFor('GC=F', 'Commodities') === null);
+  const raw = { topHoldings: {
+    holdings: [
+      { symbol: 'MSFT', holdingName: 'Microsoft Corp', holdingPercent: { raw: 0.08, fmt: '8.00%' } },
+      { symbol: 'NVDA', holdingName: 'NVIDIA Corp', holdingPercent: { raw: 0.09 } },
+      { holdingName: 'Cash', holdingPercent: 0.01 },
+    ],
+    sectorWeightings: [{ technology: { raw: 0.5 } }, { energy: { raw: 0 } }, { realestate: { raw: 0.02 } }],
+  } };
+  const p = H.parseTopHoldings(raw);
+  ok('holdings are sorted by weight, fractions read as percent',
+     p.holdings[0].symbol === 'NVDA' && Math.abs(p.holdings[0].weight - 9) < 1e-9);
+  ok('…both { raw } and bare numbers are read', Math.abs(p.holdings[2].weight - 1) < 1e-9);
+  ok('…a holding without a ticker survives, unclickable', p.holdings[2].symbol === null && p.holdings[2].name === 'Cash');
+  ok('…the listed share is their sum', Math.abs(p.listedShare - 18) < 1e-9);
+  ok('zero-weight sectors are dropped and names made readable',
+     p.sectors.length === 2 && p.sectors[0].sector === 'Technology' && p.sectors[1].sector === 'Real Estate');
+  ok('a missing or malformed response yields empty lists, not a throw',
+     H.parseTopHoldings(null).holdings.length === 0 && H.parseTopHoldings({}).sectors.length === 0 &&
+     H.parseTopHoldings({ topHoldings: { holdings: 'x' } }).holdings.length === 0);
 }
 
 rmSync(out, { recursive: true, force: true });

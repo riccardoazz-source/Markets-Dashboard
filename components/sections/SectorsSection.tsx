@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { ConstituentsButton } from '@/components/ui/ConstituentsButton';
 import { PhaseBadge } from '@/components/ui/PhaseBadge';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
@@ -425,6 +426,7 @@ export function SectorsSection({ jumpTo, onCompare }: { jumpTo?: string | null; 
                   <span className="hidden sm:inline">Compare</span>
                 </button>
               )}
+              <ConstituentsButton symbol={selected!} group="Sectors" />
               <ReturnsTableButton name={selectedSector?.name ?? selected!} symbol={selected!} />
               <MonthlyRecapButton symbol={selected!} name={selectedSector?.name ?? selected!} assetClass="Sectors" />
               <QuadrantButton name={selectedSector?.name ?? selected!} symbol={selected!} group="Sectors" />
