@@ -10,6 +10,7 @@ import { DetailModal } from './DetailModal';
 import { TimeframeSelector } from './TimeframeSelector';
 import { PriceChart } from '@/components/charts/PriceChart';
 import { BondListButton } from '@/components/ui/BondListButton';
+import { ConstituentsButton } from '@/components/ui/ConstituentsButton';
 import { ReturnsTableButton } from './ReturnsTableButton';
 import { QuadrantButton } from '@/components/ui/QuadrantButton';
 import { MonthlyRecapButton } from '@/components/ui/MonthlyRecapButton';
@@ -103,6 +104,7 @@ export function AssetQuickView({ symbol, name, group, onClose, onCompare }: {
                 everything else because that is where tools live — a bond should open the
                 same panel as anything else, plus one thing, not a panel of its own. */}
             <BondListButton symbol={symbol} />
+            <ConstituentsButton symbol={symbol} />
             <ReturnsTableButton name={name} symbol={symbol} />
               <MonthlyRecapButton symbol={symbol} name={name} assetClass={group} />
               <QuadrantButton name={name} symbol={symbol} group={group} />

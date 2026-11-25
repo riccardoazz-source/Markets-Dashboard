@@ -23,7 +23,7 @@ import { join } from 'node:path';
 const out = mkdtempSync(join(tmpdir(), 'vet-'));
 execFileSync('npx', [
   'tsc', 'lib/indicators.ts', 'lib/rotationPhase.ts', 'lib/tradingview.ts', 'lib/config.ts',
-  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', 'lib/bondLinks.ts', 'lib/govtBonds.ts', '--outDir', out,
+  'lib/volatility.ts', 'lib/phaseRuns.ts', 'lib/macroDerived.ts', 'lib/eventCalendar.ts', 'lib/eventCalendarData.ts', 'lib/gistMerge.ts', 'lib/windows.ts', 'lib/recapIdentity.ts', 'lib/eventIndicator.ts', 'lib/apifyCalendar.ts', 'lib/returnsTable.ts', 'lib/bonds.ts', 'lib/calendarMerge.ts', 'lib/bondSeries.ts', 'lib/curveParse.ts', 'lib/bondLinks.ts', 'lib/govtBonds.ts', 'lib/constituents.ts', '--outDir', out,
   '--module', 'esnext', '--target', 'es2022', '--moduleResolution', 'bundler', '--skipLibCheck',
 ], { stdio: 'inherit' });
 // tsc emits the module specifiers exactly as written, and TypeScript writes them without
@@ -2062,6 +2062,31 @@ ok('a series entirely before the boundary keeps only its last point',
      G.GOVT_COUNTRIES.flatMap(c => c.tenors).flatMap(t => t.sources).flatMap(G.dbnomicsUrls)
        .every(u => u.startsWith('https://') && !/\s/.test(u)));
   ok('a nonsense key produces no URL at all', G.dbnomicsUrls('nodataset').length === 0);
+}
+
+// ── Index and sector constituents ────────────────────────────────────────────
+{
+  const C = await import(join(out, 'constituents.js'));
+  ok('the S&P 500 and its ETFs map to the whole list',
+     ['^GSPC', 'SPY', 'voo'].every(s => C.universeFor(s)?.sector === null));
+  ok('a sector SPDR maps to its GICS sector', C.universeFor('XLK')?.sector === 'Information Technology');
+  ok('all eleven sector SPDRs are covered',
+     ['XLK','XLF','XLE','XLV','XLI','XLY','XLP','XLU','XLB','XLRE','XLC'].every(s => C.universeFor(s)));
+  ok('an asset with no list gets no button', C.universeFor('BTC-USD') === null && C.universeFor('^NDX') === null);
+  const mk = (symbol, sector, cap, chg) => ({ symbol, name: symbol, sector, subIndustry: '', price: 1,
+    changePercent: chg, marketCap: cap, trailingPE: null, forwardPE: null });
+  const all = [mk('AAA', 'Information Technology', 300, 1), mk('BBB', 'Information Technology', 100, -1),
+               mk('CCC', 'Energy', 600, 0), mk('DDD', 'Energy', null, 2)];
+  const tech = C.membersOf(all, C.universeFor('XLK'));
+  ok('a sector keeps only its own members', tech.length === 2 && tech.every(m => m.sector === 'Information Technology'));
+  ok('…and weights sum to 100 within the sector', Math.abs(tech.reduce((s, m) => s + m.weight, 0) - 100) < 1e-9);
+  ok('…AAA is 75% of tech', Math.abs(tech[0].weight - 75) < 1e-9);
+  const whole = C.membersOf(all, C.universeFor('^GSPC'));
+  ok('a member with no cap gets no weight, not zero', whole.find(m => m.symbol === 'DDD').weight === null);
+  ok('…and sorts last by weight in both directions',
+     C.sortConstituents(whole, 'weight', 'desc').at(-1).symbol === 'DDD' &&
+     C.sortConstituents(whole, 'weight', 'asc').at(-1).symbol === 'DDD');
+  ok('top-N share adds the largest weights', Math.abs(C.topShare(whole, 1) - 60) < 1e-9);
 }
 
 rmSync(out, { recursive: true, force: true });
