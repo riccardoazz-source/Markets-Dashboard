@@ -118,16 +118,28 @@ export async function GET(req: NextRequest) {
   const clipWindow = (d: { date: string; close: number }[]) =>
     trim1D(boundary ? anchorSeries(d, boundary) : d);
 
+  // How many points a window of this length must have before it counts as history at
+  // all. A ten-year request answered with ONE point is not a short history, it is a
+  // failed one — and it used to be accepted, because the fallback only fired on zero.
+  // CSI 300 (000300.SS) was exactly that: Yahoo returned today's quote as a one-row
+  // "history", Stooq was never asked, the chart showed a single dot and the row was cached.
+  const spanDays = (to.getTime() - from.getTime()) / 864e5;
+  const minPoints = spanDays > 20 ? 5 : 2;
+  const enough = (d: { date: string; close: number }[]) => d.length >= minPoints;
+
   try {
     let data = await fetchYahooChart(symbol, from, to, interval);
 
-    // Stooq fallback if Yahoo returns nothing
-    if (data.length === 0) {
-      data = await fetchStooqDaily(symbol, from, to, toStooqInterval(interval));
+    // Stooq fallback when Yahoo returns nothing, or too little to be a history.
+    if (!enough(data)) {
+      const alt = await fetchStooqDaily(symbol, from, to, toStooqInterval(interval)).catch(() => []);
+      if (alt.length > data.length) data = alt;
     }
 
     data = clipWindow(data);
-    cache.set(key, { data, ts: Date.now() });
+    // A series too short to be real is returned but not cached, so the next request
+    // retries both providers instead of serving the dot for five minutes.
+    if (enough(data)) cache.set(key, { data, ts: Date.now() });
     return NextResponse.json(data);
   } catch (err) {
     console.error('historical error', symbol, err);
