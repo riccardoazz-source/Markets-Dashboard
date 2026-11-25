@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { unstable_cache } from 'next/cache';
-import { fetchYahooTopHoldings } from '@/lib/yahoo';
+import { fetchYahooTopHoldings, yahooSessionOk } from '@/lib/yahoo';
 import { holdingsSourceFor, parseTopHoldings } from '@/lib/holdings';
 
 // Holdings for any fund, and for any index through the fund that tracks it.
@@ -24,9 +24,10 @@ export async function GET(req: NextRequest) {
   if (!src) return NextResponse.json({ error: 'no_source', symbol }, { status: 404 });
 
   if (req.nextUrl.searchParams.get('mode') === 'diag') {
+    const session = await yahooSessionOk();
     const raw = await fetchYahooTopHoldings(src.fund);
     return NextResponse.json({
-      symbol, source: src, gotResponse: !!raw,
+      symbol, source: src, crumbSession: session, gotResponse: !!raw,
       keys: raw ? Object.keys((raw as { topHoldings?: object }).topHoldings ?? {}) : [],
       parsed: raw ? parseTopHoldings(raw) : null,
     }, { headers: { 'Cache-Control': 'no-store' } });

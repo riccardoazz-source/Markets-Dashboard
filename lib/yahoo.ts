@@ -201,29 +201,55 @@ async function fetchWithTimeout(
   }
 }
 
+/** Every cookie a response set, as `name=value` pairs. */
+function cookiesOf(res: Response): string[] {
+  const h = res.headers as Headers & { getSetCookie?: () => string[] };
+  const list = typeof h.getSetCookie === 'function' ? h.getSetCookie()
+    : (res.headers.get('set-cookie') ?? '').split(/,(?=\s*[A-Za-z0-9_]+=)/);
+  return list.map(c => c.split(';')[0].trim()).filter(c => /^[A-Za-z0-9_]+=./.test(c));
+}
+
+/** Why the last crumb attempt failed, step by step — read by the diagnostics. */
+let lastCrumbTrace: string[] = [];
+export const yahooCrumbTrace = () => lastCrumbTrace;
+
+// The session that P/E, market cap and fund holdings all depend on.
+//
+// It used to request fc.yahoo.com with `redirect: 'follow'`. When Yahoo answers that with
+// a redirect, the cookie is on the FIRST response, and following the redirect discards
+// it: fetch exposes only the final response's headers. The cookie never arrived, the
+// crumb was refused, and every crumb-gated call — quoteSummary, v7 quotes — came back
+// empty. That is what made the holdings panel blank for nearly every fund.
+//
+// Now each source is read without following redirects, every cookie is kept rather than
+// only the first, two sources and both API hosts are tried, and each step is recorded.
 async function fetchCrumb(): Promise<CrumbSession> {
-  const cookieRes = await fetchWithTimeout(
-    'https://fc.yahoo.com',
-    { headers: { 'User-Agent': UA }, redirect: 'follow' },
-    4_000,
-  );
-  const raw = cookieRes.headers.get('set-cookie') ?? '';
-  // Yahoo switched from B= to A3= cookies; extract first name=value pair regardless of name
-  const cookieMatch = raw.match(/^([A-Za-z0-9_]+=\S+?)(?=;|,|$)/);
-  const cookie = cookieMatch ? cookieMatch[1] : '';
-
-  if (!cookie) throw new Error('[yahoo] fc.yahoo.com set no cookie');
-
-  const crumbRes = await fetchWithTimeout(
-    'https://query1.finance.yahoo.com/v1/test/getcrumb',
-    { headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'text/plain,*/*' } },
-    4_000,
-  );
-  const crumb = (await crumbRes.text()).trim();
-  if (!crumb || crumb.toLowerCase().includes('<!doctype')) {
-    throw new Error('[yahoo] no crumb returned');
+  const trace: string[] = [];
+  lastCrumbTrace = trace;
+  const jar = new Map<string, string>();
+  for (const src of ['https://fc.yahoo.com', 'https://finance.yahoo.com/quote/AAPL']) {
+    try {
+      const res = await fetchWithTimeout(src, { headers: { 'User-Agent': UA, Accept: 'text/html,*/*' }, redirect: 'manual' }, 5_000);
+      const got = cookiesOf(res);
+      for (const c of got) jar.set(c.slice(0, c.indexOf('=')), c);
+      trace.push(`${src}: HTTP ${res.status}, ${got.length} cookie(s)${got.length ? ' [' + got.map(c => c.split('=')[0]).join(',') + ']' : ''}`);
+      if (jar.size > 0) break;
+    } catch (e) { trace.push(`${src}: ${(e as Error).message}`); }
   }
-  return { cookie, crumb, ts: Date.now() };
+  if (jar.size === 0) throw new Error('[yahoo] no cookie from any source');
+  const cookie = [...jar.values()].join('; ');
+
+  for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+    try {
+      const res = await fetchWithTimeout(`https://${host}/v1/test/getcrumb`,
+        { headers: { 'User-Agent': UA, 'Cookie': cookie, 'Accept': 'text/plain,*/*' } }, 5_000);
+      const crumb = (await res.text()).trim();
+      const good = res.ok && !!crumb && crumb.length < 64 && !crumb.toLowerCase().includes('<');
+      trace.push(`${host} getcrumb: HTTP ${res.status}${good ? ', ok' : `, refused (${crumb.slice(0, 60)})`}`);
+      if (good) return { cookie, crumb, ts: Date.now() };
+    } catch (e) { trace.push(`${host} getcrumb: ${(e as Error).message}`); }
+  }
+  throw new Error('[yahoo] no crumb returned');
 }
 
 async function getSession(): Promise<CrumbSession> {
@@ -1367,7 +1393,7 @@ export async function fetchYahooPricesWide(
 }
 
 /** Whether a crumb session can be opened right now — the gate for v7-crumb and quoteSummary. */
-export async function yahooSessionOk(): Promise<{ ok: boolean; error: string | null }> {
-  try { await getSession(); return { ok: true, error: null }; }
-  catch (e) { return { ok: false, error: (e as Error).message }; }
+export async function yahooSessionOk(): Promise<{ ok: boolean; error: string | null; trace: string[] }> {
+  try { await getSession(); return { ok: true, error: null, trace: lastCrumbTrace }; }
+  catch (e) { return { ok: false, error: (e as Error).message, trace: lastCrumbTrace }; }
 }
