@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchSp500, Sp500Constituent } from '@/lib/sp500';
-import { fetchYahooQuotesPE, fetchYahooPricesWide, yahooSessionOk } from '@/lib/yahoo';
+import { unstable_cache } from 'next/cache';
+import { fetchYahooQuotesGentle, yahooSessionOk } from '@/lib/yahoo';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,6 +22,12 @@ let cache: CacheEntry | null = null;
 const FRESH = 5 * 60_000;
 const STALE = 60 * 60_000;
 
+const loadQuotes = unstable_cache(async (joined: string) => {
+  const r = await fetchYahooQuotesGentle(joined.split(','));
+  if (r.quotes.length < 50) throw new Error('too few quotes: ' + r.trace.join(' | '));
+  return r;
+}, ['sp500-quotes-v2'], { revalidate: 21600 });
+
 const share = (rows: Sp500Quote[], k: keyof Sp500Quote) =>
   rows.filter(r => r[k] != null && (r[k] as number) > 0).length;
 
@@ -37,21 +44,17 @@ export async function GET(req: NextRequest) {
   }
   const symbols = constituents.map(c => c.symbol);
 
-  // 1. The v7 path: the only one that carries P/E and market cap.
-  const quotes = await fetchYahooQuotesPE(symbols);
-  const map = new Map(quotes.filter(q => q.price > 0).map(q => [q.symbol.toUpperCase(), q]));
-  const fromV7 = map.size;
-
-  // 2. Anything still without a price is filled from v8, which keeps working when v7
-  // does not. This was missing: when v7 failed the route returned 503 names with every
-  // number null and the panel showed a list of dashes, zero up and zero down.
-  const missing = symbols.filter(s => !map.has(s.toUpperCase()));
-  let fromV8 = 0;
-  if (missing.length > symbols.length * 0.1) {
-    for (const q of await fetchYahooPricesWide(missing)) {
-      if (q.price > 0 && !map.has(q.symbol.toUpperCase())) { map.set(q.symbol.toUpperCase(), q); fromV8++; }
-    }
+  // ONE fill per six hours for the whole deployment, not one per serverless instance
+  // every five minutes. The per-instance cache is what turned a heavy request into a
+  // flood: every cold instance repeated it. A fill with almost no prices throws, so a
+  // throttled answer is never cached as if it were good.
+  let fill: { quotes: Awaited<ReturnType<typeof fetchYahooQuotesGentle>>['quotes']; trace: string[] };
+  try {
+    fill = diag ? await fetchYahooQuotesGentle(symbols) : await loadQuotes(symbols.join(','));
+  } catch {
+    fill = { quotes: [], trace: ['fill failed or throttled — not cached'] };
   }
+  const map = new Map(fill.quotes.map(q => [q.symbol.toUpperCase(), q]));
 
   const enriched: Sp500Quote[] = constituents.map(c => {
     const q = map.get(c.symbol.toUpperCase());
@@ -66,7 +69,7 @@ export async function GET(req: NextRequest) {
   });
 
   const stats = {
-    constituents: enriched.length, fromV7, fromV8,
+    constituents: enriched.length, trace: fill.trace,
     withPrice: share(enriched, 'price'), withMarketCap: share(enriched, 'marketCap'),
     withPE: share(enriched, 'trailingPE'),
   };

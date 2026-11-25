@@ -1397,3 +1397,50 @@ export async function yahooSessionOk(): Promise<{ ok: boolean; error: string | n
   try { await getSession(); return { ok: true, error: null, trace: lastCrumbTrace }; }
   catch (e) { return { ok: false, error: (e as Error).message, trace: lastCrumbTrace }; }
 }
+
+/**
+ * Quotes for a large list WITHOUT tripping Yahoo's rate limit.
+ *
+ * fetchYahooQuotesPE sent roughly 700 requests for the S&P 500 — v7 in parallel chunks,
+ * the same again with the crumb, up to 150 per-symbol quoteSummary calls — and the route
+ * then added 503 v8 calls at 40 at a time. Yahoo answered 429 Too Many Requests, and the
+ * throttle took the crumb session down with it, which is why fund holdings and P/E went
+ * blank everywhere at once.
+ *
+ * This sends a handful of requests, one after another: v7 in chunks of 100 without auth,
+ * then the same with the crumb only if a session opens, then v8 for what is still
+ * missing at low concurrency under a deadline. It stops escalating the moment Yahoo says
+ * 429. No per-symbol quoteSummary at all.
+ */
+export async function fetchYahooQuotesGentle(symbols: string[]): Promise<{
+  quotes: YahooQuote[]; trace: string[];
+}> {
+  const trace: string[] = [];
+  const got = new Map<string, YahooQuote>();
+  const put = (qs: YahooQuote[]) => { for (const q of qs) if (q.price > 0) got.set(q.symbol.toUpperCase(), q); };
+  const CHUNK = 100;
+  const chunks: string[][] = [];
+  for (let i = 0; i < symbols.length; i += CHUNK) chunks.push(symbols.slice(i, i + CHUNK));
+
+  for (const c of chunks) put(await fetchQuotesV7NoAuth(c).catch(() => []));
+  trace.push(`v7 no-auth: ${got.size}/${symbols.length}`);
+
+  if (got.size < symbols.length * 0.9) {
+    const s = await getSession().then(() => true).catch(() => false);
+    if (s) {
+      for (const c of chunks) {
+        const missing = c.filter(x => !got.has(x.toUpperCase()));
+        if (missing.length) put(await fetchQuotesV7(missing).catch(() => []));
+      }
+      trace.push(`v7 crumb: ${got.size}/${symbols.length}`);
+    } else trace.push('v7 crumb: skipped, no session');
+  }
+
+  if (got.size < symbols.length * 0.9) {
+    const missing = symbols.filter(x => !got.has(x.toUpperCase()));
+    const before = got.size;
+    put(await fetchYahooPricesWide(missing, 6, 30_000));
+    trace.push(`v8 prices: +${got.size - before}`);
+  }
+  return { quotes: [...got.values()], trace };
+}
