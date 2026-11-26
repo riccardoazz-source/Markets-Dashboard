@@ -21,7 +21,9 @@ export const INDEX_PROXY: Record<string, string> = {
   '^RUT': 'IWM',
   '^STOXX50E': 'FEZ',
   '^STOXX': 'EXSA.DE',
-  '^GDAXI': 'EXS1.DE',
+  // Global X DAX Germany ETF: US-listed and tracks the DAX itself. Yahoo publishes
+  // holdings for US-listed funds far more reliably than for European listings.
+  '^GDAXI': 'DAX',
   '^FTSE': 'ISF.L',
   '^FCHI': 'CAC.PA',
   '^990100-USD-STRD': 'URTH',

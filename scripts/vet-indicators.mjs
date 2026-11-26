@@ -2093,7 +2093,7 @@ ok('a series entirely before the boundary keeps only its last point',
 {
   const H = await import(join(out, 'holdings.js'));
   ok('an index is read through the fund that tracks it', H.holdingsSourceFor('^NDX', 'Indexes')?.fund === 'QQQ' &&
-     H.holdingsSourceFor('^GDAXI', 'Indexes')?.via === 'EXS1.DE');
+     H.holdingsSourceFor('^GDAXI', 'Indexes')?.via === 'DAX');
   ok('an index with no known tracker gets no source, not a lookalike',
      H.holdingsSourceFor('^KS11', 'Indexes') === null && H.holdingsSourceFor('^BSESN', 'Indexes') === null);
   ok('any fund in the Sectors tab is read directly', H.holdingsSourceFor('WCLD', 'Sectors')?.fund === 'WCLD' &&

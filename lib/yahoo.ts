@@ -1444,3 +1444,28 @@ export async function fetchYahooQuotesGentle(symbols: string[]): Promise<{
   }
   return { quotes: [...got.values()], trace };
 }
+
+/**
+ * topHoldings with Yahoo's answer kept, so "this fund has no holdings data" (404, common
+ * for funds listed outside the US) can be told apart from "the request failed".
+ */
+export async function fetchYahooTopHoldingsDetailed(symbol: string): Promise<{
+  result: Record<string, unknown> | null; status: number | null; error: string | null;
+}> {
+  let s: CrumbSession;
+  try { s = await getSession(); } catch (e) { return { result: null, status: null, error: (e as Error).message }; }
+  let last: { status: number | null; error: string | null } = { status: null, error: 'no host answered' };
+  for (const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']) {
+    try {
+      const res = await fetchWithTimeout(
+        `https://${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=topHoldings&crumb=${encodeURIComponent(s.crumb)}`,
+        { headers: { 'User-Agent': UA, 'Cookie': s.cookie, 'Accept': 'application/json' } }, 10_000);
+      const json = await res.json().catch(() => null) as { quoteSummary?: { result?: Record<string, unknown>[]; error?: { description?: string } } } | null;
+      const result = json?.quoteSummary?.result?.[0] ?? null;
+      if (res.ok && result) return { result, status: res.status, error: null };
+      last = { status: res.status, error: json?.quoteSummary?.error?.description ?? res.statusText };
+      if (res.status === 404) break;   // a definite "no data", not worth a second host
+    } catch (e) { last = { status: null, error: (e as Error).message }; }
+  }
+  return { result: null, ...last };
+}
