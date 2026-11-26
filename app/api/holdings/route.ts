@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchYahooTopHoldingsDetailed, fetchYahooQuotesGentle, yahooSessionOk } from '@/lib/yahoo';
-import { holdingsSourceFor, parseTopHoldings } from '@/lib/holdings';
+import { fetchYahooTopHoldingsDetailed, fetchYahooQuotesGentle, fetchYahooInstrumentType, yahooSessionOk } from '@/lib/yahoo';
+import { FUND_TYPES, holdingsSourceFor, parseTopHoldings } from '@/lib/holdings';
 
 // Holdings for any fund, and for any index through the fund that tracks it — each holding
 // enriched with price, day change, market cap and P/E, so every fund renders in the same
@@ -49,8 +49,19 @@ async function load(fund: string): Promise<Payload> {
   return p;
 }
 
+const kinds = new Map<string, string | null>();
+
 export async function GET(req: NextRequest) {
   const symbol = req.nextUrl.searchParams.get('symbol') ?? '';
+
+  // ?mode=kind — is this symbol a fund at all? The Stocks tab holds shares and ETFs side
+  // by side, so it asks before offering the button rather than offering it on Apple.
+  if (req.nextUrl.searchParams.get('mode') === 'kind') {
+    if (!kinds.has(symbol)) kinds.set(symbol, await fetchYahooInstrumentType(symbol).catch(() => null));
+    const type = kinds.get(symbol) ?? null;
+    return NextResponse.json({ symbol, type, fund: !!type && FUND_TYPES.has(type) });
+  }
+
   const group = req.nextUrl.searchParams.get('group');
   const src = holdingsSourceFor(symbol, group);
   if (!src) return NextResponse.json({ error: 'no_source', symbol }, { status: 404 });

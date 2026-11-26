@@ -1469,3 +1469,15 @@ export async function fetchYahooTopHoldingsDetailed(symbol: string): Promise<{
   }
   return { result: null, ...last };
 }
+
+/**
+ * What kind of instrument a symbol is — "ETF", "EQUITY", "MUTUALFUND"… — read from the
+ * v8 chart meta, which needs no crumb. Used to decide whether "what does it hold?" is a
+ * meaningful question for something opened from the Stocks tab, where funds and shares
+ * sit side by side and a watchlist entry carries no type of its own.
+ */
+export async function fetchYahooInstrumentType(symbol: string): Promise<string | null> {
+  const raw = await fetchChartRawNoAuth(symbol, 'range=5d&interval=1d', 6_000);
+  const meta = (raw as { meta?: { instrumentType?: string } } | null)?.meta;
+  return typeof meta?.instrumentType === 'string' ? meta.instrumentType : null;
+}

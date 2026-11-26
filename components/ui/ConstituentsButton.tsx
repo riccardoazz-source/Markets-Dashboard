@@ -23,11 +23,30 @@ import { AssetQuickView } from './AssetQuickView';
 // its eleven sector SPDRs); Yahoo's published top holdings for every other fund, and for
 // every other index through the fund that tracks it. The button appears wherever either
 // can answer, and nowhere else.
-export function ConstituentsButton({ symbol, group }: { symbol: string; group?: string }) {
+export function ConstituentsButton({ symbol, group, probe }: {
+  symbol: string; group?: string;
+  /** Ask the server whether this symbol is a fund before showing the button — for the
+   *  Stocks tab, where shares and ETFs sit side by side and a watchlist entry carries
+   *  no type of its own. */
+  probe?: boolean;
+}) {
+  const [isFund, setIsFund] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!probe) return;
+    let cancelled = false;
+    setIsFund(null);
+    fetch(`/api/holdings?symbol=${encodeURIComponent(symbol)}&mode=kind`)
+      .then(r => r.json()).then((j: { fund?: boolean }) => { if (!cancelled) setIsFund(!!j.fund); })
+      .catch(() => { if (!cancelled) setIsFund(false); });
+    return () => { cancelled = true; };
+  }, [symbol, probe]);
+  const g = probe ? (isFund ? 'fund' : undefined) : group;
   const u = universeFor(symbol);
-  const fund = holdingsSourceFor(symbol, group);
+  const fund = holdingsSourceFor(symbol, g);
   const [open, setOpen] = useState(false);
+  if (probe && !isFund && !u) return null;
   if (!u && !fund) return null;
+  group = g;
   return (
     <>
       <button onClick={() => setOpen(true)} title={`What ${symbol} holds`}

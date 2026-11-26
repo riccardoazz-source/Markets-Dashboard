@@ -2101,6 +2101,8 @@ ok('a series entirely before the boundary keeps only its last point',
   ok('a stock, a currency or a future gets nothing',
      H.holdingsSourceFor('AAPL', 'Stocks') === null && H.holdingsSourceFor('EURUSD=X', 'Currencies') === null &&
      H.holdingsSourceFor('GC=F', 'Commodities') === null);
+  ok('a fund opened from the Stocks tab is read directly', H.holdingsSourceFor('CEGI.L', 'fund')?.fund === 'CEGI.L');
+  ok('…and the fund types include ETFs but not shares', H.FUND_TYPES.has('ETF') && !H.FUND_TYPES.has('EQUITY'));
   const raw = { topHoldings: {
     holdings: [
       { symbol: 'MSFT', holdingName: 'Microsoft Corp', holdingPercent: { raw: 0.08, fmt: '8.00%' } },

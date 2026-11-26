@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { ConstituentsButton } from '@/components/ui/ConstituentsButton';
 import { PhaseBadge } from '@/components/ui/PhaseBadge';
 import { PanelClose } from '@/components/ui/PanelClose';
 import { Stat, StatGrid } from '@/components/ui/StatCard';
@@ -1652,6 +1653,9 @@ export function StockSection({ jumpTo, onCompare }: { jumpTo?: string | null; on
                   <span className="hidden sm:inline">Compare</span>
                 </button>
               )}
+              {/* Shown only when the symbol turns out to be a fund — ETFs live in the
+                  watchlist next to shares, and "what is inside" means nothing for a share. */}
+              <ConstituentsButton symbol={selected.symbol} probe />
               <ReturnsTableButton name={selected.name} symbol={selected.symbol} />
               <MonthlyRecapButton symbol={selected.symbol} name={selected.name} assetClass="Stocks" />
               <QuadrantButton name={selected.name} symbol={selected.symbol} group="Stocks" stocks={watchlistSymbols} />

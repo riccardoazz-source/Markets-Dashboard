@@ -36,7 +36,10 @@ export const INDEX_PROXY: Record<string, string> = {
 };
 
 /** Groups whose members are funds, so asking Yahoo for holdings is meaningful. */
-const FUND_GROUPS = new Set(['sectors', 'sector', 'etf', 'etfs']);
+const FUND_GROUPS = new Set(['sectors', 'sector', 'etf', 'etfs', 'fund']);
+
+/** Yahoo instrument types that hold other securities. */
+export const FUND_TYPES = new Set(['ETF', 'MUTUALFUND', 'ETN', 'CLOSEDEND']);
 
 export interface HoldingsSource {
   /** The fund actually asked for. */
