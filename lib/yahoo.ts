@@ -1439,7 +1439,7 @@ export async function fetchYahooQuotesGentle(symbols: string[]): Promise<{
   if (got.size < symbols.length * 0.9) {
     const missing = symbols.filter(x => !got.has(x.toUpperCase()));
     const before = got.size;
-    put(await fetchYahooPricesWide(missing, 6, 30_000));
+    put(await fetchYahooPricesWide(missing, 8, 14_000));
     trace.push(`v8 prices: +${got.size - before}`);
   }
   return { quotes: [...got.values()], trace };

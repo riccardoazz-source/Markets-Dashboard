@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchSp500, Sp500Constituent } from '@/lib/sp500';
-import { unstable_cache } from 'next/cache';
 import { fetchYahooQuotesGentle, yahooSessionOk } from '@/lib/yahoo';
 
-export const runtime = 'nodejs';
+// EDGE, like every other route in this app that talks to Yahoo — and for that reason.
+// This was the one Yahoo route on the nodejs runtime (with /api/holdings), and those two
+// were the only ones failing: Yahoo answered 429 to every request from the nodejs egress
+// a full day after the request volume had been cut to a dozen, while the edge routes
+// (/api/quotes, /api/historical, /api/stock…) kept getting prices. The block is on the
+// datacenter IPs the nodejs functions leave from, not on what this route asks for.
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
-// Up to 60s on Vercel Hobby — Yahoo PE batch with quoteSummary backfill for
-// missing PE can take 15-25s on cold starts.
-export const maxDuration = 60;
 
 interface Sp500Quote extends Sp500Constituent {
   price: number | null;
@@ -22,11 +24,17 @@ let cache: CacheEntry | null = null;
 const FRESH = 5 * 60_000;
 const STALE = 60 * 60_000;
 
-const loadQuotes = unstable_cache(async (joined: string) => {
+// unstable_cache is not available on the edge runtime, so a module-level cache per
+// isolate for six hours. With the request volume now a dozen calls per fill, a cold
+// isolate refilling is cheap; a fill with fewer than 50 prices throws and is not kept.
+let quoteCache: { r: Awaited<ReturnType<typeof fetchYahooQuotesGentle>>; ts: number } | null = null;
+async function loadQuotes(joined: string) {
+  if (quoteCache && Date.now() - quoteCache.ts < 21_600_000) return quoteCache.r;
   const r = await fetchYahooQuotesGentle(joined.split(','));
   if (r.quotes.length < 50) throw new Error('too few quotes: ' + r.trace.join(' | '));
+  quoteCache = { r, ts: Date.now() };
   return r;
-}, ['sp500-quotes-v2'], { revalidate: 21600 });
+}
 
 const share = (rows: Sp500Quote[], k: keyof Sp500Quote) =>
   rows.filter(r => r[k] != null && (r[k] as number) > 0).length;

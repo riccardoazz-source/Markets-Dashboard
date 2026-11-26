@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { unstable_cache } from 'next/cache';
 import { fetchYahooTopHoldings, yahooSessionOk } from '@/lib/yahoo';
 import { holdingsSourceFor, parseTopHoldings } from '@/lib/holdings';
 
@@ -7,15 +6,20 @@ import { holdingsSourceFor, parseTopHoldings } from '@/lib/holdings';
 // Shared across the deployment for 12 hours: fund books change on rebalances, not by
 // the minute, and the Yahoo call needs a crumb session that is not free to set up.
 
-export const runtime = 'nodejs';
+// Edge, for the reason given in /api/sp500: from the nodejs runtime's IPs Yahoo answers
+// 429 to everything, from the edge it does not.
+export const runtime = 'edge';
 
-const load = unstable_cache(
-  async (fund: string) => {
-    const raw = await fetchYahooTopHoldings(fund);
-    if (!raw) throw new Error('no response');   // thrown, so an outage is not cached
-    return parseTopHoldings(raw);
-  },
-  ['fund-holdings'], { revalidate: 43200 });
+const cache = new Map<string, { h: ReturnType<typeof parseTopHoldings>; ts: number }>();
+async function load(fund: string) {
+  const hit = cache.get(fund);
+  if (hit && Date.now() - hit.ts < 43_200_000) return hit.h;
+  const raw = await fetchYahooTopHoldings(fund);
+  if (!raw) throw new Error('no response');   // thrown, so an outage is not cached
+  const h = parseTopHoldings(raw);
+  cache.set(fund, { h, ts: Date.now() });
+  return h;
+}
 
 export async function GET(req: NextRequest) {
   const symbol = req.nextUrl.searchParams.get('symbol') ?? '';
